@@ -5,10 +5,10 @@ from pydantic import Field, field_validator, ConfigDict, field_serializer
 from pydantic_settings import BaseSettings
 from packaging.version import Version, InvalidVersion
 
-from enums.environment_alias import Environment
-from validators.config.fastapi_config import ServerConfig, CORSConfig
-from validators.config.redis_config import RedisConfig
-from validators.config.sql_alchemy_config import DatabaseConfig
+from old.enums.environment_alias import Environment
+from old.validators.config.fastapi_config import ServerConfig, CORSConfig
+from old.validators.config.redis_config import RedisConfig
+from old.validators.config.sql_alchemy_config import DatabaseConfig
 
 
 class AppConfig(BaseSettings):

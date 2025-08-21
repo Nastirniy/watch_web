@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from config import fastapi_server_config as fastapi_config
+from old.config import fastapi_server_config as fastapi_config
 
 app = FastAPI(
     host=fastapi_config.host,

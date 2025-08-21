@@ -2,11 +2,11 @@ from pathlib import Path
 
 from loguru import logger
 
-from helpers.config_loader_helper import ConfigManager
-from validators.config.app_config import AppConfig
-from validators.config.fastapi_config import ServerConfig
-from validators.config.redis_config import RedisConfig
-from validators.config.sql_alchemy_config import DatabaseConfig
+from old.helpers.config_loader_helper import ConfigManager
+from old.validators.config.app_config import AppConfig
+from old.validators.config.fastapi_config import ServerConfig
+from old.validators.config.redis_config import RedisConfig
+from old.validators.config.sql_alchemy_config import DatabaseConfig
 
 _app_config_file = Path("./dev_configs/app_config.toml")
 _app_config_manager = ConfigManager(config_path=_app_config_file, config_class=AppConfig)

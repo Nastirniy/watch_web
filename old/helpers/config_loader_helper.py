@@ -6,7 +6,6 @@ from typing import Optional, Union, Dict, Any, Type, TypeVar
 from loguru import logger
 from pydantic import BaseModel, ValidationError
 
-# --- (Start of the ConfigManager and ConfigLoader classes - as provided in the previous turn) ---
 
 # Type variable for generic config loading
 ConfigType = TypeVar('ConfigType', bound=BaseModel)

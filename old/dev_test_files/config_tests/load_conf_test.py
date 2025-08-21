@@ -5,8 +5,8 @@ from pathlib import Path
 
 from loguru import logger
 
-from helpers.config_loader_helper import ConfigManager
-from validators.config.app_config import AppConfig
+from old.helpers.config_loader_helper import ConfigManager
+from old.validators.config.app_config import AppConfig
 
 
 async def load_config():
