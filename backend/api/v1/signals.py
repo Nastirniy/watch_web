@@ -18,28 +18,17 @@ from backend.database.crud.audit import audit_log as audit_crud
 from backend.database.crud.signal import (
     observation as observation_crud,
     signal_type as signal_type_crud,
-    category as category_crud,
-    modulation_type as modulation_type_crud,
 )
-from backend.dependencies import DatabaseDep, CurrentUser, OptionalUser, require_permissions
-from backend.models.audit import AuditAction, AuditSeverity, ResourceType
-from backend.models.signal import ObservationStatus, ConfidenceLevel
-from backend.schemas.base import (
+from backend.routes.dependencies import DatabaseDep, CurrentUser, OptionalUser, require_permissions
+from backend.database.models import AuditAction, AuditSeverity, ResourceType
+from backend.api.schemas import (
     BulkOperationResponse,
     MessageResponse,
     PaginatedResponse,
     create_paginated_response,
-    create_response,
 )
-from backend.schemas.signal import (
+from backend.api.schemas import (
     BulkObservationUpdate,
-    Category,
-    CategoryCreate,
-    CategoryUpdate,
-    FrequencyAnalysis,
-    ModulationType,
-    ModulationTypeCreate,
-    ModulationTypeUpdate,
     Observation,
     ObservationCreate,
     ObservationSearchFilters,
@@ -49,7 +38,6 @@ from backend.schemas.signal import (
     SignalType,
     SignalTypeCreate,
     SignalTypeUpdate,
-    TrendAnalysis,
 )
 
 router = APIRouter()
@@ -113,10 +101,10 @@ async def create_signal_type(
 
 @router.get("/types", response_model=List[SignalType])
 async def list_signal_types(
-        active_only: bool = Query(True, description="Return only active signal types"),
-        category_id: Optional[int] = Query(None, description="Filter by category ID"),
         db: DatabaseDep,
         current_user: OptionalUser,
+        active_only: bool = Query(True, description="Return only active signal types"),
+        category_id: Optional[int] = Query(None, description="Filter by category ID"),
 ) -> List[SignalType]:
     """
     List signal types.
@@ -296,8 +284,8 @@ async def create_observation(
 
 @router.get("/observations", response_model=PaginatedResponse[ObservationSummary])
 async def list_observations(
-        filters: ObservationSearchFilters = Depends(),
         db: DatabaseDep,
+        filters: ObservationSearchFilters = Depends(),
         current_user: CurrentUser = Depends(require_permissions(SystemPermissions.OBSERVATION_READ)),
 ) -> PaginatedResponse[ObservationSummary]:
     """
@@ -642,10 +630,10 @@ async def bulk_update_observations(
 # Statistics and Analysis
 @router.get("/observations/statistics", response_model=ObservationStatistics)
 async def get_observation_statistics(
+        db: DatabaseDep,
         start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
         end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
         post_id: Optional[int] = Query(None, description="Filter by post ID"),
-        db: DatabaseDep,
         current_user: CurrentUser = Depends(require_permissions(SystemPermissions.OBSERVATION_READ)),
 ) -> ObservationStatistics:
     """
@@ -697,9 +685,9 @@ async def get_observation_statistics(
 
 @router.post("/observations/{observation_id}/mark-disappeared", response_model=MessageResponse)
 async def mark_observation_disappeared(
+        db: DatabaseDep,
         observation_id: int,
         comment: Optional[str] = None,
-        db: DatabaseDep,
         current_user: CurrentUser = Depends(require_permissions(SystemPermissions.OBSERVATION_UPDATE)),
 ) -> MessageResponse:
     """

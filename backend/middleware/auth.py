@@ -13,10 +13,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
 from backend.core.security import decode_access_token
-from backend.database import AsyncSessionLocal
+from backend.database.db_controls import AsyncSessionLocal
 from backend.database.crud.user import user as user_crud, user_session as session_crud
 from backend.database.crud.audit import audit_log as audit_crud
-from backend.models.audit import AuditAction, ResourceType, AuditSeverity
+from backend.database.models import AuditAction, ResourceType, AuditSeverity
 
 
 class AuthMiddleware(BaseHTTPMiddleware):

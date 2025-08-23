@@ -12,7 +12,7 @@ from loguru import logger
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from backend.schemas.base import ErrorDetail, ErrorResponse
+from backend.api.schemas import ErrorDetail, ErrorResponse
 
 
 class CustomHTTPException(HTTPException):

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.database.crud.base import CRUDBase
-from backend.models.audit import AuditLog, AuditAction, ResourceType, AuditSeverity
+from backend.database.models import AuditLog, AuditAction, ResourceType, AuditSeverity
 
 
 class CRUDAuditLog(CRUDBase[AuditLog, dict, dict]):

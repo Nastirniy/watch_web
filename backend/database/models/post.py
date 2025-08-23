@@ -9,11 +9,11 @@ from typing import List, Optional, TYPE_CHECKING
 
 from sqlmodel import Field, Relationship
 
-from backend.models.base import BaseModel, StatusMixin
+from backend.database.models.base import BaseModel, StatusMixin
 
 if TYPE_CHECKING:
-    from backend.models.user import User
-    from backend.models.signal import Observation
+    from backend.database.models.user import User
+    from backend.database.models.signal import Observation
 
 
 class ConnectionStatus(str, Enum):

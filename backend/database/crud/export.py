@@ -11,8 +11,8 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database.crud.base import CRUDBase
-from backend.models.export import ExportJob, JobType, JobStatus
-from backend.schemas.export import ExportJobCreate, ExportJobUpdate
+from backend.database.models import ExportJob, JobType, JobStatus
+from backend.api.schemas import ExportJobCreate, ExportJobUpdate
 
 
 class CRUDExportJob(CRUDBase[ExportJob, ExportJobCreate, ExportJobUpdate]):

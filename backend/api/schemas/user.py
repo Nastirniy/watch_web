@@ -8,7 +8,7 @@ from typing import List, Optional
 
 from pydantic import Field, field_validator, EmailStr
 
-from backend.schemas.base import BaseSchema, TimestampSchema, SearchFilters
+from backend.api.schemas.base import BaseSchema, TimestampSchema, SearchFilters
 
 
 class PermissionBase(BaseSchema):

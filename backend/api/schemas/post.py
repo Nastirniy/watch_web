@@ -8,8 +8,8 @@ from typing import List, Optional, Tuple
 
 from pydantic import Field, field_validator, EmailStr
 
-from backend.models.post import ConnectionStatus
-from backend.schemas.base import BaseSchema, TimestampSchema, SearchFilters
+from backend.database.models import ConnectionStatus
+from backend.api.schemas.base import BaseSchema, TimestampSchema, SearchFilters
 
 
 class PostBase(BaseSchema):

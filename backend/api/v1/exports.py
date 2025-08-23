@@ -3,8 +3,6 @@ Export API routes for data export and reporting functionality.
 Handles export job creation, monitoring, and file download.
 """
 
-from typing import List, Optional
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from loguru import logger
@@ -16,15 +14,15 @@ from backend.core.exceptions import (
 from backend.core.permissions import SystemPermissions
 from backend.database.crud.audit import audit_log as audit_crud
 from backend.database.crud.export import export_job as export_crud
-from backend.dependencies import DatabaseDep, CurrentUser, require_permissions
-from backend.models.audit import AuditAction, AuditSeverity, ResourceType
-from backend.models.export import JobStatus, JobType
-from backend.schemas.base import (
+from backend.routes.dependencies import DatabaseDep, CurrentUser, require_permissions
+from backend.database.models import AuditAction, AuditSeverity, ResourceType
+from backend.database.models import JobStatus, JobType
+from backend.api.schemas import (
     MessageResponse,
     PaginatedResponse,
     create_paginated_response,
 )
-from backend.schemas.export import (
+from backend.api.schemas import (
     BulkExportRequest,
     BulkExportResponse,
     DataExportPolicy,
@@ -33,14 +31,10 @@ from backend.schemas.export import (
     ExportJobCreate,
     ExportJobSummary,
     ExportJobUpdate,
-    ExportNotification,
     ExportProgress,
     ExportSearchFilters,
     ExportStatistics,
-    ExportTemplate,
-    ExportTemplateCreate,
     QueueStatus,
-    ScheduledExport,
 )
 
 router = APIRouter()
@@ -112,8 +106,8 @@ async def create_export_job(
 
 @router.get("", response_model=PaginatedResponse[ExportJobSummary])
 async def list_export_jobs(
-        filters: ExportSearchFilters = Depends(),
         db: DatabaseDep,
+        filters: ExportSearchFilters = Depends(),
         current_user: CurrentUser = Depends(require_permissions(SystemPermissions.EXPORT_READ)),
 ) -> PaginatedResponse[ExportJobSummary]:
     """
@@ -623,8 +617,8 @@ async def get_queue_status(
 
 @router.get("/statistics", response_model=ExportStatistics)
 async def get_export_statistics(
-        days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
         db: DatabaseDep,
+        days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
         current_user: CurrentUser = Depends(require_permissions(SystemPermissions.EXPORT_READ)),
 ) -> ExportStatistics:
     """

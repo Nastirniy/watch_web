@@ -2,18 +2,19 @@
 Middleware initialization and exports.
 Provides all custom middleware classes for the FastAPI application.
 """
-
-from app.middleware.auth import (
+import fastapi_app
+from backend.core.config.config import settings
+from backend.middleware.auth import (
     AuthMiddleware,
     RateLimitMiddleware,
     SessionMiddleware,
 )
-from app.middleware.cors import (
+from backend.middleware.cors import (
     CORSMiddleware,
     CompressionMiddleware,
     SecurityHeadersMiddleware,
 )
-from app.middleware.logging import (
+from backend.middleware.logging import (
     LoggingMiddleware,
     RequestContextMiddleware,
     SecurityLoggingMiddleware,
@@ -38,3 +39,17 @@ __all__ = [
     "SecurityLoggingMiddleware",
     "setup_logging",
 ]
+
+
+# Add CORS middleware
+fastapi_app.app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.BACKEND_CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+    allow_headers=["*"],
+)
+
+# Add custom middleware
+fastapi_app.app.add_middleware(LoggingMiddleware)
+fastapi_app.app.add_middleware(AuthMiddleware)

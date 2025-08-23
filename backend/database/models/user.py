@@ -8,13 +8,13 @@ from typing import List, Optional, TYPE_CHECKING
 
 from sqlmodel import Field, Relationship, SQLModel
 
-from backend.models.base import BaseModel, StatusMixin
+from backend.database.models.base import BaseModel, StatusMixin
 
 if TYPE_CHECKING:
-    from backend.models.post import Post
-    from backend.models.signal import Observation
-    from backend.models.export import ExportJob
-    from backend.models.audit import AuditLog
+    from backend.database.models.post import Post
+    from backend.database.models.signal import Observation
+    from backend.database.models.export import ExportJob
+    from backend.database.models.audit import AuditLog
 
 
 # Many-to-many relationship table for users and roles

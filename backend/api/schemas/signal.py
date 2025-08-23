@@ -9,8 +9,8 @@ from typing import List, Optional
 
 from pydantic import Field, field_validator
 
-from backend.models.signal import ObservationStatus, ConfidenceLevel
-from backend.schemas.base import BaseSchema, TimestampSchema, SearchFilters, DateRangeFilter
+from backend.database.models import ObservationStatus, ConfidenceLevel
+from backend.api.schemas.base import BaseSchema, TimestampSchema, SearchFilters, DateRangeFilter
 
 
 class CategoryBase(BaseSchema):
@@ -319,7 +319,7 @@ class TrendAnalysis(BaseSchema):
 
 
 # Forward reference resolution
-from backend.schemas.user import UserSummary  # noqa: E402
-from backend.schemas.post import PostSummary  # noqa: E402
+from backend.api.schemas.user import UserSummary  # noqa: E402
+from backend.api.schemas.post import PostSummary  # noqa: E402
 
 Observation.model_rebuild()

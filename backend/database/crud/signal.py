@@ -8,16 +8,16 @@ from decimal import Decimal
 from typing import Dict, List, Optional, Tuple
 
 from loguru import logger
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.database.crud.base import CRUDBase
-from backend.models.signal import (
+from backend.database.models import (
     Observation, SignalType, Category, ModulationType,
-    ObservationStatus, ConfidenceLevel
+    ObservationStatus
 )
-from backend.schemas.signal import ObservationCreate, ObservationUpdate
+from backend.api.schemas import ObservationCreate, ObservationUpdate
 
 
 class CRUDObservation(CRUDBase[Observation, ObservationCreate, ObservationUpdate]):

@@ -4,7 +4,7 @@ Handles user creation, authentication, PKI certificates, and RBAC.
 """
 
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional
 
 from loguru import logger
 from sqlalchemy import and_, select
@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.database.crud.base import CRUDBase
-from backend.models.user import User, Role, Permission, UserSession, UserRole, RolePermission
-from backend.schemas.user import UserCreate, UserUpdate
+from backend.database.models import User, Role, Permission, UserSession, UserRole, RolePermission
+from backend.api.schemas import UserCreate, UserUpdate
 
 
 class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):

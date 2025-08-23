@@ -4,7 +4,7 @@ Exports all schema classes for easy importing.
 """
 
 # Base schemas
-from backend.schemas.base import (
+from backend.api.schemas.base import (
     BaseSchema,
     BulkOperationResponse,
     DateRangeFilter,
@@ -25,7 +25,7 @@ from backend.schemas.base import (
 )
 
 # Authentication schemas
-from backend.schemas.auth import (
+from backend.api.schemas.auth import (
     AuthErrorResponse,
     CertificateValidationRequest,
     CertificateValidationResponse,
@@ -45,7 +45,7 @@ from backend.schemas.auth import (
 )
 
 # User schemas
-from backend.schemas.user import (
+from backend.api.schemas.user import (
     BulkPermissionAssignment,
     BulkRoleAssignment,
     PasswordPolicy,
@@ -68,7 +68,7 @@ from backend.schemas.user import (
 )
 
 # Post schemas
-from backend.schemas.post import (
+from backend.api.schemas.post import (
     BulkStatusUpdate,
     ConnectionStatusUpdate,
     LocationSearch,
@@ -86,7 +86,7 @@ from backend.schemas.post import (
 )
 
 # Signal schemas
-from backend.schemas.signal import (
+from backend.api.schemas.signal import (
     BulkObservationUpdate,
     Category,
     CategoryCreate,
@@ -108,7 +108,7 @@ from backend.schemas.signal import (
 )
 
 # Media schemas
-from backend.schemas.media import (
+from backend.api.schemas.media import (
     BulkMediaOperation,
     BulkMediaResponse,
     ChunkedUploadSession,
@@ -129,7 +129,7 @@ from backend.schemas.media import (
 )
 
 # Export schemas
-from backend.schemas.export import (
+from backend.api.schemas.export import (
     BulkExportRequest,
     BulkExportResponse,
     DataExportPolicy,

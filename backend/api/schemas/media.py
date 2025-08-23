@@ -8,8 +8,8 @@ from typing import List, Optional
 
 from pydantic import Field, field_validator
 
-from backend.models.media import MediaType
-from backend.schemas.base import BaseSchema, TimestampSchema, SearchFilters
+from backend.database.models import MediaType
+from backend.api.schemas.base import BaseSchema, TimestampSchema, SearchFilters
 
 
 class MediaFileBase(BaseSchema):

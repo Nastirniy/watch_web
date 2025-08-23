@@ -7,13 +7,12 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 from loguru import logger
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from backend.database.crud.base import CRUDBase
-from backend.models.post import Post, ConnectionStatus
-from backend.schemas.post import PostCreate, PostUpdate
+from backend.database.models import Post, ConnectionStatus
+from backend.api.schemas.post import PostCreate, PostUpdate
 
 
 class CRUDPost(CRUDBase[Post, PostCreate, PostUpdate]):
@@ -261,7 +260,7 @@ class CRUDPost(CRUDBase[Post, PostCreate, PostUpdate]):
             # Count observations in the last N days
             cutoff_date = datetime.utcnow() - timedelta(days=days)
 
-            from app.models.signal import Observation
+            from backend.database.models.signal import Observation
             query = (
                 select(func.count())
                 .where(

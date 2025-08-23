@@ -10,12 +10,12 @@ from typing import List, Optional, TYPE_CHECKING
 
 from sqlmodel import Field, Relationship
 
-from backend.models.base import BaseModel, BaseModelWithSoftDelete, StatusMixin
+from backend.database.models.base import BaseModel, BaseModelWithSoftDelete, StatusMixin
 
 if TYPE_CHECKING:
-    from backend.models.user import User
-    from backend.models.post import Post
-    from backend.models.media import MediaFile
+    from backend.database.models.user import User
+    from backend.database.models.post import Post
+    from backend.database.models.media import MediaFile
 
 
 class ObservationStatus(str, Enum):

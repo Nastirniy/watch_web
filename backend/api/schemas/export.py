@@ -8,8 +8,8 @@ from typing import Dict, List, Optional, Any
 
 from pydantic import Field, field_validator
 
-from backend.models.export import JobType, JobStatus
-from backend.schemas.base import BaseSchema, TimestampSchema, SearchFilters, DateRangeFilter
+from backend.database.models import JobType, JobStatus
+from backend.api.schemas.base import BaseSchema, TimestampSchema, SearchFilters, DateRangeFilter
 
 
 class ExportJobBase(BaseSchema):

@@ -6,12 +6,12 @@ Handles PKI certificate authentication and JWT token management.
 from datetime import datetime, timedelta
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.config.config import settings
-from backend.core.exceptions import AuthenticationException, ValidationException
+from backend.core.exceptions import AuthenticationException
 from backend.core.security import (
     create_access_token,
     create_refresh_token,
@@ -21,10 +21,9 @@ from backend.core.security import (
 )
 from backend.database.crud.audit import audit_log as audit_crud
 from backend.database.crud.user import user as user_crud, user_session as session_crud
-from backend.database.database import get_session
-from backend.dependencies import DatabaseDep, CurrentUser, OptionalUser
-from backend.models.audit import AuditAction, AuditSeverity, ResourceType
-from backend.schemas.auth import (
+from backend.routes.dependencies import DatabaseDep, CurrentUser
+from backend.database.models import AuditAction, AuditSeverity, ResourceType
+from backend.api.schemas import (
     CertificateValidationRequest,
     CertificateValidationResponse,
     LoginRequest,
@@ -38,7 +37,7 @@ from backend.schemas.auth import (
     SessionInfo,
     TokenPair,
 )
-from backend.schemas.base import MessageResponse, create_response
+from backend.api.schemas import MessageResponse, create_response
 
 router = APIRouter()
 

@@ -6,7 +6,6 @@ Handles chunked uploads, file processing, and media metadata.
 import os
 import uuid
 from pathlib import Path
-from typing import List, Optional
 
 from fastapi import (
     APIRouter,
@@ -15,11 +14,10 @@ from fastapi import (
     Form,
     HTTPException,
     Query,
-    Response,
     UploadFile,
     status
 )
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse
 from loguru import logger
 
 from backend.core.config.config import settings
@@ -31,16 +29,15 @@ from backend.core.exceptions import (
 from backend.core.permissions import SystemPermissions
 from backend.database.crud.audit import audit_log as audit_crud
 from backend.database.crud.media import media_file as media_crud, file_chunk as chunk_crud
-from backend.dependencies import DatabaseDep, CurrentUser, require_permissions
-from backend.models.audit import AuditAction, AuditSeverity, ResourceType
-from backend.models.media import MediaType
-from backend.schemas.base import (
-    BulkOperationResponse,
+from backend.routes.dependencies import DatabaseDep, CurrentUser, require_permissions
+from backend.database.models import AuditAction, AuditSeverity, ResourceType
+from backend.database.models import MediaType
+from backend.api.schemas import (
     MessageResponse,
     PaginatedResponse,
     create_paginated_response,
 )
-from backend.schemas.media import (
+from backend.api.schemas import (
     BulkMediaOperation,
     BulkMediaResponse,
     ChunkedUploadSession,
@@ -48,15 +45,12 @@ from backend.schemas.media import (
     ChunkUploadResponse,
     MediaDownloadInfo,
     MediaFile,
-    MediaFileCreate,
     MediaFileSearchFilters,
     MediaFileSummary,
     MediaFileUpdate,
-    MediaProcessingJob,
     MediaStatistics,
     MediaUploadPolicy,
     StorageCleanupReport,
-    ThumbnailRequest,
 )
 
 router = APIRouter()
@@ -112,9 +106,9 @@ async def _save_uploaded_file(file: UploadFile, stored_filename: str) -> tuple[s
 
 @router.post("/upload", response_model=MediaFile, status_code=status.HTTP_201_CREATED)
 async def upload_media_file(
+        db: DatabaseDep,
         observation_id: int = Form(..., description="Observation ID to attach file to"),
         file: UploadFile = File(..., description="File to upload"),
-        db: DatabaseDep,
         current_user: CurrentUser = Depends(require_permissions(SystemPermissions.MEDIA_CREATE)),
 ) -> MediaFile:
     """
@@ -189,12 +183,12 @@ async def upload_media_file(
 
 @router.post("/upload/chunked/start", response_model=ChunkedUploadSession)
 async def start_chunked_upload(
+        db: DatabaseDep,
         observation_id: int = Form(...),
         filename: str = Form(...),
         file_size: int = Form(...),
         chunk_size: int = Form(default=settings.CHUNK_SIZE),
         mime_type: str = Form(...),
-        db: DatabaseDep,
         current_user: CurrentUser = Depends(require_permissions(SystemPermissions.MEDIA_CREATE)),
 ) -> ChunkedUploadSession:
     """
@@ -263,9 +257,9 @@ async def start_chunked_upload(
 
 @router.post("/upload/chunked/chunk", response_model=ChunkUploadResponse)
 async def upload_chunk(
+        db: DatabaseDep,
         chunk_data: ChunkUploadRequest,
         chunk_file: UploadFile = File(...),
-        db: DatabaseDep,
         current_user: CurrentUser = Depends(require_permissions(SystemPermissions.MEDIA_CREATE)),
 ) -> ChunkUploadResponse:
     """
@@ -317,8 +311,8 @@ async def upload_chunk(
 
 @router.get("", response_model=PaginatedResponse[MediaFileSummary])
 async def list_media_files(
-        filters: MediaFileSearchFilters = Depends(),
         db: DatabaseDep,
+        filters: MediaFileSearchFilters = Depends(),
         current_user: CurrentUser = Depends(require_permissions(SystemPermissions.MEDIA_READ)),
 ) -> PaginatedResponse[MediaFileSummary]:
     """
@@ -425,9 +419,9 @@ async def get_media_file(
 
 @router.get("/{media_id}/download")
 async def download_media_file(
+        db: DatabaseDep,
         media_id: int,
         inline: bool = Query(False, description="Display inline in browser"),
-        db: DatabaseDep,
         current_user: CurrentUser = Depends(require_permissions(SystemPermissions.MEDIA_READ)),
 ) -> FileResponse:
     """

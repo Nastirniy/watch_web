@@ -3,7 +3,7 @@ Post management API routes for monitoring stations and locations.
 Handles post CRUD operations, status management, and location services.
 """
 
-from typing import List, Optional
+from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
@@ -11,31 +11,26 @@ from loguru import logger
 from backend.core.exceptions import (
     ResourceConflictException,
     ResourceNotFoundException,
-    ValidationException,
 )
 from backend.core.permissions import SystemPermissions
 from backend.database.crud.audit import audit_log as audit_crud
 from backend.database.crud.post import post as post_crud
-from backend.dependencies import DatabaseDep, CurrentUser, OptionalUser, require_permissions
-from backend.models.audit import AuditAction, AuditSeverity, ResourceType
-from backend.models.post import ConnectionStatus
-from backend.schemas.base import (
+from backend.routes.dependencies import DatabaseDep, CurrentUser, OptionalUser, require_permissions
+from backend.database.models import AuditAction, AuditSeverity, ResourceType
+from backend.database.models import ConnectionStatus
+from backend.api.schemas import (
     BulkOperationResponse,
     MessageResponse,
     PaginatedResponse,
     create_paginated_response,
-    create_response,
 )
-from backend.schemas.post import (
+from backend.api.schemas.post import (
     BulkStatusUpdate,
     ConnectionStatusUpdate,
     LocationSearch,
     Post,
     PostActivity,
-    PostConfiguration,
     PostCreate,
-    PostHealthCheck,
-    PostMaintenanceSchedule,
     PostSearchFilters,
     PostStatistics,
     PostSummary,
@@ -106,8 +101,8 @@ async def create_post(
 
 @router.get("", response_model=PaginatedResponse[PostSummary])
 async def list_posts(
-        filters: PostSearchFilters = Depends(),
         db: DatabaseDep,
+        filters: PostSearchFilters = Depends(),
         current_user: CurrentUser = Depends(require_permissions(SystemPermissions.POST_READ)),
 ) -> PaginatedResponse[PostSummary]:
     """
@@ -633,8 +628,8 @@ async def get_posts_by_status(
 @router.get("/{post_id}/activity", response_model=PostActivity)
 async def get_post_activity(
         post_id: int,
-        days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
         db: DatabaseDep,
+        days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
         current_user: CurrentUser = Depends(require_permissions(SystemPermissions.POST_READ)),
 ) -> PostActivity:
     """
@@ -750,8 +745,8 @@ async def get_regional_summary(
 # Maintenance Operations
 @router.post("/maintenance/cleanup-offline", response_model=BulkOperationResponse)
 async def cleanup_offline_posts(
-        timeout_minutes: int = Query(60, ge=1, le=1440, description="Offline timeout in minutes"),
         db: DatabaseDep,
+        timeout_minutes: int = Query(60, ge=1, le=1440, description="Offline timeout in minutes"),
         current_user: CurrentUser = Depends(require_permissions(SystemPermissions.POST_UPDATE)),
 ) -> BulkOperationResponse:
     """

@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.config.config import settings
 from backend.database.crud.user import user as user_crud
-from backend.models.user import User
+from backend.database.models import User
 
 # Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

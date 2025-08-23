@@ -3,43 +3,29 @@ User management API routes for CRUD operations and role assignments.
 Handles user creation, updates, role management, and statistics.
 """
 
-from typing import List, Optional
-
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.exceptions import (
-    AuthorizationException,
     ResourceConflictException,
     ResourceNotFoundException,
     ValidationException,
 )
 from backend.core.permissions import SystemPermissions
 from backend.database.crud.audit import audit_log as audit_crud
-from backend.database.crud.user import user as user_crud, role as role_crud, permission as permission_crud
-from backend.dependencies import DatabaseDep, CurrentUser, require_permissions
-from backend.models.audit import AuditAction, AuditSeverity, ResourceType
-from backend.schemas.base import (
+from backend.database.crud.user import user as user_crud, role as role_crud
+from backend.routes.dependencies import DatabaseDep, CurrentUser, require_permissions
+from backend.database.models import AuditAction, AuditSeverity, ResourceType
+from backend.api.schemas import (
     BulkOperationResponse,
-    IdResponse,
     MessageResponse,
     PaginatedResponse,
     create_paginated_response,
-    create_response,
 )
-from backend.schemas.user import (
+from backend.api.schemas import (
     BulkRoleAssignment,
-    Permission,
-    PermissionCreate,
-    PermissionUpdate,
-    Role,
     RoleAssignment,
-    RoleCreate,
-    RoleStatistics,
-    RoleUpdate,
     User,
-    UserActivitySummary,
     UserCreate,
     UserSearchFilters,
     UserStatistics,
@@ -129,8 +115,8 @@ async def create_user(
 
 @router.get("", response_model=PaginatedResponse[UserSummary])
 async def list_users(
-        filters: UserSearchFilters = Depends(),
         db: DatabaseDep,
+        filters: UserSearchFilters = Depends(),
         current_user: CurrentUser = Depends(require_permissions(SystemPermissions.USER_READ)),
 ) -> PaginatedResponse[UserSummary]:
     """

@@ -6,9 +6,9 @@ Handles user authentication and session management.
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import Field, field_validator
 
-from backend.schemas.base import BaseSchema, TimestampSchema
+from backend.api.schemas.base import BaseSchema, TimestampSchema
 
 
 class PKICertificateInfo(BaseSchema):

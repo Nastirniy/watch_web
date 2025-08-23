@@ -9,10 +9,10 @@ from typing import List, Optional, Dict, Any, TYPE_CHECKING
 
 from sqlmodel import Field, Relationship, JSON
 
-from backend.models.base import BaseModel
+from backend.database.models.base import BaseModel
 
 if TYPE_CHECKING:
-    from backend.models.user import User
+    from backend.database.models.user import User
 
 
 class JobType(str, Enum):

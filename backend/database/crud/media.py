@@ -5,16 +5,15 @@ Handles file metadata, chunked uploads, and integrity verification.
 
 import hashlib
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from loguru import logger
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from backend.database.crud.base import CRUDBase
-from backend.models.media import MediaFile, FileChunk, MediaType
-from backend.schemas.media import MediaFileCreate, MediaFileUpdate
+from backend.database.models import MediaFile, FileChunk, MediaType
+from backend.api.schemas import MediaFileCreate, MediaFileUpdate
 
 
 class CRUDMediaFile(CRUDBase[MediaFile, MediaFileCreate, MediaFileUpdate]):

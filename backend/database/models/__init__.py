@@ -3,7 +3,7 @@ Database models initialization.
 Imports all models to ensure they are registered with SQLModel.
 """
 
-from backend.models.base import (
+from backend.database.models.base import (
     BaseModel,
     BaseModelWithSoftDelete,
     SoftDeleteMixin,
@@ -11,7 +11,7 @@ from backend.models.base import (
     TimestampMixin,
 )
 
-from backend.models.user import (
+from backend.database.models.user import (
     Permission,
     Role,
     RolePermission,
@@ -20,12 +20,12 @@ from backend.models.user import (
     UserSession,
 )
 
-from backend.models.post import (
+from backend.database.models.post import (
     ConnectionStatus,
     Post,
 )
 
-from backend.models.signal import (
+from backend.database.models.signal import (
     Category,
     ConfidenceLevel,
     ModulationType,
@@ -34,19 +34,19 @@ from backend.models.signal import (
     SignalType,
 )
 
-from backend.models.media import (
+from backend.database.models.media import (
     FileChunk,
     MediaFile,
     MediaType,
 )
 
-from backend.models.export import (
+from backend.database.models.export import (
     ExportJob,
     JobStatus,
     JobType,
 )
 
-from backend.models.audit import (
+from backend.database.models.audit import (
     AuditAction,
     AuditLog,
     AuditSeverity,

@@ -18,7 +18,7 @@ from backend.core.exceptions import (
     handle_validation_exception,
     handle_generic_exception,
 )
-from backend.database.database import close_db_connection, create_db_and_tables
+from backend.database.db_controls import close_db_connection, create_db_and_tables
 from backend.middleware.auth import AuthMiddleware
 from backend.middleware.logging import LoggingMiddleware
 

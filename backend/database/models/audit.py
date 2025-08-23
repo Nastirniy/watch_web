@@ -3,16 +3,15 @@ Audit logging models for tracking system activities and changes.
 Provides comprehensive audit trail for security and compliance.
 """
 
-from datetime import datetime
 from enum import Enum
 from typing import Dict, Any, Optional, TYPE_CHECKING
 
 from sqlmodel import Field, Relationship, JSON
 
-from backend.models.base import BaseModel
+from backend.database.models.base import BaseModel
 
 if TYPE_CHECKING:
-    from backend.models.user import User
+    from backend.database.models.user import User
 
 
 class AuditAction(str, Enum):
