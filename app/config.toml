@@ -1,0 +1,34 @@
+[app]
+name = "Radio Monitoring System"
+version = "1.0.0"
+debug = false
+environment = "development"
+
+[database]
+host = "localhost"
+port = 3306
+name = "radio_monitoring"
+user = "root"
+password = "pythops"
+echo = false
+pool_size = 20
+max_overflow = 40
+
+[security]
+secret_key = "your-secret-key-change-this-in-production"
+algorithm = "HS256"
+access_token_expire_minutes = 1440
+session_expire_hours = 24
+
+[server]
+host = "0.0.0.0"
+port = 60800
+reload = false
+workers = 1
+
+[admin]
+username = "admin"
+username_alias = "System Administrator"
+pki_certificate_cn = "ADMIN_CN"
+pki_certificate_serial = "ADMIN_SERIAL_001"
+pki_certificate_fingerprint = "ADMIN_FINGERPRINT_001"

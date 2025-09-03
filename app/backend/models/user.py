@@ -1,0 +1,49 @@
+from typing import Optional, List
+from datetime import datetime
+from sqlmodel import Field, SQLModel, Relationship
+
+
+class User(SQLModel, table=True):
+    __tablename__ = "users"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    pki_certificate_cn: str = Field(unique=True, index=True, max_length=255)
+    pki_certificate_serial: str = Field(unique=True, max_length=255)
+    pki_certificate_fingerprint: str = Field(unique=True, max_length=255)
+    username: str = Field(unique=True, index=True, max_length=255)
+    username_alias: str = Field(max_length=255)
+    is_active: bool = Field(default=True, index=True)
+    last_login_at: Optional[datetime] = Field(default=None, index=True)
+    post_id: Optional[int] = Field(default=None, foreign_key="posts.id")
+    last_record_created_at: Optional[datetime] = Field(default=None)
+    is_deleted: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # Relationships
+    post: Optional["Post"] = Relationship(back_populates="users")
+    sessions: List["UserSession"] = Relationship(back_populates="user", cascade_delete=True)
+    user_roles: List["UserRole"] = Relationship(back_populates="user", cascade_delete=True)
+    observations: List["Observation"] = Relationship(
+        back_populates="user",
+        sa_relationship_kwargs={"foreign_keys": "[Observation.user_id]"}
+    )
+    disappeared_observations: List["Observation"] = Relationship(
+        back_populates="disappeared_by_user",
+        sa_relationship_kwargs={"foreign_keys": "[Observation.disappeared_by]"}
+    )
+
+
+class UserSession(SQLModel, table=True):
+    __tablename__ = "user_sessions"
+
+    id: str = Field(primary_key=True, max_length=128)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    ip_address: Optional[str] = Field(default=None, max_length=45)
+    user_agent: Optional[str] = Field(default=None)
+    last_activity: datetime = Field(default_factory=datetime.utcnow, index=True)
+    expires_at: datetime = Field(index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # Relationships
+    user: User = Relationship(back_populates="sessions")
