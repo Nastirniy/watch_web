@@ -13,7 +13,7 @@ import os
 from datetime import datetime, timezone
 
 # Import application components
-from app.main import app
+from app.main import fastapi_app
 from app.backend.database import get_session
 from app.backend.config import settings
 from app.backend.models.user import User, UserSession
@@ -141,7 +141,7 @@ async def client(test_session):
     async def get_test_session():
         yield test_session
     
-    app.dependency_overrides[get_session] = get_test_session
+    fastapi_app.dependency_overrides[get_session] = get_test_session
     
     # Disable rate limiting for tests by clearing the rate limit storage and making the check always return True
     from app.backend.middleware.auth import SecurityMiddleware
@@ -155,14 +155,14 @@ async def client(test_session):
     
     try:
         from httpx import ASGITransport
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        async with AsyncClient(transport=ASGITransport(app=fastapi_app), base_url="http://test") as ac:
             yield ac
     finally:
         # Restore original rate limiting behavior
         SecurityMiddleware._check_rate_limit = original_check_rate_limit
         SecurityMiddleware.rate_limit_storage = {}
         # Clean up override
-        app.dependency_overrides.clear()
+        fastapi_app.dependency_overrides.clear()
 
 
 @pytest_asyncio.fixture

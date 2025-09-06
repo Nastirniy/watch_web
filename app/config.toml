@@ -1,7 +1,7 @@
 [app]
 name = "Radio Monitoring System"
 version = "1.0.0"
-debug = false
+debug = true
 environment = "development"
 
 [database]
@@ -23,8 +23,9 @@ session_expire_hours = 8
 password_min_length = 12
 max_login_attempts = 5
 lockout_duration_minutes = 30
-require_https = true
-allowed_origins = ["https://localhost:3000"]
+require_https = false
+#allowed_origins = ["https://localhost:60800"]
+allowed_origins = ["*"]
 jwt_leeway_seconds = 10
 
 [server]

@@ -30,14 +30,14 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down application...")
 
 
-app = FastAPI(
+fastapi_app = FastAPI(
     title=settings.app.name,
     version=settings.app.version,
     lifespan=lifespan
 )
 
 # Add CORS middleware (must be before other middleware)
-app.add_middleware(
+fastapi_app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.security.allowed_origins,
     allow_credentials=True,
@@ -47,20 +47,20 @@ app.add_middleware(
 )
 
 # Add security middleware
-app.add_middleware(SecurityMiddleware)
+# fastapi_app.add_middleware(SecurityMiddleware) # TODO: fix secure middleware, /redoc and /docs not opened
 
 # Include routers
-app.include_router(health.router, tags=[SystemRoutes.tag()])
-app.include_router(auth.router, prefix=AuthRoutes.BASE.versioned_path(), tags=[AuthRoutes.tag()])
-app.include_router(users.router, prefix=UserRoutes.BASE.versioned_path(), tags=[UserRoutes.tag()])
-app.include_router(observations.router, prefix=ObservationRoutes.BASE.versioned_path(), tags=[ObservationRoutes.tag()])
-app.include_router(posts.router, prefix=PostRoutes.BASE.versioned_path(), tags=[PostRoutes.tag()])
+fastapi_app.include_router(health.router, tags=[SystemRoutes.tag()])
+fastapi_app.include_router(auth.router, prefix=AuthRoutes.BASE.versioned_path(), tags=[AuthRoutes.tag()])
+fastapi_app.include_router(users.router, prefix=UserRoutes.BASE.versioned_path(), tags=[UserRoutes.tag()])
+fastapi_app.include_router(observations.router, prefix=ObservationRoutes.BASE.versioned_path(), tags=[ObservationRoutes.tag()])
+fastapi_app.include_router(posts.router, prefix=PostRoutes.BASE.versioned_path(), tags=[PostRoutes.tag()])
 
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
-        "main:app",
+        "main:fastapi_app",
         host=settings.server.host,
         port=settings.server.port,
         reload=settings.server.reload,
