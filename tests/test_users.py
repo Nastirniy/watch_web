@@ -106,7 +106,7 @@ class TestUserEndpoints:
     async def test_list_users_pagination(self, client: AsyncClient, admin_auth_headers):
         """Test user listing with pagination parameters"""
         url = f"{UserRoutes.BASE.versioned_path()}/"
-        response = await client.get(f"{url}?skip=0&limit=10", headers=admin_auth_headers)
+        response = await client.get(f"{url}?page=1&size=10", headers=admin_auth_headers)
         
         assert response.status_code == 200
         data = response.json()

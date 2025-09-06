@@ -296,4 +296,7 @@ class Routes:
 
 
 if __name__ == "__main__":
-    print(str(Routes.AUTH.__str__()))
+    # Test route enum functionality
+    from app.backend.utils.logging_config import get_logger
+    logger = get_logger("routes")
+    logger.debug(f"Auth routes test: {Routes.AUTH.BASE.versioned_path()}")

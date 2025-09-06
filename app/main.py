@@ -1,13 +1,24 @@
 import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from loguru import logger
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.backend.config import settings
+from app.backend.utils.logging_config import setup_logging, get_logger
 from app.backend.database import init_db
-from app.backend.middleware.auth import AuthMiddleware
+from app.backend.middleware.auth import SecurityMiddleware
 from app.backend.routes import auth, users, observations, posts, health
 from app.backend.enums.routes import AuthRoutes, UserRoutes, ObservationRoutes, PostRoutes, SystemRoutes
+
+# Initialize logging system
+setup_logging(
+    log_file_path=settings.logging.file_path if settings.logging.enable_file_logging else None,
+    log_level=settings.logging.level,
+    environment=settings.app.environment
+)
+
+# Get application logger
+logger = get_logger("main")
 
 
 @asynccontextmanager
@@ -25,8 +36,18 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add middleware
-app.add_middleware(AuthMiddleware)
+# Add CORS middleware (must be before other middleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.security.allowed_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["*"],
+    max_age=600
+)
+
+# Add security middleware
+app.add_middleware(SecurityMiddleware)
 
 # Include routers
 app.include_router(health.router, tags=[SystemRoutes.tag()])

@@ -136,18 +136,31 @@ async def test_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
 
 @pytest_asyncio.fixture(scope="function") 
 async def client(test_session):
-    """Create test client with overridden database session"""
+    """Create test client with overridden database session and disabled rate limiting"""
     
     async def get_test_session():
         yield test_session
     
     app.dependency_overrides[get_session] = get_test_session
     
+    # Disable rate limiting for tests by clearing the rate limit storage and making the check always return True
+    from app.backend.middleware.auth import SecurityMiddleware
+    original_check_rate_limit = SecurityMiddleware._check_rate_limit
+    SecurityMiddleware.rate_limit_storage = {}  # Clear any existing rate limits
+    
+    async def mock_rate_limit_check(self, request):
+        return True  # Always allow requests during tests
+    
+    SecurityMiddleware._check_rate_limit = mock_rate_limit_check
+    
     try:
         from httpx import ASGITransport
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             yield ac
     finally:
+        # Restore original rate limiting behavior
+        SecurityMiddleware._check_rate_limit = original_check_rate_limit
+        SecurityMiddleware.rate_limit_storage = {}
         # Clean up override
         app.dependency_overrides.clear()
 
@@ -205,13 +218,13 @@ async def admin_user(test_session) -> User:
                 )
                 test_session.add(role_perm)
     
-    # Create admin user with unique credentials
+    # Create admin user with unique credentials (hashed)
     admin_user = User(
         username=f"admin_{unique_serial}",  # Make username unique too
         username_alias="Test Administrator",
-        pki_certificate_cn=admin_pki["cn"],
-        pki_certificate_serial=admin_pki["serial"],
-        pki_certificate_fingerprint=admin_pki["fingerprint"],
+        pki_certificate_cn_hash=AuthService.hash_pki_data(admin_pki["cn"]),
+        pki_certificate_serial_hash=AuthService.hash_pki_data(admin_pki["serial"]),
+        pki_certificate_fingerprint_hash=AuthService.hash_pki_data(admin_pki["fingerprint"]),
         is_active=True
     )
     test_session.add(admin_user)
@@ -237,13 +250,13 @@ async def regular_user(test_session) -> User:
     unique_username = f"testuser_{unique_serial}"
     user_pki = PKICertificateGenerator.generate_test_certificate(unique_username, unique_serial)
     
-    # Create regular user
+    # Create regular user (hashed)
     user = User(
         username=f"testuser_{unique_serial}",
         username_alias="Test User",
-        pki_certificate_cn=user_pki["cn"],
-        pki_certificate_serial=user_pki["serial"],
-        pki_certificate_fingerprint=user_pki["fingerprint"],
+        pki_certificate_cn_hash=AuthService.hash_pki_data(user_pki["cn"]),
+        pki_certificate_serial_hash=AuthService.hash_pki_data(user_pki["serial"]),
+        pki_certificate_fingerprint_hash=AuthService.hash_pki_data(user_pki["fingerprint"]),
         is_active=True
     )
     test_session.add(user)
@@ -294,15 +307,49 @@ async def test_signal_type(test_session) -> SignalType:
 
 
 @pytest_asyncio.fixture
-async def admin_auth_headers(admin_user) -> dict:
-    """Generate authentication headers for admin user"""
+async def admin_auth_headers(admin_user, test_session) -> dict:
+    """Generate authentication headers for admin user with valid session"""
+    # Create a valid user session
+    import secrets
+    from datetime import timedelta
+    session_id = secrets.token_urlsafe(64)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=8)
+    
+    user_session = UserSession(
+        id=session_id,
+        user_id=admin_user.id,
+        ip_address="127.0.0.1",
+        user_agent="test-client",
+        expires_at=expires_at,
+        is_active=True
+    )
+    test_session.add(user_session)
+    await test_session.commit()
+    
     token = AuthService.create_access_token(admin_user.id)
     return {"Authorization": f"Bearer {token}"}
 
 
 @pytest_asyncio.fixture
-async def user_auth_headers(regular_user) -> dict:
-    """Generate authentication headers for regular user"""  
+async def user_auth_headers(regular_user, test_session) -> dict:
+    """Generate authentication headers for regular user with valid session"""  
+    # Create a valid user session
+    import secrets
+    from datetime import timedelta
+    session_id = secrets.token_urlsafe(64)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=8)
+    
+    user_session = UserSession(
+        id=session_id,
+        user_id=regular_user.id,
+        ip_address="127.0.0.1",
+        user_agent="test-client",
+        expires_at=expires_at,
+        is_active=True
+    )
+    test_session.add(user_session)
+    await test_session.commit()
+    
     token = AuthService.create_access_token(regular_user.id)
     return {"Authorization": f"Bearer {token}"}
 

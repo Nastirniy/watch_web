@@ -1,9 +1,8 @@
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 import toml
-from loguru import logger
 
 
 class AppConfig(BaseModel):
@@ -31,15 +30,24 @@ class DatabaseConfig(BaseModel):
 class SecurityConfig(BaseModel):
     secret_key: str = "change-this-secret-key"
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 1440
-    session_expire_hours: int = 24
+    access_token_expire_minutes: int = 30  # Reduced from 1440 for better security
+    refresh_token_expire_days: int = 7
+    session_expire_hours: int = 8  # Reduced from 24 for better security
+    password_min_length: int = 12
+    max_login_attempts: int = 5
+    lockout_duration_minutes: int = 30
+    require_https: bool = True
+    allowed_origins: list[str] = ["https://localhost:3000"]
+    jwt_leeway_seconds: int = 10
 
 
 class ServerConfig(BaseModel):
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"  # More secure default
     port: int = 8000
     reload: bool = False
     workers: int = 4
+    ssl_keyfile: Optional[str] = None
+    ssl_certfile: Optional[str] = None
 
 
 class AdminConfig(BaseModel):
@@ -50,12 +58,19 @@ class AdminConfig(BaseModel):
     pki_certificate_fingerprint: str = "ADMIN_FINGERPRINT_001"
 
 
+class LoggingConfig(BaseModel):
+    level: str = "INFO"
+    file_path: Optional[str] = None
+    enable_file_logging: bool = False
+
+
 class Settings(BaseSettings):
     app: AppConfig = Field(default_factory=AppConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     admin: AdminConfig = Field(default_factory=AdminConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
 
     def __init__(self, **kwargs):
         # Load from TOML first
@@ -72,8 +87,9 @@ class Settings(BaseSettings):
             with open(config_file, "r") as f:
                 config_data = toml.load(f)
         else:
-            logger.warning(f"Config file not found in any of: {config_paths}")
-            logger.warning(f"Current working directory: {os.getcwd()}")
+            # Use print for config loading since logging isn't set up yet
+            print(f"WARNING: Config file not found in any of: {config_paths}")
+            print(f"WARNING: Current working directory: {os.getcwd()}")
 
         # Override with environment variables (MYSETTINGS_* pattern)
         env_prefix = "MYSETTINGS_"
@@ -96,4 +112,5 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-logger.info(f"Loaded configuration for environment: {settings.app.environment}")
+# Note: Actual logging will be set up in main.py after this config is loaded
+print(f"INFO: Loaded configuration for environment: {settings.app.environment}")

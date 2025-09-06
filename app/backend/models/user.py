@@ -7,9 +7,9 @@ class User(SQLModel, table=True):
     __tablename__ = "users"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    pki_certificate_cn: str = Field(unique=True, index=True, max_length=255)
-    pki_certificate_serial: str = Field(unique=True, max_length=255)
-    pki_certificate_fingerprint: str = Field(unique=True, max_length=255)
+    pki_certificate_cn_hash: str = Field(unique=True, index=True, max_length=255)
+    pki_certificate_serial_hash: str = Field(unique=True, max_length=255)
+    pki_certificate_fingerprint_hash: str = Field(unique=True, max_length=255)
     username: str = Field(unique=True, index=True, max_length=255)
     username_alias: str = Field(max_length=255)
     is_active: bool = Field(default=True, index=True)

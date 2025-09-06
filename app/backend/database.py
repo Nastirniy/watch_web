@@ -3,13 +3,16 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import event, text
 from sqlmodel import SQLModel, select
-from loguru import logger
 import contextvars
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.config import settings
+from app.backend.utils.logging_config import get_database_logger
 from app.backend.models import *  # Import all models to register them
+
+# Get database logger
+logger = get_database_logger()
 
 # Context variable to store current user ID for audit logging
 current_user_context = contextvars.ContextVar('current_user_id', default=None)
@@ -186,13 +189,14 @@ async def init_db():
                 )
                 session.add(role_perm)
 
-            # Create admin user with generated PKI credentials
+            # Create admin user with generated PKI credentials (hashed)
+            from app.backend.services.auth import AuthService
             admin_user = User(
                 username=settings.admin.username,
                 username_alias=settings.admin.username_alias,
-                pki_certificate_cn=admin_pki["pki_certificate_cn"],
-                pki_certificate_serial=admin_pki["pki_certificate_serial"],
-                pki_certificate_fingerprint=admin_pki["pki_certificate_fingerprint"],
+                pki_certificate_cn_hash=AuthService.hash_pki_data(admin_pki["pki_certificate_cn"]),
+                pki_certificate_serial_hash=AuthService.hash_pki_data(admin_pki["pki_certificate_serial"]),
+                pki_certificate_fingerprint_hash=AuthService.hash_pki_data(admin_pki["pki_certificate_fingerprint"]),
                 is_active=True
             )
             session.add(admin_user)

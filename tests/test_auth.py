@@ -9,12 +9,34 @@ from app.backend.enums.routes import AuthRoutes, APIVersionRoutes
 @pytest.mark.asyncio
 class TestAuthEndpoints:
     
-    async def test_login_success(self, client: AsyncClient, admin_user):
+    async def test_login_success(self, client: AsyncClient, test_session):
         """Test successful login with valid PKI credentials"""
+        # Create a user specifically for this login test
+        from app.backend.utils.pki_generator import PKICertificateGenerator
+        from app.backend.services.auth import AuthService
+        from app.backend.models.user import User
+        import time
+        
+        unique_serial = int(time.time() * 1000) % (10**8) + 9000
+        admin_pki = PKICertificateGenerator.generate_test_certificate(f"login_admin_{unique_serial}", unique_serial)
+        
+        # Create a user with hashed credentials 
+        test_user = User(
+            username=f"login_test_user_{unique_serial}",
+            username_alias="Login Test User",
+            pki_certificate_cn_hash=AuthService.hash_pki_data(admin_pki["cn"]),
+            pki_certificate_serial_hash=AuthService.hash_pki_data(admin_pki["serial"]),
+            pki_certificate_fingerprint_hash=AuthService.hash_pki_data(admin_pki["fingerprint"]),
+            is_active=True
+        )
+        test_session.add(test_user)
+        await test_session.commit()
+        
+        # Now use the raw PKI data to login (the service will hash it and compare)
         login_data = {
-            "certificate_cn": admin_user.pki_certificate_cn,
-            "certificate_serial": admin_user.pki_certificate_serial,
-            "certificate_fingerprint": admin_user.pki_certificate_fingerprint
+            "certificate_cn": admin_pki["cn"],
+            "certificate_serial": admin_pki["serial"], 
+            "certificate_fingerprint": admin_pki["fingerprint"]
         }
         
         url = AuthRoutes.LOGIN.versioned_path()
@@ -23,16 +45,18 @@ class TestAuthEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert "access_token" in data
+        assert "refresh_token" in data
         assert data["token_type"] == "bearer"
-        assert data["user_id"] == admin_user.id
-        assert data["username"] == admin_user.username
+        assert data["user_id"] == test_user.id
+        assert data["username"] == test_user.username
+        assert "expires_in" in data
 
     async def test_login_invalid_certificate(self, client: AsyncClient):
         """Test login with invalid PKI certificate"""
         login_data = {
             "certificate_cn": "invalid@test.local",
             "certificate_serial": "999999",
-            "certificate_fingerprint": "invalid_fingerprint"
+            "certificate_fingerprint": "ABCD:EF12:1234:5678"
         }
         
         url = AuthRoutes.LOGIN.versioned_path()
@@ -85,14 +109,15 @@ class TestAuthEndpoints:
         """Test login with inactive user"""
         # Create inactive user
         from app.backend.models.user import User
+        from app.backend.services.auth import AuthService
         
         pki = PKICertificateGenerator.generate_test_certificate("inactive_user", 3001)
         inactive_user = User(
             username="inactive_user",
             username_alias="Inactive User",
-            pki_certificate_cn=pki["cn"],
-            pki_certificate_serial=pki["serial"],
-            pki_certificate_fingerprint=pki["fingerprint"],
+            pki_certificate_cn_hash=AuthService.hash_pki_data(pki["cn"]),
+            pki_certificate_serial_hash=AuthService.hash_pki_data(pki["serial"]),
+            pki_certificate_fingerprint_hash=AuthService.hash_pki_data(pki["fingerprint"]),
             is_active=False  # Inactive
         )
         test_session.add(inactive_user)

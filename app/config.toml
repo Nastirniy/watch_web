@@ -15,10 +15,17 @@ pool_size = 20
 max_overflow = 40
 
 [security]
-secret_key = "your-secret-key-change-this-in-production"
+secret_key = "your-secret-key-change-this-in-production"  # Use MYSETTINGS_SECURITY__SECRET_KEY env var in production
 algorithm = "HS256"
-access_token_expire_minutes = 1440
-session_expire_hours = 24
+access_token_expire_minutes = 30
+refresh_token_expire_days = 7
+session_expire_hours = 8
+password_min_length = 12
+max_login_attempts = 5
+lockout_duration_minutes = 30
+require_https = true
+allowed_origins = ["https://localhost:3000"]
+jwt_leeway_seconds = 10
 
 [server]
 host = "127.0.0.1"
@@ -32,3 +39,8 @@ username_alias = "System Administrator"
 pki_certificate_cn = "ADMIN_CN"
 pki_certificate_serial = "ADMIN_SERIAL_001"
 pki_certificate_fingerprint = "ADMIN_FINGERPRINT_001"
+
+[logging]
+level = "INFO"
+# file_path = "logs/radio_monitoring.log"  # Uncomment to enable file logging
+enable_file_logging = false
