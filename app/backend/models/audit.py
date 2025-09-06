@@ -1,7 +1,7 @@
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlmodel import Field, SQLModel, JSON, Column
-from app.backend.enums import ExportJobStatus, ExportJobType
+from app.backend.enums.general import ExportJobType, ExportJobStatus
 
 
 class AuditLog(SQLModel, table=True):
@@ -24,7 +24,7 @@ class AuditLog(SQLModel, table=True):
 
     success: bool = Field(default=True, index=True)
     error_message: Optional[str] = Field(default=None)
-    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
 
 
 class ExportJob(SQLModel, table=True):
@@ -43,7 +43,7 @@ class ExportJob(SQLModel, table=True):
     output_filename: Optional[str] = Field(default=None, max_length=255)
     error_message: Optional[str] = Field(default=None)
 
-    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
     started_at: Optional[datetime] = Field(default=None)
     completed_at: Optional[datetime] = Field(default=None)
     expires_at: Optional[datetime] = Field(default=None, index=True)

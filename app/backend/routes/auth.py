@@ -7,7 +7,7 @@ from app.backend.database import get_session
 from app.backend.services.auth import AuthService
 from app.backend.dependencies import get_current_user
 from app.backend.models.user import User
-from app.backend.enums import Routes
+from app.backend.enums.routes import AuthRoutes
 
 router = APIRouter()
 
@@ -25,7 +25,7 @@ class LoginResponse(BaseModel):
     username: str
 
 
-@router.post(Routes.AUTH_LOGIN.value.replace("/auth", ""), response_model=LoginResponse)
+@router.post(AuthRoutes.LOGIN.value, response_model=LoginResponse)
 async def login(
         request: Request,
         credentials: LoginRequest,
@@ -63,7 +63,7 @@ async def login(
     )
 
 
-@router.get(Routes.AUTH_ME.value.replace("/auth", ""))
+@router.get(AuthRoutes.ME.value)
 async def get_current_user_info(
         current_user: User = Depends(get_current_user)
 ):

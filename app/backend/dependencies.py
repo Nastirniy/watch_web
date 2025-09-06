@@ -9,14 +9,20 @@ from app.backend.config import settings
 from app.backend.database import get_session
 from app.backend.models.user import User
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
-        credentials: HTTPAuthorizationCredentials = Depends(security),
+        credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
         session: AsyncSession = Depends(get_session)
 ) -> User:
     """Get current authenticated user"""
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication credentials required"
+        )
+    
     token = credentials.credentials
 
     try:

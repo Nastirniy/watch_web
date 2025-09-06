@@ -1,5 +1,5 @@
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlmodel import Field, SQLModel, Relationship
 
 
@@ -17,8 +17,8 @@ class User(SQLModel, table=True):
     post_id: Optional[int] = Field(default=None, foreign_key="posts.id")
     last_record_created_at: Optional[datetime] = Field(default=None)
     is_deleted: bool = Field(default=False)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Relationships
     post: Optional["Post"] = Relationship(back_populates="users")
@@ -41,9 +41,9 @@ class UserSession(SQLModel, table=True):
     user_id: int = Field(foreign_key="users.id", index=True)
     ip_address: Optional[str] = Field(default=None, max_length=45)
     user_agent: Optional[str] = Field(default=None)
-    last_activity: datetime = Field(default_factory=datetime.utcnow, index=True)
+    last_activity: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
     expires_at: datetime = Field(index=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Relationships
     user: User = Relationship(back_populates="sessions")

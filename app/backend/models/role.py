@@ -1,5 +1,5 @@
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlmodel import Field, SQLModel, Relationship
 
 
@@ -10,8 +10,8 @@ class Role(SQLModel, table=True):
     name: str = Field(unique=True, index=True, max_length=100)
     display_name: str = Field(max_length=255)
     description: Optional[str] = Field(default=None)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Relationships
     role_permissions: List["RolePermission"] = Relationship(back_populates="role", cascade_delete=True)
@@ -46,7 +46,7 @@ class UserRole(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="users.id", index=True)
     role_id: int = Field(foreign_key="roles.id", index=True)
-    assigned_at: datetime = Field(default_factory=datetime.utcnow)
+    assigned_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Relationships
     user: "User" = Relationship(back_populates="user_roles")

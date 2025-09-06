@@ -1,9 +1,9 @@
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from sqlmodel import Field, SQLModel, Relationship, JSON, Column
 from sqlalchemy import LargeBinary
-from app.backend.enums import ObservationStatus, ConfidenceLevel, MediaType
+from app.backend.enums.general import ObservationStatus, ConfidenceLevel, MediaType
 
 
 class Category(SQLModel, table=True):
@@ -37,8 +37,8 @@ class SignalType(SQLModel, table=True):
     description: Optional[str] = Field(default=None)
     is_active: bool = Field(default=True, index=True)
     sort_order: int = Field(default=0, index=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Relationships
     category: Optional[Category] = Relationship(back_populates="signal_types")
@@ -70,8 +70,8 @@ class Observation(SQLModel, table=True):
     confidence_level: str = Field(default=ConfidenceLevel.MEDIUM.value, max_length=10)
     is_deleted: bool = Field(default=False)
 
-    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     disappeared_at: Optional[datetime] = Field(default=None, index=True)
     disappeared_by: Optional[int] = Field(default=None, foreign_key="users.id")
 
@@ -110,7 +110,7 @@ class MediaFile(SQLModel, table=True):
     width: Optional[int] = Field(default=None)
     height: Optional[int] = Field(default=None)
 
-    uploaded_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    uploaded_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
 
     # Relationships
     observation: Observation = Relationship(back_populates="media_files")
@@ -126,7 +126,7 @@ class FileChunk(SQLModel, table=True):
     chunk_size: int
     chunk_hash: str = Field(max_length=64)
     chunk_data: bytes = Field(sa_column=Column(LargeBinary))
-    uploaded_at: datetime = Field(default_factory=datetime.utcnow)
+    uploaded_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Relationships
     media_file: MediaFile = Relationship(back_populates="file_chunks")

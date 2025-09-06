@@ -23,7 +23,8 @@ async def create_database_if_not_exists():
     db_config = settings.database
     engine_without_db = create_async_engine(
         f"mysql+aiomysql://{db_config.user}:{db_config.password}@{db_config.host}:{db_config.port}/",
-        echo=False
+        echo=False,
+        connect_args={}
     )
 
     async with engine_without_db.begin() as conn:
@@ -60,8 +61,18 @@ async def get_engine():
             echo=settings.database.echo,
             pool_size=settings.database.pool_size,
             max_overflow=settings.database.max_overflow,
+            pool_timeout=30,  # Wait up to 30 seconds for a connection
+            pool_recycle=3600,  # Recycle connections after 1 hour
+            pool_pre_ping=True,  # Verify connections before use
+            connect_args={
+                "connect_timeout": 10,
+                "charset": "utf8mb4",
+                "use_unicode": True,
+                "autocommit": False,
+            },
             future=True
         )
+        logger.info(f"Database engine created with pool_size={settings.database.pool_size}, max_overflow={settings.database.max_overflow}")
     return engine
 
 
@@ -89,14 +100,29 @@ class AuditedSession(AsyncSession):
 
 
 async def get_session() -> AsyncGenerator[AuditedSession, None]:
-    """Dependency to get database session with audit context"""
+    """Dependency to get database session with audit context and error handling"""
     session_maker = await get_session_maker()
     async with session_maker() as session:
-        # Set audit context from context variables
-        session.audit_user_id = current_user_context.get()
-        session.audit_session_id = current_session_context.get()
-        session.audit_request_info = current_request_context.get()
-        yield session
+        try:
+            # Set audit context from context variables
+            session.audit_user_id = current_user_context.get()
+            session.audit_session_id = current_session_context.get()
+            session.audit_request_info = current_request_context.get()
+            
+            # Test connection
+            await session.exec(text("SELECT 1"))
+            
+            yield session
+        except Exception as e:
+            logger.error(f"Database session error: {e}")
+            await session.rollback()
+            raise
+        finally:
+            # Ensure session is properly closed
+            try:
+                await session.close()
+            except Exception as e:
+                logger.warning(f"Error closing session: {e}")
 
 
 async def init_db():
@@ -111,12 +137,13 @@ async def init_db():
 
     logger.info("Database tables created")
 
-    # Create initial admin user and role
+    # Create initial admin user and role with proper PKI certificates
     session_maker = await get_session_maker()
     async with session_maker() as session:
         from app.backend.models.user import User
         from app.backend.models.role import Role, Permission, RolePermission
-        from app.backend.enums import Permissions
+        from app.backend.enums.general import Permissions
+        from app.backend.utils.pki_generator import generate_admin_pki_credentials
 
         # Check if admin exists
         result = await session.exec(
@@ -125,6 +152,18 @@ async def init_db():
         admin_user = result.first()
 
         if not admin_user:
+            # Generate proper PKI credentials for admin
+            try:
+                admin_pki = generate_admin_pki_credentials()
+                logger.info("Generated admin PKI credentials")
+            except Exception as e:
+                logger.warning(f"Failed to generate PKI certificates, using configured values: {e}")
+                admin_pki = {
+                    "pki_certificate_cn": settings.admin.pki_certificate_cn,
+                    "pki_certificate_serial": settings.admin.pki_certificate_serial,
+                    "pki_certificate_fingerprint": settings.admin.pki_certificate_fingerprint
+                }
+
             # Create admin role with all permissions
             admin_role = Role(
                 name="admin",
@@ -147,13 +186,13 @@ async def init_db():
                 )
                 session.add(role_perm)
 
-            # Create admin user
+            # Create admin user with generated PKI credentials
             admin_user = User(
                 username=settings.admin.username,
                 username_alias=settings.admin.username_alias,
-                pki_certificate_cn=settings.admin.pki_certificate_cn,
-                pki_certificate_serial=settings.admin.pki_certificate_serial,
-                pki_certificate_fingerprint=settings.admin.pki_certificate_fingerprint,
+                pki_certificate_cn=admin_pki["pki_certificate_cn"],
+                pki_certificate_serial=admin_pki["pki_certificate_serial"],
+                pki_certificate_fingerprint=admin_pki["pki_certificate_fingerprint"],
                 is_active=True
             )
             session.add(admin_user)
@@ -168,7 +207,7 @@ async def init_db():
             session.add(user_role)
 
             await session.commit()
-            logger.info("Admin user and permissions created")
+            logger.info(f"Admin user created with PKI CN: {admin_pki['pki_certificate_cn']}")
         else:
             logger.info("Admin user already exists")
 

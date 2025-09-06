@@ -10,7 +10,8 @@ from app.backend.models.post import Post
 from app.backend.models.user import User
 from app.backend.dependencies import get_current_user
 from app.backend.services.permissions import PermissionService
-from app.backend.enums import Routes, Permissions, ConnectionStatus
+from app.backend.enums.general import Permissions, ConnectionStatus
+from app.backend.enums.routes import PostRoutes, SystemRoutes
 
 router = APIRouter()
 
@@ -29,7 +30,7 @@ class PostUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
-@router.get(Routes.POSTS_LIST.value.replace("/posts", ""), response_model=List[Post])
+@router.get(SystemRoutes.ROOT.value, response_model=List[Post])
 @PermissionService.require_permission(Permissions.POST_VIEW.value)
 async def list_posts(
         skip: int = 0,
@@ -48,7 +49,7 @@ async def list_posts(
     return result.all()
 
 
-@router.post(Routes.POSTS_CREATE.value.replace("/posts", ""), response_model=Post)
+@router.post(SystemRoutes.ROOT.value, response_model=Post)
 @PermissionService.require_permission(Permissions.POST_CREATE.value)
 async def create_post(
         post_data: PostCreate,
@@ -66,7 +67,7 @@ async def create_post(
             detail="Post with this code already exists"
         )
 
-    post = Post(**post_data.dict())
+    post = Post(**post_data.model_dump())
     session.add(post)
     await session.commit()
     await session.refresh(post)
@@ -74,7 +75,7 @@ async def create_post(
     return post
 
 
-@router.get(Routes.POSTS_GET.value.replace("/posts/", ""), response_model=Post)
+@router.get(PostRoutes.POST_BY_ID.value, response_model=Post)
 @PermissionService.require_permission(Permissions.POST_VIEW.value)
 async def get_post(
         post_id: int,

@@ -1,8 +1,9 @@
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 from pydantic import BaseModel
 
@@ -11,7 +12,8 @@ from app.backend.models.observation import Observation
 from app.backend.models.user import User
 from app.backend.dependencies import get_current_user
 from app.backend.services.permissions import PermissionService
-from app.backend.enums import Routes, Permissions, ObservationStatus
+from app.backend.enums.general import Permissions, ObservationStatus
+from app.backend.enums.routes import ObservationRoutes, SystemRoutes
 
 router = APIRouter()
 
@@ -29,7 +31,7 @@ class ObservationCreate(BaseModel):
     confidence_level: Optional[str] = None
 
 
-@router.get(Routes.OBSERVATIONS_LIST.value.replace("/observations", ""), response_model=List[Observation])
+@router.get(SystemRoutes.ROOT.value, response_model=List[Observation])
 @PermissionService.require_permission(Permissions.OBSERVATION_VIEW.value)
 async def list_observations(
         skip: int = 0,
@@ -51,7 +53,7 @@ async def list_observations(
     return result.all()
 
 
-@router.post(Routes.OBSERVATIONS_CREATE.value.replace("/observations", ""), response_model=Observation)
+@router.post(SystemRoutes.ROOT.value, response_model=Observation)
 @PermissionService.require_permission(Permissions.OBSERVATION_CREATE.value)
 async def create_observation(
         observation_data: ObservationCreate,
@@ -60,7 +62,7 @@ async def create_observation(
 ):
     """Create new observation"""
     observation = Observation(
-        **observation_data.dict(),
+        **observation_data.model_dump(),
         user_id=current_user.id,
         frequency_center=(observation_data.frequency_min + observation_data.frequency_max) / 2,
         bandwidth=observation_data.frequency_max - observation_data.frequency_min
@@ -69,17 +71,34 @@ async def create_observation(
     session.add(observation)
 
     # Update user's last record created
-    current_user.last_record_created_at = datetime.utcnow()
+    current_user.last_record_created_at = datetime.now(timezone.utc)
     session.add(current_user)
 
-    await session.commit()
-    await session.refresh(observation)
+    try:
+        await session.commit()
+        await session.refresh(observation)
+        return observation
+    except IntegrityError as e:
+        await session.rollback()
+        # Check if it's a foreign key constraint error
+        if "post_id" in str(e) or "FOREIGN KEY" in str(e):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid post_id: Post does not exist"
+            )
+        elif "signal_type_id" in str(e):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid signal_type_id: Signal type does not exist"
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Database constraint violation"
+            )
 
-    return observation
 
-
-@router.post(Routes.OBSERVATIONS_MARK_DISAPPEARED.value.replace("/observations/", "").replace("/disappeared",
-                                                                                              "") + "/disappeared")
+@router.post(ObservationRoutes.MARK_DISAPPEARED.value)
 @PermissionService.require_permission(Permissions.OBSERVATION_UPDATE.value)
 async def mark_observation_disappeared(
         observation_id: int,
@@ -102,9 +121,9 @@ async def mark_observation_disappeared(
         )
 
     observation.status = ObservationStatus.DISAPPEARED.value
-    observation.disappeared_at = datetime.utcnow()
+    observation.disappeared_at = datetime.now(timezone.utc)
     observation.disappeared_by = current_user.id
-    observation.updated_at = datetime.utcnow()
+    observation.updated_at = datetime.now(timezone.utc)
 
     session.add(observation)
     await session.commit()

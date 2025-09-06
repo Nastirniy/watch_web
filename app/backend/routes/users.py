@@ -1,15 +1,17 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError, DataError
 from sqlmodel import select
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.backend.database import get_session
 from app.backend.models.user import User
 from app.backend.dependencies import get_current_user
 from app.backend.services.permissions import PermissionService
-from app.backend.enums import Routes, Permissions
+from app.backend.enums.general import Permissions
+from app.backend.enums.routes import UserRoutes, SystemRoutes
 
 router = APIRouter()
 
@@ -29,7 +31,7 @@ class UserUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
-@router.get(Routes.USERS_LIST.value.replace("/users", ""), response_model=List[User])
+@router.get(SystemRoutes.ROOT.value, response_model=List[User])
 @PermissionService.require_permission(Permissions.USER_VIEW.value)
 async def list_users(
         skip: int = 0,
@@ -47,7 +49,7 @@ async def list_users(
     return result.all()
 
 
-@router.post(Routes.USERS_CREATE.value.replace("/users", ""), response_model=User)
+@router.post(SystemRoutes.ROOT.value, response_model=User)
 @PermissionService.require_permission(Permissions.USER_CREATE.value)
 async def create_user(
         user_data: UserCreate,
@@ -65,15 +67,34 @@ async def create_user(
             detail="User with this username already exists"
         )
 
-    user = User(**user_data.dict())
+    user = User(**user_data.model_dump())
     session.add(user)
-    await session.commit()
-    await session.refresh(user)
+    
+    try:
+        await session.commit()
+        await session.refresh(user)
+        return user
+    except (IntegrityError, DataError) as e:
+        await session.rollback()
+        error_msg = str(e)
+        if "Data too long" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Data too long for one or more fields"
+            )
+        elif "Duplicate entry" in error_msg or "already exists" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User with this username already exists"
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Database error occurred"
+            )
 
-    return user
 
-
-@router.get(Routes.USERS_GET.value.replace("/users/", ""), response_model=User)
+@router.get(UserRoutes.USER_BY_ID.value, response_model=User)
 @PermissionService.require_permission(Permissions.USER_VIEW.value)
 async def get_user(
         user_id: int,
@@ -81,6 +102,12 @@ async def get_user(
         current_user: User = Depends(get_current_user)
 ):
     """Get user by ID"""
+    if user_id <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User ID must be a positive integer"
+        )
+    
     result = await session.exec(
         select(User).where(User.id == user_id, User.is_deleted == False)
     )
@@ -95,7 +122,7 @@ async def get_user(
     return user
 
 
-@router.patch(Routes.USERS_UPDATE.value.replace("/users/", ""), response_model=User)
+@router.patch(UserRoutes.USER_BY_ID.value, response_model=User)
 @PermissionService.require_permission(Permissions.USER_UPDATE.value)
 async def update_user(
         user_id: int,
@@ -115,10 +142,10 @@ async def update_user(
             detail="User not found"
         )
 
-    for field, value in user_update.dict(exclude_unset=True).items():
+    for field, value in user_update.model_dump(exclude_unset=True).items():
         setattr(user, field, value)
 
-    user.updated_at = datetime.utcnow()
+    user.updated_at = datetime.now(timezone.utc)
     session.add(user)
     await session.commit()
     await session.refresh(user)

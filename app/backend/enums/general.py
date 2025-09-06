@@ -1,36 +1,6 @@
 from enum import Enum
 
 
-class Routes(Enum):
-    # Auth routes
-    AUTH_LOGIN = "/auth/login"
-    AUTH_LOGOUT = "/auth/logout"
-    AUTH_REFRESH = "/auth/refresh"
-    AUTH_ME = "/auth/me"
-
-    # User routes
-    USERS_LIST = "/users"
-    USERS_GET = "/users/{user_id}"
-    USERS_CREATE = "/users"
-    USERS_UPDATE = "/users/{user_id}"
-    USERS_DELETE = "/users/{user_id}"
-
-    # Post routes
-    POSTS_LIST = "/posts"
-    POSTS_GET = "/posts/{post_id}"
-    POSTS_CREATE = "/posts"
-    POSTS_UPDATE = "/posts/{post_id}"
-    POSTS_DELETE = "/posts/{post_id}"
-
-    # Observation routes
-    OBSERVATIONS_LIST = "/observations"
-    OBSERVATIONS_GET = "/observations/{observation_id}"
-    OBSERVATIONS_CREATE = "/observations"
-    OBSERVATIONS_UPDATE = "/observations/{observation_id}"
-    OBSERVATIONS_DELETE = "/observations/{observation_id}"
-    OBSERVATIONS_MARK_DISAPPEARED = "/observations/{observation_id}/disappeared"
-
-
 class Permissions(Enum):
     # User permissions
     USER_VIEW = "user.view"

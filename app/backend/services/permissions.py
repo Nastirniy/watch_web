@@ -5,37 +5,39 @@ from loguru import logger
 
 from app.backend.models.user import User
 from app.backend.models.role import UserRole, RolePermission, Permission
-from app.backend.enums import Permissions
+from app.backend.enums.general import Permissions
 
 
 class PermissionService:
     @staticmethod
     async def get_user_permissions(session: AsyncSession, user: User) -> List[str]:
-        """Get all permissions for a user"""
-        # Get user roles
-        user_roles_result = await session.exec(
-            select(UserRole).where(UserRole.user_id == user.id)
-        )
-        user_roles = user_roles_result.all()
+        """Get all permissions for a user with optimized SQLAlchemy query"""
+        try:
+            # Check if user is active and not deleted
+            if not user.is_active or user.is_deleted:
+                logger.warning(f"Permission check for inactive/deleted user: {user.username}")
+                return []
 
-        permissions = set()
-
-        # Get permissions for each role
-        for user_role in user_roles:
-            role_perms_result = await session.exec(
-                select(RolePermission).where(RolePermission.role_id == user_role.role_id)
+            # Use JOIN query for better performance
+            from sqlalchemy.orm import selectinload
+            query = (
+                select(Permission.name)
+                .select_from(Permission)
+                .join(RolePermission, Permission.id == RolePermission.permission_id)
+                .join(UserRole, RolePermission.role_id == UserRole.role_id)
+                .where(UserRole.user_id == user.id)
+                .distinct()
             )
-            role_perms = role_perms_result.all()
-
-            for role_perm in role_perms:
-                perm_result = await session.exec(
-                    select(Permission).where(Permission.id == role_perm.permission_id)
-                )
-                perm = perm_result.first()
-                if perm:
-                    permissions.add(perm.name)
-
-        return list(permissions)
+            
+            result = await session.exec(query)
+            permissions = result.all()
+            
+            logger.debug(f"User {user.username} has permissions: {permissions}")
+            return list(permissions)
+            
+        except Exception as e:
+            logger.error(f"Error getting permissions for user {user.username}: {e}")
+            return []
 
     @staticmethod
     async def has_permission(
@@ -43,14 +45,49 @@ class PermissionService:
             user: User,
             permission: str
     ) -> bool:
-        """Check if user has specific permission"""
-        user_permissions = await PermissionService.get_user_permissions(session, user)
+        """Check if user has specific permission with enhanced validation"""
+        try:
+            # Basic validation
+            if not user or not permission:
+                logger.warning("Invalid user or permission in has_permission check")
+                return False
+                
+            # Check if user is active
+            if not user.is_active or user.is_deleted:
+                logger.warning(f"Permission check denied for inactive user: {user.username}")
+                return False
 
-        # Check for admin override
-        if Permissions.ADMIN_FULL.value in user_permissions:
-            return True
+            # Direct query to check specific permission (more efficient)
+            query = (
+                select(Permission.name)
+                .select_from(Permission)
+                .join(RolePermission, Permission.id == RolePermission.permission_id)
+                .join(UserRole, RolePermission.role_id == UserRole.role_id)
+                .where(
+                    UserRole.user_id == user.id,
+                    Permission.name.in_([permission, Permissions.ADMIN_FULL.value])
+                )
+            )
+            
+            result = await session.exec(query)
+            user_permissions = result.all()
 
-        return permission in user_permissions
+            # Check for admin override or specific permission
+            has_perm = (
+                Permissions.ADMIN_FULL.value in user_permissions or
+                permission in user_permissions
+            )
+            
+            if Permissions.ADMIN_FULL.value in user_permissions:
+                logger.debug(f"Admin override granted for user {user.username}")
+            elif not has_perm:
+                logger.debug(f"Permission {permission} denied for user {user.username}")
+            
+            return has_perm
+            
+        except Exception as e:
+            logger.error(f"Error checking permission {permission} for user {user.username if user else 'None'}: {e}")
+            return False
 
     @staticmethod
     def require_permission(permission: str):

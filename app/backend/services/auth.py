@@ -1,5 +1,5 @@
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from jose import jwt
 from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +18,7 @@ class AuthService:
     @staticmethod
     def create_access_token(user_id: int) -> str:
         """Create JWT access token"""
-        expire = datetime.utcnow() + timedelta(minutes=settings.security.access_token_expire_minutes)
+        expire = datetime.now(timezone.utc) + timedelta(minutes=settings.security.access_token_expire_minutes)
         payload = {
             "sub": str(user_id),
             "exp": expire,
@@ -35,7 +35,7 @@ class AuthService:
     ) -> UserSession:
         """Create user session"""
         session_id = secrets.token_urlsafe(64)
-        expires_at = datetime.utcnow() + timedelta(hours=settings.security.session_expire_hours)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=settings.security.session_expire_hours)
 
         user_session = UserSession(
             id=session_id,
@@ -47,7 +47,7 @@ class AuthService:
         session.add(user_session)
 
         # Update last login
-        user.last_login_at = datetime.utcnow()
+        user.last_login_at = datetime.now(timezone.utc)
         session.add(user)
 
         # Create audit log

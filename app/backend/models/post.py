@@ -1,7 +1,7 @@
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlmodel import Field, SQLModel, Relationship
-from app.backend.enums import ConnectionStatus
+from app.backend.enums.general import ConnectionStatus
 
 
 class Post(SQLModel, table=True):
@@ -19,8 +19,8 @@ class Post(SQLModel, table=True):
         index=True,
         max_length=20
     )
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Relationships
     users: List["User"] = Relationship(back_populates="post")

@@ -60,9 +60,20 @@ class Settings(BaseSettings):
     def __init__(self, **kwargs):
         # Load from TOML first
         config_data = {}
-        if os.path.exists("config.toml"):
-            with open("config.toml", "r") as f:
+        # Look for config.toml in current directory or app directory
+        config_paths = ["config.toml", "app/config.toml", "../config.toml"]
+        config_file = None
+        for path in config_paths:
+            if os.path.exists(path):
+                config_file = path
+                break
+        
+        if config_file:
+            with open(config_file, "r") as f:
                 config_data = toml.load(f)
+        else:
+            logger.warning(f"Config file not found in any of: {config_paths}")
+            logger.warning(f"Current working directory: {os.getcwd()}")
 
         # Override with environment variables (MYSETTINGS_* pattern)
         env_prefix = "MYSETTINGS_"
