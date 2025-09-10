@@ -19,7 +19,7 @@ from app.backend.config import settings
 from app.backend.models.user import User, UserSession
 from app.backend.models.role import Role, Permission, RolePermission, UserRole
 from app.backend.models.post import Post
-from app.backend.models.observation import SignalType, Category, ModulationType
+from app.backend.models.observation import SignalType, Category
 from app.backend.enums.general import Permissions
 from app.backend.utils.pki_generator import PKICertificateGenerator
 from app.backend.services.auth import AuthService
@@ -117,7 +117,6 @@ async def test_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
                 await session.exec(text("TRUNCATE TABLE observation"))
                 await session.exec(text("TRUNCATE TABLE signal_type"))
                 await session.exec(text("TRUNCATE TABLE category"))
-                await session.exec(text("TRUNCATE TABLE modulation_type"))
                 await session.exec(text("TRUNCATE TABLE post"))
                 await session.exec(text("TRUNCATE TABLE user"))
                 await session.exec(text("TRUNCATE TABLE role"))

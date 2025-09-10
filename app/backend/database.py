@@ -128,17 +128,12 @@ async def get_session() -> AsyncGenerator[AuditedSession, None]:
                 logger.warning(f"Error closing session: {e}")
 
 
-async def init_db():
-    """Initialize database and create admin user"""
-    # First ensure database exists
+async def seed_database():
+    """Seed database with initial data (admin user, roles, signal types)"""
+    # First ensure database exists (migrations should already be applied)
     await create_database_if_not_exists()
-
-    # Get engine and create tables
-    engine = await get_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
-
-    logger.info("Database tables created")
+    
+    logger.info("Starting database seeding...")
 
     # Create initial admin user and role with proper PKI certificates
     session_maker = await get_session_maker()
@@ -214,6 +209,86 @@ async def init_db():
             logger.info(f"Admin user created with PKI CN: {admin_pki['pki_certificate_cn']}")
         else:
             logger.info("Admin user already exists")
+
+        # Seed signal types if they don't exist
+        from app.backend.models.observation import SignalType
+        result = await session.exec(select(SignalType))
+        existing_signal_types = result.all()
+        
+        if not existing_signal_types:
+            signal_types_data = [
+                {"id": 1, "code": "fpv_drone", "name": "FPV дрон"},
+                {"id": 2, "code": "wing_uav", "name": "Крило (БПЛА)"},
+                {"id": 3, "code": "mavic", "name": "Mavic"},
+            ]
+            
+            for signal_data in signal_types_data:
+                signal_type = SignalType(
+                    code=signal_data["code"],
+                    name=signal_data["name"],
+                    is_active=True,
+                    sort_order=signal_data["id"]
+                )
+                session.add(signal_type)
+            
+            await session.commit()
+            logger.info("Signal types seeded successfully")
+        else:
+            logger.info("Signal types already exist")
+
+
+async def initialize_database_with_migrations():
+    """Initialize database using migrations and then seed data"""
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    from alembic.config import Config
+    from alembic import command
+    
+    logger.info("Initializing database with migrations...")
+    
+    try:
+        # Ensure database exists
+        await create_database_if_not_exists()
+        
+        # Check if we need to run migrations
+        def check_and_run_migrations():
+            try:
+                from pathlib import Path
+                # Get the project root directory (where alembic.ini is located)
+                project_root = Path(__file__).parent.parent.parent
+                alembic_ini_path = project_root / "alembic.ini"
+                alembic_cfg = Config(str(alembic_ini_path))
+                
+                # Try to upgrade to head (this handles both fresh DB and updates)
+                command.upgrade(alembic_cfg, "head")
+                return True
+                
+            except Exception as e:
+                logger.warning(f"Migration failed, will create tables manually: {e}")
+                return False
+        
+        # Run migrations in thread to avoid event loop issues
+        loop = asyncio.get_running_loop()
+        with ThreadPoolExecutor() as executor:
+            migration_success = await loop.run_in_executor(executor, check_and_run_migrations)
+        
+        if migration_success:
+            logger.info("Migrations applied successfully")
+        else:
+            # Fallback: create tables manually if migration fails
+            logger.info("Creating tables manually as fallback...")
+            engine = await get_engine()
+            async with engine.begin() as conn:
+                await conn.run_sync(SQLModel.metadata.create_all)
+            logger.info("Tables created manually")
+        
+        # Always seed initial data
+        await seed_database()
+        logger.info("Database initialization completed successfully")
+        
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+        raise
 
 
 async def close_db():

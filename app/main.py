@@ -12,7 +12,7 @@ sys.path.insert(0, str(project_root))
 
 from app.backend.config import settings
 from app.backend.utils.logging_config import setup_logging, get_logger
-from app.backend.database import init_db
+from app.backend.database import initialize_database_with_migrations
 from app.backend.middleware.auth import SecurityMiddleware
 from app.backend.routes import auth, users, observations, posts, health
 from app.backend.enums.routes import AuthRoutes, UserRoutes, ObservationRoutes, PostRoutes, SystemRoutes
@@ -31,10 +31,17 @@ logger = get_logger("main")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifecycle"""
-    logger.info("Starting application...")
-    await init_db()
-    yield
-    logger.info("Shutting down application...")
+    try:
+        logger.info("Starting application...")
+        await initialize_database_with_migrations()
+        logger.info("Database initialization completed. Server ready.")
+        yield
+        logger.info("Shutting down application...")
+    except Exception as e:
+        logger.error(f"Startup failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 
 fastapi_app = FastAPI(
@@ -67,9 +74,9 @@ fastapi_app.include_router(posts.router, prefix=PostRoutes.BASE.versioned_path()
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
-        "main:fastapi_app",
+        "app.main:fastapi_app",
         host=settings.server.host,
         port=settings.server.port,
         reload=settings.server.reload,
-        workers=settings.server.workers
+        log_level="info"
     )
