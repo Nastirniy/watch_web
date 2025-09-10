@@ -307,10 +307,13 @@ class FrontendApp:
         endpoint = f"{self.config.API_VERSION}{ObservationRoutes.BASE.value}/"
         obs_data = {
             "post_id": post_id,
-            "signal_type_id": signal_type_id,
+            "signal_type_id": signal_type_id,  # Now we have valid signal types (1-12)
             "frequency_min": str(frequency_min),
             "frequency_max": str(frequency_max),
             "observed_at": datetime.now(timezone.utc).isoformat(),
+            "duration_seconds": 300,
+            "signal_strength": str(-75.5),
+            "modulation_type_id": 1,  # FM modulation type
             "comment": comment,
             "confidence_level": "medium"
         }
@@ -365,6 +368,25 @@ class FrontendApp:
         else:
             self.show_notification("Unable to check system health", "error")
             return None
+    
+    async def get_signal_types(self) -> dict:
+        """Get available signal types (like frontend dropdown data)"""
+        # For now, we'll use the known signal types since there's no API endpoint yet
+        # In a real frontend, this would be a GET /api/v1/signal-types endpoint
+        return {
+            1: "FM - Frequency Modulation",
+            2: "AM - Amplitude Modulation", 
+            3: "SSB - Single Sideband",
+            4: "CW - Continuous Wave",
+            5: "PSK31 - Phase Shift Keying 31",
+            6: "RTTY - Radio Teletype",
+            7: "DMR - Digital Mobile Radio",
+            8: "TETRA - Terrestrial Trunked Radio",
+            9: "ACARS - Aircraft Communications",
+            10: "ADS-B - Automatic Dependent Surveillance",
+            11: "AIS - Automatic Identification System", 
+            12: "UNKNOWN - Unknown Signal Type"
+        }
 
 
 async def simulate_frontend_workflow():
@@ -414,14 +436,23 @@ async def simulate_frontend_workflow():
         print("\nStep 5: Observations Management")
         test_post = app.app_state['posts'][0]  # Use the newly created post
         
+        # Get available signal types (like populating a dropdown)
+        signal_types = await app.get_signal_types()
+        print(f"Available signal types: {len(signal_types)} options")
+        
         # Load observations for this post
         await app.load_observations_list(post_id=test_post['id'])
         
         # Create a new observation (like user logging a signal)
+        selected_signal_type = 1  # FM - Frequency Modulation
+        signal_name = signal_types.get(selected_signal_type, "Unknown")
+        print(f"Creating observation with signal type: {signal_name}")
+        
         await app.create_observation(
             post_id=test_post['id'],
             frequency_min=146.0,
             frequency_max=147.0,
+            signal_type_id=selected_signal_type,
             comment="Test observation from frontend simulator"
         )
     

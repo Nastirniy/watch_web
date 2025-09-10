@@ -53,9 +53,9 @@ class ServerConfig(BaseModel):
 class AdminConfig(BaseModel):
     username: str = "admin"
     username_alias: str = "System Administrator"
-    pki_certificate_cn: str = "ADMIN_CN"
-    pki_certificate_serial: str = "ADMIN_SERIAL_001"
-    pki_certificate_fingerprint: str = "ADMIN_FINGERPRINT_001"
+    pki_certificate_cn: str = "admin@radiomonitoring.local"
+    pki_certificate_serial: str = "ABC123DEF456"
+    pki_certificate_fingerprint: str = "12:34:56:78:90:AB:CD:EF:12:34:56:78:90:AB:CD:EF:12:34:56:78"
 
 
 class LoggingConfig(BaseModel):
