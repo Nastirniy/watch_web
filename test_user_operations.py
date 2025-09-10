@@ -7,6 +7,12 @@ import requests
 import json
 from datetime import datetime
 from typing import Optional
+import sys
+import os
+
+# Add the app directory to the path to import PKI generator
+sys.path.append(os.path.join(os.path.dirname(__file__), 'app', 'backend', 'utils'))
+from pki_generator import PKICertificateGenerator, generate_admin_pki_credentials
 
 
 class APIClient:
@@ -16,11 +22,14 @@ class APIClient:
         self.session = requests.Session()
     
     def login_admin(self) -> bool:
-        """Login as admin using PKI credentials from config"""
+        """Login as admin using PKI credentials from generator"""
+        # Generate proper admin PKI credentials
+        admin_creds = generate_admin_pki_credentials()
+        
         login_data = {
-            "certificate_cn": "ADMIN_CN",
-            "certificate_serial": "ADMIN_SERIAL_001", 
-            "certificate_fingerprint": "ADMIN_FINGERPRINT_001"
+            "certificate_cn": admin_creds["pki_certificate_cn"],
+            "certificate_serial": admin_creds["pki_certificate_serial"], 
+            "certificate_fingerprint": admin_creds["pki_certificate_fingerprint"]
         }
         
         try:
@@ -46,12 +55,17 @@ class APIClient:
     def create_user(self, username: str) -> Optional[dict]:
         """Create a new user"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        full_username = f"{username}_{timestamp}"
+        
+        # Generate proper PKI credentials using the PKI generator
+        user_cert_data = PKICertificateGenerator.generate_test_certificate(full_username)
+        
         user_data = {
-            "username": f"{username}_{timestamp}",
+            "username": full_username,
             "username_alias": f"{username.title()} User",
-            "pki_certificate_cn": f"CN_{username.upper()}_{timestamp}",
-            "pki_certificate_serial": f"SERIAL_{username.upper()}_{timestamp}",
-            "pki_certificate_fingerprint": f"FINGERPRINT_{username.upper()}_{timestamp}",
+            "pki_certificate_cn": user_cert_data["cn"],
+            "pki_certificate_serial": user_cert_data["serial"],
+            "pki_certificate_fingerprint": user_cert_data["fingerprint"],
             "post_id": None
         }
         

@@ -1,7 +1,14 @@
 import asyncio
+import sys
+import os
+from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+# Add project root to Python path
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
 from app.backend.config import settings
 from app.backend.utils.logging_config import setup_logging, get_logger
