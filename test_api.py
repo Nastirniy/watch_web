@@ -313,7 +313,6 @@ class FrontendApp:
             "observed_at": datetime.now(timezone.utc).isoformat(),
             "duration_seconds": 300,
             "signal_strength": str(-75.5),
-            "modulation_type_id": 1,  # FM modulation type
             "comment": comment,
             "confidence_level": "medium"
         }
@@ -447,6 +446,7 @@ async def simulate_frontend_workflow():
         selected_signal_type = 1  # FM - Frequency Modulation
         signal_name = signal_types.get(selected_signal_type, "Unknown")
         print(f"Creating observation with signal type: {signal_name}")
+        print("Note: Modulation types have been removed from the system")
         
         await app.create_observation(
             post_id=test_post['id'],

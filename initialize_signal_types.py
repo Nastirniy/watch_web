@@ -13,7 +13,7 @@ sys.path.insert(0, str(project_root))
 
 from app.backend.config import settings
 from app.backend.database import get_session_maker
-from app.backend.models.observation import Category, SignalType, ModulationType
+from app.backend.models.observation import Category, SignalType
 from app.backend.utils.logging_config import setup_logging, get_logger
 from sqlmodel import select
 
@@ -104,38 +104,7 @@ async def initialize_signal_types():
             else:
                 logger.info(f"Found {len(signal_types)} existing signal types")
             
-            # Check if modulation types exist
-            result = await session.exec(select(ModulationType))
-            modulation_types = result.all()
-            
-            if not modulation_types:
-                logger.info("Creating default modulation types...")
-                
-                # Create default modulation types
-                default_modulation_types = [
-                    {"name": "FM - Frequency Modulation"},
-                    {"name": "AM - Amplitude Modulation"},
-                    {"name": "SSB - Single Sideband"},
-                    {"name": "LSB - Lower Sideband"},
-                    {"name": "USB - Upper Sideband"},
-                    {"name": "CW - Continuous Wave"},
-                    {"name": "PSK - Phase Shift Keying"},
-                    {"name": "FSK - Frequency Shift Keying"},
-                    {"name": "QAM - Quadrature Amplitude Modulation"},
-                    {"name": "OFDM - Orthogonal Frequency-Division Multiplexing"},
-                    {"name": "Unknown"}
-                ]
-                
-                for mod_data in default_modulation_types:
-                    modulation_type = ModulationType(**mod_data)
-                    session.add(modulation_type)
-                    await session.flush()
-                    logger.info(f"Created modulation type: {mod_data['name']} (ID: {modulation_type.id})")
-                
-                await session.commit()
-                logger.info(f"Created {len(default_modulation_types)} modulation types")
-            else:
-                logger.info(f"Found {len(modulation_types)} existing modulation types")
+            logger.info("Modulation types removed from system - no longer needed")
             
             return True
             

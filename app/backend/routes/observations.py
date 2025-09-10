@@ -26,7 +26,6 @@ class ObservationCreate(BaseModel):
     observed_at: datetime
     duration_seconds: Optional[int] = None
     signal_strength: Optional[Decimal] = None
-    modulation_type_id: Optional[int] = None
     comment: Optional[str] = None
     confidence_level: Optional[str] = None
 

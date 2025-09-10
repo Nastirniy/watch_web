@@ -17,16 +17,6 @@ class Category(SQLModel, table=True):
     signal_types: List["SignalType"] = Relationship(back_populates="category")
 
 
-class ModulationType(SQLModel, table=True):
-    __tablename__ = "modulation_types"
-
-    id: Optional[int] = Field(default=None, primary_key=True)
-    name: str = Field(max_length=255)
-
-    # Relationships
-    observations: List["Observation"] = Relationship(back_populates="modulation_type")
-
-
 class SignalType(SQLModel, table=True):
     __tablename__ = "signal_types"
 
@@ -62,7 +52,6 @@ class Observation(SQLModel, table=True):
     duration_seconds: Optional[int] = Field(default=None)
 
     signal_strength: Optional[Decimal] = Field(default=None, decimal_places=2, max_digits=8)
-    modulation_type_id: Optional[int] = Field(default=None, foreign_key="modulation_types.id")
 
     comment: Optional[str] = Field(default=None, max_length=1000)
 
@@ -82,7 +71,6 @@ class Observation(SQLModel, table=True):
     )
     post: "Post" = Relationship(back_populates="observations")
     signal_type: SignalType = Relationship(back_populates="observations")
-    modulation_type: Optional[ModulationType] = Relationship(back_populates="observations")
     disappeared_by_user: Optional["User"] = Relationship(
         back_populates="disappeared_observations",
         sa_relationship_kwargs={"foreign_keys": "[Observation.disappeared_by]"}
