@@ -6,12 +6,11 @@ from starlette.requests import Request
 from starlette.responses import Response, JSONResponse
 from fastapi import status
 from jose import jwt, JWTError
-from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
+from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 
 from app.backend.config import settings
 from app.backend.utils.logging_config import get_auth_logger
-from app.backend.database import get_session_maker
 from app.backend.models.user import User, UserSession
 from app.backend.enums.routes import AuthRoutes, SystemRoutes, DocsRoutes
 

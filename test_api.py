@@ -312,7 +312,6 @@ class FrontendApp:
             "frequency_max": str(frequency_max),
             "observed_at": datetime.now(timezone.utc).isoformat(),
             "duration_seconds": 300,
-            "signal_strength": str(-75.5),
             "comment": comment,
             "confidence_level": "medium"
         }
