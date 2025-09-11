@@ -2,11 +2,10 @@ from typing import Optional, Dict, Any
 from datetime import datetime, timedelta, timezone
 from jose import jwt, JWTError
 from passlib.context import CryptContext
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select, and_
 import secrets
 import hashlib
-import hmac
 
 from app.backend.config import settings
 from app.backend.utils.logging_config import get_auth_logger

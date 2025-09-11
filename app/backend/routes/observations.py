@@ -2,10 +2,10 @@ from typing import List, Optional
 from datetime import datetime, timezone
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 from pydantic import BaseModel
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.database import get_session
 from app.backend.models.observation import Observation
@@ -25,7 +25,6 @@ class ObservationCreate(BaseModel):
     frequency_max: Decimal
     observed_at: datetime
     duration_seconds: Optional[int] = None
-    signal_strength: Optional[Decimal] = None
     comment: Optional[str] = None
     confidence_level: Optional[str] = None
 

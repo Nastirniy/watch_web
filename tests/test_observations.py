@@ -35,7 +35,6 @@ class TestObservationEndpoints:
             "frequency_max": "144.600",
             "observed_at": datetime.now(timezone.utc).isoformat(),
             "duration_seconds": 300,
-            "signal_strength": "-80.5",
             "comment": "Test observation",
             "confidence_level": "HIGH"
         }

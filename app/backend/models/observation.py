@@ -51,8 +51,6 @@ class Observation(SQLModel, table=True):
     observed_at: datetime = Field(index=True)
     duration_seconds: Optional[int] = Field(default=None)
 
-    signal_strength: Optional[Decimal] = Field(default=None, decimal_places=2, max_digits=8)
-
     comment: Optional[str] = Field(default=None, max_length=1000)
 
     status: str = Field(default=ObservationStatus.ACTIVE.value, index=True, max_length=20)
