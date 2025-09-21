@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from sqlmodel.ext.asyncio.session import AsyncSession
-from sqlalchemy import text
+from sqlmodel import select, func
 from datetime import datetime, timezone
 from pydantic import BaseModel
 from typing import Dict, Any
@@ -9,6 +9,10 @@ import asyncio
 from app.backend.database import get_session
 from app.backend.config import settings
 from app.backend.enums.routes import SystemRoutes
+from app.backend.models.user import User
+from app.backend.models.post import Post
+from app.backend.models.observation import Observation
+from app.backend.utils.datetime_utils import get_current_time_in_timezone
 
 router = APIRouter()
 
@@ -18,6 +22,7 @@ class HealthResponse(BaseModel):
     timestamp: datetime
     version: str
     environment: str
+    timezone: str
     database: Dict[str, Any]
     services: Dict[str, Any]
 
@@ -27,18 +32,31 @@ async def check_database_health(session: AsyncSession) -> Dict[str, Any]:
     try:
         start_time = datetime.now(timezone.utc)
 
-        # Basic connectivity test
-        await session.exec(text("SELECT 1"))
+        # Basic connectivity test using ORM
+        await session.exec(select(func.count()).select_from(User).limit(1))
 
-        # Get basic stats
-        result = await session.exec(text("""
-            SELECT 
-                (SELECT COUNT(*) FROM users WHERE is_deleted = FALSE) as active_users,
-                (SELECT COUNT(*) FROM posts WHERE is_active = TRUE) as active_posts,
-                (SELECT COUNT(*) FROM observations WHERE is_deleted = FALSE) as total_observations,
-                (SELECT COUNT(*) FROM observations WHERE status = 'active' AND is_deleted = FALSE) as active_observations
-        """))
-        stats = result.fetchone()
+        # Get basic stats using ORM queries
+        active_users_result = await session.exec(
+            select(func.count(User.id)).where(User.is_deleted is False)
+        )
+        active_users = active_users_result.one()
+
+        active_posts_result = await session.exec(
+            select(func.count(Post.id)).where(Post.is_active == True)
+        )
+        active_posts = active_posts_result.one()
+
+        total_observations_result = await session.exec(
+            select(func.count(Observation.id)).where(Observation.is_deleted is False)
+        )
+        total_observations = total_observations_result.one()
+
+        active_observations_result = await session.exec(
+            select(func.count(Observation.id)).where(
+                (Observation.status == 'active') & (Observation.is_deleted is False)
+            )
+        )
+        active_observations = active_observations_result.one()
 
         response_time = (datetime.now(timezone.utc) - start_time).total_seconds()
 
@@ -46,10 +64,10 @@ async def check_database_health(session: AsyncSession) -> Dict[str, Any]:
             "status": "healthy",
             "response_time": round(response_time, 4),
             "stats": {
-                "active_users": stats[0] if stats else 0,
-                "active_posts": stats[1] if stats else 0,
-                "total_observations": stats[2] if stats else 0,
-                "active_observations": stats[3] if stats else 0
+                "active_users": active_users,
+                "active_posts": active_posts,
+                "total_observations": total_observations,
+                "active_observations": active_observations
             }
         }
     except Exception as e:
@@ -95,9 +113,10 @@ async def health_check(session: AsyncSession = Depends(get_session)):
 
         return HealthResponse(
             status=overall_status,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=get_current_time_in_timezone(settings.timezone.timezone),
             version=settings.app.version,
             environment=settings.app.environment,
+            timezone=settings.timezone.timezone,
             database=db_health,
             services=services_health
         )
@@ -105,9 +124,10 @@ async def health_check(session: AsyncSession = Depends(get_session)):
     except Exception as e:
         return HealthResponse(
             status="unhealthy",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=get_current_time_in_timezone(settings.timezone.timezone),
             version=settings.app.version,
             environment=settings.app.environment,
+            timezone=settings.timezone.timezone,
             database={"status": "error", "error": str(e)},
             services={"status": "error", "error": str(e)}
         )

@@ -96,7 +96,7 @@ async def list_users(
         
         result = await session.exec(
             select(User)
-            .where(User.is_deleted == False)
+            .where(User.is_deleted is False)
             .offset(skip)
             .limit(pagination.size)
             .order_by(User.created_at.desc())
@@ -191,7 +191,7 @@ async def get_user(
         )
     
     result = await session.exec(
-        select(User).where(User.id == user_id, User.is_deleted == False)
+        select(User).where(User.id == user_id, User.is_deleted is False)
     )
     user = result.first()
 
@@ -214,7 +214,7 @@ async def update_user(
 ):
     """Update user"""
     result = await session.exec(
-        select(User).where(User.id == user_id, User.is_deleted == False)
+        select(User).where(User.id == user_id, User.is_deleted is False)
     )
     user = result.first()
 

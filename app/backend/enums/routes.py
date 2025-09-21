@@ -116,6 +116,7 @@ class MediaRoutes(str, Enum):
     MEDIA_BY_ID = "/{media_id}"
     MEDIA_DOWNLOAD = "/{media_id}/download"
     MEDIA_INFO = "/{media_id}/info"
+    OBSERVATION = "/observation/{observation_id}"
     BULK = "/bulk"
     STATISTICS = "/statistics"
     MAINTENANCE_CLEANUP = "/maintenance/cleanup"

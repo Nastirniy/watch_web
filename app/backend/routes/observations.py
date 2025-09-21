@@ -1,7 +1,7 @@
 from typing import List, Optional
 from datetime import datetime, timezone
 from decimal import Decimal
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status as fapi_status
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 from pydantic import BaseModel
@@ -23,10 +23,16 @@ class ObservationCreate(BaseModel):
     signal_type_id: int
     frequency_min: Decimal
     frequency_max: Decimal
-    observed_at: datetime
+    video_frequency_min: Optional[Decimal] = None
+    video_frequency_max: Optional[Decimal] = None
+    observed_at: Optional[datetime] = None
     duration_seconds: Optional[int] = None
     comment: Optional[str] = None
     confidence_level: Optional[str] = None
+
+
+class ObservationDisappeared(BaseModel):
+    disappeared_at: datetime
 
 
 @router.get(SystemRoutes.ROOT.value, response_model=List[Observation])
@@ -59,12 +65,22 @@ async def create_observation(
         current_user: User = Depends(get_current_user)
 ):
     """Create new observation"""
-    observation = Observation(
-        **observation_data.model_dump(),
-        user_id=current_user.id,
-        frequency_center=(observation_data.frequency_min + observation_data.frequency_max) / 2,
-        bandwidth=observation_data.frequency_max - observation_data.frequency_min
-    )
+    # Handle timezone for observed_at field
+    observed_at = observation_data.observed_at
+    
+    # Prepare observation data
+    observation_dict = observation_data.model_dump()
+    observation_dict["observed_at"] = observed_at
+    observation_dict["user_id"] = current_user.id
+    observation_dict["frequency_center"] = (observation_data.frequency_min + observation_data.frequency_max) / 2
+    observation_dict["bandwidth"] = observation_data.frequency_max - observation_data.frequency_min
+    
+    # Calculate video frequency fields if both min and max are provided
+    if observation_data.video_frequency_min is not None and observation_data.video_frequency_max is not None:
+        observation_dict["video_frequency_center"] = (observation_data.video_frequency_min + observation_data.video_frequency_max) / 2
+        observation_dict["video_bandwidth"] = observation_data.video_frequency_max - observation_data.video_frequency_min
+    
+    observation = Observation(**observation_dict)
 
     session.add(observation)
 
@@ -81,17 +97,17 @@ async def create_observation(
         # Check if it's a foreign key constraint error
         if "post_id" in str(e) or "FOREIGN KEY" in str(e):
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=fapi_status.HTTP_400_BAD_REQUEST,
                 detail="Invalid post_id: Post does not exist"
             )
         elif "signal_type_id" in str(e):
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=fapi_status.HTTP_400_BAD_REQUEST,
                 detail="Invalid signal_type_id: Signal type does not exist"
             )
         else:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=fapi_status.HTTP_400_BAD_REQUEST,
                 detail="Database constraint violation"
             )
 
@@ -100,6 +116,7 @@ async def create_observation(
 @PermissionService.require_permission(Permissions.OBSERVATION_UPDATE.value)
 async def mark_observation_disappeared(
         observation_id: int,
+        disappeared_data: ObservationDisappeared,
         session: AsyncSession = Depends(get_session),
         current_user: User = Depends(get_current_user)
 ):
@@ -114,14 +131,22 @@ async def mark_observation_disappeared(
 
     if not observation:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=fapi_status.HTTP_404_NOT_FOUND,
             detail="Observation not found"
         )
 
+    # Handle timezone for disappeared_at field
+    disappeared_at = disappeared_data.disappeared_at
+    
     observation.status = ObservationStatus.DISAPPEARED.value
-    observation.disappeared_at = datetime.now(timezone.utc)
+    observation.disappeared_at = disappeared_at
     observation.disappeared_by = current_user.id
     observation.updated_at = datetime.now(timezone.utc)
+    
+    # Calculate duration in seconds if observed_at exists
+    if observation.observed_at:
+        time_delta = observation.disappeared_at - observation.observed_at
+        observation.duration_seconds = int(time_delta.total_seconds())
 
     session.add(observation)
     await session.commit()

@@ -3,14 +3,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 from pydantic import BaseModel
-from datetime import datetime
 
 from app.backend.database import get_session
 from app.backend.models.post import Post
 from app.backend.models.user import User
 from app.backend.dependencies import get_current_user
 from app.backend.services.permissions import PermissionService
-from app.backend.enums.general import Permissions, ConnectionStatus
+from app.backend.enums.general import Permissions
 from app.backend.enums.routes import PostRoutes, SystemRoutes
 
 router = APIRouter()

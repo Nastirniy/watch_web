@@ -1,7 +1,11 @@
-from typing import Optional, List
+from typing import Optional, List, TYPE_CHECKING
 from datetime import datetime, timezone
 from sqlmodel import Field, SQLModel, Relationship
 from app.backend.enums.general import ConnectionStatus
+
+if TYPE_CHECKING:
+    from app.backend.models.observation import Observation
+    from app.backend.models.user import User
 
 
 class Post(SQLModel, table=True):

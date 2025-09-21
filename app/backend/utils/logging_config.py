@@ -3,10 +3,9 @@ Centralized logging configuration for the Radio Monitoring System
 """
 
 import sys
-import os
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional
 from loguru import logger
 from contextvars import ContextVar
 
@@ -98,8 +97,7 @@ class LoggingConfig:
                 compression="gz"
             )
         
-        # Add error file handler for ERROR and CRITICAL levels
-        if self.enable_file_logging:
+            # Add error file handler for ERROR and CRITICAL levels
             error_log_path = str(log_path.parent / f"{log_path.stem}_errors{log_path.suffix}")
             logger.add(
                 error_log_path,
