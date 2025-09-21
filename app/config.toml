@@ -30,7 +30,7 @@ jwt_leeway_seconds = 10
 
 [server]
 host = "127.0.0.1"
-port = 60800
+port = 8000
 reload = false
 workers = 1
 

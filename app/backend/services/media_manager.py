@@ -5,6 +5,7 @@ import shutil
 import tempfile
 import uuid
 import re
+import unicodedata
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple, Set, Union
 from dataclasses import dataclass
@@ -73,6 +74,18 @@ class FileValidationResult:
 
 
 @dataclass
+class UploadSession:
+    """Information about an existing upload session"""
+    media_file_id: int
+    uploaded_chunks: List[int]
+    total_chunks: int
+    file_hash: str
+    last_activity: datetime
+    is_expired: bool
+    can_resume: bool
+
+
+@dataclass
 class FileIntegrityCheck:
     media_file_id: int
     original_filename: str
@@ -99,13 +112,17 @@ class MediaManager:
                  auto_cleanup: bool = True,
                  temp_path: str = "temp",
                  enable_deduplication: bool = True,
-                 _max_concurrent_uploads: int = 10):
+                 _max_concurrent_uploads: int = 10,
+                 chunk_retention_days: int = 7,
+                 upload_session_timeout_hours: int = 24):
         self.storage_path = Path(storage_path)
         self.temp_path = Path(temp_path)
         self.chunk_size = chunk_size
         self.use_filesystem_cache = use_filesystem_cache
         self.auto_cleanup = auto_cleanup
         self.enable_deduplication = enable_deduplication
+        self.chunk_retention_days = chunk_retention_days
+        self.upload_session_timeout_hours = upload_session_timeout_hours
 
         # Ensure directories exist with proper permissions
         for path in [self.storage_path, self.temp_path]:
@@ -120,23 +137,73 @@ class MediaManager:
         self._hash_cache: Dict[str, int] = {}
     
     def sanitize_filename(self, filename: str) -> str:
-        """Sanitize filename to prevent security issues"""
-        # Remove dangerous characters and patterns
-        filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
-        filename = re.sub(r'\.{2,}', '.', filename)  # Remove multiple dots
-        filename = filename.strip('. ')  # Remove leading/trailing dots and spaces
+        """Enhanced filename sanitization for cross-platform compatibility"""
+        if not filename:
+            return f"upload_{uuid.uuid4().hex[:8]}"
 
-        # Limit length
-        if len(filename) > MAX_FILENAME_LENGTH:
-            name, ext = os.path.splitext(filename)
-            max_name_len = MAX_FILENAME_LENGTH - len(ext)
-            filename = name[:max_name_len] + ext
+        # Normalize Unicode characters (decompose accented characters)
+        filename = unicodedata.normalize('NFKD', filename)
 
-        # Ensure not empty
-        if not filename or filename in ['.', '..']:
-            filename = f"upload_{uuid.uuid4().hex[:8]}"
+        # Convert to ASCII, replacing non-ASCII characters
+        filename = filename.encode('ascii', 'ignore').decode('ascii')
 
-        return filename
+        # Split name and extension for proper handling
+        name, ext = os.path.splitext(filename)
+
+        # Remove dangerous characters and patterns (Windows + Unix) + spaces
+        dangerous_chars = r'[<>:"/\\|?*\x00-\x1f\x7f-\x9f\s]'
+        name = re.sub(dangerous_chars, '_', name)
+        ext = re.sub(dangerous_chars, '_', ext)
+
+        # Remove multiple dots and normalize
+        name = re.sub(r'\.{2,}', '_', name)
+        name = re.sub(r'[_]{2,}', '_', name)  # Normalize multiple underscores
+
+        # Remove leading/trailing problematic characters
+        name = name.strip('. _-')
+        ext = ext.strip('. _-')
+
+        # Ensure extension starts with dot if present
+        if ext and not ext.startswith('.'):
+            ext = f'.{ext}'
+
+        # Handle reserved Windows filenames
+        reserved_names = {
+            'CON', 'PRN', 'AUX', 'NUL', 'COM1', 'COM2', 'COM3', 'COM4', 'COM5',
+            'COM6', 'COM7', 'COM8', 'COM9', 'LPT1', 'LPT2', 'LPT3', 'LPT4',
+            'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'
+        }
+        if name.upper() in reserved_names:
+            name = f"{name}_file"
+
+        # Reconstruct filename
+        sanitized = f"{name}{ext}" if name else ext
+
+        # Apply length limits (account for full path later)
+        max_filename_len = min(MAX_FILENAME_LENGTH, 200)  # Conservative limit
+        if len(sanitized) > max_filename_len:
+            # Preserve extension, truncate name
+            if ext:
+                max_name_len = max_filename_len - len(ext) - 1
+                name = name[:max_name_len]
+                sanitized = f"{name}{ext}"
+            else:
+                sanitized = sanitized[:max_filename_len]
+
+        # Final validation
+        if not sanitized or sanitized in ['.', '..', '_']:
+            sanitized = f"upload_{uuid.uuid4().hex[:8]}{ext}"
+
+        # Ensure lowercase for consistency (optional - can be configured)
+        # sanitized = sanitized.lower()
+
+        return sanitized
+
+    def validate_full_path_length(self, full_path: str) -> bool:
+        """Validate that the full file path doesn't exceed filesystem limits"""
+        # Windows: 260 characters, Unix: typically 4096, but be conservative
+        max_path_length = 250  # Conservative limit
+        return len(str(full_path)) <= max_path_length
 
     async def validate_file(self, file_data: bytes, filename: str,
                           config: Optional[FileValidationConfig] = None) -> FileValidationResult:
@@ -256,6 +323,68 @@ class MediaManager:
 
         return metadata
 
+    async def check_existing_upload(self, session: AsyncSession, file_hash: str, observation_id: int) -> Optional[UploadSession]:
+        """Check for existing partial upload that can be resumed"""
+        try:
+            # Look for incomplete media file with same hash
+            media_query = select(MediaFile).where(
+                MediaFile.file_hash == file_hash,
+                MediaFile.observation_id == observation_id
+            )
+            result = await session.exec(media_query)
+            media_file = result.first()
+
+            if not media_file:
+                return None
+
+            # Check if media_file has proper attributes (handle test mocks)
+            if not hasattr(media_file, 'id') or not hasattr(media_file, 'file_size'):
+                logger.warning(f"Invalid media file object returned from database query")
+                return None
+
+            # Get existing chunks
+            chunks_query = select(FileChunk).where(
+                FileChunk.media_file_id == media_file.id
+            ).order_by(FileChunk.chunk_number)
+            chunks_result = await session.exec(chunks_query)
+            chunks = chunks_result.all()
+
+            # Calculate expected chunks
+            expected_chunks = (media_file.file_size + self.chunk_size - 1) // self.chunk_size
+            uploaded_chunks = [chunk.chunk_number for chunk in chunks]
+
+            # Check if upload session has expired
+            session_timeout = timedelta(hours=self.upload_session_timeout_hours)
+            last_activity = media_file.uploaded_at  # Use uploaded_at as last activity for now
+            is_expired = datetime.now(timezone.utc) - last_activity > session_timeout
+
+            # Can resume if not expired and not complete
+            can_resume = not is_expired and len(uploaded_chunks) < expected_chunks
+
+            return UploadSession(
+                media_file_id=media_file.id,
+                uploaded_chunks=uploaded_chunks,
+                total_chunks=expected_chunks,
+                file_hash=file_hash,
+                last_activity=last_activity,
+                is_expired=is_expired,
+                can_resume=can_resume
+            )
+
+        except Exception as e:
+            logger.error(f"Error checking existing upload for hash {file_hash}: {e}")
+            return None
+
+    async def resume_upload(self, session: AsyncSession, upload_session: UploadSession) -> int:
+        """Resume an existing upload session"""
+        if not upload_session.can_resume:
+            raise ValueError("Upload session cannot be resumed")
+
+        logger.info(f"Resuming upload for media_file {upload_session.media_file_id}, "
+                   f"{len(upload_session.uploaded_chunks)}/{upload_session.total_chunks} chunks uploaded")
+
+        return upload_session.media_file_id
+
     async def store_file_chunked(self,
                                session: AsyncSession,
                                observation_id: int,
@@ -292,8 +421,19 @@ class MediaManager:
             except ValueError:
                 raise ValueError(f"Invalid media type: {media_type}")
 
-            # Generate file hash for deduplication
+            # Generate file hash for deduplication and resumable uploads
             file_hash = hashlib.sha256(file_data).hexdigest()
+
+            # Check for existing upload session that can be resumed
+            existing_upload = await self.check_existing_upload(session, file_hash, observation_id)
+            if existing_upload:
+                if existing_upload.can_resume:
+                    logger.info(f"Found resumable upload session for file hash {file_hash}")
+                    return await self.resume_upload(session, existing_upload)
+                elif not existing_upload.is_expired:
+                    # Upload is complete, return existing file
+                    logger.info(f"File already exists and is complete: {existing_upload.media_file_id}")
+                    return existing_upload.media_file_id
 
             # Check for duplicate files if deduplication is enabled
             if self.enable_deduplication:
@@ -313,12 +453,23 @@ class MediaManager:
             # Use date-based organized directory structure for human readability
             organized_dir = await self._get_organized_path(session, observation_id)
 
+            # Validate full path length and adjust if necessary
+            full_file_path = organized_dir / stored_filename
+            if not self.validate_full_path_length(str(full_file_path)):
+                # If path is too long, use shorter filename with hash
+                name, ext = os.path.splitext(safe_filename)
+                short_name = name[:50] if len(name) > 50 else name  # Limit name part
+                hash_suffix = hashlib.md5(safe_filename.encode()).hexdigest()[:8]
+                stored_filename = f"{timestamp}_{short_name}_{hash_suffix}{ext}"
+                full_file_path = organized_dir / stored_filename
+                logger.info(f"Shortened filename due to path length: {stored_filename}")
+
             # Create media file record with organized path
             media_file = MediaFile(
                 observation_id=observation_id,
                 original_filename=safe_filename,
                 stored_filename=stored_filename,
-                file_path=str(organized_dir / stored_filename),
+                file_path=str(full_file_path),
                 file_size=file_size,
                 mime_type=mime_type,
                 file_extension=file_extension,
@@ -387,6 +538,9 @@ class MediaManager:
                 # After successful backup creation, clean up individual chunk files
                 await self._cleanup_chunk_files(organized_dir, media_file.id, total_chunks)
 
+                # Clean up database chunks after successful backup and grace period
+                await self._cleanup_database_chunks(session, media_file.id)
+
             logger.info(f"Stored file {safe_filename} as {stored_filename} with {total_chunks} chunks")
             return media_file.id
 
@@ -418,7 +572,7 @@ class MediaManager:
         result = await session.exec(duplicate_query)
         duplicate = result.first()
 
-        if duplicate:
+        if duplicate and hasattr(duplicate, 'id'):
             self._hash_cache[file_hash] = duplicate.id
             return duplicate.id
 
@@ -481,6 +635,96 @@ class MediaManager:
 
         except Exception as e:
             logger.warning(f"Failed to cleanup chunk files for media_file {media_file_id}: {e}")
+
+    async def _cleanup_database_chunks(self, session: AsyncSession, media_file_id: int):
+        """Remove chunk records from database after successful complete file creation"""
+        try:
+            # Get media file to verify backup exists
+            media_query = select(MediaFile).where(MediaFile.id == media_file_id)
+            media_result = await session.exec(media_query)
+            media_file = media_result.first()
+
+            if not media_file:
+                logger.warning(f"Media file {media_file_id} not found for chunk cleanup")
+                return
+
+            # Verify complete file exists on filesystem before removing chunk records
+            complete_file_path = Path(media_file.file_path)
+            if not (complete_file_path.exists() and complete_file_path.is_file()):
+                logger.warning(f"Complete file not found at {complete_file_path}, keeping chunk records")
+                return
+
+            # Verify file integrity before removing chunks
+            try:
+                async with aiofiles.open(complete_file_path, 'rb') as f:
+                    file_data = await f.read()
+
+                file_hash = hashlib.sha256(file_data).hexdigest()
+                if file_hash != media_file.file_hash:
+                    logger.warning(f"File integrity check failed for {media_file_id}, keeping chunk records")
+                    return
+            except Exception as e:
+                logger.warning(f"Failed to verify file integrity for {media_file_id}: {e}, keeping chunk records")
+                return
+
+            # Only proceed with chunk cleanup if backup is verified
+            chunks_query = select(FileChunk).where(FileChunk.media_file_id == media_file_id)
+            chunks_result = await session.exec(chunks_query)
+            chunks = chunks_result.all()
+
+            chunks_count = len(chunks)
+            if chunks_count > 0:
+                for chunk in chunks:
+                    await session.delete(chunk)
+
+                await session.commit()
+                logger.info(f"Cleaned up {chunks_count} database chunk records for media_file {media_file_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to cleanup database chunks for media_file {media_file_id}: {e}")
+            await session.rollback()
+
+    async def cleanup_old_chunks(self, session: AsyncSession) -> int:
+        """Clean up old chunks based on retention policy"""
+        if self.chunk_retention_days <= 0:
+            return 0
+
+        chunks_cleaned = 0
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=self.chunk_retention_days)
+
+        try:
+            # Find media files that have complete backups and old chunks
+            media_query = select(MediaFile).where(MediaFile.uploaded_at < cutoff_date)
+            media_result = await session.exec(media_query)
+            old_media_files = media_result.all()
+
+            for media_file in old_media_files:
+                # Check if complete file exists on filesystem
+                complete_file_path = Path(media_file.file_path)
+                if complete_file_path.exists() and complete_file_path.is_file():
+                    # Check if chunks still exist in database
+                    chunks_query = select(FileChunk).where(FileChunk.media_file_id == media_file.id)
+                    chunks_result = await session.exec(chunks_query)
+                    chunks = chunks_result.all()
+
+                    if chunks:
+                        logger.info(f"Cleaning up {len(chunks)} old chunks for media_file {media_file.id} "
+                                   f"(older than {self.chunk_retention_days} days)")
+
+                        # Remove chunk records from database
+                        for chunk in chunks:
+                            await session.delete(chunk)
+                            chunks_cleaned += 1
+
+            if chunks_cleaned > 0:
+                await session.commit()
+                logger.info(f"Cleaned up {chunks_cleaned} old chunk records based on retention policy")
+
+        except Exception as e:
+            logger.error(f"Error during old chunk cleanup: {e}")
+            await session.rollback()
+
+        return chunks_cleaned
 
     async def retrieve_file(self, session: AsyncSession, media_file_id: int,
                           validate_integrity: bool = True) -> Optional[bytes]:

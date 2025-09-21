@@ -16,7 +16,7 @@ from app.backend.models.user import User
 from app.backend.utils.datetime_utils import get_default_timezone_datetime
 from app.backend.dependencies import get_current_user
 from app.backend.services.permissions import PermissionService
-from app.backend.services.media_manager import MediaManager, FileIntegrityCheck, FileValidationConfig
+from app.backend.services.media_manager import MediaManager, FileIntegrityCheck, FileValidationConfig, UploadSession
 from app.backend.enums.general import Permissions, MediaType
 from app.backend.enums.routes import MediaRoutes, SystemRoutes
 from app.backend.utils.mime_detector import mime_detector
@@ -167,6 +167,24 @@ class MediaFileInfo(BaseModel):
     upload_complete: bool
     total_chunks: int
     uploaded_chunks: int
+
+
+class ResumeUploadRequest(BaseModel):
+    observation_id: int
+    original_filename: str
+    file_size: int
+    file_hash: str
+    media_type: str
+
+
+class UploadSessionInfo(BaseModel):
+    media_file_id: int
+    uploaded_chunks: List[int]
+    total_chunks: int
+    file_hash: str
+    last_activity: datetime
+    is_expired: bool
+    can_resume: bool
 
 
 @router.post(MediaRoutes.UPLOAD_CHUNKED_START.path(), response_model=ChunkedUploadResponse)
@@ -704,6 +722,111 @@ async def get_storage_statistics(
     return stats
 
 
+@router.post("/check-upload-session", response_model=Optional[UploadSessionInfo])
+@PermissionService.require_permission(Permissions.OBSERVATION_VIEW.value)
+async def check_upload_session(
+    request: ResumeUploadRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    """Check if an upload session exists and can be resumed"""
+
+    # Verify observation exists and user has access
+    observation_query = select(Observation).where(
+        Observation.id == request.observation_id,
+        Observation.is_deleted is False
+    )
+    observation = await session.exec(observation_query)
+    observation_result = observation.first()
+
+    if not observation_result:
+        raise HTTPException(
+            status_code=fapi_status.HTTP_404_NOT_FOUND,
+            detail="Observation not found"
+        )
+
+    # Check for existing upload session
+    upload_session = await media_manager.check_existing_upload(
+        session, request.file_hash, request.observation_id
+    )
+
+    if upload_session:
+        return UploadSessionInfo(
+            media_file_id=upload_session.media_file_id,
+            uploaded_chunks=upload_session.uploaded_chunks,
+            total_chunks=upload_session.total_chunks,
+            file_hash=upload_session.file_hash,
+            last_activity=upload_session.last_activity,
+            is_expired=upload_session.is_expired,
+            can_resume=upload_session.can_resume
+        )
+
+    return None
+
+
+@router.post("/resume-upload")
+@PermissionService.require_permission(Permissions.OBSERVATION_CREATE.value)
+async def resume_upload_session(
+    request: ResumeUploadRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    """Resume an existing upload session"""
+
+    # Check for existing upload session
+    upload_session = await media_manager.check_existing_upload(
+        session, request.file_hash, request.observation_id
+    )
+
+    if not upload_session:
+        raise HTTPException(
+            status_code=fapi_status.HTTP_404_NOT_FOUND,
+            detail="No upload session found for this file"
+        )
+
+    if not upload_session.can_resume:
+        if upload_session.is_expired:
+            raise HTTPException(
+                status_code=fapi_status.HTTP_408_REQUEST_TIMEOUT,
+                detail="Upload session has expired"
+            )
+        else:
+            raise HTTPException(
+                status_code=fapi_status.HTTP_409_CONFLICT,
+                detail="Upload session is complete or cannot be resumed"
+            )
+
+    try:
+        media_file_id = await media_manager.resume_upload(session, upload_session)
+        return {
+            "message": "Upload session resumed successfully",
+            "media_file_id": media_file_id,
+            "uploaded_chunks": upload_session.uploaded_chunks,
+            "total_chunks": upload_session.total_chunks
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=fapi_status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to resume upload: {str(e)}"
+        )
+
+
+@router.post("/cleanup/old-chunks")
+@PermissionService.require_permission(Permissions.ADMIN_FULL.value)
+async def cleanup_old_chunks(
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    """Clean up old chunks based on retention policy"""
+
+    chunks_cleaned = await media_manager.cleanup_old_chunks(session)
+
+    return {
+        "message": "Old chunk cleanup completed",
+        "chunks_cleaned": chunks_cleaned
+    }
+
+
 @router.post(MediaRoutes.UPLOAD.path())
 @PermissionService.require_permission(Permissions.OBSERVATION_CREATE.value)
 async def upload_complete_file(
@@ -764,13 +887,19 @@ async def upload_complete_file(
         validation_config.allowed_extensions = {'.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a'}
         validation_config.allowed_mime_types = {'audio/mpeg', 'audio/wav', 'audio/flac', 'audio/aac', 'audio/ogg'}
 
+    # Handle filename issues
+    original_filename = file.filename or "uploaded_file"
+
+    # Log original filename for debugging problematic uploads
+    logger.info(f"Uploading file: '{original_filename}' (size: {len(file_data)} bytes)")
+
     # Store using enhanced media manager
     try:
         media_file_id = await media_manager.store_file_chunked(
             session=session,
             observation_id=observation_id,
             file_data=file_data,
-            original_filename=file.filename or "uploaded_file",
+            original_filename=original_filename,
             media_type=media_type,
             validation_config=validation_config
         )
