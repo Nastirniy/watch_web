@@ -1,6 +1,6 @@
 import os
-from typing import Any, Dict, Optional
-from pydantic import BaseModel, Field
+from typing import Optional
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings
 import toml
 
@@ -64,6 +64,53 @@ class LoggingConfig(BaseModel):
     enable_file_logging: bool = False
 
 
+class TimezoneConfig(BaseModel):
+    timezone: str = "UTC"
+    dst_handling: bool = True
+    
+    @field_validator('timezone')
+    @classmethod
+    def validate_timezone(cls, v):
+        # Handle empty string as fallback to default
+        if v == "":
+            return "UTC"
+        return v
+
+
+class StorageConfig(BaseModel):
+    """Configuration for media file storage"""
+    upload_path: str = "uploads"
+    chunk_size_mb: int = 1
+    upload_timeout_minutes: int = 30
+    max_file_size_gb: int = 10
+    
+    @field_validator('upload_path')
+    @classmethod
+    def validate_upload_path(cls, v):
+        # Ensure upload path is not empty
+        if not v.strip():
+            return "uploads"
+        return v.strip()
+    
+    @field_validator('chunk_size_mb')
+    @classmethod
+    def validate_chunk_size(cls, v):
+        # Ensure chunk size is between 1MB and 100MB
+        return max(1, min(100, v))
+    
+    @field_validator('upload_timeout_minutes')
+    @classmethod
+    def validate_timeout(cls, v):
+        # Ensure timeout is between 5 minutes and 24 hours
+        return max(5, min(1440, v))
+    
+    @field_validator('max_file_size_gb')
+    @classmethod
+    def validate_max_file_size(cls, v):
+        # Ensure max file size is between 1GB and 1TB
+        return max(1, min(1024, v))
+
+
 class Settings(BaseSettings):
     app: AppConfig = Field(default_factory=AppConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
@@ -71,6 +118,8 @@ class Settings(BaseSettings):
     server: ServerConfig = Field(default_factory=ServerConfig)
     admin: AdminConfig = Field(default_factory=AdminConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    timezone: TimezoneConfig = Field(default_factory=TimezoneConfig)
+    storage: StorageConfig = Field(default_factory=StorageConfig)
 
     def __init__(self, **kwargs):
         # Load from TOML first

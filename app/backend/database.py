@@ -1,7 +1,7 @@
 from typing import AsyncGenerator, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy import event, text
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio.engine import AsyncEngine
 from sqlmodel import SQLModel, select
 import contextvars
 
@@ -51,11 +51,11 @@ async def create_database_if_not_exists():
 
 
 # Create engine (will be initialized after database check)
-engine = None
+engine: Optional[AsyncEngine] = None
 async_session_maker = None
 
 
-async def get_engine():
+async def get_engine() -> AsyncEngine:
     """Get or create database engine"""
     global engine
     if engine is None:
@@ -298,4 +298,3 @@ async def close_db():
         await engine.dispose()
         engine = None
         logger.info("Database connections closed")
-

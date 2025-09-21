@@ -45,3 +45,17 @@ pki_certificate_fingerprint = "12:34:56:78:90:AB:CD:EF:12:34:56:78:90:AB:CD:EF:1
 level = "INFO"
 # file_path = "logs/radio_monitoring.log"  # Uncomment to enable file logging
 enable_file_logging = false
+
+[timezone]
+# Universal timezone support - any IANA timezone name
+# Examples: "UTC", "Europe/Kyiv", "America/New_York", "Asia/Tokyo", "Europe/London"
+# System will fallback to UTC if timezone is not available
+timezone = "Europe/Kyiv"  # Ukraine timezone with automatic winter/summer time handling
+dst_handling = true
+
+[storage]
+# Media file storage configuration
+upload_path = "uploads"  # Base directory for uploaded files
+chunk_size_mb = 1  # Default chunk size in megabytes
+upload_timeout_minutes = 30  # Upload session timeout in minutes
+max_file_size_gb = 10  # Maximum file size in gigabytes

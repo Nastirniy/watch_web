@@ -3,8 +3,9 @@ from .role import Role, Permission, RolePermission, UserRole
 from .post import Post
 from .observation import (
     SignalType, Category,
-    Observation, MediaFile, FileChunk
+    Observation
 )
+from .media import MediaFile, FileChunk
 from .audit import AuditLog, ExportJob
 
 __all__ = [

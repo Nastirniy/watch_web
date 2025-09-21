@@ -1,9 +1,13 @@
-from typing import Optional, List
+from typing import Optional, List, TYPE_CHECKING
 from datetime import datetime, timezone
 from decimal import Decimal
-from sqlmodel import Field, SQLModel, Relationship, JSON, Column
-from sqlalchemy import LargeBinary
-from app.backend.enums.general import ObservationStatus, ConfidenceLevel, MediaType
+from sqlmodel import Field, SQLModel, Relationship
+from app.backend.enums.general import ObservationStatus, ConfidenceLevel
+
+if TYPE_CHECKING:
+    from app.backend.models.user import User
+    from app.backend.models.post import Post
+    from app.backend.models.media import MediaFile
 
 
 class Category(SQLModel, table=True):
@@ -48,6 +52,11 @@ class Observation(SQLModel, table=True):
     frequency_center: Optional[Decimal] = Field(default=None, decimal_places=3, max_digits=12, index=True)
     bandwidth: Optional[Decimal] = Field(default=None, decimal_places=3, max_digits=12)
 
+    video_frequency_min: Optional[Decimal] = Field(default=None, decimal_places=3, max_digits=12)
+    video_frequency_max: Optional[Decimal] = Field(default=None, decimal_places=3, max_digits=12)
+    video_frequency_center: Optional[Decimal] = Field(default=None, decimal_places=3, max_digits=12, index=True)
+    video_bandwidth: Optional[Decimal] = Field(default=None, decimal_places=3, max_digits=12)
+
     observed_at: datetime = Field(index=True)
     duration_seconds: Optional[int] = Field(default=None)
 
@@ -74,45 +83,3 @@ class Observation(SQLModel, table=True):
         sa_relationship_kwargs={"foreign_keys": "[Observation.disappeared_by]"}
     )
     media_files: List["MediaFile"] = Relationship(back_populates="observation", cascade_delete=True)
-
-
-class MediaFile(SQLModel, table=True):
-    __tablename__ = "media_files"
-
-    id: Optional[int] = Field(default=None, primary_key=True)
-    observation_id: int = Field(foreign_key="observations.id", index=True)
-
-    original_filename: str = Field(max_length=255)
-    stored_filename: str = Field(unique=True, max_length=255)
-    file_path: str = Field(max_length=500)
-    file_size: int
-    mime_type: str = Field(max_length=100)
-    file_extension: str = Field(max_length=10)
-
-    media_type: str = Field(max_length=10, index=True)
-
-    file_hash: str = Field(max_length=64, index=True)
-
-    width: Optional[int] = Field(default=None)
-    height: Optional[int] = Field(default=None)
-
-    uploaded_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
-
-    # Relationships
-    observation: Observation = Relationship(back_populates="media_files")
-    file_chunks: List["FileChunk"] = Relationship(back_populates="media_file", cascade_delete=True)
-
-
-class FileChunk(SQLModel, table=True):
-    __tablename__ = "file_chunks"
-
-    id: Optional[int] = Field(default=None, primary_key=True)
-    media_file_id: int = Field(foreign_key="media_files.id", index=True)
-    chunk_number: int = Field(index=True)
-    chunk_size: int
-    chunk_hash: str = Field(max_length=64)
-    chunk_data: bytes = Field(sa_column=Column(LargeBinary))
-    uploaded_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-    # Relationships
-    media_file: MediaFile = Relationship(back_populates="file_chunks")

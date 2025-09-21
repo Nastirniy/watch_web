@@ -147,7 +147,7 @@ async def refresh_token(
             select(User).where(
                 User.id == user_id,
                 User.is_active == True,
-                User.is_deleted == False
+                User.is_deleted is False
             )
         )
         user = user_result.first()
