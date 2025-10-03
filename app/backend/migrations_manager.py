@@ -31,7 +31,10 @@ logger = get_logger("migrations")
 
 def get_alembic_config():
     """Get alembic configuration"""
-    alembic_cfg = Config("alembic.ini")
+    # Get the project root directory (where alembic.ini is located)
+    project_root_dir = Path(__file__).parent.parent.parent
+    alembic_ini_path = project_root_dir / "alembic.ini"
+    alembic_cfg = Config(str(alembic_ini_path))
     return alembic_cfg
 
 

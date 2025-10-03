@@ -277,3 +277,27 @@ class AuthService:
     def generate_secure_token(length: int = 32) -> str:
         """Generate cryptographically secure token"""
         return secrets.token_urlsafe(length)
+
+from fastapi import Depends, HTTPException, Request, status
+
+def client_auth(request: Request):
+    verify = request.headers.get("x-ssl-client-verify")
+    fingerprint = request.headers.get("x-ssl-client-fingerprint")
+    common_name = request.headers.get("x-ssl-client-cn")
+
+    if verify != "SUCCESS":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid client certificate"
+        )
+
+    # Тут можна зробити перевірку в БД
+    # наприклад: чи є fingerprint у списку дозволених користувачів
+    allowed_users = {"AB:CD:EF:12:34"}  # приклад
+    if fingerprint not in allowed_users:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
+
+    return {"cn": common_name, "fingerprint": fingerprint}

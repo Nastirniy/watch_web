@@ -96,7 +96,7 @@ async def list_users(
         
         result = await session.exec(
             select(User)
-            .where(User.is_deleted is False)
+            .where(User.is_deleted == 0)
             .offset(skip)
             .limit(pagination.size)
             .order_by(User.created_at.desc())

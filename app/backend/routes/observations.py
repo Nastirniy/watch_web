@@ -31,6 +31,18 @@ class ObservationCreate(BaseModel):
     confidence_level: Optional[str] = None
 
 
+class ObservationUpdate(BaseModel):
+    signal_type_id: Optional[int] = None
+    frequency_min: Optional[Decimal] = None
+    frequency_max: Optional[Decimal] = None
+    video_frequency_min: Optional[Decimal] = None
+    video_frequency_max: Optional[Decimal] = None
+    observed_at: Optional[datetime] = None
+    duration_seconds: Optional[int] = None
+    comment: Optional[str] = None
+    confidence_level: Optional[str] = None
+
+
 class ObservationDisappeared(BaseModel):
     disappeared_at: datetime
 
@@ -67,6 +79,8 @@ async def create_observation(
     """Create new observation"""
     # Handle timezone for observed_at field
     observed_at = observation_data.observed_at
+    if observed_at and observed_at.tzinfo is None:
+        observed_at = observed_at.replace(tzinfo=timezone.utc)
     
     # Prepare observation data
     observation_dict = observation_data.model_dump()
@@ -112,6 +126,72 @@ async def create_observation(
             )
 
 
+@router.put("/{observation_id}", response_model=Observation)
+@PermissionService.require_permission(Permissions.OBSERVATION_UPDATE.value)
+async def update_observation(
+        observation_id: int,
+        observation_data: ObservationUpdate,
+        session: AsyncSession = Depends(get_session),
+        current_user: User = Depends(get_current_user)
+):
+    """Update existing observation"""
+    # Get observation by ID
+    result = await session.exec(
+        select(Observation).where(
+            Observation.id == observation_id,
+            Observation.is_deleted == False
+        )
+    )
+    observation = result.first()
+
+    if not observation:
+        raise HTTPException(
+            status_code=fapi_status.HTTP_404_NOT_FOUND,
+            detail="Observation not found"
+        )
+
+    # Update only provided fields
+    update_data = observation_data.model_dump(exclude_unset=True)
+
+    for field, value in update_data.items():
+        # Handle timezone for observed_at field
+        if field == "observed_at" and value and value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        setattr(observation, field, value)
+
+    # Recalculate center frequency and bandwidth if min/max changed
+    if observation_data.frequency_min is not None or observation_data.frequency_max is not None:
+        observation.frequency_center = (observation.frequency_min + observation.frequency_max) / 2
+        observation.bandwidth = observation.frequency_max - observation.frequency_min
+
+    # Recalculate video frequency fields if both provided
+    if observation_data.video_frequency_min is not None or observation_data.video_frequency_max is not None:
+        if observation.video_frequency_min is not None and observation.video_frequency_max is not None:
+            observation.video_frequency_center = (observation.video_frequency_min + observation.video_frequency_max) / 2
+            observation.video_bandwidth = observation.video_frequency_max - observation.video_frequency_min
+
+    observation.updated_at = datetime.now(timezone.utc)
+
+    session.add(observation)
+
+    try:
+        await session.commit()
+        await session.refresh(observation)
+        return observation
+    except IntegrityError as e:
+        await session.rollback()
+        if "signal_type_id" in str(e):
+            raise HTTPException(
+                status_code=fapi_status.HTTP_400_BAD_REQUEST,
+                detail="Invalid signal_type_id: Signal type does not exist"
+            )
+        else:
+            raise HTTPException(
+                status_code=fapi_status.HTTP_400_BAD_REQUEST,
+                detail="Database constraint violation"
+            )
+
+
 @router.post(ObservationRoutes.MARK_DISAPPEARED.value)
 @PermissionService.require_permission(Permissions.OBSERVATION_UPDATE.value)
 async def mark_observation_disappeared(
@@ -137,15 +217,24 @@ async def mark_observation_disappeared(
 
     # Handle timezone for disappeared_at field
     disappeared_at = disappeared_data.disappeared_at
-    
+
+    # Ensure disappeared_at has timezone info
+    if disappeared_at.tzinfo is None:
+        disappeared_at = disappeared_at.replace(tzinfo=timezone.utc)
+
     observation.status = ObservationStatus.DISAPPEARED.value
     observation.disappeared_at = disappeared_at
     observation.disappeared_by = current_user.id
     observation.updated_at = datetime.now(timezone.utc)
-    
+
     # Calculate duration in seconds if observed_at exists
     if observation.observed_at:
-        time_delta = observation.disappeared_at - observation.observed_at
+        # Ensure both datetimes have timezone info for comparison
+        observed_at = observation.observed_at
+        if observed_at.tzinfo is None:
+            observed_at = observed_at.replace(tzinfo=timezone.utc)
+
+        time_delta = observation.disappeared_at - observed_at
         observation.duration_seconds = int(time_delta.total_seconds())
 
     session.add(observation)
