@@ -9,7 +9,7 @@ host = "localhost"
 port = 3306
 name = "radio_monitoring"
 user = "root"
-password = "pythops"
+password = "root"
 echo = false
 pool_size = 20
 max_overflow = 40
@@ -25,12 +25,12 @@ max_login_attempts = 5
 lockout_duration_minutes = 30
 require_https = false
 #allowed_origins = ["https://localhost:60800"]
-allowed_origins = ["*"]
+allowed_origins = ["http://localhost:3000", "http://127.0.0.1:3000", "*"]
 jwt_leeway_seconds = 10
 
 [server]
 host = "127.0.0.1"
-port = 8000
+port = 60800
 reload = false
 workers = 1
 
