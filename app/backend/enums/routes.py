@@ -121,6 +121,11 @@ class MediaRoutes(str, Enum):
     STATISTICS = "/statistics"
     MAINTENANCE_CLEANUP = "/maintenance/cleanup"
     POLICY = "/policy"
+    CHECK_UPLOAD_SESSION = "/check-upload-session"
+    RESUME_UPLOAD = "/resume-upload"
+    FILE_INTEGRITY = "/integrity/{media_id}"
+    FILE_REPAIR = "/repair/{media_id}"
+    CLEANUP_OLD_CHUNKS = "/cleanup/old-chunks"
 
     def versioned_path(self) -> str:
         """Get the full path with base prefix and api version prefix"""
@@ -204,6 +209,8 @@ class SignalRoutes(str, Enum):
 class ObservationRoutes(str, Enum):
     """Observation management routes"""
     BASE = "/observations"
+    CREATE = "/create"
+    LIST_ALL = "/list-all"
     OBSERVATION_BY_ID = "/{observation_id}"
     MARK_DISAPPEARED = "/{observation_id}/disappeared"
     BULK_UPDATE = "/bulk-update"

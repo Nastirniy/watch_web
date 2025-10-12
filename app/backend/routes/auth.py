@@ -268,39 +268,40 @@ async def get_user_sessions(
             detail="Failed to retrieve sessions"
         )
 
-from fastapi import FastAPI, Request
+if __name__ == "__main__":
+    from fastapi import FastAPI, Request
 
-app = FastAPI(title="Test mTLS Endpoint")
+    app = FastAPI(title="Test mTLS Endpoint")
 
-def parse_cn(dn: str) -> str | None:
-    """Парсить CN із Distinguished Name"""
-    if not dn:
+    def parse_cn(dn: str) -> str | None:
+        """Парсить CN із Distinguished Name"""
+        if not dn:
+            return None
+        parts = [p.strip() for p in dn.split(",")]
+        for p in parts:
+            if p.startswith("CN="):
+                return p[3:]
         return None
-    parts = [p.strip() for p in dn.split(",")]
-    for p in parts:
-        if p.startswith("CN="):
-            return p[3:]
-    return None
 
-@router.get("/test-cert")
-async def test_cert(request: Request):
-    """
-    Тестовий endpoint для перевірки клієнтського сертифіката.
-    Повертає інформацію про сертифікат із заголовків, переданих NGINX.
-    """
-    ssl_verify = request.headers.get("x-ssl-client-verify")
-    ssl_dn = request.headers.get("x-ssl-client-dn")
-    ssl_fingerprint = request.headers.get("x-ssl-client-fingerprint")
-    ssl_serial = request.headers.get("x-ssl-client-serial")
-    ssl_issuer = request.headers.get("x-ssl-issuer-dn")
+    @router.get("/test-cert")
+    async def test_cert(request: Request):
+        """
+        Тестовий endpoint для перевірки клієнтського сертифіката.
+        Повертає інформацію про сертифікат із заголовків, переданих NGINX.
+        """
+        ssl_verify = request.headers.get("x-ssl-client-verify")
+        ssl_dn = request.headers.get("x-ssl-client-dn")
+        ssl_fingerprint = request.headers.get("x-ssl-client-fingerprint")
+        ssl_serial = request.headers.get("x-ssl-client-serial")
+        ssl_issuer = request.headers.get("x-ssl-issuer-dn")
 
-    cn = parse_cn(ssl_dn)
+        cn = parse_cn(ssl_dn)
 
-    print( {
-        "ssl_verify": ssl_verify,
-        "ssl_dn": ssl_dn,
-        "ssl_cn": cn,
-        "ssl_fingerprint": ssl_fingerprint,
-        "ssl_serial": ssl_serial,
-        "ssl_issuer": ssl_issuer
-    })
+        print({
+            "ssl_verify": ssl_verify,
+            "ssl_dn": ssl_dn,
+            "ssl_cn": cn,
+            "ssl_fingerprint": ssl_fingerprint,
+            "ssl_serial": ssl_serial,
+            "ssl_issuer": ssl_issuer
+        })

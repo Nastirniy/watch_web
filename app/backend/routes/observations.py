@@ -12,6 +12,7 @@ from app.backend.models.observation import Observation
 from app.backend.models.user import User
 from app.backend.dependencies import get_current_user
 from app.backend.services.permissions import PermissionService
+from app.backend.services.access_control import AccessControlService
 from app.backend.enums.general import Permissions, ObservationStatus
 from app.backend.enums.routes import ObservationRoutes, SystemRoutes
 
@@ -21,8 +22,8 @@ router = APIRouter()
 class ObservationCreate(BaseModel):
     post_id: int
     signal_type_id: int
-    frequency_min: Decimal
-    frequency_max: Decimal
+    frequency_min: Optional[Decimal] = None
+    frequency_max: Optional[Decimal] = None
     video_frequency_min: Optional[Decimal] = None
     video_frequency_max: Optional[Decimal] = None
     observed_at: Optional[datetime] = None
@@ -47,7 +48,7 @@ class ObservationDisappeared(BaseModel):
     disappeared_at: datetime
 
 
-@router.get(SystemRoutes.ROOT.value, response_model=List[Observation])
+@router.get(ObservationRoutes.LIST_ALL.value, response_model=List[Observation])
 @PermissionService.require_permission(Permissions.OBSERVATION_VIEW.value)
 async def list_observations(
         skip: int = 0,
@@ -57,11 +58,23 @@ async def list_observations(
         session: AsyncSession = Depends(get_session),
         current_user: User = Depends(get_current_user)
 ):
-    """List observations"""
+    """
+    List observations.
+    Regular users can only see observations from their assigned post.
+    Admins can see all observations or filter by specific post.
+    """
+
+    # Apply post access filter
+    filtered_post_id = await AccessControlService.filter_query_by_post_access(
+        current_user, session, post_id
+    )
+
     query = select(Observation).where(Observation.is_deleted == False)
 
-    if post_id:
-        query = query.where(Observation.post_id == post_id)
+    # Apply post filter (enforced for regular users, optional for admins)
+    if filtered_post_id:
+        query = query.where(Observation.post_id == filtered_post_id)
+
     if status:
         query = query.where(Observation.status == status)
 
@@ -69,31 +82,68 @@ async def list_observations(
     return result.all()
 
 
-@router.post(SystemRoutes.ROOT.value, response_model=Observation)
+@router.post(ObservationRoutes.CREATE.value, response_model=Observation)
 @PermissionService.require_permission(Permissions.OBSERVATION_CREATE.value)
 async def create_observation(
         observation_data: ObservationCreate,
         session: AsyncSession = Depends(get_session),
         current_user: User = Depends(get_current_user)
 ):
-    """Create new observation"""
+    """
+    Create new observation.
+    Users can only create observations for their assigned post.
+    """
+    # Check if user has access to the post
+    await AccessControlService.check_post_membership(
+        current_user,
+        observation_data.post_id,
+        session,
+        f"{Permissions.OBSERVATION_CREATE.name} for {ObservationRoutes.BASE.value}"
+    )
+
+    # Validate that at least one set of frequencies is provided
+    has_default_freq = observation_data.frequency_min is not None and observation_data.frequency_max is not None
+    has_video_freq = observation_data.video_frequency_min is not None and observation_data.video_frequency_max is not None
+
+    if not has_default_freq and not has_video_freq:
+        raise HTTPException(
+            status_code=fapi_status.HTTP_400_BAD_REQUEST,
+            detail="At least one set of frequencies must be provided: either (frequency_min, frequency_max) or (video_frequency_min, video_frequency_max)"
+        )
+
+    # Validate that if one frequency is provided, both min and max must be provided
+    if (observation_data.frequency_min is not None) != (observation_data.frequency_max is not None):
+        raise HTTPException(
+            status_code=fapi_status.HTTP_400_BAD_REQUEST,
+            detail="Both frequency_min and frequency_max must be provided together"
+        )
+
+    if (observation_data.video_frequency_min is not None) != (observation_data.video_frequency_max is not None):
+        raise HTTPException(
+            status_code=fapi_status.HTTP_400_BAD_REQUEST,
+            detail="Both video_frequency_min and video_frequency_max must be provided together"
+        )
+
     # Handle timezone for observed_at field
     observed_at = observation_data.observed_at
     if observed_at and observed_at.tzinfo is None:
         observed_at = observed_at.replace(tzinfo=timezone.utc)
-    
+
     # Prepare observation data
     observation_dict = observation_data.model_dump()
     observation_dict["observed_at"] = observed_at
     observation_dict["user_id"] = current_user.id
-    observation_dict["frequency_center"] = (observation_data.frequency_min + observation_data.frequency_max) / 2
-    observation_dict["bandwidth"] = observation_data.frequency_max - observation_data.frequency_min
-    
-    # Calculate video frequency fields if both min and max are provided
-    if observation_data.video_frequency_min is not None and observation_data.video_frequency_max is not None:
+
+    # Calculate default frequency fields if provided
+    if has_default_freq:
+        observation_dict["frequency_center"] = (observation_data.frequency_min + observation_data.frequency_max) / 2
+        observation_dict["bandwidth"] = observation_data.frequency_max - observation_data.frequency_min
+
+    # Calculate video frequency fields if provided
+    if has_video_freq:
         observation_dict["video_frequency_center"] = (observation_data.video_frequency_min + observation_data.video_frequency_max) / 2
         observation_dict["video_bandwidth"] = observation_data.video_frequency_max - observation_data.video_frequency_min
-    
+
     observation = Observation(**observation_dict)
 
     session.add(observation)
@@ -126,7 +176,7 @@ async def create_observation(
             )
 
 
-@router.put("/{observation_id}", response_model=Observation)
+@router.put(ObservationRoutes.OBSERVATION_BY_ID.value, response_model=Observation)
 @PermissionService.require_permission(Permissions.OBSERVATION_UPDATE.value)
 async def update_observation(
         observation_id: int,
@@ -134,7 +184,10 @@ async def update_observation(
         session: AsyncSession = Depends(get_session),
         current_user: User = Depends(get_current_user)
 ):
-    """Update existing observation"""
+    """
+    Update existing observation.
+    Users can only update observations from their assigned post.
+    """
     # Get observation by ID
     result = await session.exec(
         select(Observation).where(
@@ -150,19 +203,53 @@ async def update_observation(
             detail="Observation not found"
         )
 
-    # Update only provided fields
+    # Check if user has access to this observation's post
+    await AccessControlService.check_post_membership(
+        current_user,
+        observation.post_id,
+        session,
+        f"{Permissions.OBSERVATION_UPDATE.name} for {ObservationRoutes.BASE.value}"
+    )
+
+    # Validate that if one frequency is provided in update, both min and max must be provided
     update_data = observation_data.model_dump(exclude_unset=True)
 
+    if "frequency_min" in update_data or "frequency_max" in update_data:
+        if (observation_data.frequency_min is not None) != (observation_data.frequency_max is not None):
+            raise HTTPException(
+                status_code=fapi_status.HTTP_400_BAD_REQUEST,
+                detail="Both frequency_min and frequency_max must be provided together"
+            )
+
+    if "video_frequency_min" in update_data or "video_frequency_max" in update_data:
+        if (observation_data.video_frequency_min is not None) != (observation_data.video_frequency_max is not None):
+            raise HTTPException(
+                status_code=fapi_status.HTTP_400_BAD_REQUEST,
+                detail="Both video_frequency_min and video_frequency_max must be provided together"
+            )
+
+    # Update only provided fields
     for field, value in update_data.items():
         # Handle timezone for observed_at field
         if field == "observed_at" and value and value.tzinfo is None:
             value = value.replace(tzinfo=timezone.utc)
         setattr(observation, field, value)
 
+    # Validate that after update, at least one set of frequencies exists
+    has_default_freq = observation.frequency_min is not None and observation.frequency_max is not None
+    has_video_freq = observation.video_frequency_min is not None and observation.video_frequency_max is not None
+
+    if not has_default_freq and not has_video_freq:
+        raise HTTPException(
+            status_code=fapi_status.HTTP_400_BAD_REQUEST,
+            detail="At least one set of frequencies must exist: either (frequency_min, frequency_max) or (video_frequency_min, video_frequency_max)"
+        )
+
     # Recalculate center frequency and bandwidth if min/max changed
     if observation_data.frequency_min is not None or observation_data.frequency_max is not None:
-        observation.frequency_center = (observation.frequency_min + observation.frequency_max) / 2
-        observation.bandwidth = observation.frequency_max - observation.frequency_min
+        if observation.frequency_min is not None and observation.frequency_max is not None:
+            observation.frequency_center = (observation.frequency_min + observation.frequency_max) / 2
+            observation.bandwidth = observation.frequency_max - observation.frequency_min
 
     # Recalculate video frequency fields if both provided
     if observation_data.video_frequency_min is not None or observation_data.video_frequency_max is not None:
@@ -200,7 +287,10 @@ async def mark_observation_disappeared(
         session: AsyncSession = Depends(get_session),
         current_user: User = Depends(get_current_user)
 ):
-    """Mark observation as disappeared"""
+    """
+    Mark observation as disappeared.
+    Users can only mark observations from their assigned post.
+    """
     result = await session.exec(
         select(Observation).where(
             Observation.id == observation_id,
@@ -214,6 +304,14 @@ async def mark_observation_disappeared(
             status_code=fapi_status.HTTP_404_NOT_FOUND,
             detail="Observation not found"
         )
+
+    # Check if user has access to this observation's post
+    await AccessControlService.check_post_membership(
+        current_user,
+        observation.post_id,
+        session,
+        f"{Permissions.OBSERVATION_UPDATE.name} for {ObservationRoutes.MARK_DISAPPEARED.value}"
+    )
 
     # Handle timezone for disappeared_at field
     disappeared_at = disappeared_data.disappeared_at
