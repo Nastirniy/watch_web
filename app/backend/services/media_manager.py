@@ -442,10 +442,6 @@ class MediaManager:
                     logger.info(f"Duplicate file detected, returning existing file ID: {existing_file_id}")
                     return existing_file_id
         
-            # Generate human-readable stored filename (simpler for manual access)
-            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-            stored_filename = f"{timestamp}_{safe_filename}"
-
             # Use validated MIME type
             mime_type = validation_result.detected_mime_type
             logger.info(f"Validated MIME type for {safe_filename}: {mime_type}")
@@ -453,23 +449,17 @@ class MediaManager:
             # Use date-based organized directory structure for human readability
             organized_dir = await self._get_organized_path(session, observation_id)
 
-            # Validate full path length and adjust if necessary
-            full_file_path = organized_dir / stored_filename
-            if not self.validate_full_path_length(str(full_file_path)):
-                # If path is too long, use shorter filename with hash
-                name, ext = os.path.splitext(safe_filename)
-                short_name = name[:50] if len(name) > 50 else name  # Limit name part
-                hash_suffix = hashlib.md5(safe_filename.encode()).hexdigest()[:8]
-                stored_filename = f"{timestamp}_{short_name}_{hash_suffix}{ext}"
-                full_file_path = organized_dir / stored_filename
-                logger.info(f"Shortened filename due to path length: {stored_filename}")
+            # Generate temporary stored filename using unique hash
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            temp_hash = hashlib.md5(f"{safe_filename}_{timestamp}".encode()).hexdigest()[:16]
+            temp_stored_filename = f"temp_{temp_hash}{file_extension}"
 
-            # Create media file record with organized path
+            # Create media file record with temporary filename
             media_file = MediaFile(
                 observation_id=observation_id,
                 original_filename=safe_filename,
-                stored_filename=stored_filename,
-                file_path=str(full_file_path),
+                stored_filename=temp_stored_filename,
+                file_path=str(organized_dir / temp_stored_filename),
                 file_size=file_size,
                 mime_type=mime_type,
                 file_extension=file_extension,
@@ -483,8 +473,19 @@ class MediaManager:
                     media_file.width = validation_result.metadata['width']
                 if 'height' in validation_result.metadata:
                     media_file.height = validation_result.metadata['height']
-        
+
             session.add(media_file)
+            await session.commit()
+            await session.refresh(media_file)
+
+            # Generate final stored filename using media_file.id and MD5 hash of original filename
+            md5_hash = hashlib.md5(safe_filename.encode()).hexdigest()[:16]
+            stored_filename = f"{media_file.id}_{md5_hash}{file_extension}"
+            full_file_path = organized_dir / stored_filename
+
+            # Update media file with final filename
+            media_file.stored_filename = stored_filename
+            media_file.file_path = str(full_file_path)
             await session.commit()
             await session.refresh(media_file)
 

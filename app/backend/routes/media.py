@@ -16,6 +16,7 @@ from app.backend.models.user import User
 from app.backend.utils.datetime_utils import get_default_timezone_datetime
 from app.backend.dependencies import get_current_user
 from app.backend.services.permissions import PermissionService
+from app.backend.services.access_control import AccessControlService
 from app.backend.services.media_manager import MediaManager, FileIntegrityCheck, FileValidationConfig, UploadSession
 from app.backend.enums.general import Permissions, MediaType
 from app.backend.enums.routes import MediaRoutes, SystemRoutes
@@ -25,6 +26,24 @@ from app.backend.config import settings
 
 router = APIRouter()
 logger = get_logger("media")
+
+
+async def _get_observation_from_media(session: AsyncSession, media_file: MediaFile) -> Observation:
+    """Helper to get observation and check if it exists"""
+    obs_query = select(Observation).where(
+        Observation.id == media_file.observation_id,
+        Observation.is_deleted == False
+    )
+    result = await session.exec(obs_query)
+    observation = result.first()
+
+    if not observation:
+        raise HTTPException(
+            status_code=fapi_status.HTTP_404_NOT_FOUND,
+            detail="Associated observation not found"
+        )
+
+    return observation
 
 
 async def _assemble_chunks_into_file(session: AsyncSession, media_file_id: int):
@@ -187,15 +206,18 @@ class UploadSessionInfo(BaseModel):
     can_resume: bool
 
 
-@router.post(MediaRoutes.UPLOAD_CHUNKED_START.path(), response_model=ChunkedUploadResponse)
+@router.post(MediaRoutes.UPLOAD_CHUNKED_START.value, response_model=ChunkedUploadResponse)
 @PermissionService.require_permission(Permissions.OBSERVATION_CREATE.value)
 async def start_chunked_upload(
     upload_data: ChunkedUploadStart,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user)
 ):
-    """Start a chunked file upload session"""
-    
+    """
+    Start a chunked file upload session.
+    Users can only upload media for observations from their assigned post.
+    """
+
     # Verify observation exists and user has access
     observation_query = select(Observation).where(
         Observation.id == upload_data.observation_id,
@@ -203,13 +225,21 @@ async def start_chunked_upload(
     )
     observation = await session.exec(observation_query)
     observation_result = observation.first()
-    
+
     if not observation_result:
         raise HTTPException(
             status_code=fapi_status.HTTP_404_NOT_FOUND,
             detail="Observation not found"
         )
-    
+
+    # Check if user has access to this observation's post
+    await AccessControlService.check_post_membership(
+        current_user,
+        observation_result.post_id,
+        session,
+        f"{Permissions.OBSERVATION_CREATE.name} for {MediaRoutes.UPLOAD_CHUNKED_START.value}"
+    )
+
     # Validate media type
     try:
         media_type_enum = MediaType(upload_data.media_type.lower())
@@ -219,29 +249,44 @@ async def start_chunked_upload(
             detail=f"Invalid media type: {upload_data.media_type}"
         )
     
-    # Generate unique stored filename
+    # Generate unique file hash for deduplication and resume
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     file_hash_base = f"{upload_data.original_filename}_{upload_data.file_size}_{timestamp}"
     file_hash = hashlib.sha256(file_hash_base.encode()).hexdigest()[:16]
-    stored_filename = f"{file_hash}_{upload_data.original_filename}"
-    
+
+    # Generate MD5 hash of original filename
+    md5_hash = hashlib.md5(upload_data.original_filename.encode()).hexdigest()[:16]
+
+    # Generate unique part using timestamp and file_hash
+    unique_part = f"{timestamp}_{file_hash[:8]}"
+
+    # Create temporary stored filename (will be updated after getting media_file.id)
+    temp_stored_filename = f"{unique_part}_{md5_hash}{upload_data.file_extension}"
+
     # Create media file record
     media_file = MediaFile(
         observation_id=upload_data.observation_id,
         original_filename=upload_data.original_filename,
-        stored_filename=stored_filename,
-        file_path=f"{settings.storage.upload_path}/{observation_result.id}/{stored_filename}",
+        stored_filename=temp_stored_filename,
+        file_path=f"{settings.storage.upload_path}/{observation_result.id}/{temp_stored_filename}",
         file_size=upload_data.file_size,
         mime_type="application/octet-stream",  # Will be updated when first chunk arrives
         file_extension=upload_data.file_extension,
         media_type=media_type_enum.value,
         file_hash=file_hash
     )
-    
+
     session.add(media_file)
     await session.commit()
     await session.refresh(media_file)
-    
+
+    # Update stored filename with media_file.id
+    stored_filename = f"{media_file.id}_{md5_hash}{upload_data.file_extension}"
+    media_file.stored_filename = stored_filename
+    media_file.file_path = f"{settings.storage.upload_path}/{observation_result.id}/{stored_filename}"
+    await session.commit()
+    await session.refresh(media_file)
+
     upload_id = f"{media_file.id}_{file_hash}"
     
     return ChunkedUploadResponse(
@@ -253,7 +298,7 @@ async def start_chunked_upload(
     )
 
 
-@router.post(MediaRoutes.UPLOAD_CHUNKED_CHUNK.path(), response_model=ChunkUploadResponse)
+@router.post(MediaRoutes.UPLOAD_CHUNKED_CHUNK.value, response_model=ChunkUploadResponse)
 @PermissionService.require_permission(Permissions.OBSERVATION_CREATE.value)
 async def upload_chunk(
     upload_id: str = Form(...),
@@ -262,8 +307,11 @@ async def upload_chunk(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user)
 ):
-    """Upload a single chunk of a file"""
-    
+    """
+    Upload a single chunk of a file.
+    Users can only upload chunks for media from their assigned post.
+    """
+
     # Parse upload_id to get media_file_id
     try:
         media_file_id = int(upload_id.split('_')[0])
@@ -272,18 +320,27 @@ async def upload_chunk(
             status_code=fapi_status.HTTP_400_BAD_REQUEST,
             detail="Invalid upload_id format"
         )
-    
+
     # Get media file
     media_query = select(MediaFile).where(MediaFile.id == media_file_id)
     media_result = await session.exec(media_query)
     media_file = media_result.first()
-    
+
     if not media_file:
         raise HTTPException(
             status_code=fapi_status.HTTP_404_NOT_FOUND,
             detail="Media file not found"
         )
-    
+
+    # Check if user has access to this media's observation post
+    observation = await _get_observation_from_media(session, media_file)
+    await AccessControlService.check_post_membership(
+        current_user,
+        observation.post_id,
+        session,
+        f"{Permissions.OBSERVATION_CREATE.name} for {MediaRoutes.UPLOAD_CHUNKED_CHUNK.value}"
+    )
+
     # Check upload session timeout (30 minutes default)
     from datetime import timedelta
     current_time = get_default_timezone_datetime()
@@ -377,24 +434,36 @@ async def upload_chunk(
     )
 
 
-@router.get(MediaRoutes.MEDIA_INFO.path(), response_model=MediaFileInfo)
+@router.get(MediaRoutes.MEDIA_INFO.value, response_model=MediaFileInfo)
 @PermissionService.require_permission(Permissions.OBSERVATION_VIEW.value)
 async def get_media_info(
     media_id: int,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user)
 ):
-    """Get information about a media file and its upload status"""
-    
+    """
+    Get information about a media file and its upload status.
+    Users can only access media from their assigned post.
+    """
+
     media_query = select(MediaFile).where(MediaFile.id == media_id)
     media_result = await session.exec(media_query)
     media_file = media_result.first()
-    
+
     if not media_file:
         raise HTTPException(
             status_code=fapi_status.HTTP_404_NOT_FOUND,
             detail="Media file not found"
         )
+
+    # Get observation and check post access
+    observation = await _get_observation_from_media(session, media_file)
+    await AccessControlService.check_post_membership(
+        current_user,
+        observation.post_id,
+        session,
+        f"{Permissions.OBSERVATION_VIEW.name} for {MediaRoutes.MEDIA_INFO.value}"
+    )
     
     # Get chunk information
     chunks_query = select(FileChunk).where(FileChunk.media_file_id == media_id)
@@ -420,7 +489,7 @@ async def get_media_info(
     )
 
 
-@router.get(MediaRoutes.MEDIA_DOWNLOAD.path())
+@router.get(MediaRoutes.MEDIA_DOWNLOAD.value)
 @PermissionService.require_permission(Permissions.OBSERVATION_VIEW.value)
 async def download_media_file(
     media_id: int,
@@ -429,7 +498,10 @@ async def download_media_file(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user)
 ):
-    """Download a complete media file with integrity validation and optional streaming"""
+    """
+    Download a complete media file with integrity validation and optional streaming.
+    Users can only download media from their assigned post.
+    """
 
     # Get media file info first
     media_query = select(MediaFile).where(MediaFile.id == media_id)
@@ -441,6 +513,15 @@ async def download_media_file(
             status_code=fapi_status.HTTP_404_NOT_FOUND,
             detail="Media file not found"
         )
+
+    # Check if user has access to this media's observation post
+    observation = await _get_observation_from_media(session, media_file)
+    await AccessControlService.check_post_membership(
+        current_user,
+        observation.post_id,
+        session,
+        f"{Permissions.OBSERVATION_VIEW.name} for {MediaRoutes.MEDIA_DOWNLOAD.value}"
+    )
 
     # Handle streaming download for large files
     if stream and media_file.file_size > 10 * 1024 * 1024:  # 10MB threshold
@@ -591,25 +672,37 @@ async def _stream_media_file(session: AsyncSession, media_file: MediaFile, valid
     )
 
 
-@router.delete(MediaRoutes.MEDIA_BY_ID.path())
+@router.delete(MediaRoutes.MEDIA_BY_ID.value)
 @PermissionService.require_permission(Permissions.OBSERVATION_DELETE.value)
 async def delete_media_file(
     media_id: int,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user)
 ):
-    """Delete a media file and all its chunks"""
-    
+    """
+    Delete a media file and all its chunks.
+    Users can only delete media from their assigned post.
+    """
+
     media_query = select(MediaFile).where(MediaFile.id == media_id)
     media_result = await session.exec(media_query)
     media_file = media_result.first()
-    
+
     if not media_file:
         raise HTTPException(
             status_code=fapi_status.HTTP_404_NOT_FOUND,
             detail="Media file not found"
         )
-    
+
+    # Check if user has access to this media's observation post
+    observation = await _get_observation_from_media(session, media_file)
+    await AccessControlService.check_post_membership(
+        current_user,
+        observation.post_id,
+        session,
+        f"{Permissions.OBSERVATION_DELETE.name} for {MediaRoutes.MEDIA_BY_ID.value}"
+    )
+
     # Delete all chunks first (due to foreign key constraint)
     chunks_query = select(FileChunk).where(FileChunk.media_file_id == media_id)
     chunks_result = await session.exec(chunks_query)
@@ -660,20 +753,43 @@ media_manager = MediaManager(
 )
 
 
-@router.get("/integrity/{media_id}", response_model=FileIntegrityCheck)
+@router.get(MediaRoutes.FILE_INTEGRITY.value, response_model=FileIntegrityCheck)
 @PermissionService.require_permission(Permissions.OBSERVATION_VIEW.value)
 async def check_file_integrity(
     media_id: int,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user)
 ):
-    """Check file integrity and detect any issues"""
-    
+    """
+    Check file integrity and detect any issues.
+    Users can only check integrity for media from their assigned post.
+    """
+
+    # Get media file first
+    media_query = select(MediaFile).where(MediaFile.id == media_id)
+    media_result = await session.exec(media_query)
+    media_file = media_result.first()
+
+    if not media_file:
+        raise HTTPException(
+            status_code=fapi_status.HTTP_404_NOT_FOUND,
+            detail="Media file not found"
+        )
+
+    # Check if user has access to this media's observation post
+    observation = await _get_observation_from_media(session, media_file)
+    await AccessControlService.check_post_membership(
+        current_user,
+        observation.post_id,
+        session,
+        f"{Permissions.OBSERVATION_VIEW.name} for {MediaRoutes.FILE_INTEGRITY.value}"
+    )
+
     integrity = await media_manager.check_file_integrity(session, media_id)
     return integrity
 
 
-@router.post("/repair/{media_id}")
+@router.post(MediaRoutes.FILE_REPAIR.value)
 @PermissionService.require_permission(Permissions.OBSERVATION_UPDATE.value)
 async def repair_file(
     media_id: int,
@@ -693,7 +809,7 @@ async def repair_file(
         )
 
 
-@router.post(MediaRoutes.MAINTENANCE_CLEANUP.path())
+@router.post(MediaRoutes.MAINTENANCE_CLEANUP.value)
 @PermissionService.require_permission(Permissions.ADMIN_FULL.value)
 async def cleanup_orphaned_files(
     session: AsyncSession = Depends(get_session),
@@ -710,8 +826,8 @@ async def cleanup_orphaned_files(
     }
 
 
-@router.get(MediaRoutes.STATISTICS.path())
-@PermissionService.require_permission(Permissions.OBSERVATION_VIEW.value)
+@router.get(MediaRoutes.STATISTICS.value)
+@PermissionService.require_permission(Permissions.ADMIN_FULL.value)
 async def get_storage_statistics(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user)
@@ -722,14 +838,17 @@ async def get_storage_statistics(
     return stats
 
 
-@router.post("/check-upload-session", response_model=Optional[UploadSessionInfo])
+@router.post(MediaRoutes.CHECK_UPLOAD_SESSION.value, response_model=Optional[UploadSessionInfo])
 @PermissionService.require_permission(Permissions.OBSERVATION_VIEW.value)
 async def check_upload_session(
     request: ResumeUploadRequest,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user)
 ):
-    """Check if an upload session exists and can be resumed"""
+    """
+    Check if an upload session exists and can be resumed.
+    Users can only check sessions for their assigned post.
+    """
 
     # Verify observation exists and user has access
     observation_query = select(Observation).where(
@@ -744,6 +863,14 @@ async def check_upload_session(
             status_code=fapi_status.HTTP_404_NOT_FOUND,
             detail="Observation not found"
         )
+
+    # Check if user has access to this observation's post
+    await AccessControlService.check_post_membership(
+        current_user,
+        observation_result.post_id,
+        session,
+        f"{Permissions.OBSERVATION_VIEW.name} for {MediaRoutes.CHECK_UPLOAD_SESSION.value}"
+    )
 
     # Check for existing upload session
     upload_session = await media_manager.check_existing_upload(
@@ -764,7 +891,7 @@ async def check_upload_session(
     return None
 
 
-@router.post("/resume-upload")
+@router.post(MediaRoutes.RESUME_UPLOAD.value)
 @PermissionService.require_permission(Permissions.OBSERVATION_CREATE.value)
 async def resume_upload_session(
     request: ResumeUploadRequest,
@@ -811,7 +938,7 @@ async def resume_upload_session(
         )
 
 
-@router.post("/cleanup/old-chunks")
+@router.post(MediaRoutes.CLEANUP_OLD_CHUNKS.value)
 @PermissionService.require_permission(Permissions.ADMIN_FULL.value)
 async def cleanup_old_chunks(
     session: AsyncSession = Depends(get_session),
@@ -827,7 +954,7 @@ async def cleanup_old_chunks(
     }
 
 
-@router.post(MediaRoutes.UPLOAD.path())
+@router.post(MediaRoutes.UPLOAD.value)
 @PermissionService.require_permission(Permissions.OBSERVATION_CREATE.value)
 async def upload_complete_file(
     observation_id: int = Form(...),
@@ -836,8 +963,11 @@ async def upload_complete_file(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user)
 ):
-    """Upload a complete file with comprehensive validation and security checks"""
-    
+    """
+    Upload a complete file with comprehensive validation and security checks.
+    Users can only upload files for observations from their assigned post.
+    """
+
     # Verify observation exists
     observation_query = select(Observation).where(
         Observation.id == observation_id,
@@ -845,13 +975,21 @@ async def upload_complete_file(
     )
     observation = await session.exec(observation_query)
     observation_result = observation.first()
-    
+
     if not observation_result:
         raise HTTPException(
             status_code=fapi_status.HTTP_404_NOT_FOUND,
             detail="Observation not found"
         )
-    
+
+    # Check if user has access to this observation's post
+    await AccessControlService.check_post_membership(
+        current_user,
+        observation_result.post_id,
+        session,
+        f"{Permissions.OBSERVATION_CREATE.name} for {MediaRoutes.UPLOAD.value}"
+    )
+
     # Validate file size before reading (basic check)
     if file.size and file.size > 500 * 1024 * 1024:  # 500MB limit
         raise HTTPException(
@@ -929,14 +1067,39 @@ async def upload_complete_file(
         )
 
 
-@router.get("/observation/{observation_id}", response_model=List[MediaFileInfo])
+@router.get(MediaRoutes.OBSERVATION.value, response_model=List[MediaFileInfo])
 @PermissionService.require_permission(Permissions.OBSERVATION_VIEW.value)
 async def list_media_for_observation(
     observation_id: int,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user)
 ):
-    """List all media files for a specific observation"""
+    """
+    List all media files for a specific observation.
+    Users can only list media from their assigned post.
+    """
+
+    # Get observation first and check access
+    observation_query = select(Observation).where(
+        Observation.id == observation_id,
+        Observation.is_deleted == False
+    )
+    obs_result = await session.exec(observation_query)
+    observation = obs_result.first()
+
+    if not observation:
+        raise HTTPException(
+            status_code=fapi_status.HTTP_404_NOT_FOUND,
+            detail="Observation not found"
+        )
+
+    # Check if user has access to this observation's post
+    await AccessControlService.check_post_membership(
+        current_user,
+        observation.post_id,
+        session,
+        f"{Permissions.OBSERVATION_VIEW.name} for {MediaRoutes.OBSERVATION.value}"
+    )
 
     # Query media files for the observation
     media_query = select(MediaFile).where(MediaFile.observation_id == observation_id)
