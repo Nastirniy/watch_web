@@ -1,0 +1,61 @@
+[app]
+name = "Radio Monitoring System"
+version = "1.0.0"
+debug = true
+environment = "development"
+
+[database]
+host = "localhost"
+port = 3306
+name = "radio_monitoring"
+user = "root"
+password = "root"
+echo = false
+pool_size = 20
+max_overflow = 40
+
+[security]
+secret_key = "your-secret-key-change-this-in-production"  # Use MYSETTINGS_SECURITY__SECRET_KEY env var in production
+algorithm = "HS256"
+access_token_expire_minutes = 30
+refresh_token_expire_days = 7
+session_expire_hours = 8
+password_min_length = 12
+max_login_attempts = 5
+lockout_duration_minutes = 30
+require_https = false
+#allowed_origins = ["https://localhost:60800"]
+allowed_origins = ["http://localhost:3000", "http://127.0.0.1:3000", "*"]
+jwt_leeway_seconds = 10
+
+[server]
+host = "127.0.0.1"
+port = 60800
+reload = false
+workers = 1
+
+[admin]
+username = "admin"
+username_alias = "System Administrator"
+pki_certificate_cn = "admin@radiomonitoring.local"
+pki_certificate_serial = "ABC123DEF456"
+pki_certificate_fingerprint = "12:34:56:78:90:AB:CD:EF:12:34:56:78:90:AB:CD:EF:12:34:56:78"
+
+[logging]
+level = "INFO"
+# file_path = "logs/radio_monitoring.log"  # Uncomment to enable file logging
+enable_file_logging = false
+
+[timezone]
+# Universal timezone support - any IANA timezone name
+# Examples: "UTC", "Europe/Kyiv", "America/New_York", "Asia/Tokyo", "Europe/London"
+# System will fallback to UTC if timezone is not available
+timezone = "Europe/Kyiv"  # Ukraine timezone with automatic winter/summer time handling
+dst_handling = true
+
+[storage]
+# Media file storage configuration
+upload_path = "uploads"  # Base directory for uploaded files
+chunk_size_mb = 1  # Default chunk size in megabytes
+upload_timeout_minutes = 30  # Upload session timeout in minutes
+max_file_size_gb = 10  # Maximum file size in gigabytes
