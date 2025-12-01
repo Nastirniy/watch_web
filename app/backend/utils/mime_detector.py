@@ -6,7 +6,7 @@ import mimetypes
 from typing import Optional, Tuple
 import logging
 
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
 
 
 class MimeTypeDetector:
@@ -87,9 +87,9 @@ class MimeTypeDetector:
         if self.use_magic:
             try:
                 self._magic_mime = magic.Magic(mime=True)
-                logger.info("python-magic initialized successfully")
+                _logger.info("python-magic initialized successfully")
             except Exception as e:
-                logger.warning(f"Failed to initialize python-magic: {e}")
+                _logger.warning(f"Failed to initialize python-magic: {e}")
                 self.use_magic = False
     
     def detect_mime_type(self, file_data: bytes, filename: Optional[str] = None) -> Tuple[str, str]:
@@ -112,11 +112,11 @@ class MimeTypeDetector:
                 mime_type = self._magic_mime.from_buffer(file_data)
                 if mime_type and mime_type != 'application/octet-stream':
                     method = "magic"
-                    logger.debug(f"Magic detection: {mime_type}")
+                    _logger.debug(f"Magic detection: {mime_type}")
                 else:
                     mime_type = None
             except Exception as e:
-                logger.warning(f"Magic detection failed: {e}")
+                _logger.warning(f"Magic detection failed: {e}")
         
         # Method 2: Python's mimetypes module with filename
         if not mime_type and filename:
@@ -125,9 +125,9 @@ class MimeTypeDetector:
                 if detected_type:
                     mime_type = detected_type
                     method = "mimetypes"
-                    logger.debug(f"Mimetypes detection: {mime_type}")
+                    _logger.debug(f"Mimetypes detection: {mime_type}")
             except Exception as e:
-                logger.warning(f"Mimetypes detection failed: {e}")
+                _logger.warning(f"Mimetypes detection failed: {e}")
         
         # Method 3: Extension-based detection (fallback)
         if not mime_type and filename:
@@ -135,14 +135,14 @@ class MimeTypeDetector:
             if extension in self.EXTENSION_MIME_MAP:
                 mime_type = self.EXTENSION_MIME_MAP[extension]
                 method = "extension"
-                logger.debug(f"Extension detection: {mime_type}")
+                _logger.debug(f"Extension detection: {mime_type}")
         
         # Method 4: Content-based heuristics for common formats
         if not mime_type:
             mime_type = self._detect_by_content(file_data)
             if mime_type:
                 method = "content_heuristic"
-                logger.debug(f"Content heuristic detection: {mime_type}")
+                _logger.debug(f"Content heuristic detection: {mime_type}")
         
         # Final fallback
         if not mime_type:
@@ -151,7 +151,7 @@ class MimeTypeDetector:
         
         # Validate MIME type if strict validation is enabled
         if self.strict_validation and not self._is_allowed_mime_type(mime_type):
-            logger.warning(f"MIME type {mime_type} not in allowed list")
+            _logger.warning(f"MIME type {mime_type} not in allowed list")
             mime_type = "application/octet-stream"
             method = "restricted"
         

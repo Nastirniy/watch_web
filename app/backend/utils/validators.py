@@ -196,39 +196,6 @@ class DateRangeParams(SecureBaseModel):
         return v
 
 
-def create_secure_string_field(
-    max_length: int = 255,
-    min_length: int = 1,
-    pattern: Optional[str] = None,
-    allow_html: bool = False
-) -> Field:
-    """Factory function to create secure string fields"""
-    
-    def validator(v: str) -> str:
-        if v is not None:
-            v = SecurityValidators.sanitize_string(v, max_length, allow_html)
-            if pattern and not re.match(pattern, v):
-                raise ValueError(f"String does not match required pattern: {pattern}")
-        return v
-    
-    return Field(
-        ...,
-        min_length=min_length,
-        max_length=max_length,
-        description=f"Secure string field (max {max_length} chars)"
-    )
-
-
-def create_secure_id_field(max_value: int = 2147483647) -> Field:
-    """Factory function to create secure ID fields"""
-    return Field(
-        ...,
-        gt=0,
-        le=max_value,
-        description="Secure positive integer ID"
-    )
-
-
 class SecurityConfig:
     """Runtime security configuration"""
     

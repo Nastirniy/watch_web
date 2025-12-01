@@ -20,8 +20,14 @@ class Permissions(Enum):
     OBSERVATION_UPDATE = "observation.update"
     OBSERVATION_DELETE = "observation.delete"
 
+    # Role permissions
+    ROLE_VIEW = "role.view"
+    ROLE_CREATE = "role.create"
+    ROLE_UPDATE = "role.update"
+    ROLE_DELETE = "role.delete"
+
     # Admin permissions
-    ADMIN_FULL = "admin.full"
+    IS_ADMIN = "admin.true"
     AUDIT_VIEW = "audit.view"
     EXPORT_CREATE = "export.create"
 
@@ -45,6 +51,23 @@ class ConnectionStatus(Enum):
     OFFLINE = "offline"
     MAINTENANCE = "maintenance"
     ERROR = "error"
+
+
+class ServiceHealthStatus(Enum):
+    HEALTHY = "healthy"
+    UNHEALTHY = "unhealthy"
+    DEGRADED = "degraded"
+    ERROR = "error"
+
+
+class ServiceUptimeStatus(Enum):
+    RUNNING = "running"
+    UNKNOWN = "unknown"
+
+
+class AppEnvironment(Enum):
+    DEVELOPMENT = "development"
+    PRODUCTION = "production"
 
 
 class MediaType(Enum):

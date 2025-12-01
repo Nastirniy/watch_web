@@ -1,15 +1,18 @@
 import os
 from typing import Optional
+from pathlib import Path
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings
 import toml
+
+from app.backend.enums.general import AppEnvironment
 
 
 class AppConfig(BaseModel):
     name: str = "Radio Monitoring System"
     version: str = "1.0.0"
     debug: bool = False
-    environment: str = "production"
+    environment: str = AppEnvironment.PRODUCTION.value
 
 
 class DatabaseConfig(BaseModel):
@@ -33,10 +36,6 @@ class SecurityConfig(BaseModel):
     access_token_expire_minutes: int = 30  # Reduced from 1440 for better security
     refresh_token_expire_days: int = 7
     session_expire_hours: int = 8  # Reduced from 24 for better security
-    password_min_length: int = 12
-    max_login_attempts: int = 5
-    lockout_duration_minutes: int = 30
-    require_https: bool = True
     allowed_origins: list[str] = ["https://localhost:3000"]
     jwt_leeway_seconds: int = 10
 
@@ -53,9 +52,9 @@ class ServerConfig(BaseModel):
 class AdminConfig(BaseModel):
     username: str = "admin"
     username_alias: str = "System Administrator"
-    pki_certificate_cn: str = "admin@radiomonitoring.local"
-    pki_certificate_serial: str = "ABC123DEF456"
-    pki_certificate_fingerprint: str = "12:34:56:78:90:AB:CD:EF:12:34:56:78:90:AB:CD:EF:12:34:56:78"
+    pki_certificate_cn: Optional[str] = None
+    pki_certificate_serial: Optional[str] = None
+    pki_certificate_fingerprint: Optional[str] = None
 
 
 class LoggingConfig(BaseModel):
@@ -83,7 +82,7 @@ class StorageConfig(BaseModel):
     chunk_size_mb: int = 1
     upload_timeout_minutes: int = 30
     max_file_size_gb: int = 10
-    
+
     @field_validator('upload_path')
     @classmethod
     def validate_upload_path(cls, v):
@@ -91,24 +90,45 @@ class StorageConfig(BaseModel):
         if not v.strip():
             return "uploads"
         return v.strip()
-    
+
     @field_validator('chunk_size_mb')
     @classmethod
     def validate_chunk_size(cls, v):
         # Ensure chunk size is between 1MB and 100MB
         return max(1, min(100, v))
-    
+
     @field_validator('upload_timeout_minutes')
     @classmethod
     def validate_timeout(cls, v):
         # Ensure timeout is between 5 minutes and 24 hours
         return max(5, min(1440, v))
-    
+
     @field_validator('max_file_size_gb')
     @classmethod
     def validate_max_file_size(cls, v):
         # Ensure max file size is between 1GB and 1TB
         return max(1, min(1024, v))
+
+
+class HealthConfig(BaseModel):
+    """Configuration for health endpoint security"""
+    allowed_hosts: list[str] = ["127.0.0.1", "localhost", "::1"]
+    rate_limit_requests: int = 10
+    rate_limit_window_seconds: int = 60
+    enable_rate_limit: bool = True
+    enable_host_check: bool = True
+
+    @field_validator('rate_limit_requests')
+    @classmethod
+    def validate_rate_limit_requests(cls, v):
+        # Ensure rate limit is between 1 and 1000 requests
+        return max(1, min(1000, v))
+
+    @field_validator('rate_limit_window_seconds')
+    @classmethod
+    def validate_rate_limit_window(cls, v):
+        # Ensure window is between 10 and 3600 seconds (1 hour)
+        return max(10, min(3600, v))
 
 
 class Settings(BaseSettings):
@@ -120,6 +140,7 @@ class Settings(BaseSettings):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     timezone: TimezoneConfig = Field(default_factory=TimezoneConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
+    health: HealthConfig = Field(default_factory=HealthConfig)
 
     def __init__(self, **kwargs):
         # Load from TOML first

@@ -9,6 +9,8 @@ from typing import Optional
 from loguru import logger
 from contextvars import ContextVar
 
+from app.backend.enums.general import AppEnvironment
+
 # Context variables for request tracking
 request_id_context: ContextVar[Optional[str]] = ContextVar('request_id', default=None)
 user_id_context: ContextVar[Optional[int]] = ContextVar('user_id', default=None)
@@ -22,14 +24,14 @@ class LoggingConfig:
         self.is_configured = False
         self.log_file_path: Optional[str] = None
         self.log_level: str = "INFO"
-        self.environment: str = "production"
+        self.environment: str = AppEnvironment.PRODUCTION.value
         self.enable_file_logging: bool = False
     
     def configure(
         self,
         log_file_path: Optional[str] = None,
         log_level: str = "INFO",
-        environment: str = "production",
+        environment: str = AppEnvironment.PRODUCTION.value,
         enable_context: bool = True
     ):
         """
@@ -54,7 +56,7 @@ class LoggingConfig:
         self.enable_file_logging = log_file_path is not None
         
         # Define log format based on environment
-        if self.environment == "development":
+        if self.environment == AppEnvironment.DEVELOPMENT.value:
             format_string = (
                 "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
                 "<level>{level: <8}</level> | "
@@ -73,7 +75,7 @@ class LoggingConfig:
             sys.stdout,
             format=format_string,
             level=self.log_level,
-            colorize=self.environment == "development"
+            colorize=self.environment == AppEnvironment.DEVELOPMENT.value
         )
         
         # Add file handler if log path is provided
@@ -176,7 +178,7 @@ logging_config = LoggingConfig()
 def setup_logging(
     log_file_path: Optional[str] = None,
     log_level: str = "INFO",
-    environment: str = "production"
+    environment: str = AppEnvironment.PRODUCTION.value
 ):
     """
     Setup logging system
@@ -330,3 +332,10 @@ def get_api_logger():
 def get_audit_logger():
     """Get logger for audit events"""
     return get_logger("audit")
+
+
+def get_main_logger():
+    """Get logger for main point"""
+    return get_logger("main")
+
+# TODO: make fully implemented clearly logging

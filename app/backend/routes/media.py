@@ -21,189 +21,24 @@ from app.backend.services.media_manager import MediaManager, FileIntegrityCheck,
 from app.backend.enums.general import Permissions, MediaType
 from app.backend.enums.routes import MediaRoutes, SystemRoutes
 from app.backend.utils.mime_detector import mime_detector
-from app.backend.utils.logging_config import get_logger
+from app.backend.utils.logging_config import get_logger, get_api_logger
 from app.backend.config import settings
+from app.backend.routes.models.request.media_request import ChunkedUploadStart, ResumeUploadRequest
+from app.backend.routes.models.response.media_response import (
+    ChunkedUploadResponse,
+    ChunkUploadResponse,
+    MediaFileInfo,
+    UploadSessionInfo
+)
+from app.backend.routes.helpers.media_helper import (
+    get_observation_from_media,
+    assemble_chunks_into_file,
+    cleanup_expired_upload_session,
+    stream_media_file
+)
 
 router = APIRouter()
-logger = get_logger("media")
-
-
-async def _get_observation_from_media(session: AsyncSession, media_file: MediaFile) -> Observation:
-    """Helper to get observation and check if it exists"""
-    obs_query = select(Observation).where(
-        Observation.id == media_file.observation_id,
-        Observation.is_deleted == False
-    )
-    result = await session.exec(obs_query)
-    observation = result.first()
-
-    if not observation:
-        raise HTTPException(
-            status_code=fapi_status.HTTP_404_NOT_FOUND,
-            detail="Associated observation not found"
-        )
-
-    return observation
-
-
-async def _assemble_chunks_into_file(session: AsyncSession, media_file_id: int):
-    """Assemble all chunks into a single complete file"""
-    from pathlib import Path
-    
-    # Get media file info
-    media_query = select(MediaFile).where(MediaFile.id == media_file_id)
-    media_result = await session.exec(media_query)
-    media_file = media_result.first()
-    
-    if not media_file:
-        logger.error(f"Media file {media_file_id} not found for assembly")
-        return
-    
-    # Get all chunks ordered by chunk number
-    chunks_query = select(FileChunk).where(
-        FileChunk.media_file_id == media_file_id
-    ).order_by(FileChunk.chunk_number)
-    chunks_result = await session.exec(chunks_query)
-    chunks = chunks_result.all()
-    
-    if not chunks:
-        logger.error(f"No chunks found for media file {media_file_id}")
-        return
-    
-    try:
-        # Create complete file path
-        uploads_dir = Path(settings.storage.upload_path)
-        observation_dir = uploads_dir / str(media_file.observation_id)
-        complete_file_path = observation_dir / media_file.stored_filename
-        
-        # Ensure observation directory exists
-        observation_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Assemble chunks into complete file
-        with open(complete_file_path, "wb") as complete_file:
-            for chunk in chunks:
-                try:
-                    with open(chunk.chunk_file_path, "rb") as chunk_file:
-                        chunk_data = chunk_file.read()
-                        complete_file.write(chunk_data)
-                except FileNotFoundError:
-                    logger.error(f"Chunk file not found: {chunk.chunk_file_path}")
-                    return
-        
-        # Update media file with complete file path
-        media_file.file_path = str(complete_file_path)
-        media_file.upload_complete = True
-        
-        logger.info(f"Successfully assembled {len(chunks)} chunks into {complete_file_path}")
-        
-    except Exception as e:
-        logger.error(f"Failed to assemble chunks for media file {media_file_id}: {e}")
-
-
-async def _cleanup_expired_upload_session(session: AsyncSession, media_file_id: int):
-    """Clean up expired upload session - remove all chunks and reset media file"""
-    from pathlib import Path
-    
-    # Get media file
-    media_query = select(MediaFile).where(MediaFile.id == media_file_id)
-    media_result = await session.exec(media_query)
-    media_file = media_result.first()
-    
-    if not media_file:
-        return
-    
-    # Get all chunks for this media file
-    chunks_query = select(FileChunk).where(FileChunk.media_file_id == media_file_id)
-    chunks_result = await session.exec(chunks_query)
-    chunks = chunks_result.all()
-    
-    # Delete chunk files from filesystem
-    for chunk in chunks:
-        try:
-            chunk_path = Path(chunk.chunk_file_path)
-            if chunk_path.exists():
-                chunk_path.unlink()
-        except Exception as e:
-            logger.warning(f"Failed to delete expired chunk file {chunk.chunk_file_path}: {e}")
-        
-        # Delete chunk record from database
-        await session.delete(chunk)
-    
-    # Clean up chunk directory
-    try:
-        uploads_dir = Path(settings.storage.upload_path)
-        observation_dir = uploads_dir / str(media_file.observation_id)
-        chunks_dir = observation_dir / f"media_{media_file_id}"
-        
-        if chunks_dir.exists():
-            chunks_dir.rmdir()  # Only removes if empty
-    except Exception as e:
-        logger.warning(f"Failed to cleanup expired chunk directory: {e}")
-    
-    # Reset media file session tracking
-    media_file.upload_session_started = get_default_timezone_datetime()
-    media_file.upload_last_activity = get_default_timezone_datetime()
-    media_file.upload_complete = False
-    
-    logger.info(f"Cleaned up expired upload session for media file {media_file_id}")
-
-
-class ChunkedUploadStart(BaseModel):
-    observation_id: int
-    original_filename: str
-    file_size: int
-    chunk_size: int
-    total_chunks: int
-    file_extension: str
-    media_type: str
-
-
-class ChunkedUploadResponse(BaseModel):
-    upload_id: str
-    media_file_id: int
-    chunk_size: int
-    total_chunks: int
-    uploaded_chunks: List[int]
-
-
-class ChunkUploadResponse(BaseModel):
-    chunk_number: int
-    uploaded: bool
-    remaining_chunks: int
-    upload_complete: bool
-
-
-class MediaFileInfo(BaseModel):
-    id: int
-    original_filename: str
-    stored_filename: str
-    file_size: int
-    mime_type: str
-    media_type: str
-    width: Optional[int]
-    height: Optional[int]
-    uploaded_at: datetime
-    upload_complete: bool
-    total_chunks: int
-    uploaded_chunks: int
-
-
-class ResumeUploadRequest(BaseModel):
-    observation_id: int
-    original_filename: str
-    file_size: int
-    file_hash: str
-    media_type: str
-
-
-class UploadSessionInfo(BaseModel):
-    media_file_id: int
-    uploaded_chunks: List[int]
-    total_chunks: int
-    file_hash: str
-    last_activity: datetime
-    is_expired: bool
-    can_resume: bool
+_logger = get_api_logger()
 
 
 @router.post(MediaRoutes.UPLOAD_CHUNKED_START.value, response_model=ChunkedUploadResponse)
@@ -221,7 +56,7 @@ async def start_chunked_upload(
     # Verify observation exists and user has access
     observation_query = select(Observation).where(
         Observation.id == upload_data.observation_id,
-        Observation.is_deleted is False
+        Observation.is_deleted == False
     )
     observation = await session.exec(observation_query)
     observation_result = observation.first()
@@ -333,7 +168,7 @@ async def upload_chunk(
         )
 
     # Check if user has access to this media's observation post
-    observation = await _get_observation_from_media(session, media_file)
+    observation = await get_observation_from_media(session, media_file)
     await AccessControlService.check_post_membership(
         current_user,
         observation.post_id,
@@ -348,7 +183,7 @@ async def upload_chunk(
     
     if current_time - media_file.upload_last_activity > timeout_duration:
         # Session expired, clean up chunks and restart
-        await _cleanup_expired_upload_session(session, media_file_id)
+        await cleanup_expired_upload_session(session, media_file_id)
         raise HTTPException(
             status_code=fapi_status.HTTP_408_REQUEST_TIMEOUT,
             detail=f"Upload session expired after {settings.storage.upload_timeout_minutes} minutes. Please restart upload."
@@ -397,7 +232,7 @@ async def upload_chunk(
             media_file.mime_type = detected_mime
             
             # Log detection method for debugging
-            logger.info(f"MIME type detected for {media_file.original_filename}: {detected_mime} (method: {detection_method})")
+            _logger.info(f"MIME type detected for {media_file.original_filename}: {detected_mime} (method: {detection_method})")
         
         # Create chunk record with file path
         file_chunk = FileChunk(
@@ -422,7 +257,7 @@ async def upload_chunk(
     
     # If upload is complete, assemble the chunks into a single file
     if upload_complete:
-        await _assemble_chunks_into_file(session, media_file_id)
+        await assemble_chunks_into_file(session, media_file_id)
     
     await session.commit()
     
@@ -457,7 +292,7 @@ async def get_media_info(
         )
 
     # Get observation and check post access
-    observation = await _get_observation_from_media(session, media_file)
+    observation = await get_observation_from_media(session, media_file)
     await AccessControlService.check_post_membership(
         current_user,
         observation.post_id,
@@ -515,7 +350,7 @@ async def download_media_file(
         )
 
     # Check if user has access to this media's observation post
-    observation = await _get_observation_from_media(session, media_file)
+    observation = await get_observation_from_media(session, media_file)
     await AccessControlService.check_post_membership(
         current_user,
         observation.post_id,
@@ -525,7 +360,7 @@ async def download_media_file(
 
     # Handle streaming download for large files
     if stream and media_file.file_size > 10 * 1024 * 1024:  # 10MB threshold
-        return await _stream_media_file(session, media_file, validate_integrity)
+        return await stream_media_file(session, media_file, media_manager, validate_integrity)
     
     # Use the enhanced media manager for retrieval
     try:
@@ -564,7 +399,7 @@ async def download_media_file(
             detail=str(e)
         )
     except Exception as e:
-        logger.error(f"Failed to download media file {media_id}: {e}")
+        _logger.error(f"Failed to download media file {media_id}: {e}")
         raise HTTPException(
             status_code=fapi_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve file"
@@ -624,56 +459,13 @@ async def list_media_files(
     return media_info_list
 
 
-async def _stream_media_file(session: AsyncSession, media_file: MediaFile, validate_integrity: bool = True):
-    """Stream large media files chunk by chunk"""
-
-    async def generate_chunks():
-        try:
-            # Use the media manager for reliable retrieval
-            file_data = await media_manager.retrieve_file(
-                session=session,
-                media_file_id=media_file.id,
-                validate_integrity=validate_integrity
-            )
-
-            if not file_data:
-                raise HTTPException(
-                    status_code=fapi_status.HTTP_404_NOT_FOUND,
-                    detail="File data not available"
-                )
-
-            # Stream in 64KB chunks for optimal performance
-            chunk_size = 64 * 1024
-            for i in range(0, len(file_data), chunk_size):
-                chunk = file_data[i:i + chunk_size]
-                yield chunk
-
-                # Small delay to prevent overwhelming the client
-                await asyncio.sleep(0.001)
-
-        except Exception as e:
-            logger.error(f"Error streaming media file {media_file.id}: {e}")
-            raise HTTPException(
-                status_code=fapi_status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to stream file"
-            )
-
-    return StreamingResponse(
-        generate_chunks(),
-        media_type=media_file.mime_type,
-        headers={
-            "Content-Disposition": f"attachment; filename={media_file.original_filename}",
-            "Content-Length": str(media_file.file_size),
-            "X-File-Hash": media_file.file_hash,
-            "Accept-Ranges": "bytes",
-            "Cache-Control": "private, max-age=3600",
-            "ETag": f'"{media_file.file_hash}"'
-        }
-    )
-
-
 @router.delete(MediaRoutes.MEDIA_BY_ID.value)
-@PermissionService.require_permission(Permissions.OBSERVATION_DELETE.value)
+@PermissionService.require_permissions({
+    "all": [
+        {"any": [Permissions.OBSERVATION_DELETE.value, Permissions.IS_ADMIN.value]},
+        Permissions.OBSERVATION_VIEW.value
+    ]
+})
 async def delete_media_file(
     media_id: int,
     session: AsyncSession = Depends(get_session),
@@ -695,7 +487,7 @@ async def delete_media_file(
         )
 
     # Check if user has access to this media's observation post
-    observation = await _get_observation_from_media(session, media_file)
+    observation = await get_observation_from_media(session, media_file)
     await AccessControlService.check_post_membership(
         current_user,
         observation.post_id,
@@ -716,7 +508,7 @@ async def delete_media_file(
             if chunk_path.exists():
                 chunk_path.unlink()
         except Exception as e:
-            logger.warning(f"Failed to delete chunk file {chunk.chunk_file_path}: {e}")
+            _logger.warning(f"Failed to delete chunk file {chunk.chunk_file_path}: {e}")
         
         # Delete chunk record from database
         await session.delete(chunk)
@@ -734,7 +526,7 @@ async def delete_media_file(
         if observation_dir.exists() and not any(observation_dir.iterdir()):
             observation_dir.rmdir()
     except Exception as e:
-        logger.warning(f"Failed to cleanup directories: {e}")
+        _logger.warning(f"Failed to cleanup directories: {e}")
     
     # Delete media file record
     await session.delete(media_file)
@@ -777,7 +569,7 @@ async def check_file_integrity(
         )
 
     # Check if user has access to this media's observation post
-    observation = await _get_observation_from_media(session, media_file)
+    observation = await get_observation_from_media(session, media_file)
     await AccessControlService.check_post_membership(
         current_user,
         observation.post_id,
@@ -810,7 +602,7 @@ async def repair_file(
 
 
 @router.post(MediaRoutes.MAINTENANCE_CLEANUP.value)
-@PermissionService.require_permission(Permissions.ADMIN_FULL.value)
+@PermissionService.require_permission(Permissions.IS_ADMIN.value)
 async def cleanup_orphaned_files(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user)
@@ -827,7 +619,7 @@ async def cleanup_orphaned_files(
 
 
 @router.get(MediaRoutes.STATISTICS.value)
-@PermissionService.require_permission(Permissions.ADMIN_FULL.value)
+@PermissionService.require_permission(Permissions.IS_ADMIN.value)
 async def get_storage_statistics(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user)
@@ -853,7 +645,7 @@ async def check_upload_session(
     # Verify observation exists and user has access
     observation_query = select(Observation).where(
         Observation.id == request.observation_id,
-        Observation.is_deleted is False
+        Observation.is_deleted == False
     )
     observation = await session.exec(observation_query)
     observation_result = observation.first()
@@ -939,7 +731,7 @@ async def resume_upload_session(
 
 
 @router.post(MediaRoutes.CLEANUP_OLD_CHUNKS.value)
-@PermissionService.require_permission(Permissions.ADMIN_FULL.value)
+@PermissionService.require_permission(Permissions.IS_ADMIN.value)
 async def cleanup_old_chunks(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user)
@@ -1029,7 +821,7 @@ async def upload_complete_file(
     original_filename = file.filename or "uploaded_file"
 
     # Log original filename for debugging problematic uploads
-    logger.info(f"Uploading file: '{original_filename}' (size: {len(file_data)} bytes)")
+    _logger.info(f"Uploading file: '{original_filename}' (size: {len(file_data)} bytes)")
 
     # Store using enhanced media manager
     try:

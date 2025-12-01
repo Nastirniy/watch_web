@@ -11,11 +11,10 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from app.backend.config import settings
-from app.backend.utils.logging_config import setup_logging, get_logger
+from app.backend.utils.logging_config import setup_logging, get_logger, get_main_logger
 from app.backend.database import initialize_database_with_migrations
-from app.backend.middleware.auth import SecurityMiddleware
-from app.backend.routes import auth, users, observations, posts, health, media
-from app.backend.enums.routes import AuthRoutes, UserRoutes, ObservationRoutes, PostRoutes, SystemRoutes, MediaRoutes
+from app.backend.routes import auth, users, observations, posts, health, media, roles
+from app.backend.enums.routes import AuthRoutes, UserRoutes, ObservationRoutes, PostRoutes, SystemRoutes, MediaRoutes, RoleRoutes
 
 # Initialize logging system
 setup_logging(
@@ -25,20 +24,20 @@ setup_logging(
 )
 
 # Get application logger
-logger = get_logger("main")
+_logger = get_main_logger()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifecycle"""
     try:
-        logger.info("Starting application...")
+        _logger.info("Starting application...")
         await initialize_database_with_migrations()
-        logger.info("Database initialization completed. Server ready.")
+        _logger.info("Database initialization completed. Server ready.")
         yield
-        logger.info("Shutting down application...")
+        _logger.info("Shutting down application...")
     except Exception as e:
-        logger.error(f"Startup failed: {e}")
+        _logger.error(f"Startup failed: {e}")
         import traceback
         traceback.print_exc()
         raise
@@ -60,13 +59,11 @@ fastapi_app.add_middleware(
     max_age=600
 )
 
-# Add security middleware
-# fastapi_app.add_middleware(SecurityMiddleware) # TODO: fix secure middleware, /redoc and /docs not opened
-
 # Include routers
 fastapi_app.include_router(health.router, tags=[SystemRoutes.tag()])
 fastapi_app.include_router(auth.router, prefix=AuthRoutes.BASE.versioned_path(), tags=[AuthRoutes.tag()])
 fastapi_app.include_router(users.router, prefix=UserRoutes.BASE.versioned_path(), tags=[UserRoutes.tag()])
+fastapi_app.include_router(roles.router, prefix=RoleRoutes.BASE.versioned_path(), tags=[RoleRoutes.tag()])
 fastapi_app.include_router(observations.router, prefix=ObservationRoutes.BASE.versioned_path(), tags=[ObservationRoutes.tag()])
 fastapi_app.include_router(posts.router, prefix=PostRoutes.BASE.versioned_path(), tags=[PostRoutes.tag()])
 fastapi_app.include_router(media.router, prefix=MediaRoutes.BASE.versioned_path(), tags=[MediaRoutes.tag()])
@@ -79,5 +76,5 @@ if __name__ == "__main__":
         host=settings.server.host,
         port=settings.server.port,
         reload=settings.server.reload,
-        log_level="info"
+        log_level=settings.logging.level.lower()
     )

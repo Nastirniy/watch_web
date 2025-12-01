@@ -7,7 +7,7 @@ class APIVersionRoutes(str, Enum):
     V1 = "/api/v1"
 
     @classmethod
-    def version(cls) -> str:
+    def current_version(cls) -> str:
         return str(cls.V1.value)  # TODO: need to be followed as app config
 
     def path(self) -> str:
@@ -21,7 +21,6 @@ class APIVersionRoutes(str, Enum):
         return "API_VERSIONS"
 
 
-
 class DocsRoutes(str, Enum):
     """FastAPI documentation routes"""
     BASE = ""  # No base prefix for docs
@@ -30,7 +29,7 @@ class DocsRoutes(str, Enum):
 
     def versioned_path(self) -> str:
         """Get the full path with base prefix and api version prefix"""
-        api_ver = APIVersionRoutes.version()
+        api_ver = APIVersionRoutes.current_version()
         if self == self.BASE:
             return f"{api_ver}{self.BASE.value}"
         return f"{api_ver}{self.BASE.value}{self.value}" if self.BASE.value else f"{api_ver}{self.value}"
@@ -60,7 +59,7 @@ class AuthRoutes(str, Enum):
 
     def versioned_path(self) -> str:
         """Get the full path with base prefix and api version prefix"""
-        api_ver = APIVersionRoutes.version()
+        api_ver = APIVersionRoutes.current_version()
         if self == self.BASE:
             return f"{api_ver}{self.BASE.value}"
         return f"{api_ver}{self.BASE.value}{self.value}" if self.BASE.value else f"{api_ver}{self.value}"
@@ -91,7 +90,7 @@ class ExportRoutes(str, Enum):
 
     def versioned_path(self) -> str:
         """Get the full path with base prefix and api version prefix"""
-        api_ver = APIVersionRoutes.version()
+        api_ver = APIVersionRoutes.current_version()
         if self == self.BASE:
             return f"{api_ver}{self.BASE.value}"
         return f"{api_ver}{self.BASE.value}{self.value}" if self.BASE.value else f"{api_ver}{self.value}"
@@ -129,7 +128,7 @@ class MediaRoutes(str, Enum):
 
     def versioned_path(self) -> str:
         """Get the full path with base prefix and api version prefix"""
-        api_ver = APIVersionRoutes.version()
+        api_ver = APIVersionRoutes.current_version()
         if self == self.BASE:
             return f"{api_ver}{self.BASE.value}"
         return f"{api_ver}{self.BASE.value}{self.value}" if self.BASE.value else f"{api_ver}{self.value}"
@@ -148,7 +147,6 @@ class MediaRoutes(str, Enum):
 class PostRoutes(str, Enum):
     """Post/content management routes"""
     BASE = "/posts"
-    ACTIVE = "/active"
     POST_BY_ID = "/{post_id}"
     POST_STATUS = "/{post_id}/status"
     BULK_STATUS_UPDATE = "/bulk/status-update"
@@ -161,7 +159,7 @@ class PostRoutes(str, Enum):
 
     def versioned_path(self) -> str:
         """Get the full path with base prefix and api version prefix"""
-        api_ver = APIVersionRoutes.version()
+        api_ver = APIVersionRoutes.current_version()
         if self == self.BASE:
             return f"{api_ver}{self.BASE.value}"
         return f"{api_ver}{self.BASE.value}{self.value}" if self.BASE.value else f"{api_ver}{self.value}"
@@ -190,7 +188,7 @@ class SignalRoutes(str, Enum):
 
     def versioned_path(self) -> str:
         """Get the full path with base prefix and api version prefix"""
-        api_ver = APIVersionRoutes.version()
+        api_ver = APIVersionRoutes.current_version()
         if self == self.BASE:
             return f"{api_ver}{self.BASE.value}"
         return f"{api_ver}{self.BASE.value}{self.value}" if self.BASE.value else f"{api_ver}{self.value}"
@@ -218,7 +216,7 @@ class ObservationRoutes(str, Enum):
 
     def versioned_path(self) -> str:
         """Get the full path with base prefix and api version prefix"""
-        api_ver = APIVersionRoutes.version()
+        api_ver = APIVersionRoutes.current_version()
         if self == self.BASE:
             return f"{api_ver}{self.BASE.value}"
         return f"{api_ver}{self.BASE.value}{self.value}" if self.BASE.value else f"{api_ver}{self.value}"
@@ -239,13 +237,10 @@ class UserRoutes(str, Enum):
     BASE = "/users"
     USER_BY_ID = "/{user_id}"
     USER_ROLES = "/{user_id}/roles"
-    USER_ROLE_BY_ID = "/{user_id}/roles/{role_id}"
-    BULK_ASSIGN_ROLES = "/bulk/assign-roles"
-    STATISTICS = "/statistics"
 
     def versioned_path(self) -> str:
         """Get the full path with base prefix and api version prefix"""
-        api_ver = APIVersionRoutes.version()
+        api_ver = APIVersionRoutes.current_version()
         if self == self.BASE:
             return f"{api_ver}{self.BASE.value}"
         return f"{api_ver}{self.BASE.value}{self.value}" if self.BASE.value else f"{api_ver}{self.value}"
@@ -261,6 +256,31 @@ class UserRoutes(str, Enum):
         return "USERS"
 
 
+class RoleRoutes(str, Enum):
+    """Role management routes"""
+    BASE = "/roles"
+    ROLE_BY_ID = "/{role_id}"
+    ROLE_PERMISSIONS = "/{role_id}/permissions"
+    ROLE_PERMISSION_BY_ID = "/{role_id}/permissions/{permission_id}"
+
+    def versioned_path(self) -> str:
+        """Get the full path with base prefix and api version prefix"""
+        api_ver = APIVersionRoutes.current_version()
+        if self == self.BASE:
+            return f"{api_ver}{self.BASE.value}"
+        return f"{api_ver}{self.BASE.value}{self.value}" if self.BASE.value else f"{api_ver}{self.value}"
+
+    def path(self) -> str:
+        """Get the full path with base prefix"""
+        if self == self.BASE:
+            return f"{self.BASE.value}"
+        return f"{self.BASE.value}{self.value}" if self.BASE.value else str(self.value)
+
+    @staticmethod
+    def tag() -> str:
+        return "ROLES"
+
+
 class SystemRoutes(str, Enum):
     """System and utility routes"""
     BASE = ""  # No base prefix for system routes
@@ -272,7 +292,7 @@ class SystemRoutes(str, Enum):
 
     def versioned_path(self) -> str:
         """Get the full path with base prefix and api version prefix"""
-        api_ver = APIVersionRoutes.version()
+        api_ver = APIVersionRoutes.current_version()
         if self == self.BASE:
             return f"{api_ver}{self.BASE.value}"
         return f"{api_ver}{self.BASE.value}{self.value}" if self.BASE.value else f"{api_ver}{self.value}"
@@ -299,6 +319,7 @@ class Routes:
     SIGNALS = SignalRoutes
     OBSERVATIONS = ObservationRoutes
     USERS = UserRoutes
+    ROLES = RoleRoutes
     API_VERSION = APIVersionRoutes
     SYSTEM = SystemRoutes
 

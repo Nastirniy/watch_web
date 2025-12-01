@@ -1,90 +1,35 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Form
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.exc import IntegrityError, DataError
 from sqlmodel import select
-from pydantic import BaseModel, Field, field_validator
 from datetime import datetime, timezone
+import json
 
 from app.backend.database import get_session
 from app.backend.models.user import User
+from app.backend.models.role import Role, UserRole
+from app.backend.models.post import Post
 from app.backend.dependencies import get_current_user
 from app.backend.services.permissions import PermissionService
+from app.backend.services.access_control import AccessControlService
+from app.backend.services.auth import AuthService
+from app.backend.helpers.certeficates_helper import CertificateParser, hash_data
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import UserRoutes, SystemRoutes
-from app.backend.utils.validators import (
-    SecureBaseModel, 
-    SecurityValidators, 
-    PaginationParams,
-    create_secure_string_field,
-    create_secure_id_field
-)
-from app.backend.utils.logging_config import get_logger
+from app.backend.utils.validators import PaginationParams
+from app.backend.utils.logging_config import get_logger, get_api_logger
+from app.backend.routes.models.request.user_request import UserCreateData, UserUpdateData
+from app.backend.routes.models.response.user_response import UserResponse, UserRoleResponse
 
 router = APIRouter()
-logger = get_logger("users")
-
-
-class UserCreate(SecureBaseModel):
-    username: str = Field(..., min_length=3, max_length=50)
-    username_alias: str = Field(..., min_length=1, max_length=255)
-    pki_certificate_cn: str = Field(..., min_length=1, max_length=255)
-    pki_certificate_serial: str = Field(..., min_length=1, max_length=255)
-    pki_certificate_fingerprint: str = Field(..., min_length=1, max_length=512)
-    post_id: Optional[int] = Field(default=None, gt=0)
-
-    @field_validator('username')
-    @classmethod
-    def validate_username(cls, v):
-        return SecurityValidators.validate_username(v)
-
-    @field_validator('username_alias')
-    @classmethod
-    def validate_username_alias(cls, v):
-        return SecurityValidators.sanitize_string(v, max_length=255)
-
-    @field_validator('pki_certificate_cn')
-    @classmethod
-    def validate_cn(cls, v):
-        return SecurityValidators.sanitize_string(v, max_length=255)
-
-    @field_validator('pki_certificate_serial')
-    @classmethod
-    def validate_serial(cls, v):
-        return SecurityValidators.sanitize_string(v, max_length=255)
-
-    @field_validator('pki_certificate_fingerprint')
-    @classmethod
-    def validate_fingerprint(cls, v):
-        return SecurityValidators.sanitize_string(v, max_length=512)
-
-
-class UserUpdate(SecureBaseModel):
-    username_alias: Optional[str] = Field(default=None, min_length=1, max_length=255)
-    post_id: Optional[int] = Field(default=None, gt=0)
-    is_active: Optional[bool] = None
-
-    @field_validator('username_alias')
-    @classmethod
-    def validate_username_alias(cls, v):
-        if v is not None:
-            return SecurityValidators.sanitize_string(v, max_length=255)
-        return v
-
-
-class UserResponse(SecureBaseModel):
-    id: int
-    username: str
-    username_alias: str
-    post_id: Optional[int]
-    is_active: bool
-    created_at: datetime
-    updated_at: Optional[datetime]
-    last_login_at: Optional[datetime]
+_logger = get_api_logger()
 
 
 @router.get(SystemRoutes.ROOT.value, response_model=List[UserResponse])
-@PermissionService.require_permission(Permissions.USER_VIEW.value)
+@PermissionService.require_permissions({"all": [
+    Permissions.USER_VIEW.value,
+    Permissions.IS_ADMIN.value]})
 async def list_users(
         pagination: PaginationParams = Depends(),
         session: AsyncSession = Depends(get_session),
@@ -103,7 +48,7 @@ async def list_users(
         )
         
         users = result.all()
-        logger.info(f"User {current_user.username} listed {len(users)} users")
+        _logger.info(f"User {current_user.username} listed {len(users)} users")
         
         return [UserResponse(
             id=user.id,
@@ -117,22 +62,85 @@ async def list_users(
         ) for user in users]
 
     except Exception as e:
-        logger.error(f"Error listing users: {str(e)}")
+        _logger.error(f"Error listing users: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve users"
         )
 
 
-@router.post(SystemRoutes.ROOT.value, response_model=User)
-@PermissionService.require_permission(Permissions.USER_CREATE.value)
+@router.post(SystemRoutes.ROOT.value, response_model=UserResponse)
+@PermissionService.require_permissions({"all": [
+    Permissions.USER_CREATE.value,
+    Permissions.IS_ADMIN.value]})
 async def create_user(
-        user_data: UserCreate,
+        certificate: UploadFile = File(..., description="PKI certificate file (PEM or DER format)"),
+        username: str = Form(..., min_length=3, max_length=50),
+        username_alias: str = Form(..., min_length=1, max_length=255),
+        role_ids: str = Form(..., description="JSON array of role IDs, e.g. [1, 2, 3]"),
+        post_id: Optional[int] = Form(default=None),
         session: AsyncSession = Depends(get_session),
         current_user: User = Depends(get_current_user)
 ):
-    """Create new user"""
-    # Check if user exists
+    """
+    Create new user with PKI certificate authentication
+
+    The certificate file will be parsed to extract:
+    - Common Name (CN)
+    - Serial Number
+    - SHA256 Fingerprint
+
+    These fields are hashed before storage for security.
+
+    Parameters:
+    - certificate: PKI certificate file (PEM or DER format)
+    - username: Unique username (3-50 characters)
+    - username_alias: Display name (1-255 characters)
+    - role_ids: JSON array string of role IDs, e.g. "[1, 2, 3]"
+    - post_id: Optional post/position ID
+    """
+    # Parse role_ids from JSON string
+    try:
+        _logger.debug(f"Received role_ids string: {role_ids}")
+        role_ids_list = json.loads(role_ids)
+
+        if not isinstance(role_ids_list, list):
+            raise ValueError("role_ids must be a JSON array")
+
+    except json.JSONDecodeError as e:
+        _logger.error(f"JSON decode error for role_ids: {str(e)}, received: {role_ids}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid role_ids format. Must be a JSON array like [1, 2, 3]. Error: {str(e)}"
+        )
+
+    # Validate all input data using Pydantic model
+    try:
+        user_data = UserCreateData(
+            username=username,
+            username_alias=username_alias,
+            post_id=post_id,
+            role_ids=role_ids_list
+        )
+    except Exception as e:
+        _logger.error(f"Validation error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e)
+        )
+
+    # Validate post_id exists if provided
+    if user_data.post_id is not None:
+        post_result = await session.exec(
+            select(Post).where(Post.id == user_data.post_id)
+        )
+        if not post_result.first():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Post with ID {user_data.post_id} not found"
+            )
+
+    # Check if user already exists
     result = await session.exec(
         select(User).where(User.username == user_data.username)
     )
@@ -142,20 +150,110 @@ async def create_user(
             detail="User with this username already exists"
         )
 
+    # Read and parse certificate
+    try:
+        cert_data = await certificate.read()
+        if len(cert_data) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Certificate file is empty"
+            )
+
+        # Limit certificate file size (5MB)
+        max_cert_size = 5 * 1024 * 1024
+        if len(cert_data) > max_cert_size:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="Certificate file too large (max 5MB)"
+            )
+
+        # Parse certificate and extract PKI fields
+        cert_info = CertificateParser.parse_certificate(cert_data)
+        pki_cn = cert_info["pki_certificate_cn"]
+        pki_serial = cert_info["pki_certificate_serial"]
+        pki_fingerprint = cert_info["pki_certificate_fingerprint"]
+
+        _logger.info(f"Certificate parsed successfully for user {username}: CN={pki_cn}, Serial={pki_serial[:16]}...")
+
+    except ValueError as e:
+        _logger.error(f"Certificate parsing error for user {username}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid certificate: {str(e)}"
+        )
+    except Exception as e:
+        _logger.error(f"Unexpected error reading certificate: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to process certificate file"
+        )
+
+    # Validate all roles exist
+    roles_to_assign = []
+    for role_id in user_data.role_ids:
+        role_result = await session.exec(
+            select(Role).where(Role.id == role_id)
+        )
+        role = role_result.first()
+        if not role:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Role with ID {role_id} not found"
+            )
+        roles_to_assign.append(role)
+
     # Hash PKI certificate data before storing
-    from app.backend.services.auth import AuthService
-    user_dict = user_data.model_dump()
-    user_dict['pki_certificate_cn_hash'] = AuthService.hash_pki_data(user_dict.pop('pki_certificate_cn'))
-    user_dict['pki_certificate_serial_hash'] = AuthService.hash_pki_data(user_dict.pop('pki_certificate_serial'))
-    user_dict['pki_certificate_fingerprint_hash'] = AuthService.hash_pki_data(user_dict.pop('pki_certificate_fingerprint'))
-    
-    user = User(**user_dict)
+    pki_cn_hash = await hash_data(pki_cn)
+    pki_serial_hash = await hash_data(pki_serial)
+    pki_fingerprint_hash = await hash_data(pki_fingerprint)
+
+    # Check for duplicate certificate before creating user
+    duplicate_check = await session.exec(
+        select(User).where(
+            (User.pki_certificate_cn_hash == pki_cn_hash) |
+            (User.pki_certificate_serial_hash == pki_serial_hash) |
+            (User.pki_certificate_fingerprint_hash == pki_fingerprint_hash)
+        )
+    )
+    if duplicate_check.first():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Certificate already exists for another user"
+        )
+
+    # Create user with validated data and hashed PKI data
+    user = User(
+        username=user_data.username,
+        username_alias=user_data.username_alias,
+        post_id=user_data.post_id,
+        pki_certificate_cn_hash=pki_cn_hash,
+        pki_certificate_serial_hash=pki_serial_hash,
+        pki_certificate_fingerprint_hash=pki_fingerprint_hash
+    )
     session.add(user)
-    
+
     try:
         await session.commit()
         await session.refresh(user)
-        return user
+
+        # Assign roles
+        for role in roles_to_assign:
+            user_role = UserRole(user_id=user.id, role_id=role.id)
+            session.add(user_role)
+
+        await session.commit()
+        _logger.info(f"User {current_user.username} created user {user_data.username} with {len(roles_to_assign)} roles and PKI authentication")
+
+        return UserResponse(
+            id=user.id,
+            username=user.username,
+            username_alias=user.username_alias,
+            post_id=user.post_id,
+            is_active=user.is_active,
+            created_at=user.created_at,
+            updated_at=user.updated_at,
+            last_login_at=user.last_login_at
+        )
     except (IntegrityError, DataError) as e:
         await session.rollback()
         error_msg = str(e)
@@ -167,31 +265,40 @@ async def create_user(
         elif "Duplicate entry" in error_msg or "already exists" in error_msg:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User with this username already exists"
+                detail="User with this username or certificate already exists"
             )
         else:
+            _logger.error(f"Error creating user: {error_msg}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Database error occurred"
             )
 
 
-@router.get(UserRoutes.USER_BY_ID.value, response_model=User)
-@PermissionService.require_permission(Permissions.USER_VIEW.value)
+@router.get(UserRoutes.USER_BY_ID.value, response_model=UserResponse)
+@PermissionService.require_permissions({"any": [
+    Permissions.USER_VIEW.value,
+    Permissions.IS_ADMIN.value]})
 async def get_user(
         user_id: int,
         session: AsyncSession = Depends(get_session),
         current_user: User = Depends(get_current_user)
 ):
-    """Get user by ID"""
+    """Get user by ID - users can only view their own information or if they have admin.true"""
     if user_id <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User ID must be a positive integer"
         )
-    
+
+    # Check if user is accessing themselves or is admin
+    await AccessControlService.check_user_self_or_admin(
+        current_user, user_id, session, "view"
+    )
+
     result = await session.exec(
-        select(User).where(User.id == user_id, User.is_deleted is False)
+        select(User).where(User.id == user_id)
+        # select(User).where(User.id == user_id, User.is_deleted is False)  # TODO: implement boolean check
     )
     user = result.first()
 
@@ -201,20 +308,54 @@ async def get_user(
             detail="User not found"
         )
 
-    return user
+    return UserResponse(
+        id=user.id,
+        username=user.username,
+        username_alias=user.username_alias,
+        post_id=user.post_id,
+        is_active=user.is_active,
+        created_at=user.created_at,
+        updated_at=user.updated_at,
+        last_login_at=user.last_login_at
+    )
 
 
-@router.patch(UserRoutes.USER_BY_ID.value, response_model=User)
-@PermissionService.require_permission(Permissions.USER_UPDATE.value)
+@router.patch(UserRoutes.USER_BY_ID.value, response_model=UserResponse)
+@PermissionService.require_permissions({"all": [
+    Permissions.USER_UPDATE.value,
+    Permissions.USER_VIEW.value,
+    Permissions.IS_ADMIN.value]})
 async def update_user(
         user_id: int,
-        user_update: UserUpdate,
+        certificate: Optional[UploadFile] = File(None, description="Optional PKI certificate file to update (PEM or DER format)"),
+        username_alias: Optional[str] = Form(None, min_length=1, max_length=255),
+        post_id: Optional[int] = Form(None),
+        is_active: Optional[bool] = Form(None),
+        role_ids: Optional[str] = Form(None, description="Optional JSON array of role IDs, e.g. [1, 2, 3]"),
         session: AsyncSession = Depends(get_session),
         current_user: User = Depends(get_current_user)
 ):
-    """Update user"""
+    """
+    Update user fields - all fields are optional
+
+    Supports updating:
+    - username_alias: User's display name (1-255 characters)
+    - post_id: User's post/position ID
+    - is_active: User's active status (boolean)
+    - role_ids: Replace all user roles with provided role IDs (JSON array string, e.g. "[1, 2, 3]")
+    - certificate: Update PKI certificate authentication data (file upload)
+
+    Only provided fields will be updated.
+    """
+    if user_id <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User ID must be a positive integer"
+        )
+
+    # Find user
     result = await session.exec(
-        select(User).where(User.id == user_id, User.is_deleted is False)
+        select(User).where(User.id == user_id, User.is_deleted == False)
     )
     user = result.first()
 
@@ -224,12 +365,240 @@ async def update_user(
             detail="User not found"
         )
 
-    for field, value in user_update.model_dump(exclude_unset=True).items():
-        setattr(user, field, value)
+    # Parse role_ids from JSON string if provided
+    role_ids_list = None
+    if role_ids is not None:
+        try:
+            _logger.debug(f"Received role_ids string for update: {role_ids}")
+            role_ids_list = json.loads(role_ids)
 
+            if not isinstance(role_ids_list, list):
+                raise ValueError("role_ids must be a JSON array")
+
+        except json.JSONDecodeError as e:
+            _logger.error(f"JSON decode error for role_ids: {str(e)}, received: {role_ids}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid role_ids format. Must be a JSON array like [1, 2, 3]. Error: {str(e)}"
+            )
+
+    # Validate input data using Pydantic model
+    try:
+        update_data = UserUpdateData(
+            username_alias=username_alias,
+            post_id=post_id,
+            is_active=is_active,
+            role_ids=role_ids_list
+        )
+    except Exception as e:
+        _logger.error(f"Validation error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e)
+        )
+
+    if update_data.post_id is not None:
+        post_result = await session.exec(
+            select(Post).where(Post.id == update_data.post_id)
+        )
+        if not post_result.first():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Post with ID {update_data.post_id} not found"
+            )
+        user.post_id = update_data.post_id
+
+    if update_data.username_alias is not None:
+        user.username_alias = update_data.username_alias
+
+    if update_data.is_active is not None:
+        user.is_active = update_data.is_active
+
+    # Handle certificate update if provided
+    if certificate is not None:
+        try:
+            cert_data = await certificate.read()
+            if len(cert_data) == 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Certificate file is empty"
+                )
+
+            # Limit certificate file size (5MB)
+            max_cert_size = 5 * 1024 * 1024
+            if len(cert_data) > max_cert_size:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail="Certificate file too large (max 5MB)"
+                )
+
+            # Parse certificate and extract PKI fields
+            cert_info = CertificateParser.parse_certificate(cert_data)
+            pki_cn = cert_info["pki_certificate_cn"]
+            pki_serial = cert_info["pki_certificate_serial"]
+            pki_fingerprint = cert_info["pki_certificate_fingerprint"]
+
+            _logger.info(f"Certificate parsed for user {user.username}: CN={pki_cn}, Serial={pki_serial[:16]}...")
+
+            # Hash PKI certificate data before storing
+            pki_cn_hash = await hash_data(pki_cn)
+            pki_serial_hash = await hash_data(pki_serial)
+            pki_fingerprint_hash = await hash_data(pki_fingerprint)
+
+            # Check for duplicate certificate (excluding current user)
+            duplicate_check = await session.exec(
+                select(User).where(
+                    (
+                        (User.pki_certificate_cn_hash == pki_cn_hash) |
+                        (User.pki_certificate_serial_hash == pki_serial_hash) |
+                        (User.pki_certificate_fingerprint_hash == pki_fingerprint_hash)
+                    ) &
+                    (User.id != user_id)
+                )
+            )
+            if duplicate_check.first():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Certificate already exists for another user"
+                )
+
+            user.pki_certificate_cn_hash = pki_cn_hash
+            user.pki_certificate_serial_hash = pki_serial_hash
+            user.pki_certificate_fingerprint_hash = pki_fingerprint_hash
+
+            _logger.info(f"User {current_user.username} updated certificate for user {user.username}")
+
+        except ValueError as e:
+            _logger.error(f"Certificate parsing error for user {user.username}: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid certificate: {str(e)}"
+            )
+        except Exception as e:
+            _logger.error(f"Unexpected error reading certificate: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to process certificate file"
+            )
+
+    # Update timestamp
     user.updated_at = datetime.now(timezone.utc)
     session.add(user)
-    await session.commit()
-    await session.refresh(user)
 
-    return user
+    try:
+        await session.commit()
+
+        # Handle role updates if provided
+        if update_data.role_ids is not None:
+            # Validate all roles exist
+            roles_to_assign = []
+            for role_id in update_data.role_ids:
+                role_result = await session.exec(
+                    select(Role).where(Role.id == role_id)
+                )
+                role = role_result.first()
+                if not role:
+                    await session.rollback()
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Role with ID {role_id} not found"
+                    )
+                roles_to_assign.append(role)
+
+            # Delete existing role assignments
+            existing_assignments_result = await session.exec(
+                select(UserRole).where(UserRole.user_id == user_id)
+            )
+            existing_assignments = existing_assignments_result.all()
+
+            for assignment in existing_assignments:
+                await session.delete(assignment)
+
+            # Assign new roles
+            for role in roles_to_assign:
+                user_role = UserRole(user_id=user_id, role_id=role.id)
+                session.add(user_role)
+
+            await session.commit()
+            _logger.info(f"User {current_user.username} updated user {user.username} and replaced roles with {len(roles_to_assign)} new roles")
+
+        await session.refresh(user)
+        _logger.info(f"User {current_user.username} updated user {user.username}")
+
+        return UserResponse(
+            id=user.id,
+            username=user.username,
+            username_alias=user.username_alias,
+            post_id=user.post_id,
+            is_active=user.is_active,
+            created_at=user.created_at,
+            updated_at=user.updated_at,
+            last_login_at=user.last_login_at
+        )
+
+    except (IntegrityError, DataError) as e:
+        await session.rollback()
+        error_msg = str(e)
+        if "Duplicate entry" in error_msg or "already exists" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Certificate already exists for another user"
+            )
+        else:
+            _logger.error(f"Error updating user: {error_msg}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Database error occurred"
+            )
+
+
+# UserRole Management Routes
+
+@router.get(UserRoutes.USER_ROLES.value, response_model=List[UserRoleResponse])
+@PermissionService.require_permissions({"any": [
+    {"all": [
+        Permissions.USER_VIEW.value,
+        Permissions.ROLE_VIEW.value,
+    ]},
+    Permissions.IS_ADMIN.value]})
+async def list_user_roles(
+        user_id: int,
+        session: AsyncSession = Depends(get_session),
+        current_user: User = Depends(get_current_user)
+):
+    """List all roles assigned to a user - requires both USER_VIEW and ROLE_VIEW permissions"""
+    if user_id <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User ID must be a positive integer"
+        )
+
+    # Check if user exists
+    user_result = await session.exec(
+        select(User).where(User.id == user_id, User.is_deleted == False)
+    )
+    user = user_result.first()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    # Get all roles for this user
+    result = await session.exec(
+        select(Role, UserRole.assigned_at)
+        .join(UserRole, UserRole.role_id == Role.id)
+        .where(UserRole.user_id == user_id)
+        .order_by(UserRole.assigned_at.desc())
+    )
+
+    roles_data = result.all()
+    _logger.info(f"User {current_user.username} listed {len(roles_data)} roles for user {user.username}")
+
+    return [UserRoleResponse(
+        id=role.id,
+        name=role.name,
+        display_name=role.display_name,
+        assigned_at=assigned_at
+    ) for role, assigned_at in roles_data]

@@ -46,8 +46,10 @@ class UserSession(SQLModel, table=True):
     user_id: int = Field(foreign_key="users.id", index=True)
     ip_address: Optional[str] = Field(default=None, max_length=45)
     user_agent: Optional[str] = Field(default=None)
+    is_active: bool = Field(default=True, index=True)
     last_activity: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
     expires_at: datetime = Field(index=True)
+    ended_at: Optional[datetime] = Field(default=None)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Relationships

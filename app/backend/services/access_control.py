@@ -1,9 +1,11 @@
 from typing import Optional, Callable, Any
 from fastapi import HTTPException, status
 from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlmodel import select
 from loguru import logger
 
 from app.backend.models.user import User
+from app.backend.models.role import UserRole
 from app.backend.services.permissions import PermissionService
 from app.backend.enums.general import Permissions
 
@@ -24,7 +26,7 @@ class AccessControlService:
         """
         Check if user has access to the specified post.
         Users can access a post if:
-        1. They have admin.full permission (bypass all checks)
+        1. They have admin.true permission (bypass all checks)
         2. They are assigned to that specific post (user.post_id == post_id)
 
         Args:
@@ -36,9 +38,9 @@ class AccessControlService:
         Raises:
             HTTPException: If user doesn't have access to the post
         """
-        # Check if user has admin.full permission (bypass post membership check)
+        # Check if user has admin.true permission (bypass post membership check)
         has_admin = await PermissionService.has_permission(
-            session, user, Permissions.ADMIN_FULL.value
+            session, user, Permissions.IS_ADMIN.value
         )
 
         if has_admin:
@@ -125,9 +127,9 @@ class AccessControlService:
                 user, observation.user_id, session, "observation"
             )
         """
-        # Check if user has admin.full permission
+        # Check if user has admin.true permission
         has_admin = await PermissionService.has_permission(
-            session, user, Permissions.ADMIN_FULL.value
+            session, user, Permissions.IS_ADMIN.value
         )
 
         if has_admin:
@@ -160,7 +162,7 @@ class AccessControlService:
         """
         Combined access check for resources that have both post_id and owner.
         Checks:
-        1. Admin override (admin.full permission)
+        1. Admin override (admin.true permission)
         2. Post membership
         3. Ownership (if required)
 
@@ -191,7 +193,7 @@ class AccessControlService:
         """
         # Check admin override first
         has_admin = await PermissionService.has_permission(
-            session, user, Permissions.ADMIN_FULL.value
+            session, user, Permissions.IS_ADMIN.value
         )
 
         if has_admin:
@@ -267,9 +269,9 @@ class AccessControlService:
             if actual_post_id:
                 query = query.where(Observation.post_id == actual_post_id)
         """
-        # Check if user has admin.full permission
+        # Check if user has admin.true permission
         has_admin = await PermissionService.has_permission(
-            session, user, Permissions.ADMIN_FULL.value
+            session, user, Permissions.IS_ADMIN.value
         )
 
         if has_admin:
@@ -293,3 +295,109 @@ class AccessControlService:
             True if user.post_id matches post_id
         """
         return user.post_id == post_id
+
+    @staticmethod
+    async def check_role_membership(
+        user: User,
+        role_id: int,
+        session: AsyncSession,
+        operation: str = "view"
+    ) -> None:
+        """
+        Check if user has the requested role or admin privileges.
+        Users can access a role if:
+        1. They have admin.true permission (bypass all checks)
+        2. They are assigned to that specific role
+
+        Args:
+            user: The user to check
+            role_id: The role ID to check access for
+            session: Database session
+            operation: Description of the operation (for logging/error messages)
+
+        Raises:
+            HTTPException: If user doesn't have the role
+
+        Example:
+            await AccessControlService.check_role_membership(
+                current_user, role_id, session, "view"
+            )
+        """
+        # Check if user has admin.true permission (bypass role membership check)
+        has_admin = await PermissionService.has_permission(
+            session, user, Permissions.IS_ADMIN.value
+        )
+
+        if has_admin:
+            logger.debug(f"Admin user {user.username} accessing role {role_id} for {operation}")
+            return
+
+        # Check if user has the requested role
+        result = await session.exec(
+            select(UserRole).where(
+                UserRole.user_id == user.id,
+                UserRole.role_id == role_id
+            )
+        )
+        user_role = result.first()
+
+        if not user_role:
+            logger.warning(
+                f"User {user.username} (id: {user.id}) tried to {operation} "
+                f"role {role_id} without having that role assigned"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access denied. You can only {operation} roles that are assigned to you"
+            )
+
+        logger.debug(f"User {user.username} has access to role {role_id} for {operation}")
+
+    @staticmethod
+    async def check_user_self_or_admin(
+        user: User,
+        requested_user_id: int,
+        session: AsyncSession,
+        operation: str = "view"
+    ) -> None:
+        """
+        Check if user is accessing their own data or has admin privileges.
+        Users can access user data if:
+        1. They have admin.true permission (bypass all checks)
+        2. They are accessing their own user data (user.id == requested_user_id)
+
+        Args:
+            user: The current user making the request
+            requested_user_id: The user ID being accessed
+            session: Database session
+            operation: Description of the operation (for logging/error messages)
+
+        Raises:
+            HTTPException: If user is not accessing themselves and not admin
+
+        Example:
+            await AccessControlService.check_user_self_or_admin(
+                current_user, user_id, session, "view"
+            )
+        """
+        # Check if user has admin.true permission (bypass self-access check)
+        has_admin = await PermissionService.has_permission(
+            session, user, Permissions.IS_ADMIN.value
+        )
+
+        if has_admin:
+            logger.debug(f"Admin user {user.username} accessing user {requested_user_id} for {operation}")
+            return
+
+        # Check if user is accessing their own data
+        if user.id != requested_user_id:
+            logger.warning(
+                f"User {user.username} (id: {user.id}) tried to {operation} "
+                f"user {requested_user_id} without permission"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access denied. You can only {operation} your own user information"
+            )
+
+        logger.debug(f"User {user.username} accessing their own data for {operation}")

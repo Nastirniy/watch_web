@@ -1,104 +1,59 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request, HTTPException, status
 from sqlmodel.ext.asyncio.session import AsyncSession
-from sqlmodel import select, func
-from datetime import datetime, timezone
-from pydantic import BaseModel
-from typing import Dict, Any
 import asyncio
 
 from app.backend.database import get_session
 from app.backend.config import settings
+from app.backend.enums.general import ServiceHealthStatus, ServiceUptimeStatus
 from app.backend.enums.routes import SystemRoutes
-from app.backend.models.user import User
-from app.backend.models.post import Post
-from app.backend.models.observation import Observation
+from app.backend.routes.models.response.health_response import HealthResponse
 from app.backend.utils.datetime_utils import get_current_time_in_timezone
+from app.backend.routes.helpers.health_helper import (
+    check_database_health,
+    check_services_health,
+    health_rate_limiter,
+    is_host_allowed,
+    DatabaseHealthModel,
+    ServicesHealthModel,
+    ServiceStatusModel
+)
+from app.backend.helpers.ip_request_helper import get_real_client_ip
 
 router = APIRouter()
 
 
-class HealthResponse(BaseModel):
-    status: str
-    timestamp: datetime
-    version: str
-    environment: str
-    timezone: str
-    database: Dict[str, Any]
-    services: Dict[str, Any]
-
-
-async def check_database_health(session: AsyncSession) -> Dict[str, Any]:
-    """Check database connectivity and basic stats"""
-    try:
-        start_time = datetime.now(timezone.utc)
-
-        # Basic connectivity test using ORM
-        await session.exec(select(func.count()).select_from(User).limit(1))
-
-        # Get basic stats using ORM queries
-        active_users_result = await session.exec(
-            select(func.count(User.id)).where(User.is_deleted is False)
-        )
-        active_users = active_users_result.one()
-
-        active_posts_result = await session.exec(
-            select(func.count(Post.id)).where(Post.is_active == True)
-        )
-        active_posts = active_posts_result.one()
-
-        total_observations_result = await session.exec(
-            select(func.count(Observation.id)).where(Observation.is_deleted is False)
-        )
-        total_observations = total_observations_result.one()
-
-        active_observations_result = await session.exec(
-            select(func.count(Observation.id)).where(
-                (Observation.status == 'active') & (Observation.is_deleted is False)
-            )
-        )
-        active_observations = active_observations_result.one()
-
-        response_time = (datetime.now(timezone.utc) - start_time).total_seconds()
-
-        return {
-            "status": "healthy",
-            "response_time": round(response_time, 4),
-            "stats": {
-                "active_users": active_users,
-                "active_posts": active_posts,
-                "total_observations": total_observations,
-                "active_observations": active_observations
-            }
-        }
-    except Exception as e:
-        return {
-            "status": "unhealthy",
-            "error": str(e),
-            "response_time": None,
-            "stats": None
-        }
-
-
-async def check_services_health() -> Dict[str, Any]:
-    """Check external services health"""
-    services = {}
-
-    # Add any external service checks here
-    # For now, we'll just return system info
-    services["system"] = {
-        "status": "healthy",
-        "uptime": "running"
-    }
-
-    return services
-
-
 @router.get(SystemRoutes.HEALTH.value, response_model=HealthResponse)
-async def health_check(session: AsyncSession = Depends(get_session)):
+async def health_check(
+    request: Request,
+    session: AsyncSession = Depends(get_session)
+):
     """
-    Health check endpoint
+    Health check endpoint with rate limiting and host restrictions
     Returns system status, database connectivity, and basic statistics
+
+    Security features:
+    - Rate limiting: Configurable requests per time window
+    - Host restrictions: Only allowed hosts can access (configurable)
     """
+    # Get client information
+    client_ip = get_real_client_ip(request)
+    client_host = request.client.host if request.client else "unknown"
+
+    # Check host restrictions
+    if not is_host_allowed(client_host):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Access denied: Host {client_host} is not allowed to access health endpoint"
+        )
+
+    # Check rate limiting
+    if not health_rate_limiter.is_allowed(client_ip):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Rate limit exceeded. Maximum {settings.health.rate_limit_requests} requests per {settings.health.rate_limit_window_seconds} seconds",
+            headers={"Retry-After": str(settings.health.rate_limit_window_seconds)}
+        )
+
     try:
         # Run health checks concurrently
         db_health, services_health = await asyncio.gather(
@@ -107,9 +62,9 @@ async def health_check(session: AsyncSession = Depends(get_session)):
         )
 
         # Determine overall status
-        overall_status = "healthy"
-        if db_health.get("status") != "healthy":
-            overall_status = "degraded"
+        overall_status = ServiceHealthStatus.HEALTHY.value
+        if db_health.status != ServiceHealthStatus.HEALTHY.value:
+            overall_status = ServiceHealthStatus.DEGRADED.value
 
         return HealthResponse(
             status=overall_status,
@@ -122,12 +77,15 @@ async def health_check(session: AsyncSession = Depends(get_session)):
         )
 
     except Exception as e:
+        # Return error response with Pydantic models
         return HealthResponse(
-            status="unhealthy",
+            status=ServiceHealthStatus.UNHEALTHY.value,
             timestamp=get_current_time_in_timezone(settings.timezone.timezone),
             version=settings.app.version,
             environment=settings.app.environment,
             timezone=settings.timezone.timezone,
-            database={"status": "error", "error": str(e)},
-            services={"status": "error", "error": str(e)}
+            database=DatabaseHealthModel(status=ServiceHealthStatus.ERROR.value, error=str(e)),
+            services=ServicesHealthModel(
+                system=ServiceStatusModel(status=ServiceHealthStatus.ERROR.value, uptime=ServiceUptimeStatus.UNKNOWN.value)
+            )
         )

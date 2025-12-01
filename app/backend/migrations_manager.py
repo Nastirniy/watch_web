@@ -26,7 +26,7 @@ from alembic import command
 from app.backend.database import seed_database, create_database_if_not_exists
 from app.backend.utils.logging_config import get_logger
 
-logger = get_logger("migrations")
+_logger = get_logger("migrations")
 
 
 def get_alembic_config():
@@ -40,7 +40,7 @@ def get_alembic_config():
 
 async def init_migrations():
     """Initialize migrations - create first migration from current models"""
-    logger.info("Initializing migrations...")
+    _logger.info("Initializing migrations...")
     
     # Ensure database exists
     await create_database_if_not_exists()
@@ -50,28 +50,28 @@ async def init_migrations():
     try:
         # Create initial migration
         command.revision(alembic_cfg, autogenerate=True, message="Initial migration")
-        logger.info("✅ Initial migration created successfully")
+        _logger.info("Initial migration created successfully")
         
         # Apply the migration
         command.upgrade(alembic_cfg, "head")
-        logger.info("✅ Initial migration applied successfully")
+        _logger.info("Initial migration applied successfully")
         
     except Exception as e:
-        logger.error(f"❌ Failed to initialize migrations: {e}")
+        _logger.error(f"Failed to initialize migrations: {e}")
         raise
 
 
 def migrate():
     """Apply all pending migrations"""
-    logger.info("Applying migrations...")
+    _logger.info("Applying migrations...")
     
     alembic_cfg = get_alembic_config()
     
     try:
         command.upgrade(alembic_cfg, "head")
-        logger.info("✅ Migrations applied successfully")
+        _logger.info("Migrations applied successfully")
     except Exception as e:
-        logger.error(f"❌ Failed to apply migrations: {e}")
+        _logger.error(f"Failed to apply migrations: {e}")
         raise
 
 
@@ -81,32 +81,32 @@ def create_revision(message: str = None):
         message = input("Enter migration message: ").strip()
     
     if not message:
-        logger.error("❌ Migration message is required")
+        _logger.error("Migration message is required")
         return
     
-    logger.info(f"Creating migration: {message}")
+    _logger.info(f"Creating migration: {message}")
     
     alembic_cfg = get_alembic_config()
     
     try:
         command.revision(alembic_cfg, autogenerate=True, message=message)
-        logger.info("✅ Migration created successfully")
+        _logger.info("Migration created successfully")
     except Exception as e:
-        logger.error(f"❌ Failed to create migration: {e}")
+        _logger.error(f"Failed to create migration: {e}")
         raise
 
 
 def downgrade_migration(revision: str = "-1"):
     """Downgrade to previous or specific migration"""
-    logger.info(f"Downgrading to: {revision}")
+    _logger.info(f"Downgrading to: {revision}")
     
     alembic_cfg = get_alembic_config()
     
     try:
         command.downgrade(alembic_cfg, revision)
-        logger.info("✅ Migration downgraded successfully")
+        _logger.info("Migration downgraded successfully")
     except Exception as e:
-        logger.error(f"❌ Failed to downgrade migration: {e}")
+        _logger.error(f"Failed to downgrade migration: {e}")
         raise
 
 
@@ -117,7 +117,7 @@ def show_current():
     try:
         command.current(alembic_cfg)
     except Exception as e:
-        logger.error(f"❌ Failed to show current migration: {e}")
+        _logger.error(f"Failed to show current migration: {e}")
         raise
 
 
@@ -128,19 +128,19 @@ def show_history():
     try:
         command.history(alembic_cfg)
     except Exception as e:
-        logger.error(f"❌ Failed to show migration history: {e}")
+        _logger.error(f"Failed to show migration history: {e}")
         raise
 
 
 async def run_seed():
     """Run database seeding"""
-    logger.info("Running database seeding...")
+    _logger.info("Running database seeding...")
     
     try:
         await seed_database()
-        logger.info("✅ Database seeding completed successfully")
+        _logger.info("Database seeding completed successfully")
     except Exception as e:
-        logger.error(f"❌ Failed to seed database: {e}")
+        _logger.error(f"Failed to seed database: {e}")
         raise
 
 
@@ -197,7 +197,7 @@ def main():
             parser.print_help()
             
     except Exception as e:
-        logger.error(f"Command failed: {e}")
+        _logger.error(f"Command failed: {e}")
         sys.exit(1)
 
 

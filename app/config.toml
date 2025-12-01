@@ -9,7 +9,7 @@ host = "localhost"
 port = 3306
 name = "radio_monitoring"
 user = "root"
-password = "root"
+password = "pythops"
 echo = false
 pool_size = 20
 max_overflow = 40
@@ -59,3 +59,11 @@ upload_path = "uploads"  # Base directory for uploaded files
 chunk_size_mb = 1  # Default chunk size in megabytes
 upload_timeout_minutes = 30  # Upload session timeout in minutes
 max_file_size_gb = 10  # Maximum file size in gigabytes
+
+[health]
+# Health endpoint security configuration
+allowed_hosts = ["127.0.0.1", "localhost", "::1", "*"]  # Hosts allowed to access health endpoint. Use "*" to allow all
+rate_limit_requests = 10  # Maximum requests per window (1-1000)
+rate_limit_window_seconds = 60  # Rate limit window in seconds (10-3600)
+enable_rate_limit = true  # Enable rate limiting for health endpoint
+enable_host_check = false  # Enable host restrictions for health endpoint (set to true in production)

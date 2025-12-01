@@ -5,17 +5,24 @@ from passlib.context import CryptContext
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select, and_
 import secrets
-import hashlib
 
 from app.backend.config import settings
 from app.backend.utils.logging_config import get_auth_logger
 from app.backend.models.user import User, UserSession
-from app.backend.models.audit import AuditLog
+from app.backend.helpers.certeficates_helper import (
+    validate_pki_certificate_data,
+    hash_pki_certificate_data,
+    create_pki_auth_audit_details
+)
+from app.backend.helpers.audit_helper import (
+    create_audit_log,
+    truncate_for_logging
+)
 
 # Get authentication logger
-logger = get_auth_logger()
+_logger = get_auth_logger()
 
-pwd_context = CryptContext(
+_pwd_context = CryptContext(
     schemes=["bcrypt"],
     deprecated="auto",
     bcrypt__rounds=12  # Higher security rounds
@@ -23,11 +30,6 @@ pwd_context = CryptContext(
 
 
 class AuthService:
-    @staticmethod
-    def hash_pki_data(data: str) -> str:
-        """Hash PKI certificate data using SHA256"""
-        return hashlib.sha256(data.encode('utf-8')).hexdigest()
-    
     @staticmethod
     def create_access_token(user_id: int, additional_claims: Optional[Dict[str, Any]] = None) -> str:
         """Create JWT access token with enhanced security"""
@@ -73,16 +75,16 @@ class AuthService:
                 token,
                 settings.security.secret_key,
                 algorithms=[settings.security.algorithm],
-                leeway=settings.security.jwt_leeway_seconds
+                options={"leeway": settings.security.jwt_leeway_seconds}
             )
             
             if payload.get("type") != token_type:
-                logger.warning(f"Invalid token type: expected {token_type}, got {payload.get('type')}")
+                _logger.warning(f"Invalid token type: expected {token_type}, got {payload.get('type')}")
                 return None
                 
             return payload
         except JWTError as e:
-            logger.warning(f"Token verification failed: {str(e)}")
+            _logger.warning(f"Token verification failed: {str(e)}")
             return None
 
     @staticmethod
@@ -109,8 +111,9 @@ class AuthService:
         user.last_login_at = datetime.now(timezone.utc)
         session.add(user)
 
-        # Create audit log
-        audit = AuditLog(
+        # Create audit log using helper
+        await create_audit_log(
+            session=session,
             user_id=user.id,
             session_id=session_id,
             action="login",
@@ -120,7 +123,6 @@ class AuthService:
             user_agent=user_agent,
             success=True
         )
-        session.add(audit)
 
         await session.commit()
         return user_session
@@ -135,33 +137,40 @@ class AuthService:
     ) -> Optional[User]:
         """Authenticate user by PKI certificate with enhanced security"""
         try:
-            # Validate certificate data format
-            if not all([certificate_cn, certificate_serial, certificate_fingerprint]):
-                logger.warning("Invalid PKI certificate data provided")
+            # Validate certificate data format using helper
+            if not await validate_pki_certificate_data(certificate_cn, certificate_serial, certificate_fingerprint):
+                _logger.warning("Invalid PKI certificate data provided")
                 return None
 
-            # Hash the certificate data for secure comparison
-            cn_hash = AuthService.hash_pki_data(certificate_cn)
-            serial_hash = AuthService.hash_pki_data(certificate_serial)
-            fingerprint_hash = AuthService.hash_pki_data(certificate_fingerprint)
+            _logger.debug(
+                f"PKI authentication attempt - CN: {certificate_cn}, "
+                f"Serial: {truncate_for_logging(certificate_serial, 8)}, "
+                f"Fingerprint: {truncate_for_logging(certificate_fingerprint)}"
+            )
 
-            # Create audit log for authentication attempt
-            audit = AuditLog(
-                user_id=None,
-                session_id=None,
+            # Hash the certificate data for secure comparison using helper
+            cn_hash, serial_hash, fingerprint_hash = await hash_pki_certificate_data(
+                certificate_cn, certificate_serial, certificate_fingerprint
+            )
+
+            _logger.debug(
+                f"Hashed PKI data - CN hash: {truncate_for_logging(cn_hash)}, "
+                f"Serial hash: {truncate_for_logging(serial_hash)}, "
+                f"Fingerprint hash: {truncate_for_logging(fingerprint_hash)}"
+            )
+
+            # Create audit log for authentication attempt using helper
+            audit_details = await create_pki_auth_audit_details(
+                certificate_cn, certificate_serial, fingerprint_hash
+            )
+            audit = await create_audit_log(
+                session=session,
                 action="pki_auth_attempt",
                 resource_type="auth",
-                resource_id=None,
-                ip_address=ip_address,
                 success=False,
-                details={
-                    "certificate_cn": certificate_cn,
-                    "certificate_serial": certificate_serial,
-                    # Don't log full fingerprint for security
-                    "certificate_fingerprint_hash": fingerprint_hash[:16]
-                }
+                ip_address=ip_address,
+                details=audit_details
             )
-            session.add(audit)
 
             # Find user with matching hashed PKI credentials
             result = await session.exec(
@@ -177,19 +186,21 @@ class AuthService:
             )
             user = result.first()
 
+            _logger.debug(f"PKI authentication query result: {'User found' if user else 'No matching user'}")
+
             if user:
                 # Update audit log for success
                 audit.success = True
                 audit.user_id = user.id
-                logger.info(f"Successful PKI authentication for user {user.username}")
+                _logger.info(f"Successful PKI authentication for user {user.username}")
             else:
-                logger.warning(f"Failed PKI authentication attempt for CN: {certificate_cn}")
+                _logger.warning(f"Failed PKI authentication attempt for CN: {certificate_cn}")
 
             await session.commit()
             return user
 
         except Exception as e:
-            logger.error(f"PKI authentication error: {str(e)}")
+            _logger.error(f"PKI authentication error: {str(e)}")
             await session.rollback()
             return None
 
@@ -214,22 +225,22 @@ class AuthService:
                 user_session.ended_at = datetime.now(timezone.utc)
                 session.add(user_session)
 
-                # Create audit log
-                audit = AuditLog(
+                # Create audit log using helper
+                await create_audit_log(
+                    session=session,
                     user_id=user_session.user_id,
                     session_id=session_id,
                     action="logout",
                     resource_type="session",
-                    resource_id=session_id,
+                    resource_id=int(session_id),
                     success=True
                 )
-                session.add(audit)
 
                 await session.commit()
                 return True
 
         except Exception as e:
-            logger.error(f"Session invalidation error: {str(e)}")
+            _logger.error(f"Session invalidation error: {str(e)}")
             await session.rollback()
 
         return False
@@ -254,50 +265,26 @@ class AuthService:
 
             if count > 0:
                 await session.commit()
-                logger.info(f"Cleaned up {count} expired sessions")
+                _logger.info(f"Cleaned up {count} expired sessions")
 
             return count
 
         except Exception as e:
-            logger.error(f"Session cleanup error: {str(e)}")
+            _logger.error(f"Session cleanup error: {str(e)}")
             await session.rollback()
             return 0
 
     @staticmethod
     def hash_password(password: str) -> str:
         """Hash password using bcrypt"""
-        return pwd_context.hash(password)
+        return _pwd_context.hash(password)
 
     @staticmethod
     def verify_password(plain_password: str, hashed_password: str) -> bool:
         """Verify password against hash"""
-        return pwd_context.verify(plain_password, hashed_password)
+        return _pwd_context.verify(plain_password, hashed_password)
 
     @staticmethod
     def generate_secure_token(length: int = 32) -> str:
         """Generate cryptographically secure token"""
         return secrets.token_urlsafe(length)
-
-from fastapi import Depends, HTTPException, Request, status
-
-def client_auth(request: Request):
-    verify = request.headers.get("x-ssl-client-verify")
-    fingerprint = request.headers.get("x-ssl-client-fingerprint")
-    common_name = request.headers.get("x-ssl-client-cn")
-
-    if verify != "SUCCESS":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid client certificate"
-        )
-
-    # Тут можна зробити перевірку в БД
-    # наприклад: чи є fingerprint у списку дозволених користувачів
-    allowed_users = {"AB:CD:EF:12:34"}  # приклад
-    if fingerprint not in allowed_users:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied"
-        )
-
-    return {"cn": common_name, "fingerprint": fingerprint}

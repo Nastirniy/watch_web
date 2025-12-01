@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Union, Any
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 from loguru import logger
@@ -65,7 +65,7 @@ class PermissionService:
                 .join(UserRole, RolePermission.role_id == UserRole.role_id)
                 .where(
                     UserRole.user_id == user.id,
-                    Permission.name.in_([permission, Permissions.ADMIN_FULL.value])
+                    Permission.name.in_([permission, Permissions.IS_ADMIN.value])
                 )
             )
             
@@ -74,11 +74,11 @@ class PermissionService:
 
             # Check for admin override or specific permission
             has_perm = (
-                Permissions.ADMIN_FULL.value in user_permissions or
+                Permissions.IS_ADMIN.value in user_permissions or
                 permission in user_permissions
             )
             
-            if Permissions.ADMIN_FULL.value in user_permissions:
+            if Permissions.IS_ADMIN.value in user_permissions:
                 logger.debug(f"Admin override granted for user {user.username}")
             elif not has_perm:
                 logger.debug(f"Permission {permission} denied for user {user.username}")
@@ -105,7 +105,7 @@ class PermissionService:
                 logger.warning(f"Permission check denied for inactive user: {user.username}")
                 return False
 
-            # Check if user has admin.full which grants all permissions
+            # Check if user has admin.true which grants all permissions
             query = (
                 select(Permission.name)
                 .select_from(Permission)
@@ -113,15 +113,15 @@ class PermissionService:
                 .join(UserRole, RolePermission.role_id == UserRole.role_id)
                 .where(
                     UserRole.user_id == user.id,
-                    Permission.name.in_(permissions + [Permissions.ADMIN_FULL.value])
+                    Permission.name.in_(permissions + [Permissions.IS_ADMIN.value])
                 )
             )
 
             result = await session.exec(query)
             user_permissions = result.all()
 
-            # Check if user has admin.full or any of the required permissions
-            if Permissions.ADMIN_FULL.value in user_permissions:
+            # Check if user has admin.true or any of the required permissions
+            if Permissions.IS_ADMIN.value in user_permissions:
                 logger.debug(f"Admin override granted for user {user.username}")
                 return True
 
@@ -152,7 +152,7 @@ class PermissionService:
                 logger.warning(f"Permission check denied for inactive user: {user.username}")
                 return False
 
-            # Check if user has admin.full which grants all permissions
+            # Check if user has admin.true which grants all permissions
             query = (
                 select(Permission.name)
                 .select_from(Permission)
@@ -160,15 +160,15 @@ class PermissionService:
                 .join(UserRole, RolePermission.role_id == UserRole.role_id)
                 .where(
                     UserRole.user_id == user.id,
-                    Permission.name.in_(permissions + [Permissions.ADMIN_FULL.value])
+                    Permission.name.in_(permissions + [Permissions.IS_ADMIN.value])
                 )
             )
 
             result = await session.exec(query)
             user_permissions = result.all()
 
-            # Check if user has admin.full
-            if Permissions.ADMIN_FULL.value in user_permissions:
+            # Check if user has admin.true
+            if Permissions.IS_ADMIN.value in user_permissions:
                 logger.debug(f"Admin override granted for user {user.username}")
                 return True
 
@@ -182,6 +182,111 @@ class PermissionService:
 
         except Exception as e:
             logger.error(f"Error checking all permissions for user {user.username if user else 'None'}: {e}")
+            return False
+
+    @staticmethod
+    async def evaluate_complex_permissions(
+            session: AsyncSession,
+            user: User,
+            permission_structure: Union[str, List[str], Dict[str, Any]]
+    ) -> bool:
+        """
+        Evaluate complex permission structures with nested AND/OR logic.
+
+        Supported formats:
+        - String: "permission.name" - single permission
+        - List: ["perm1", "perm2"] - OR logic (any)
+        - Dict with "any": {"any": ["perm1", "perm2"]} - OR logic
+        - Dict with "all": {"all": ["perm1", "perm2"]} - AND logic
+        - Nested: {"all": [{"any": ["perm1", "perm2"]}, "perm3"]} - complex logic
+
+        Example:
+            {"all": [{"any": ["posts.create", "posts.edit"]}, "user.verified"]}
+            Means: (posts.create OR posts.edit) AND user.verified
+        """
+        try:
+            if not user:
+                logger.warning("Invalid user in evaluate_complex_permissions")
+                return False
+
+            if not user.is_active or user.is_deleted:
+                logger.warning(f"Permission check denied for inactive user: {user.username}")
+                return False
+
+            # Handle string - single permission
+            if isinstance(permission_structure, str):
+                return await PermissionService.has_permission(session, user, permission_structure)
+
+            # Handle list - treat as OR logic by default
+            if isinstance(permission_structure, list):
+                # Check if all items are strings
+                if all(isinstance(item, str) for item in permission_structure):
+                    return await PermissionService.has_any_permission(session, user, permission_structure)
+
+                # Handle list with nested structures
+                results = []
+                for item in permission_structure:
+                    result = await PermissionService.evaluate_complex_permissions(session, user, item)
+                    results.append(result)
+                # Default list behavior is OR
+                return any(results)
+
+            # Handle dictionary
+            if isinstance(permission_structure, dict):
+                # Check for "any" key (OR logic)
+                if "any" in permission_structure:
+                    any_perms = permission_structure["any"]
+                    if not isinstance(any_perms, list):
+                        logger.error(f"'any' key must contain a list, got {type(any_perms)}")
+                        return False
+
+                    results = []
+                    for perm in any_perms:
+                        result = await PermissionService.evaluate_complex_permissions(session, user, perm)
+                        results.append(result)
+
+                    any_result = any(results)
+
+                    # Check for "all" key in the same dict (both conditions must be met)
+                    if "all" in permission_structure:
+                        all_perms = permission_structure["all"]
+                        if not isinstance(all_perms, list):
+                            logger.error(f"'all' key must contain a list, got {type(all_perms)}")
+                            return False
+
+                        all_results = []
+                        for perm in all_perms:
+                            result = await PermissionService.evaluate_complex_permissions(session, user, perm)
+                            all_results.append(result)
+
+                        all_result = all(all_results)
+                        return any_result and all_result
+
+                    return any_result
+
+                # Check for "all" key (AND logic)
+                elif "all" in permission_structure:
+                    all_perms = permission_structure["all"]
+                    if not isinstance(all_perms, list):
+                        logger.error(f"'all' key must contain a list, got {type(all_perms)}")
+                        return False
+
+                    results = []
+                    for perm in all_perms:
+                        result = await PermissionService.evaluate_complex_permissions(session, user, perm)
+                        results.append(result)
+
+                    return all(results)
+
+                else:
+                    logger.error(f"Dict must contain 'any' or 'all' key, got: {permission_structure.keys()}")
+                    return False
+
+            logger.error(f"Unsupported permission structure type: {type(permission_structure)}")
+            return False
+
+        except Exception as e:
+            logger.error(f"Error evaluating complex permissions for user {user.username if user else 'None'}: {e}")
             return False
 
     @staticmethod
@@ -272,6 +377,80 @@ class PermissionService:
                 if not has_perm:
                     logger.warning(
                         f"Permission denied: user {current_user.username} lacks all of {permissions}"
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Insufficient permissions"
+                    )
+                return await func(*args, current_user=current_user, session=session, **kwargs)
+
+            return wrapper
+
+        return decorator
+
+    @staticmethod
+    def require_permissions(permission_structure: Union[str, List[str], Dict[str, Any]]):
+        """
+        Decorator to require complex permission structures with nested AND/OR logic.
+
+        Supported formats:
+        - String: @require_permissions("permission.name")
+        - List (OR): @require_permissions(["perm1", "perm2"])
+        - Dict (AND): @require_permissions({"all": ["perm1", "perm2"]})
+        - Dict (OR): @require_permissions({"any": ["perm1", "perm2"]})
+        - Complex nested: @require_permissions({
+            "all": [
+                {"any": ["posts.create", "posts.edit"]},
+                "user.verified"
+            ]
+          })
+
+        Examples:
+            # Single permission
+            @require_permissions("posts.create")
+
+            # User needs ANY of these (OR logic)
+            @require_permissions(["posts.create", "posts.edit"])
+            @require_permissions({"any": ["posts.create", "posts.edit"]})
+
+            # User needs ALL of these (AND logic)
+            @require_permissions({"all": ["posts.create", "user.verified"]})
+
+            # Complex: (posts.create OR posts.edit) AND user.verified
+            @require_permissions({
+                "all": [
+                    {"any": ["posts.create", "posts.edit"]},
+                    "user.verified"
+                ]
+            })
+
+            # Complex: posts.create AND (comments.edit OR comments.delete)
+            @require_permissions({
+                "all": [
+                    "posts.create",
+                    {"any": ["comments.edit", "comments.delete"]}
+                ]
+            })
+        """
+        from functools import wraps
+        from fastapi import Depends, HTTPException, status
+        from app.backend.dependencies import get_current_user
+        from app.backend.database import get_session
+
+        def decorator(func):
+            @wraps(func)
+            async def wrapper(
+                    *args,
+                    current_user: User = Depends(get_current_user),
+                    session: AsyncSession = Depends(get_session),
+                    **kwargs
+            ):
+                has_perm = await PermissionService.evaluate_complex_permissions(
+                    session, current_user, permission_structure
+                )
+                if not has_perm:
+                    logger.warning(
+                        f"Permission denied: user {current_user.username} failed complex permission check: {permission_structure}"
                     )
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,

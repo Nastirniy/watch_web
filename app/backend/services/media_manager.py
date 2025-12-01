@@ -21,7 +21,7 @@ from app.backend.enums.general import MediaType
 from app.backend.utils.logging_config import get_logger
 from app.backend.utils.mime_detector import mime_detector
 
-logger = get_logger("media_manager")
+_logger = get_logger("media_manager")
 
 # Security and validation configurations
 MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
@@ -319,7 +319,7 @@ class MediaManager:
                             metadata['exif'] = {safe_tags.get(k, k): v for k, v in exif.items()
                                               if k in safe_tags and isinstance(v, (str, int, float))}
         except Exception as e:
-            logger.warning(f"Failed to extract metadata: {e}")
+            _logger.warning(f"Failed to extract metadata: {e}")
 
         return metadata
 
@@ -339,7 +339,7 @@ class MediaManager:
 
             # Check if media_file has proper attributes (handle test mocks)
             if not hasattr(media_file, 'id') or not hasattr(media_file, 'file_size'):
-                logger.warning(f"Invalid media file object returned from database query")
+                _logger.warning(f"Invalid media file object returned from database query")
                 return None
 
             # Get existing chunks
@@ -372,7 +372,7 @@ class MediaManager:
             )
 
         except Exception as e:
-            logger.error(f"Error checking existing upload for hash {file_hash}: {e}")
+            _logger.error(f"Error checking existing upload for hash {file_hash}: {e}")
             return None
 
     async def resume_upload(self, session: AsyncSession, upload_session: UploadSession) -> int:
@@ -380,7 +380,7 @@ class MediaManager:
         if not upload_session.can_resume:
             raise ValueError("Upload session cannot be resumed")
 
-        logger.info(f"Resuming upload for media_file {upload_session.media_file_id}, "
+        _logger.info(f"Resuming upload for media_file {upload_session.media_file_id}, "
                    f"{len(upload_session.uploaded_chunks)}/{upload_session.total_chunks} chunks uploaded")
 
         return upload_session.media_file_id
@@ -428,23 +428,23 @@ class MediaManager:
             existing_upload = await self.check_existing_upload(session, file_hash, observation_id)
             if existing_upload:
                 if existing_upload.can_resume:
-                    logger.info(f"Found resumable upload session for file hash {file_hash}")
+                    _logger.info(f"Found resumable upload session for file hash {file_hash}")
                     return await self.resume_upload(session, existing_upload)
                 elif not existing_upload.is_expired:
                     # Upload is complete, return existing file
-                    logger.info(f"File already exists and is complete: {existing_upload.media_file_id}")
+                    _logger.info(f"File already exists and is complete: {existing_upload.media_file_id}")
                     return existing_upload.media_file_id
 
             # Check for duplicate files if deduplication is enabled
             if self.enable_deduplication:
                 existing_file_id = await self._check_for_duplicate(session, file_hash, observation_id)
                 if existing_file_id:
-                    logger.info(f"Duplicate file detected, returning existing file ID: {existing_file_id}")
+                    _logger.info(f"Duplicate file detected, returning existing file ID: {existing_file_id}")
                     return existing_file_id
         
             # Use validated MIME type
             mime_type = validation_result.detected_mime_type
-            logger.info(f"Validated MIME type for {safe_filename}: {mime_type}")
+            _logger.info(f"Validated MIME type for {safe_filename}: {mime_type}")
 
             # Use date-based organized directory structure for human readability
             organized_dir = await self._get_organized_path(session, observation_id)
@@ -542,7 +542,7 @@ class MediaManager:
                 # Clean up database chunks after successful backup and grace period
                 await self._cleanup_database_chunks(session, media_file.id)
 
-            logger.info(f"Stored file {safe_filename} as {stored_filename} with {total_chunks} chunks")
+            _logger.info(f"Stored file {safe_filename} as {stored_filename} with {total_chunks} chunks")
             return media_file.id
 
         finally:
@@ -616,10 +616,10 @@ class MediaManager:
             # Set secure file permissions
             os.chmod(file_path, 0o644)
 
-            logger.debug(f"Created filesystem backup: {file_path}")
+            _logger.debug(f"Created filesystem backup: {file_path}")
             
         except Exception as e:
-            logger.error(f"Failed to create filesystem backup for media_file {media_file_id}: {e}")
+            _logger.error(f"Failed to create filesystem backup for media_file {media_file_id}: {e}")
 
     async def _cleanup_chunk_files(self, organized_dir: Path, media_file_id: int, total_chunks: int):
         """Clean up individual chunk files after successful complete file creation"""
@@ -630,12 +630,12 @@ class MediaManager:
 
                 if chunk_file_path.exists():
                     chunk_file_path.unlink()
-                    logger.debug(f"Cleaned up chunk file: {chunk_file_path}")
+                    _logger.debug(f"Cleaned up chunk file: {chunk_file_path}")
 
-            logger.info(f"Cleaned up {total_chunks} chunk files for media_file {media_file_id}")
+            _logger.info(f"Cleaned up {total_chunks} chunk files for media_file {media_file_id}")
 
         except Exception as e:
-            logger.warning(f"Failed to cleanup chunk files for media_file {media_file_id}: {e}")
+            _logger.warning(f"Failed to cleanup chunk files for media_file {media_file_id}: {e}")
 
     async def _cleanup_database_chunks(self, session: AsyncSession, media_file_id: int):
         """Remove chunk records from database after successful complete file creation"""
@@ -646,13 +646,13 @@ class MediaManager:
             media_file = media_result.first()
 
             if not media_file:
-                logger.warning(f"Media file {media_file_id} not found for chunk cleanup")
+                _logger.warning(f"Media file {media_file_id} not found for chunk cleanup")
                 return
 
             # Verify complete file exists on filesystem before removing chunk records
             complete_file_path = Path(media_file.file_path)
             if not (complete_file_path.exists() and complete_file_path.is_file()):
-                logger.warning(f"Complete file not found at {complete_file_path}, keeping chunk records")
+                _logger.warning(f"Complete file not found at {complete_file_path}, keeping chunk records")
                 return
 
             # Verify file integrity before removing chunks
@@ -662,10 +662,10 @@ class MediaManager:
 
                 file_hash = hashlib.sha256(file_data).hexdigest()
                 if file_hash != media_file.file_hash:
-                    logger.warning(f"File integrity check failed for {media_file_id}, keeping chunk records")
+                    _logger.warning(f"File integrity check failed for {media_file_id}, keeping chunk records")
                     return
             except Exception as e:
-                logger.warning(f"Failed to verify file integrity for {media_file_id}: {e}, keeping chunk records")
+                _logger.warning(f"Failed to verify file integrity for {media_file_id}: {e}, keeping chunk records")
                 return
 
             # Only proceed with chunk cleanup if backup is verified
@@ -679,10 +679,10 @@ class MediaManager:
                     await session.delete(chunk)
 
                 await session.commit()
-                logger.info(f"Cleaned up {chunks_count} database chunk records for media_file {media_file_id}")
+                _logger.info(f"Cleaned up {chunks_count} database chunk records for media_file {media_file_id}")
 
         except Exception as e:
-            logger.error(f"Failed to cleanup database chunks for media_file {media_file_id}: {e}")
+            _logger.error(f"Failed to cleanup database chunks for media_file {media_file_id}: {e}")
             await session.rollback()
 
     async def cleanup_old_chunks(self, session: AsyncSession) -> int:
@@ -709,7 +709,7 @@ class MediaManager:
                     chunks = chunks_result.all()
 
                     if chunks:
-                        logger.info(f"Cleaning up {len(chunks)} old chunks for media_file {media_file.id} "
+                        _logger.info(f"Cleaning up {len(chunks)} old chunks for media_file {media_file.id} "
                                    f"(older than {self.chunk_retention_days} days)")
 
                         # Remove chunk records from database
@@ -719,10 +719,10 @@ class MediaManager:
 
             if chunks_cleaned > 0:
                 await session.commit()
-                logger.info(f"Cleaned up {chunks_cleaned} old chunk records based on retention policy")
+                _logger.info(f"Cleaned up {chunks_cleaned} old chunk records based on retention policy")
 
         except Exception as e:
-            logger.error(f"Error during old chunk cleanup: {e}")
+            _logger.error(f"Error during old chunk cleanup: {e}")
             await session.rollback()
 
         return chunks_cleaned
@@ -737,7 +737,7 @@ class MediaManager:
         media_file = media_result.first()
         
         if not media_file:
-            logger.error(f"Media file {media_file_id} not found")
+            _logger.error(f"Media file {media_file_id} not found")
             return None
         
         # Try to retrieve from database chunks first
@@ -758,7 +758,7 @@ class MediaManager:
                     # Read chunk from filesystem
                     chunk_path = Path(chunk.chunk_file_path)
                     if not chunk_path.exists():
-                        logger.error(f"Chunk file not found: {chunk_path}")
+                        _logger.error(f"Chunk file not found: {chunk_path}")
                         raise ValueError(f"Chunk file {chunk.chunk_number} not found")
 
                     async with aiofiles.open(chunk_path, 'rb') as f:
@@ -768,7 +768,7 @@ class MediaManager:
                     if validate_integrity:
                         chunk_hash = hashlib.sha256(chunk_data).hexdigest()
                         if chunk_hash != chunk.chunk_hash:
-                            logger.error(f"Chunk {chunk.chunk_number} hash mismatch for file {media_file_id}")
+                            _logger.error(f"Chunk {chunk.chunk_number} hash mismatch for file {media_file_id}")
                             raise ValueError(f"Chunk integrity validation failed")
 
                     chunk_data_list.append(chunk_data)
@@ -780,16 +780,16 @@ class MediaManager:
                 if validate_integrity:
                     file_hash = hashlib.sha256(file_data).hexdigest()
                     if file_hash != media_file.file_hash:
-                        logger.error(f"File hash mismatch for file {media_file_id}")
+                        _logger.error(f"File hash mismatch for file {media_file_id}")
                         raise ValueError("File integrity validation failed")
 
-                logger.debug(f"Retrieved file {media_file_id} from database chunks")
+                _logger.debug(f"Retrieved file {media_file_id} from database chunks")
                 return file_data
             else:
-                logger.warning(f"Incomplete chunks for file {media_file_id}: {len(chunks)}/{expected_chunks}")
+                _logger.warning(f"Incomplete chunks for file {media_file_id}: {len(chunks)}/{expected_chunks}")
         
         except Exception as e:
-            logger.error(f"Failed to retrieve file {media_file_id} from database: {e}")
+            _logger.error(f"Failed to retrieve file {media_file_id} from database: {e}")
         
         # Fallback to filesystem if available
         if self.use_filesystem_cache:
@@ -812,16 +812,16 @@ class MediaManager:
                 if validate_integrity:
                     file_hash = hashlib.sha256(file_data).hexdigest()
                     if file_hash != media_file.file_hash:
-                        logger.error(f"Hash mismatch for filesystem file {media_file.file_path}")
+                        _logger.error(f"Hash mismatch for filesystem file {media_file.file_path}")
                         raise ValueError("Filesystem file integrity validation failed")
 
-                logger.info(f"Retrieved file {media_file.id} from filesystem backup")
+                _logger.info(f"Retrieved file {media_file.id} from filesystem backup")
                 return file_data
             else:
-                logger.warning(f"Filesystem file not found: {file_path}")
+                _logger.warning(f"Filesystem file not found: {file_path}")
         
         except Exception as e:
-            logger.error(f"Failed to retrieve file from filesystem {media_file.file_path}: {e}")
+            _logger.error(f"Failed to retrieve file from filesystem {media_file.file_path}: {e}")
         
         return None
     
@@ -963,12 +963,12 @@ class MediaManager:
         integrity = await self.check_file_integrity(session, media_file_id)
         
         if integrity.status == "ok":
-            logger.info(f"File {media_file_id} is already intact")
+            _logger.info(f"File {media_file_id} is already intact")
             return True
         
         # Try to restore from filesystem backup
         if integrity.filesystem_exists and integrity.status in ["incomplete", "corrupted"]:
-            logger.info(f"Attempting to restore file {media_file_id} from filesystem backup")
+            _logger.info(f"Attempting to restore file {media_file_id} from filesystem backup")
             
             media_query = select(MediaFile).where(MediaFile.id == media_file_id)
             media_result = await session.exec(media_query)
@@ -984,7 +984,7 @@ class MediaManager:
                     # Verify hash
                     file_hash = hashlib.sha256(file_data).hexdigest()
                     if file_hash != media_file.file_hash:
-                        logger.error(f"Filesystem backup hash mismatch for file {media_file_id}")
+                        _logger.error(f"Filesystem backup hash mismatch for file {media_file_id}")
                         return False
                     
                     # Delete existing chunks
@@ -1025,14 +1025,14 @@ class MediaManager:
                         session.add(file_chunk)
                     
                     await session.commit()
-                    logger.info(f"Successfully repaired file {media_file_id} from filesystem backup")
+                    _logger.info(f"Successfully repaired file {media_file_id} from filesystem backup")
                     return True
                 
                 except Exception as e:
-                    logger.error(f"Failed to repair file {media_file_id} from filesystem: {e}")
+                    _logger.error(f"Failed to repair file {media_file_id} from filesystem: {e}")
                     await session.rollback()
         
-        logger.warning(f"Could not repair file {media_file_id}")
+        _logger.warning(f"Could not repair file {media_file_id}")
         return False
     
     async def cleanup_orphaned_files(self, session: AsyncSession) -> Tuple[int, int]:
@@ -1053,7 +1053,7 @@ class MediaManager:
             orphaned_files = orphaned_result.all()
             
             for media_file in orphaned_files:
-                logger.info(f"Cleaning up orphaned media file: {media_file.original_filename}")
+                _logger.info(f"Cleaning up orphaned media file: {media_file.original_filename}")
                 
                 # Delete chunks
                 chunks_query = select(FileChunk).where(FileChunk.media_file_id == media_file.id)
@@ -1071,7 +1071,7 @@ class MediaManager:
                             file_path.unlink()
                             fs_cleaned += 1
                     except Exception as e:
-                        logger.warning(f"Could not delete orphaned filesystem file {media_file.file_path}: {e}")
+                        _logger.warning(f"Could not delete orphaned filesystem file {media_file.file_path}: {e}")
                 
                 # Delete media file record
                 await session.delete(media_file)
@@ -1095,7 +1095,7 @@ class MediaManager:
                                 file_result = await session.exec(file_query)
                                 
                                 if not file_result.first():
-                                    logger.info(f"Removing orphaned filesystem file: {file_path}")
+                                    _logger.info(f"Removing orphaned filesystem file: {file_path}")
                                     file_path.unlink()
                                     fs_cleaned += 1
                         
@@ -1104,9 +1104,9 @@ class MediaManager:
                             observation_dir.rmdir()
             
             except Exception as e:
-                logger.error(f"Error during filesystem cleanup: {e}")
+                _logger.error(f"Error during filesystem cleanup: {e}")
         
-        logger.info(f"Cleanup completed: {db_cleaned} database records, {fs_cleaned} filesystem files")
+        _logger.info(f"Cleanup completed: {db_cleaned} database records, {fs_cleaned} filesystem files")
         return db_cleaned, fs_cleaned
 
     async def cleanup_legacy_chunk_files(self, session: AsyncSession) -> int:
@@ -1133,20 +1133,20 @@ class MediaManager:
                         chunk_files = list(observation_dir.glob(chunk_pattern))
 
                         if chunk_files:
-                            logger.info(f"Cleaning up {len(chunk_files)} legacy chunk files for media_file {media_file.id}")
+                            _logger.info(f"Cleaning up {len(chunk_files)} legacy chunk files for media_file {media_file.id}")
 
                             for chunk_file in chunk_files:
                                 try:
                                     chunk_file.unlink()
                                     chunks_cleaned += 1
-                                    logger.debug(f"Removed legacy chunk file: {chunk_file}")
+                                    _logger.debug(f"Removed legacy chunk file: {chunk_file}")
                                 except Exception as e:
-                                    logger.warning(f"Failed to remove chunk file {chunk_file}: {e}")
+                                    _logger.warning(f"Failed to remove chunk file {chunk_file}: {e}")
 
-            logger.info(f"Legacy chunk cleanup completed: {chunks_cleaned} chunk files removed")
+            _logger.info(f"Legacy chunk cleanup completed: {chunks_cleaned} chunk files removed")
 
         except Exception as e:
-            logger.error(f"Error during legacy chunk cleanup: {e}")
+            _logger.error(f"Error during legacy chunk cleanup: {e}")
 
         return chunks_cleaned
 

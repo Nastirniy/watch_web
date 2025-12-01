@@ -1,51 +1,27 @@
 from typing import List, Optional
 from datetime import datetime, timezone
-from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, status as fapi_status
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
-from pydantic import BaseModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.database import get_session
-from app.backend.models.observation import Observation
+from app.backend.models.observation import Observation, SignalType
 from app.backend.models.user import User
+from app.backend.models.post import Post
 from app.backend.dependencies import get_current_user
 from app.backend.services.permissions import PermissionService
 from app.backend.services.access_control import AccessControlService
 from app.backend.enums.general import Permissions, ObservationStatus
-from app.backend.enums.routes import ObservationRoutes, SystemRoutes
+from app.backend.enums.routes import ObservationRoutes
+from app.backend.routes.models.request.observations_request import (
+    ObservationCreate,
+    ObservationUpdate,
+    ObservationDisappeared
+)
+from app.backend.routes.models.response.observations_response import MessageResponse
 
 router = APIRouter()
-
-
-class ObservationCreate(BaseModel):
-    post_id: int
-    signal_type_id: int
-    frequency_min: Optional[Decimal] = None
-    frequency_max: Optional[Decimal] = None
-    video_frequency_min: Optional[Decimal] = None
-    video_frequency_max: Optional[Decimal] = None
-    observed_at: Optional[datetime] = None
-    duration_seconds: Optional[int] = None
-    comment: Optional[str] = None
-    confidence_level: Optional[str] = None
-
-
-class ObservationUpdate(BaseModel):
-    signal_type_id: Optional[int] = None
-    frequency_min: Optional[Decimal] = None
-    frequency_max: Optional[Decimal] = None
-    video_frequency_min: Optional[Decimal] = None
-    video_frequency_max: Optional[Decimal] = None
-    observed_at: Optional[datetime] = None
-    duration_seconds: Optional[int] = None
-    comment: Optional[str] = None
-    confidence_level: Optional[str] = None
-
-
-class ObservationDisappeared(BaseModel):
-    disappeared_at: datetime
 
 
 @router.get(ObservationRoutes.LIST_ALL.value, response_model=List[Observation])
@@ -92,7 +68,19 @@ async def create_observation(
     """
     Create new observation.
     Users can only create observations for their assigned post.
+    Note: Field validation is handled by Pydantic model validators.
     """
+    # Validate post exists and user has access
+    post_result = await session.exec(
+        select(Post).where(Post.id == observation_data.post_id)
+    )
+    post = post_result.first()
+    if not post:
+        raise HTTPException(
+            status_code=fapi_status.HTTP_404_NOT_FOUND,
+            detail=f"Post with id {observation_data.post_id} does not exist"
+        )
+
     # Check if user has access to the post
     await AccessControlService.check_post_membership(
         current_user,
@@ -101,50 +89,42 @@ async def create_observation(
         f"{Permissions.OBSERVATION_CREATE.name} for {ObservationRoutes.BASE.value}"
     )
 
-    # Validate that at least one set of frequencies is provided
+    # Validate signal_type exists and is active
+    signal_type_result = await session.exec(
+        select(SignalType).where(SignalType.id == observation_data.signal_type_id)
+    )
+    signal_type = signal_type_result.first()
+    if not signal_type:
+        raise HTTPException(
+            status_code=fapi_status.HTTP_404_NOT_FOUND,
+            detail=f"SignalType with id {observation_data.signal_type_id} does not exist"
+        )
+    if not signal_type.is_active:
+        raise HTTPException(
+            status_code=fapi_status.HTTP_400_BAD_REQUEST,
+            detail=f"SignalType '{signal_type.name}' is inactive and cannot be used"
+        )
+
     has_default_freq = observation_data.frequency_min is not None and observation_data.frequency_max is not None
     has_video_freq = observation_data.video_frequency_min is not None and observation_data.video_frequency_max is not None
 
-    if not has_default_freq and not has_video_freq:
-        raise HTTPException(
-            status_code=fapi_status.HTTP_400_BAD_REQUEST,
-            detail="At least one set of frequencies must be provided: either (frequency_min, frequency_max) or (video_frequency_min, video_frequency_max)"
-        )
-
-    # Validate that if one frequency is provided, both min and max must be provided
-    if (observation_data.frequency_min is not None) != (observation_data.frequency_max is not None):
-        raise HTTPException(
-            status_code=fapi_status.HTTP_400_BAD_REQUEST,
-            detail="Both frequency_min and frequency_max must be provided together"
-        )
-
-    if (observation_data.video_frequency_min is not None) != (observation_data.video_frequency_max is not None):
-        raise HTTPException(
-            status_code=fapi_status.HTTP_400_BAD_REQUEST,
-            detail="Both video_frequency_min and video_frequency_max must be provided together"
-        )
-
-    # Handle timezone for observed_at field
-    observed_at = observation_data.observed_at
-    if observed_at and observed_at.tzinfo is None:
-        observed_at = observed_at.replace(tzinfo=timezone.utc)
-
-    # Prepare observation data
-    observation_dict = observation_data.model_dump()
-    observation_dict["observed_at"] = observed_at
-    observation_dict["user_id"] = current_user.id
-
-    # Calculate default frequency fields if provided
-    if has_default_freq:
-        observation_dict["frequency_center"] = (observation_data.frequency_min + observation_data.frequency_max) / 2
-        observation_dict["bandwidth"] = observation_data.frequency_max - observation_data.frequency_min
-
-    # Calculate video frequency fields if provided
-    if has_video_freq:
-        observation_dict["video_frequency_center"] = (observation_data.video_frequency_min + observation_data.video_frequency_max) / 2
-        observation_dict["video_bandwidth"] = observation_data.video_frequency_max - observation_data.video_frequency_min
-
-    observation = Observation(**observation_dict)
+    observation = Observation(
+        post_id=observation_data.post_id,
+        signal_type_id=observation_data.signal_type_id,
+        frequency_min=observation_data.frequency_min,
+        frequency_max=observation_data.frequency_max,
+        frequency_center=(observation_data.frequency_min + observation_data.frequency_max) / 2 if has_default_freq else None,
+        bandwidth=observation_data.frequency_max - observation_data.frequency_min if has_default_freq else None,
+        video_frequency_min=observation_data.video_frequency_min,
+        video_frequency_max=observation_data.video_frequency_max,
+        video_frequency_center=(observation_data.video_frequency_min + observation_data.video_frequency_max) / 2 if has_video_freq else None,
+        video_bandwidth=observation_data.video_frequency_max - observation_data.video_frequency_min if has_video_freq else None,
+        observed_at=observation_data.observed_at,
+        duration_seconds=observation_data.duration_seconds,
+        comment=observation_data.comment,
+        confidence_level=observation_data.confidence_level,
+        user_id=current_user.id
+    )
 
     session.add(observation)
 
@@ -158,22 +138,12 @@ async def create_observation(
         return observation
     except IntegrityError as e:
         await session.rollback()
-        # Check if it's a foreign key constraint error
-        if "post_id" in str(e) or "FOREIGN KEY" in str(e):
-            raise HTTPException(
-                status_code=fapi_status.HTTP_400_BAD_REQUEST,
-                detail="Invalid post_id: Post does not exist"
-            )
-        elif "signal_type_id" in str(e):
-            raise HTTPException(
-                status_code=fapi_status.HTTP_400_BAD_REQUEST,
-                detail="Invalid signal_type_id: Signal type does not exist"
-            )
-        else:
-            raise HTTPException(
-                status_code=fapi_status.HTTP_400_BAD_REQUEST,
-                detail="Database constraint violation"
-            )
+        # This should rarely happen since we pre-validate foreign keys
+        # but kept as safety net for unexpected constraints
+        raise HTTPException(
+            status_code=fapi_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}"
+        )
 
 
 @router.put(ObservationRoutes.OBSERVATION_BY_ID.value, response_model=Observation)
@@ -211,28 +181,24 @@ async def update_observation(
         f"{Permissions.OBSERVATION_UPDATE.name} for {ObservationRoutes.BASE.value}"
     )
 
-    # Validate that if one frequency is provided in update, both min and max must be provided
+    if observation_data.signal_type_id is not None:
+        signal_type_result = await session.exec(
+            select(SignalType).where(SignalType.id == observation_data.signal_type_id)
+        )
+        signal_type = signal_type_result.first()
+        if not signal_type:
+            raise HTTPException(
+                status_code=fapi_status.HTTP_404_NOT_FOUND,
+                detail=f"SignalType with id {observation_data.signal_type_id} does not exist"
+            )
+        if not signal_type.is_active:
+            raise HTTPException(
+                status_code=fapi_status.HTTP_400_BAD_REQUEST,
+                detail=f"SignalType '{signal_type.name}' is inactive and cannot be used"
+            )
+
     update_data = observation_data.model_dump(exclude_unset=True)
-
-    if "frequency_min" in update_data or "frequency_max" in update_data:
-        if (observation_data.frequency_min is not None) != (observation_data.frequency_max is not None):
-            raise HTTPException(
-                status_code=fapi_status.HTTP_400_BAD_REQUEST,
-                detail="Both frequency_min and frequency_max must be provided together"
-            )
-
-    if "video_frequency_min" in update_data or "video_frequency_max" in update_data:
-        if (observation_data.video_frequency_min is not None) != (observation_data.video_frequency_max is not None):
-            raise HTTPException(
-                status_code=fapi_status.HTTP_400_BAD_REQUEST,
-                detail="Both video_frequency_min and video_frequency_max must be provided together"
-            )
-
-    # Update only provided fields
     for field, value in update_data.items():
-        # Handle timezone for observed_at field
-        if field == "observed_at" and value and value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
         setattr(observation, field, value)
 
     # Validate that after update, at least one set of frequencies exists
@@ -267,19 +233,15 @@ async def update_observation(
         return observation
     except IntegrityError as e:
         await session.rollback()
-        if "signal_type_id" in str(e):
-            raise HTTPException(
-                status_code=fapi_status.HTTP_400_BAD_REQUEST,
-                detail="Invalid signal_type_id: Signal type does not exist"
-            )
-        else:
-            raise HTTPException(
-                status_code=fapi_status.HTTP_400_BAD_REQUEST,
-                detail="Database constraint violation"
-            )
+        # This should rarely happen since we pre-validate foreign keys
+        # but kept as safety net for unexpected constraints
+        raise HTTPException(
+            status_code=fapi_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}"
+        )
 
 
-@router.post(ObservationRoutes.MARK_DISAPPEARED.value)
+@router.post(ObservationRoutes.MARK_DISAPPEARED.value, response_model=MessageResponse)
 @PermissionService.require_permission(Permissions.OBSERVATION_UPDATE.value)
 async def mark_observation_disappeared(
         observation_id: int,
@@ -313,29 +275,17 @@ async def mark_observation_disappeared(
         f"{Permissions.OBSERVATION_UPDATE.name} for {ObservationRoutes.MARK_DISAPPEARED.value}"
     )
 
-    # Handle timezone for disappeared_at field
-    disappeared_at = disappeared_data.disappeared_at
-
-    # Ensure disappeared_at has timezone info
-    if disappeared_at.tzinfo is None:
-        disappeared_at = disappeared_at.replace(tzinfo=timezone.utc)
-
     observation.status = ObservationStatus.DISAPPEARED.value
-    observation.disappeared_at = disappeared_at
+    observation.disappeared_at = disappeared_data.disappeared_at
     observation.disappeared_by = current_user.id
     observation.updated_at = datetime.now(timezone.utc)
 
-    # Calculate duration in seconds if observed_at exists
     if observation.observed_at:
-        # Ensure both datetimes have timezone info for comparison
-        observed_at = observation.observed_at
-        if observed_at.tzinfo is None:
-            observed_at = observed_at.replace(tzinfo=timezone.utc)
-
-        time_delta = observation.disappeared_at - observed_at
+        observed_at = observation.observed_at if observation.observed_at.tzinfo else observation.observed_at.replace(tzinfo=timezone.utc)
+        time_delta = disappeared_data.disappeared_at - observed_at
         observation.duration_seconds = int(time_delta.total_seconds())
 
     session.add(observation)
     await session.commit()
 
-    return {"message": "Observation marked as disappeared"}
+    return MessageResponse(message="Observation marked as disappeared")

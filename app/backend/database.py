@@ -8,11 +8,13 @@ import contextvars
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.config import settings
+from app.backend.enums.general import AppEnvironment
+from app.backend.helpers.certeficates_helper import hash_data
 from app.backend.utils.logging_config import get_database_logger
 from app.backend.models import *  # Import all models to register them
 
 # Get database logger
-logger = get_database_logger()
+_logger = get_database_logger()
 
 # Context variable to store current user ID for audit logging
 current_user_context = contextvars.ContextVar('current_user_id', default=None)
@@ -43,9 +45,9 @@ async def create_database_if_not_exists():
             await conn.execute(
                 text(f"CREATE DATABASE {db_config.name} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
             )
-            logger.info(f"Database '{db_config.name}' created successfully")
+            _logger.info(f"Database '{db_config.name}' created successfully")
         else:
-            logger.info(f"Database '{db_config.name}' already exists")
+            _logger.info(f"Database '{db_config.name}' already exists")
 
     await engine_without_db.dispose()
 
@@ -75,7 +77,7 @@ async def get_engine() -> AsyncEngine:
             },
             future=True
         )
-        logger.info(f"Database engine created with pool_size={settings.database.pool_size}, max_overflow={settings.database.max_overflow}")
+        _logger.info(f"Database engine created with pool_size={settings.database.pool_size}, max_overflow={settings.database.max_overflow}")
     return engine
 
 
@@ -117,7 +119,7 @@ async def get_session() -> AsyncGenerator[AuditedSession, None]:
             
             yield session
         except Exception as e:
-            logger.error(f"Database session error: {e}")
+            _logger.error(f"Database session error: {e}")
             await session.rollback()
             raise
         finally:
@@ -125,15 +127,51 @@ async def get_session() -> AsyncGenerator[AuditedSession, None]:
             try:
                 await session.close()
             except Exception as e:
-                logger.warning(f"Error closing session: {e}")
+                _logger.warning(f"Error closing session: {e}")
+
+
+def _is_admin_pki_data_valid(admin_config) -> bool:
+    """Check if admin PKI data is complete and appears valid"""
+    # Check if all fields are present and non-empty
+    if not all([
+        admin_config.pki_certificate_cn,
+        admin_config.pki_certificate_serial,
+        admin_config.pki_certificate_fingerprint
+    ]):
+        return False
+
+    # Check if values are not just empty strings
+    if not all([
+        admin_config.pki_certificate_cn.strip(),
+        admin_config.pki_certificate_serial.strip(),
+        admin_config.pki_certificate_fingerprint.strip()
+    ]):
+        return False
+
+    # Check if CN looks like an email or valid format
+    cn = admin_config.pki_certificate_cn.strip()
+    if '@' not in cn and '=' not in cn:
+        return False
+
+    # Check if serial has reasonable length
+    serial = admin_config.pki_certificate_serial.strip()
+    if len(serial) < 4:
+        return False
+
+    # Check if fingerprint has reasonable format (contains colons)
+    fingerprint = admin_config.pki_certificate_fingerprint.strip()
+    if ':' not in fingerprint or len(fingerprint) < 20:
+        return False
+
+    return True
 
 
 async def seed_database():
     """Seed database with initial data (admin user, roles, signal types)"""
     # First ensure database exists (migrations should already be applied)
     await create_database_if_not_exists()
-    
-    logger.info("Starting database seeding...")
+
+    _logger.info("Starting database seeding...")
 
     # Create initial admin user and role with proper PKI certificates
     session_maker = await get_session_maker()
@@ -150,17 +188,37 @@ async def seed_database():
         admin_user = result.first()
 
         if not admin_user:
-            # Generate proper PKI credentials for admin
-            try:
-                admin_pki = generate_admin_pki_credentials()
-                logger.info("Generated admin PKI credentials")
-            except Exception as e:
-                logger.warning(f"Failed to generate PKI certificates, using configured values: {e}")
+            # Determine whether to use config values or generate new PKI credentials
+            use_generated = False
+            admin_pki = {}
+
+            if _is_admin_pki_data_valid(settings.admin):
+                # Use configured values
                 admin_pki = {
                     "pki_certificate_cn": settings.admin.pki_certificate_cn,
                     "pki_certificate_serial": settings.admin.pki_certificate_serial,
                     "pki_certificate_fingerprint": settings.admin.pki_certificate_fingerprint
                 }
+                _logger.info("Using admin PKI credentials from configuration")
+            else:
+                # Generate new PKI credentials
+                try:
+                    admin_pki = generate_admin_pki_credentials()
+                    use_generated = True
+                    _logger.info("Generated new admin PKI credentials (config data missing or invalid)")
+
+                    # Print certificate data in dev mode
+                    if settings.app.debug and settings.app.environment == AppEnvironment.DEVELOPMENT.value:
+                        _logger.debug("\n" + "=" * 80)
+                        _logger.debug("GENERATED ADMIN PKI CREDENTIALS (DEV MODE)")
+                        _logger.debug("=" * 80)
+                        _logger.debug(f"CN:          {admin_pki['pki_certificate_cn']}")
+                        _logger.debug(f"Serial:      {admin_pki['pki_certificate_serial']}")
+                        _logger.debug(f"Fingerprint: {admin_pki['pki_certificate_fingerprint']}")
+                        _logger.debug("=" * 80 + "\n")
+                except Exception as e:
+                    _logger.error(f"Failed to generate PKI certificates and no valid config data available: {e}")
+                    raise ValueError("Cannot create admin user without valid PKI credentials")
 
             # Create admin role with all permissions
             admin_role = Role(
@@ -184,14 +242,14 @@ async def seed_database():
                 )
                 session.add(role_perm)
 
-            # Create admin user with generated PKI credentials (hashed)
+            # Create admin user with PKI credentials (hashed)
             from app.backend.services.auth import AuthService
             admin_user = User(
                 username=settings.admin.username,
                 username_alias=settings.admin.username_alias,
-                pki_certificate_cn_hash=AuthService.hash_pki_data(admin_pki["pki_certificate_cn"]),
-                pki_certificate_serial_hash=AuthService.hash_pki_data(admin_pki["pki_certificate_serial"]),
-                pki_certificate_fingerprint_hash=AuthService.hash_pki_data(admin_pki["pki_certificate_fingerprint"]),
+                pki_certificate_cn_hash=await hash_data(admin_pki["pki_certificate_cn"]),
+                pki_certificate_serial_hash=await hash_data(admin_pki["pki_certificate_serial"]),
+                pki_certificate_fingerprint_hash=await hash_data(admin_pki["pki_certificate_fingerprint"]),
                 is_active=True
             )
             session.add(admin_user)
@@ -206,9 +264,11 @@ async def seed_database():
             session.add(user_role)
 
             await session.commit()
-            logger.info(f"Admin user created with PKI CN: {admin_pki['pki_certificate_cn']}")
+
+            method = "generated" if use_generated else "configured"
+            _logger.info(f"Admin user created with {method} PKI credentials (CN: {admin_pki['pki_certificate_cn']})")
         else:
-            logger.info("Admin user already exists")
+            _logger.info("Admin user already exists")
 
         # Seed signal types if they don't exist
         from app.backend.models.observation import SignalType
@@ -232,9 +292,9 @@ async def seed_database():
                 session.add(signal_type)
             
             await session.commit()
-            logger.info("Signal types seeded successfully")
+            _logger.info("Signal types seeded successfully")
         else:
-            logger.info("Signal types already exist")
+            _logger.info("Signal types already exist")
 
 
 async def initialize_database_with_migrations():
@@ -244,7 +304,7 @@ async def initialize_database_with_migrations():
     from alembic.config import Config
     from alembic import command
     
-    logger.info("Initializing database with migrations...")
+    _logger.info("Initializing database with migrations...")
     
     try:
         # Ensure database exists
@@ -264,7 +324,7 @@ async def initialize_database_with_migrations():
                 return True
                 
             except Exception as e:
-                logger.warning(f"Migration failed, will create tables manually: {e}")
+                _logger.warning(f"Migration failed, will create tables manually: {e}")
                 return False
         
         # Run migrations in thread to avoid event loop issues
@@ -273,21 +333,21 @@ async def initialize_database_with_migrations():
             migration_success = await loop.run_in_executor(executor, check_and_run_migrations)
         
         if migration_success:
-            logger.info("Migrations applied successfully")
+            _logger.info("Migrations applied successfully")
         else:
             # Fallback: create tables manually if migration fails
-            logger.info("Creating tables manually as fallback...")
+            _logger.info("Creating tables manually as fallback...")
             engine = await get_engine()
             async with engine.begin() as conn:
                 await conn.run_sync(SQLModel.metadata.create_all)
-            logger.info("Tables created manually")
+            _logger.info("Tables created manually")
         
         # Always seed initial data
         await seed_database()
-        logger.info("Database initialization completed successfully")
+        _logger.info("Database initialization completed successfully")
         
     except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
+        _logger.error(f"Failed to initialize database: {e}")
         raise
 
 
@@ -297,4 +357,4 @@ async def close_db():
     if engine:
         await engine.dispose()
         engine = None
-        logger.info("Database connections closed")
+        _logger.info("Database connections closed")
