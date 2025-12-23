@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Request, HTTPException, status
 from sqlmodel.ext.asyncio.session import AsyncSession
 import asyncio
+from loguru import logger
 
 from app.backend.database import get_session
 from app.backend.config import settings
@@ -77,14 +78,20 @@ async def health_check(
         )
 
     except Exception as e:
-        # Return error response with Pydantic models
+        # Log the actual error for debugging (server-side only)
+        logger.error(f"Health check failed for client {client_ip}: {type(e).__name__}: {str(e)}")
+        logger.exception("Health check exception details:")
+
         return HealthResponse(
             status=ServiceHealthStatus.UNHEALTHY.value,
             timestamp=get_current_time_in_timezone(settings.timezone.timezone),
             version=settings.app.version,
             environment=settings.app.environment,
             timezone=settings.timezone.timezone,
-            database=DatabaseHealthModel(status=ServiceHealthStatus.ERROR.value, error=str(e)),
+            database=DatabaseHealthModel(
+                status=ServiceHealthStatus.ERROR.value, 
+                error="Service health check failed. Contact system administrator."
+            ),
             services=ServicesHealthModel(
                 system=ServiceStatusModel(status=ServiceHealthStatus.ERROR.value, uptime=ServiceUptimeStatus.UNKNOWN.value)
             )

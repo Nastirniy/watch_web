@@ -96,6 +96,31 @@ async def create_role(
     )
 
 
+@router.get(RoleRoutes.ALL_PERMISSIONS.value, response_model=List[PermissionResponse])
+@PermissionService.require_permissions({"all": [Permissions.IS_ADMIN.value]})
+async def list_all_permissions(
+        session: AsyncSession = Depends(get_session),
+        current_user: User = Depends(get_current_user)
+):
+    """List all available permissions in the system - admin only"""
+    try:
+        result = await session.exec(
+            select(Permission).order_by(Permission.name)
+        )
+
+        permissions = result.all()
+        _logger.info(f"Admin {current_user.username} listed all {len(permissions)} permissions")
+
+        return [PermissionResponse(id=perm.id, name=perm.name) for perm in permissions]
+
+    except Exception as e:
+        _logger.error(f"Error listing all permissions: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve permissions"
+        )
+
+
 @router.get(RoleRoutes.ROLE_BY_ID.value, response_model=RoleResponse)
 @PermissionService.require_permissions({"any": [
     Permissions.ROLE_VIEW.value,
@@ -112,7 +137,7 @@ async def get_role(
     )
 
     role = await get_role_or_404(session, role_id)
-    
+
     return RoleResponse(
         id=role.id,
         name=role.name,

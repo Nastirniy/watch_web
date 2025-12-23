@@ -111,7 +111,7 @@ async def create_user(
         _logger.error(f"JSON decode error for role_ids: {str(e)}, received: {role_ids}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid role_ids format. Must be a JSON array like [1, 2, 3]. Error: {str(e)}"
+            detail=f"Invalid role_ids format. Must be a JSON array like [1, 2, 3]. Received: {role_ids}"
         )
 
     # Validate all input data using Pydantic model
@@ -126,7 +126,7 @@ async def create_user(
         _logger.error(f"Validation error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(e)
+            detail="Server side error"  # TODO swap to real error message
         )
 
     # Validate post_id exists if provided
@@ -179,7 +179,7 @@ async def create_user(
         _logger.error(f"Certificate parsing error for user {username}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid certificate: {str(e)}"
+            detail=f"Invalid certificate"
         )
     except Exception as e:
         _logger.error(f"Unexpected error reading certificate: {str(e)}")
@@ -379,7 +379,7 @@ async def update_user(
             _logger.error(f"JSON decode error for role_ids: {str(e)}, received: {role_ids}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid role_ids format. Must be a JSON array like [1, 2, 3]. Error: {str(e)}"
+                detail=f"Invalid role_ids format. Must be a JSON array like [1, 2, 3]. Received: {role_ids}"
             )
 
     # Validate input data using Pydantic model
@@ -394,7 +394,7 @@ async def update_user(
         _logger.error(f"Validation error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(e)
+            detail="Server side error"  # TODO swap to real error message
         )
 
     if update_data.post_id is not None:
@@ -472,7 +472,7 @@ async def update_user(
             _logger.error(f"Certificate parsing error for user {user.username}: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid certificate: {str(e)}"
+                detail=f"Invalid certificate"
             )
         except Exception as e:
             _logger.error(f"Unexpected error reading certificate: {str(e)}")

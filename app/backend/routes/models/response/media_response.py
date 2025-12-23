@@ -31,6 +31,7 @@ class MediaFileInfo(BaseModel):
     upload_complete: bool
     total_chunks: int
     uploaded_chunks: int
+    thumbnail_id: Optional[int] = None
 
 
 class UploadSessionInfo(BaseModel):
@@ -41,3 +42,10 @@ class UploadSessionInfo(BaseModel):
     last_activity: datetime
     is_expired: bool
     can_resume: bool
+
+
+class ThumbnailInfo(BaseModel):
+    media_id: int
+    thumbnail_url: Optional[str]
+    thumbnail_ready: bool
+    error: Optional[str]

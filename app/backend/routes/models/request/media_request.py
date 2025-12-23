@@ -18,3 +18,7 @@ class ResumeUploadRequest(BaseModel):
     file_size: int
     file_hash: str
     media_type: str
+
+
+class ListAttachedMediaRequest(BaseModel):
+    observation_id: int

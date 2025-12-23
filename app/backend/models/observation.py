@@ -14,8 +14,9 @@ class Category(SQLModel, table=True):
     __tablename__ = "categories"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str = Field(max_length=255, index=True)
+    name: str = Field(max_length=255, index=True, unique=True)
     alias: str = Field(max_length=255)
+    is_deleted: bool = Field(default=False)
 
     # Relationships
     signal_types: List["SignalType"] = Relationship(back_populates="category")
@@ -33,6 +34,7 @@ class SignalType(SQLModel, table=True):
     sort_order: int = Field(default=0, index=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    is_deleted: bool = Field(default=False)
 
     # Relationships
     category: Optional[Category] = Relationship(back_populates="signal_types")

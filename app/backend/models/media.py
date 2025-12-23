@@ -27,6 +27,9 @@ class MediaFile(SQLModel, table=True):
     width: Optional[int] = Field(default=None)
     height: Optional[int] = Field(default=None)
 
+    thumbnail_path: Optional[str] = Field(default=None, max_length=500)
+    thumbnail_error: Optional[str] = Field(default=None, max_length=500)
+
     uploaded_at: datetime = Field(default_factory=get_default_timezone_datetime, index=True)
     upload_complete: bool = Field(default=False)
     upload_session_started: datetime = Field(default_factory=get_default_timezone_datetime, index=True)

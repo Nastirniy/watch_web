@@ -13,8 +13,8 @@ sys.path.insert(0, str(project_root))
 from app.backend.config import settings
 from app.backend.utils.logging_config import setup_logging, get_logger, get_main_logger
 from app.backend.database import initialize_database_with_migrations
-from app.backend.routes import auth, users, observations, posts, health, media, roles
-from app.backend.enums.routes import AuthRoutes, UserRoutes, ObservationRoutes, PostRoutes, SystemRoutes, MediaRoutes, RoleRoutes
+from app.backend.routes import auth, users, observations, posts, health, media, roles, categories, signal_types
+from app.backend.enums.routes import AuthRoutes, UserRoutes, ObservationRoutes, PostRoutes, SystemRoutes, MediaRoutes, RoleRoutes, CategoryRoutes, SignalTypeRoutes
 
 # Initialize logging system
 setup_logging(
@@ -64,6 +64,8 @@ fastapi_app.include_router(health.router, tags=[SystemRoutes.tag()])
 fastapi_app.include_router(auth.router, prefix=AuthRoutes.BASE.versioned_path(), tags=[AuthRoutes.tag()])
 fastapi_app.include_router(users.router, prefix=UserRoutes.BASE.versioned_path(), tags=[UserRoutes.tag()])
 fastapi_app.include_router(roles.router, prefix=RoleRoutes.BASE.versioned_path(), tags=[RoleRoutes.tag()])
+fastapi_app.include_router(categories.router, prefix=CategoryRoutes.BASE.versioned_path(), tags=[CategoryRoutes.tag()])
+fastapi_app.include_router(signal_types.router, prefix=SignalTypeRoutes.BASE.versioned_path(), tags=[SignalTypeRoutes.tag()])
 fastapi_app.include_router(observations.router, prefix=ObservationRoutes.BASE.versioned_path(), tags=[ObservationRoutes.tag()])
 fastapi_app.include_router(posts.router, prefix=PostRoutes.BASE.versioned_path(), tags=[PostRoutes.tag()])
 fastapi_app.include_router(media.router, prefix=MediaRoutes.BASE.versioned_path(), tags=[MediaRoutes.tag()])

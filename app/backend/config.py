@@ -52,9 +52,9 @@ class ServerConfig(BaseModel):
 class AdminConfig(BaseModel):
     username: str = "admin"
     username_alias: str = "System Administrator"
-    pki_certificate_cn: Optional[str] = None
-    pki_certificate_serial: Optional[str] = None
-    pki_certificate_fingerprint: Optional[str] = None
+    pki_certificate_cn: str = "admin@radiomonitoring.local"
+    pki_certificate_serial: str = "ABC123DEF456"
+    pki_certificate_fingerprint: str = "12:34:56:78:90:AB:CD:EF:12:34:56:78:90:AB:CD:EF:12:34:56:78"
 
 
 class LoggingConfig(BaseModel):
@@ -76,12 +76,43 @@ class TimezoneConfig(BaseModel):
         return v
 
 
+class ThumbnailSettings(BaseModel):
+    """Configuration for thumbnail generation"""
+    enabled: bool = True
+    small_size: tuple[int, int] = (150, 150)
+    medium_size: tuple[int, int] = (300, 300)
+    large_size: tuple[int, int] = (600, 600)
+    quality: int = 85
+    format: str = "JPEG"
+    video_frame_position: float = 0.1
+    max_concurrent: int = 3
+
+    @field_validator('quality')
+    @classmethod
+    def validate_quality(cls, v):
+        # Ensure quality is between 1 and 100
+        return max(1, min(100, v))
+
+    @field_validator('video_frame_position')
+    @classmethod
+    def validate_frame_position(cls, v):
+        # Ensure frame position is between 0 and 1
+        return max(0.0, min(1.0, v))
+
+    @field_validator('max_concurrent')
+    @classmethod
+    def validate_max_concurrent(cls, v):
+        # Ensure max_concurrent is between 1 and 10
+        return max(1, min(10, v))
+
+
 class StorageConfig(BaseModel):
     """Configuration for media file storage"""
     upload_path: str = "uploads"
     chunk_size_mb: int = 1
     upload_timeout_minutes: int = 30
     max_file_size_gb: int = 10
+    thumbnail: ThumbnailSettings = Field(default_factory=ThumbnailSettings)
 
     @field_validator('upload_path')
     @classmethod

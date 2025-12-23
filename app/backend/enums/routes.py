@@ -106,44 +106,6 @@ class ExportRoutes(str, Enum):
         return "EXPORTS"
 
 
-class MediaRoutes(str, Enum):
-    """Media file management routes"""
-    BASE = "/media"
-    UPLOAD = "/upload"
-    UPLOAD_CHUNKED_START = "/upload/chunked/start"
-    UPLOAD_CHUNKED_CHUNK = "/upload/chunked/chunk"
-    MEDIA_BY_ID = "/{media_id}"
-    MEDIA_DOWNLOAD = "/{media_id}/download"
-    MEDIA_INFO = "/{media_id}/info"
-    OBSERVATION = "/observation/{observation_id}"
-    BULK = "/bulk"
-    STATISTICS = "/statistics"
-    MAINTENANCE_CLEANUP = "/maintenance/cleanup"
-    POLICY = "/policy"
-    CHECK_UPLOAD_SESSION = "/check-upload-session"
-    RESUME_UPLOAD = "/resume-upload"
-    FILE_INTEGRITY = "/integrity/{media_id}"
-    FILE_REPAIR = "/repair/{media_id}"
-    CLEANUP_OLD_CHUNKS = "/cleanup/old-chunks"
-
-    def versioned_path(self) -> str:
-        """Get the full path with base prefix and api version prefix"""
-        api_ver = APIVersionRoutes.current_version()
-        if self == self.BASE:
-            return f"{api_ver}{self.BASE.value}"
-        return f"{api_ver}{self.BASE.value}{self.value}" if self.BASE.value else f"{api_ver}{self.value}"
-
-    def path(self) -> str:
-        """Get the full path with base prefix"""
-        if self == self.BASE:
-            return f"{self.BASE.value}"
-        return f"{self.BASE.value}{self.value}" if self.BASE.value else str(self.value)
-
-    @staticmethod
-    def tag() -> str:
-        return "MEDIA"
-
-
 class PostRoutes(str, Enum):
     """Post/content management routes"""
     BASE = "/posts"
@@ -232,6 +194,45 @@ class ObservationRoutes(str, Enum):
         return "OBSERVATIONS"
 
 
+class MediaRoutes(str, Enum):
+    """Media file management routes"""
+    BASE = "/media"
+    UPLOAD = "/upload"
+    # UPLOAD_CHUNKED_START = "/upload/chunked/start"
+    # UPLOAD_CHUNKED_CHUNK = "/upload/chunked/chunk"
+    MEDIA_BY_ID = "/{media_id}"
+    MEDIA_DOWNLOAD = "/{media_id}/download"
+    MEDIA_INFO = "/{media_id}/info"
+    MEDIA_THUMBNAIL = "/{media_id}/thumbnail"
+    MEDIA_THUMBNAIL_REGENERATE = "/{media_id}/thumbnail/regenerate"
+    LIST_ALL_ATTACHED_MEDIA = "/list-all-attached"
+    # OBSERVATION_THUMBNAILS = "/observation/{observation_id}/thumbnails"
+    STORAGE_STATISTICS = "/statistics"
+    # MAINTENANCE_CLEANUP = "/maintenance/cleanup"
+    # CHECK_UPLOAD_SESSION = "/check-upload-session"
+    # RESUME_UPLOAD = "/resume-upload"
+    # FILE_INTEGRITY = "/integrity/{media_id}"
+    # FILE_REPAIR = "/repair/{media_id}"
+    # CLEANUP_OLD_CHUNKS = "/cleanup/old-chunks"
+
+    def versioned_path(self) -> str:
+        """Get the full path with base prefix and api version prefix"""
+        api_ver = APIVersionRoutes.current_version()
+        if self == self.BASE:
+            return f"{api_ver}{self.BASE.value}"
+        return f"{api_ver}{self.BASE.value}{self.value}" if self.BASE.value else f"{api_ver}{self.value}"
+
+    def path(self) -> str:
+        """Get the full path with base prefix"""
+        if self == self.BASE:
+            return f"{self.BASE.value}"
+        return f"{self.BASE.value}{self.value}" if self.BASE.value else str(self.value)
+
+    @staticmethod
+    def tag() -> str:
+        return "MEDIA"
+
+
 class UserRoutes(str, Enum):
     """User management routes"""
     BASE = "/users"
@@ -262,6 +263,7 @@ class RoleRoutes(str, Enum):
     ROLE_BY_ID = "/{role_id}"
     ROLE_PERMISSIONS = "/{role_id}/permissions"
     ROLE_PERMISSION_BY_ID = "/{role_id}/permissions/{permission_id}"
+    ALL_PERMISSIONS = "/list-all-permissions"
 
     def versioned_path(self) -> str:
         """Get the full path with base prefix and api version prefix"""
@@ -279,6 +281,57 @@ class RoleRoutes(str, Enum):
     @staticmethod
     def tag() -> str:
         return "ROLES"
+
+
+class CategoryRoutes(str, Enum):
+    """Category management routes"""
+    BASE = "/categories"
+    LIST_ALL = "/list-all"
+    CREATE = "/create"
+    CATEGORY_BY_ID = "/{category_id}"
+    CATEGORY_SIGNAL_TYPES = "/{category_id}/signal-types"
+
+    def versioned_path(self) -> str:
+        """Get the full path with base prefix and api version prefix"""
+        api_ver = APIVersionRoutes.current_version()
+        if self == self.BASE:
+            return f"{api_ver}{self.BASE.value}"
+        return f"{api_ver}{self.BASE.value}{self.value}" if self.BASE.value else f"{api_ver}{self.value}"
+
+    def path(self) -> str:
+        """Get the full path with base prefix"""
+        if self == self.BASE:
+            return f"{self.BASE.value}"
+        return f"{self.BASE.value}{self.value}" if self.BASE.value else str(self.value)
+
+    @staticmethod
+    def tag() -> str:
+        return "CATEGORIES"
+
+
+class SignalTypeRoutes(str, Enum):
+    """Signal type management routes"""
+    BASE = "/signal-types"
+    LIST_ALL = "/list-all"
+    CREATE = "/create"
+    SIGNAL_TYPE_BY_ID = "/{signal_type_id}"
+
+    def versioned_path(self) -> str:
+        """Get the full path with base prefix and api version prefix"""
+        api_ver = APIVersionRoutes.current_version()
+        if self == self.BASE:
+            return f"{api_ver}{self.BASE.value}"
+        return f"{api_ver}{self.BASE.value}{self.value}" if self.BASE.value else f"{api_ver}{self.value}"
+
+    def path(self) -> str:
+        """Get the full path with base prefix"""
+        if self == self.BASE:
+            return f"{self.BASE.value}"
+        return f"{self.BASE.value}{self.value}" if self.BASE.value else str(self.value)
+
+    @staticmethod
+    def tag() -> str:
+        return "SIGNAL_TYPES"
 
 
 class SystemRoutes(str, Enum):
@@ -314,12 +367,14 @@ class Routes:
     DOCS = DocsRoutes
     AUTH = AuthRoutes
     EXPORTS = ExportRoutes
-    MEDIA = MediaRoutes
     POSTS = PostRoutes
     SIGNALS = SignalRoutes
     OBSERVATIONS = ObservationRoutes
+    MEDIA = MediaRoutes
     USERS = UserRoutes
     ROLES = RoleRoutes
+    CATEGORIES = CategoryRoutes
+    SIGNAL_TYPES = SignalTypeRoutes
     API_VERSION = APIVersionRoutes
     SYSTEM = SystemRoutes
 

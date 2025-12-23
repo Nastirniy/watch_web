@@ -1,7 +1,9 @@
 from typing import List, Optional
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status as fapi_status
+from loguru import logger
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import selectinload
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -19,12 +21,12 @@ from app.backend.routes.models.request.observations_request import (
     ObservationUpdate,
     ObservationDisappeared
 )
-from app.backend.routes.models.response.observations_response import MessageResponse
+from app.backend.routes.models.response.observations_response import MessageResponse, ObservationWithMedia
 
 router = APIRouter()
 
 
-@router.get(ObservationRoutes.LIST_ALL.value, response_model=List[Observation])
+@router.get(ObservationRoutes.LIST_ALL.value, response_model=List[ObservationWithMedia])
 @PermissionService.require_permission(Permissions.OBSERVATION_VIEW.value)
 async def list_observations(
         skip: int = 0,
@@ -35,9 +37,12 @@ async def list_observations(
         current_user: User = Depends(get_current_user)
 ):
     """
-    List observations.
+    List observations with attached media IDs.
     Regular users can only see observations from their assigned post.
     Admins can see all observations or filter by specific post.
+
+    DB Load: Uses eager loading (selectinload) to fetch media_files in a single additional query,
+    preventing N+1 query problem. For N observations, this executes 2 queries instead of N+1.
     """
 
     # Apply post access filter
@@ -54,8 +59,43 @@ async def list_observations(
     if status:
         query = query.where(Observation.status == status)
 
+    # Eager load media_files to avoid N+1 queries
+    query = query.options(selectinload(Observation.media_files))
+
     result = await session.exec(query.offset(skip).limit(limit))
-    return result.all()
+    observations = result.all()
+
+    # Build response with media IDs
+    response = []
+    for obs in observations:
+        obs_dict = {
+            "id": obs.id,
+            "user_id": obs.user_id,
+            "post_id": obs.post_id,
+            "signal_type_id": obs.signal_type_id,
+            "frequency_min": obs.frequency_min,
+            "frequency_max": obs.frequency_max,
+            "frequency_center": obs.frequency_center,
+            "bandwidth": obs.bandwidth,
+            "video_frequency_min": obs.video_frequency_min,
+            "video_frequency_max": obs.video_frequency_max,
+            "video_frequency_center": obs.video_frequency_center,
+            "video_bandwidth": obs.video_bandwidth,
+            "observed_at": obs.observed_at,
+            "duration_seconds": obs.duration_seconds,
+            "comment": obs.comment,
+            "status": obs.status,
+            "confidence_level": obs.confidence_level,
+            "is_deleted": obs.is_deleted,
+            "created_at": obs.created_at,
+            "updated_at": obs.updated_at,
+            "disappeared_at": obs.disappeared_at,
+            "disappeared_by": obs.disappeared_by,
+            "media_ids": [media.id for media in obs.media_files]
+        }
+        response.append(ObservationWithMedia(**obs_dict))
+
+    return response
 
 
 @router.post(ObservationRoutes.CREATE.value, response_model=Observation)
@@ -91,7 +131,10 @@ async def create_observation(
 
     # Validate signal_type exists and is active
     signal_type_result = await session.exec(
-        select(SignalType).where(SignalType.id == observation_data.signal_type_id)
+        select(SignalType).where(
+            SignalType.id == observation_data.signal_type_id,
+            SignalType.is_deleted == False
+        )
     )
     signal_type = signal_type_result.first()
     if not signal_type:
@@ -140,9 +183,10 @@ async def create_observation(
         await session.rollback()
         # This should rarely happen since we pre-validate foreign keys
         # but kept as safety net for unexpected constraints
+        logger.exception(f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}")  #TODO: make it as loggers config
         raise HTTPException(
             status_code=fapi_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}"
+            detail=f"Unexpected database constraint violation"
         )
 
 
@@ -183,7 +227,10 @@ async def update_observation(
 
     if observation_data.signal_type_id is not None:
         signal_type_result = await session.exec(
-            select(SignalType).where(SignalType.id == observation_data.signal_type_id)
+            select(SignalType).where(
+                SignalType.id == observation_data.signal_type_id,
+                SignalType.is_deleted == False
+            )
         )
         signal_type = signal_type_result.first()
         if not signal_type:
@@ -235,9 +282,11 @@ async def update_observation(
         await session.rollback()
         # This should rarely happen since we pre-validate foreign keys
         # but kept as safety net for unexpected constraints
+        logger.exception(
+            f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}")  # TODO: make it as loggers config
         raise HTTPException(
             status_code=fapi_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}"
+            detail=f"Unexpected database constraint violation"
         )
 
 

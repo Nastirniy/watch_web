@@ -169,7 +169,7 @@ async def check_database_health(session: AsyncSession) -> DatabaseHealthModel:
     except Exception as e:
         return DatabaseHealthModel(
             status=ServiceHealthStatus.UNHEALTHY.value,
-            error=str(e),
+            error="Server side error",  # TODO swap to real error message
             response_time=None,
             stats=None
         )

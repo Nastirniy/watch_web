@@ -31,6 +31,18 @@ class Permissions(Enum):
     AUDIT_VIEW = "audit.view"
     EXPORT_CREATE = "export.create"
 
+    # Category permissions
+    CATEGORY_VIEW = "category.view"
+    CATEGORY_CREATE = "category.create"
+    CATEGORY_UPDATE = "category.update"
+    CATEGORY_DELETE = "category.delete"
+
+    # SignalType permissions
+    SIGNAL_TYPE_VIEW = "signal_type.view"
+    SIGNAL_TYPE_CREATE = "signal_type.create"
+    SIGNAL_TYPE_UPDATE = "signal_type.update"
+    SIGNAL_TYPE_DELETE = "signal_type.delete"
+
 
 class ObservationStatus(Enum):
     ACTIVE = "active"

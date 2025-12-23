@@ -37,9 +37,6 @@ workers = 1
 [admin]
 username = "admin"
 username_alias = "System Administrator"
-pki_certificate_cn = "admin@radiomonitoring.local"
-pki_certificate_serial = "ABC123DEF456"
-pki_certificate_fingerprint = "12:34:56:78:90:AB:CD:EF:12:34:56:78:90:AB:CD:EF:12:34:56:78"
 
 [logging]
 level = "INFO"
