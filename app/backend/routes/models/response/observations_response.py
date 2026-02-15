@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional
 from datetime import datetime
 from decimal import Decimal
@@ -12,12 +12,14 @@ class MessageResponse(BaseModel):  # TODO: i think we need make it global access
 
 class ObservationWithMedia(BaseModel):
     """Observation with attached media file IDs"""
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     user_id: int
     post_id: int
     signal_type_id: int
-    frequency_min: Decimal
-    frequency_max: Decimal
+    frequency_min: Optional[Decimal] = None
+    frequency_max: Optional[Decimal] = None
     frequency_center: Optional[Decimal] = None
     bandwidth: Optional[Decimal] = None
     video_frequency_min: Optional[Decimal] = None
@@ -35,3 +37,4 @@ class ObservationWithMedia(BaseModel):
     disappeared_at: Optional[datetime] = None
     disappeared_by: Optional[int] = None
     media_ids: List[int] = []
+    tag_ids: List[int] = []

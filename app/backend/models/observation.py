@@ -10,6 +10,29 @@ if TYPE_CHECKING:
     from app.backend.models.media import MediaFile
 
 
+class ObservationTag(SQLModel, table=True):
+    """Link table for many-to-many relationship between observations and tags"""
+    __tablename__ = "observation_tags"
+
+    observation_id: int = Field(foreign_key="observations.id", primary_key=True)
+    tag_id: int = Field(foreign_key="tags.id", primary_key=True)
+
+
+class Tag(SQLModel, table=True):
+    __tablename__ = "tags"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(max_length=100, index=True, unique=True)
+    is_deleted: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    # Relationships
+    observations: List["Observation"] = Relationship(
+        back_populates="tags",
+        link_model=ObservationTag
+    )
+
+
 class Category(SQLModel, table=True):
     __tablename__ = "categories"
 
@@ -29,7 +52,7 @@ class SignalType(SQLModel, table=True):
     code: str = Field(unique=True, index=True, max_length=50)
     name: str = Field(max_length=255)
     category_id: Optional[int] = Field(default=None, foreign_key="categories.id", index=True)
-    description: Optional[str] = Field(default=None)
+    description: Optional[str] = Field(default=None, max_length=1000)
     is_active: bool = Field(default=True, index=True)
     sort_order: int = Field(default=0, index=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -40,6 +63,11 @@ class SignalType(SQLModel, table=True):
     category: Optional[Category] = Relationship(back_populates="signal_types")
     observations: List["Observation"] = Relationship(back_populates="signal_type")
 
+    @property
+    def category_name(self) -> Optional[str]:
+        """Convenience property to get category name"""
+        return self.category.name if self.category else None
+
 
 class Observation(SQLModel, table=True):
     __tablename__ = "observations"
@@ -49,8 +77,8 @@ class Observation(SQLModel, table=True):
     post_id: int = Field(foreign_key="posts.id", index=True)
     signal_type_id: int = Field(foreign_key="signal_types.id", index=True)
 
-    frequency_min: Decimal = Field(decimal_places=3, max_digits=12)
-    frequency_max: Decimal = Field(decimal_places=3, max_digits=12)
+    frequency_min: Optional[Decimal] = Field(default=None, decimal_places=3, max_digits=12)
+    frequency_max: Optional[Decimal] = Field(default=None, decimal_places=3, max_digits=12)
     frequency_center: Optional[Decimal] = Field(default=None, decimal_places=3, max_digits=12, index=True)
     bandwidth: Optional[Decimal] = Field(default=None, decimal_places=3, max_digits=12)
 
@@ -85,3 +113,17 @@ class Observation(SQLModel, table=True):
         sa_relationship_kwargs={"foreign_keys": "[Observation.disappeared_by]"}
     )
     media_files: List["MediaFile"] = Relationship(back_populates="observation", cascade_delete=True)
+    tags: List[Tag] = Relationship(
+        back_populates="observations",
+        link_model=ObservationTag
+    )
+
+    @property
+    def media_ids(self) -> List[int]:
+        """Convenience property to get IDs of attached media files"""
+        return [m.id for m in self.media_files] if self.media_files else []
+
+    @property
+    def tag_ids(self) -> List[int]:
+        """Convenience property to get IDs of attached tags"""
+        return [t.id for t in self.tags] if self.tags else []

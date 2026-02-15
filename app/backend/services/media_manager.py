@@ -1,22 +1,20 @@
 import os
-import asyncio
-import hashlib
 import shutil
-import tempfile
+import hashlib
 import uuid
 import re
 import unicodedata
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple, Set, Union
+from typing import Optional, Dict, Any, List, Set
 from dataclasses import dataclass
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 import aiofiles
 import aiofiles.os
 from pydantic import BaseModel, field_validator
 
-from app.backend.models.media import MediaFile, FileChunk
+from app.backend.models.media import MediaFile
 from app.backend.enums.general import MediaType
 from app.backend.utils.logging_config import get_logger
 from app.backend.utils.mime_detector import mime_detector
@@ -74,59 +72,50 @@ class FileValidationResult:
 
 
 @dataclass
-class UploadSession:
-    """Information about an existing upload session"""
-    media_file_id: int
-    uploaded_chunks: List[int]
-    total_chunks: int
-    file_hash: str
-    last_activity: datetime
-    is_expired: bool
-    can_resume: bool
-
-
-@dataclass
 class FileIntegrityCheck:
     media_file_id: int
     original_filename: str
     expected_size: int
-    actual_size: int
-    expected_chunks: int
-    actual_chunks: int
-    missing_chunks: List[int]
     filesystem_exists: bool
     filesystem_size: Optional[int]
     hash_matches: bool
-    status: str  # 'ok', 'incomplete', 'missing', 'corrupted', 'orphaned'
+    status: str  # 'ok', 'missing', 'corrupted'
     issues: List[str]
     security_validated: bool = True
 
 
 class MediaManager:
-    """Enterprise-grade media file manager with security, validation, and performance optimizations"""
+    """Media file manager with security, validation, and filesystem storage"""
 
     def __init__(self,
                  storage_path: str = "uploads",
-                 chunk_size: int = 1024 * 1024,  # 1MB chunks
                  use_filesystem_cache: bool = True,
                  auto_cleanup: bool = True,
                  temp_path: str = "temp",
                  enable_deduplication: bool = True,
                  _max_concurrent_uploads: int = 10,
-                 chunk_retention_days: int = 7,
-                 upload_session_timeout_hours: int = 24):
+                 nginx_symlink_path: Optional[str] = None,
+                 enable_nginx_streaming: bool = True):
         self.storage_path = Path(storage_path)
         self.temp_path = Path(temp_path)
-        self.chunk_size = chunk_size
         self.use_filesystem_cache = use_filesystem_cache
         self.auto_cleanup = auto_cleanup
         self.enable_deduplication = enable_deduplication
-        self.chunk_retention_days = chunk_retention_days
-        self.upload_session_timeout_hours = upload_session_timeout_hours
+        self.nginx_symlink_path = Path(nginx_symlink_path) if nginx_symlink_path else None
+        self.enable_nginx_streaming = enable_nginx_streaming
 
         # Ensure directories exist with proper permissions
         for path in [self.storage_path, self.temp_path]:
             path.mkdir(parents=True, exist_ok=True, mode=0o755)
+
+        # Create Nginx symlink directory if enabled
+        if self.enable_nginx_streaming and self.nginx_symlink_path:
+            try:
+                self.nginx_symlink_path.mkdir(parents=True, exist_ok=True, mode=0o755)
+                _logger.info(f"Nginx symlink directory initialized at: {self.nginx_symlink_path}")
+            except Exception as e:
+                _logger.error(f"Failed to create Nginx symlink directory: {e}")
+                self.enable_nginx_streaming = False
 
         # Rate limiting and concurrency control
         self._upload_sessions: Dict[str, datetime] = {}
@@ -135,7 +124,7 @@ class MediaManager:
 
         # File deduplication cache
         self._hash_cache: Dict[str, int] = {}
-    
+
     def sanitize_filename(self, filename: str) -> str:
         """Enhanced filename sanitization for cross-platform compatibility"""
         if not filename:
@@ -194,14 +183,10 @@ class MediaManager:
         if not sanitized or sanitized in ['.', '..', '_']:
             sanitized = f"upload_{uuid.uuid4().hex[:8]}{ext}"
 
-        # Ensure lowercase for consistency (optional - can be configured)
-        # sanitized = sanitized.lower()
-
         return sanitized
 
     def validate_full_path_length(self, full_path: str) -> bool:
         """Validate that the full file path doesn't exceed filesystem limits"""
-        # Windows: 260 characters, Unix: typically 4096, but be conservative
         max_path_length = 250  # Conservative limit
         return len(str(full_path)) <= max_path_length
 
@@ -323,76 +308,15 @@ class MediaManager:
 
         return metadata
 
-    async def check_existing_upload(self, session: AsyncSession, file_hash: str, observation_id: int) -> Optional[UploadSession]:
-        """Check for existing partial upload that can be resumed"""
-        try:
-            # Look for incomplete media file with same hash
-            media_query = select(MediaFile).where(
-                MediaFile.file_hash == file_hash,
-                MediaFile.observation_id == observation_id
-            )
-            result = await session.exec(media_query)
-            media_file = result.first()
-
-            if not media_file:
-                return None
-
-            # Check if media_file has proper attributes (handle test mocks)
-            if not hasattr(media_file, 'id') or not hasattr(media_file, 'file_size'):
-                _logger.warning(f"Invalid media file object returned from database query")
-                return None
-
-            # Get existing chunks
-            chunks_query = select(FileChunk).where(
-                FileChunk.media_file_id == media_file.id
-            ).order_by(FileChunk.chunk_number)
-            chunks_result = await session.exec(chunks_query)
-            chunks = chunks_result.all()
-
-            # Calculate expected chunks
-            expected_chunks = (media_file.file_size + self.chunk_size - 1) // self.chunk_size
-            uploaded_chunks = [chunk.chunk_number for chunk in chunks]
-
-            # Check if upload session has expired
-            session_timeout = timedelta(hours=self.upload_session_timeout_hours)
-            last_activity = media_file.uploaded_at  # Use uploaded_at as last activity for now
-            is_expired = datetime.now(timezone.utc) - last_activity > session_timeout
-
-            # Can resume if not expired and not complete
-            can_resume = not is_expired and len(uploaded_chunks) < expected_chunks
-
-            return UploadSession(
-                media_file_id=media_file.id,
-                uploaded_chunks=uploaded_chunks,
-                total_chunks=expected_chunks,
-                file_hash=file_hash,
-                last_activity=last_activity,
-                is_expired=is_expired,
-                can_resume=can_resume
-            )
-
-        except Exception as e:
-            _logger.error(f"Error checking existing upload for hash {file_hash}: {e}")
-            return None
-
-    async def resume_upload(self, session: AsyncSession, upload_session: UploadSession) -> int:
-        """Resume an existing upload session"""
-        if not upload_session.can_resume:
-            raise ValueError("Upload session cannot be resumed")
-
-        _logger.info(f"Resuming upload for media_file {upload_session.media_file_id}, "
-                   f"{len(upload_session.uploaded_chunks)}/{upload_session.total_chunks} chunks uploaded")
-
-        return upload_session.media_file_id
-
-    async def store_file_chunked(self,
-                               session: AsyncSession,
-                               observation_id: int,
-                               file_data: bytes,
-                               original_filename: str,
-                               media_type: str,
-                               validation_config: Optional[FileValidationConfig] = None) -> int:
-        """Store file in database chunks with comprehensive validation and security checks"""
+    async def store_file(self,
+                        session: AsyncSession,
+                        observation_id: int,
+                        file_data: bytes,
+                        original_filename: str,
+                        media_type: str,
+                        user_id: Optional[int] = None,
+                        validation_config: Optional[FileValidationConfig] = None) -> int:
+        """Store file on filesystem with comprehensive validation and security checks"""
 
         # Generate unique upload session ID
         upload_session_id = str(uuid.uuid4())
@@ -411,7 +335,7 @@ class MediaManager:
 
             # Use sanitized filename
             safe_filename = validation_result.sanitized_filename or original_filename
-        
+
             file_size = validation_result.file_size
             file_extension = Path(safe_filename).suffix or ''
 
@@ -421,19 +345,8 @@ class MediaManager:
             except ValueError:
                 raise ValueError(f"Invalid media type: {media_type}")
 
-            # Generate file hash for deduplication and resumable uploads
+            # Generate file hash for deduplication
             file_hash = hashlib.sha256(file_data).hexdigest()
-
-            # Check for existing upload session that can be resumed
-            existing_upload = await self.check_existing_upload(session, file_hash, observation_id)
-            if existing_upload:
-                if existing_upload.can_resume:
-                    _logger.info(f"Found resumable upload session for file hash {file_hash}")
-                    return await self.resume_upload(session, existing_upload)
-                elif not existing_upload.is_expired:
-                    # Upload is complete, return existing file
-                    _logger.info(f"File already exists and is complete: {existing_upload.media_file_id}")
-                    return existing_upload.media_file_id
 
             # Check for duplicate files if deduplication is enabled
             if self.enable_deduplication:
@@ -441,7 +354,7 @@ class MediaManager:
                 if existing_file_id:
                     _logger.info(f"Duplicate file detected, returning existing file ID: {existing_file_id}")
                     return existing_file_id
-        
+
             # Use validated MIME type
             mime_type = validation_result.detected_mime_type
             _logger.info(f"Validated MIME type for {safe_filename}: {mime_type}")
@@ -457,6 +370,7 @@ class MediaManager:
             # Create media file record with temporary filename
             media_file = MediaFile(
                 observation_id=observation_id,
+                user_id=user_id,
                 original_filename=safe_filename,
                 stored_filename=temp_stored_filename,
                 file_path=str(organized_dir / temp_stored_filename),
@@ -489,66 +403,20 @@ class MediaManager:
             await session.commit()
             await session.refresh(media_file)
 
-            # Store file in chunks with optimized processing
-            total_chunks = (file_size + self.chunk_size - 1) // self.chunk_size
-
-            # Use batch processing for large files
-            chunk_batch = []
-            batch_size = 50  # Process chunks in batches
-
-            for chunk_number in range(total_chunks):
-                start_offset = chunk_number * self.chunk_size
-                end_offset = min(start_offset + self.chunk_size, file_size)
-                chunk_data = file_data[start_offset:end_offset]
-                chunk_hash = hashlib.sha256(chunk_data).hexdigest()
-
-                # Create chunk file path using organized structure
-                chunk_filename = f"{media_file.id}_chunk_{chunk_number:04d}.bin"
-                await aiofiles.os.makedirs(organized_dir, exist_ok=True)
-                chunk_file_path = organized_dir / chunk_filename
-
-                # Save chunk to filesystem
-                async with aiofiles.open(chunk_file_path, 'wb') as f:
-                    await f.write(chunk_data)
-
-                file_chunk = FileChunk(
-                    media_file_id=media_file.id,
-                    chunk_number=chunk_number,
-                    chunk_size=len(chunk_data),
-                    chunk_hash=chunk_hash,
-                    chunk_file_path=str(chunk_file_path)
-                )
-
-                chunk_batch.append(file_chunk)
-
-                # Commit chunks in batches for better performance
-                if len(chunk_batch) >= batch_size or chunk_number == total_chunks - 1:
-                    for chunk in chunk_batch:
-                        session.add(chunk)
-                    await session.commit()
-                    chunk_batch = []
+            # Save file to filesystem
+            await self._create_filesystem_backup(media_file.id, file_data, organized_dir, stored_filename)
 
             # Update deduplication cache
             if self.enable_deduplication:
                 self._hash_cache[file_hash] = media_file.id
-        
-            # Optionally create filesystem backup
-            if self.use_filesystem_cache:
-                await self._create_filesystem_backup(media_file.id, file_data, organized_dir, stored_filename)
 
-                # After successful backup creation, clean up individual chunk files
-                await self._cleanup_chunk_files(organized_dir, media_file.id, total_chunks)
-
-                # Clean up database chunks after successful backup and grace period
-                await self._cleanup_database_chunks(session, media_file.id)
-
-            _logger.info(f"Stored file {safe_filename} as {stored_filename} with {total_chunks} chunks")
+            _logger.info(f"Stored file {safe_filename} as {stored_filename}")
             return media_file.id
 
         finally:
             # Always remove from active uploads
             self._active_uploads.discard(upload_session_id)
-    
+
     async def _check_for_duplicate(self, session: AsyncSession, file_hash: str, observation_id: int) -> Optional[int]:
         """Check if file already exists based on hash"""
         # Check cache first
@@ -581,7 +449,6 @@ class MediaManager:
 
     async def _get_organized_path(self, session: AsyncSession, observation_id: int, observed_at: str = None) -> Path:
         """Generate organized directory path based on date and observation info"""
-        # Use current date for organization since we're having import issues
         from datetime import datetime, timezone
         date = datetime.now(timezone.utc)
 
@@ -603,7 +470,7 @@ class MediaManager:
                                       file_data: bytes,
                                       organized_dir: Path,
                                       stored_filename: str):
-        """Create filesystem backup of the file with async I/O"""
+        """Save file to filesystem with async I/O"""
         try:
             await aiofiles.os.makedirs(organized_dir, exist_ok=True)
 
@@ -616,190 +483,29 @@ class MediaManager:
             # Set secure file permissions
             os.chmod(file_path, 0o644)
 
-            _logger.debug(f"Created filesystem backup: {file_path}")
-            
-        except Exception as e:
-            _logger.error(f"Failed to create filesystem backup for media_file {media_file_id}: {e}")
-
-    async def _cleanup_chunk_files(self, organized_dir: Path, media_file_id: int, total_chunks: int):
-        """Clean up individual chunk files after successful complete file creation"""
-        try:
-            for chunk_number in range(total_chunks):
-                chunk_filename = f"{media_file_id}_chunk_{chunk_number:04d}.bin"
-                chunk_file_path = organized_dir / chunk_filename
-
-                if chunk_file_path.exists():
-                    chunk_file_path.unlink()
-                    _logger.debug(f"Cleaned up chunk file: {chunk_file_path}")
-
-            _logger.info(f"Cleaned up {total_chunks} chunk files for media_file {media_file_id}")
+            _logger.debug(f"Saved file to filesystem: {file_path}")
 
         except Exception as e:
-            _logger.warning(f"Failed to cleanup chunk files for media_file {media_file_id}: {e}")
-
-    async def _cleanup_database_chunks(self, session: AsyncSession, media_file_id: int):
-        """Remove chunk records from database after successful complete file creation"""
-        try:
-            # Get media file to verify backup exists
-            media_query = select(MediaFile).where(MediaFile.id == media_file_id)
-            media_result = await session.exec(media_query)
-            media_file = media_result.first()
-
-            if not media_file:
-                _logger.warning(f"Media file {media_file_id} not found for chunk cleanup")
-                return
-
-            # Verify complete file exists on filesystem before removing chunk records
-            complete_file_path = Path(media_file.file_path)
-            if not (complete_file_path.exists() and complete_file_path.is_file()):
-                _logger.warning(f"Complete file not found at {complete_file_path}, keeping chunk records")
-                return
-
-            # Verify file integrity before removing chunks
-            try:
-                async with aiofiles.open(complete_file_path, 'rb') as f:
-                    file_data = await f.read()
-
-                file_hash = hashlib.sha256(file_data).hexdigest()
-                if file_hash != media_file.file_hash:
-                    _logger.warning(f"File integrity check failed for {media_file_id}, keeping chunk records")
-                    return
-            except Exception as e:
-                _logger.warning(f"Failed to verify file integrity for {media_file_id}: {e}, keeping chunk records")
-                return
-
-            # Only proceed with chunk cleanup if backup is verified
-            chunks_query = select(FileChunk).where(FileChunk.media_file_id == media_file_id)
-            chunks_result = await session.exec(chunks_query)
-            chunks = chunks_result.all()
-
-            chunks_count = len(chunks)
-            if chunks_count > 0:
-                for chunk in chunks:
-                    await session.delete(chunk)
-
-                await session.commit()
-                _logger.info(f"Cleaned up {chunks_count} database chunk records for media_file {media_file_id}")
-
-        except Exception as e:
-            _logger.error(f"Failed to cleanup database chunks for media_file {media_file_id}: {e}")
-            await session.rollback()
-
-    async def cleanup_old_chunks(self, session: AsyncSession) -> int:
-        """Clean up old chunks based on retention policy"""
-        if self.chunk_retention_days <= 0:
-            return 0
-
-        chunks_cleaned = 0
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=self.chunk_retention_days)
-
-        try:
-            # Find media files that have complete backups and old chunks
-            media_query = select(MediaFile).where(MediaFile.uploaded_at < cutoff_date)
-            media_result = await session.exec(media_query)
-            old_media_files = media_result.all()
-
-            for media_file in old_media_files:
-                # Check if complete file exists on filesystem
-                complete_file_path = Path(media_file.file_path)
-                if complete_file_path.exists() and complete_file_path.is_file():
-                    # Check if chunks still exist in database
-                    chunks_query = select(FileChunk).where(FileChunk.media_file_id == media_file.id)
-                    chunks_result = await session.exec(chunks_query)
-                    chunks = chunks_result.all()
-
-                    if chunks:
-                        _logger.info(f"Cleaning up {len(chunks)} old chunks for media_file {media_file.id} "
-                                   f"(older than {self.chunk_retention_days} days)")
-
-                        # Remove chunk records from database
-                        for chunk in chunks:
-                            await session.delete(chunk)
-                            chunks_cleaned += 1
-
-            if chunks_cleaned > 0:
-                await session.commit()
-                _logger.info(f"Cleaned up {chunks_cleaned} old chunk records based on retention policy")
-
-        except Exception as e:
-            _logger.error(f"Error during old chunk cleanup: {e}")
-            await session.rollback()
-
-        return chunks_cleaned
+            _logger.error(f"Failed to save file for media_file {media_file_id}: {e}")
 
     async def retrieve_file(self, session: AsyncSession, media_file_id: int,
                           validate_integrity: bool = True) -> Optional[bytes]:
-        """Retrieve complete file from database chunks with integrity validation and fallback"""
-        
+        """Retrieve file from filesystem with integrity validation"""
+
         # Get media file info
         media_query = select(MediaFile).where(MediaFile.id == media_file_id)
         media_result = await session.exec(media_query)
         media_file = media_result.first()
-        
+
         if not media_file:
             _logger.error(f"Media file {media_file_id} not found")
             return None
-        
-        # Try to retrieve from database chunks first
-        try:
-            chunks_query = select(FileChunk).where(
-                FileChunk.media_file_id == media_file_id
-            ).order_by(FileChunk.chunk_number)
 
-            chunks_result = await session.exec(chunks_query)
-            chunks = chunks_result.all()
+        return await self._retrieve_from_filesystem(media_file, validate_integrity)
 
-            expected_chunks = (media_file.file_size + self.chunk_size - 1) // self.chunk_size
-
-            if len(chunks) == expected_chunks:
-                # Read chunk data from filesystem and verify integrity
-                chunk_data_list = []
-                for chunk in chunks:
-                    # Read chunk from filesystem
-                    chunk_path = Path(chunk.chunk_file_path)
-                    if not chunk_path.exists():
-                        _logger.error(f"Chunk file not found: {chunk_path}")
-                        raise ValueError(f"Chunk file {chunk.chunk_number} not found")
-
-                    async with aiofiles.open(chunk_path, 'rb') as f:
-                        chunk_data = await f.read()
-
-                    # Verify chunk integrity if requested
-                    if validate_integrity:
-                        chunk_hash = hashlib.sha256(chunk_data).hexdigest()
-                        if chunk_hash != chunk.chunk_hash:
-                            _logger.error(f"Chunk {chunk.chunk_number} hash mismatch for file {media_file_id}")
-                            raise ValueError(f"Chunk integrity validation failed")
-
-                    chunk_data_list.append(chunk_data)
-
-                # Reassemble from chunks
-                file_data = b"".join(chunk_data_list)
-
-                # Verify file integrity
-                if validate_integrity:
-                    file_hash = hashlib.sha256(file_data).hexdigest()
-                    if file_hash != media_file.file_hash:
-                        _logger.error(f"File hash mismatch for file {media_file_id}")
-                        raise ValueError("File integrity validation failed")
-
-                _logger.debug(f"Retrieved file {media_file_id} from database chunks")
-                return file_data
-            else:
-                _logger.warning(f"Incomplete chunks for file {media_file_id}: {len(chunks)}/{expected_chunks}")
-        
-        except Exception as e:
-            _logger.error(f"Failed to retrieve file {media_file_id} from database: {e}")
-        
-        # Fallback to filesystem if available
-        if self.use_filesystem_cache:
-            return await self._retrieve_from_filesystem(media_file, validate_integrity)
-        
-        return None
-    
     async def _retrieve_from_filesystem(self, media_file: MediaFile,
                                       validate_integrity: bool = True) -> Optional[bytes]:
-        """Retrieve file from filesystem backup with async I/O"""
+        """Retrieve file from filesystem with async I/O"""
         try:
             file_path = Path(media_file.file_path)
 
@@ -815,33 +521,29 @@ class MediaManager:
                         _logger.error(f"Hash mismatch for filesystem file {media_file.file_path}")
                         raise ValueError("Filesystem file integrity validation failed")
 
-                _logger.info(f"Retrieved file {media_file.id} from filesystem backup")
+                _logger.info(f"Retrieved file {media_file.id} from filesystem")
                 return file_data
             else:
                 _logger.warning(f"Filesystem file not found: {file_path}")
-        
+
         except Exception as e:
             _logger.error(f"Failed to retrieve file from filesystem {media_file.file_path}: {e}")
-        
+
         return None
-    
+
     async def check_file_integrity(self, session: AsyncSession, media_file_id: int) -> FileIntegrityCheck:
-        """Comprehensive file integrity check"""
-        
+        """Check file integrity on filesystem"""
+
         # Get media file info
         media_query = select(MediaFile).where(MediaFile.id == media_file_id)
         media_result = await session.exec(media_query)
         media_file = media_result.first()
-        
+
         if not media_file:
             return FileIntegrityCheck(
                 media_file_id=media_file_id,
                 original_filename="Unknown",
                 expected_size=0,
-                actual_size=0,
-                expected_chunks=0,
-                actual_chunks=0,
-                missing_chunks=[],
                 filesystem_exists=False,
                 filesystem_size=None,
                 hash_matches=False,
@@ -849,239 +551,114 @@ class MediaManager:
                 issues=["Media file record not found in database"],
                 security_validated=False
             )
-        
-        # Get chunks info
-        chunks_query = select(FileChunk).where(
-            FileChunk.media_file_id == media_file_id
-        ).order_by(FileChunk.chunk_number)
-        
-        chunks_result = await session.exec(chunks_query)
-        chunks = chunks_result.all()
-        
-        expected_chunks = (media_file.file_size + self.chunk_size - 1) // self.chunk_size
-        actual_chunks = len(chunks)
-        actual_size = sum(chunk.chunk_size for chunk in chunks)
-        
-        # Find missing chunks
-        existing_chunk_numbers = set(chunk.chunk_number for chunk in chunks)
-        expected_chunk_numbers = set(range(expected_chunks))
-        missing_chunks = list(expected_chunk_numbers - existing_chunk_numbers)
-        
+
         # Check filesystem
         filesystem_exists = False
         filesystem_size = None
-        
-        if self.use_filesystem_cache:
-            file_path = Path(media_file.file_path)
-            filesystem_exists = file_path.exists() and file_path.is_file()
-            if filesystem_exists:
-                try:
-                    filesystem_size = file_path.stat().st_size
-                except Exception:
-                    filesystem_size = None
-        
-        # Check hash integrity if all chunks available
         hash_matches = False
-        security_validated = True
-        issues = []  # Initialize issues list here
+        issues = []
 
-        if actual_chunks == expected_chunks and not missing_chunks:
+        file_path = Path(media_file.file_path)
+        filesystem_exists = file_path.exists() and file_path.is_file()
+
+        if filesystem_exists:
             try:
-                # Verify individual chunk hashes first and collect data
-                chunk_data_list = []
-                for chunk in chunks:
-                    chunk_path = Path(chunk.chunk_file_path)
-                    if not chunk_path.exists():
-                        security_validated = False
-                        issues.append(f"Chunk file {chunk.chunk_number} not found: {chunk_path}")
-                        continue
+                filesystem_size = file_path.stat().st_size
+            except Exception:
+                filesystem_size = None
 
-                    async with aiofiles.open(chunk_path, 'rb') as f:
-                        chunk_data = await f.read()
-
-                    chunk_hash = hashlib.sha256(chunk_data).hexdigest()
-                    if chunk_hash != chunk.chunk_hash:
-                        security_validated = False
-                        issues.append(f"Chunk {chunk.chunk_number} hash mismatch")
-
-                    chunk_data_list.append(chunk_data)
-
-                if security_validated and len(chunk_data_list) == expected_chunks:
-                    file_data = b"".join(chunk_data_list)
-                    file_hash = hashlib.sha256(file_data).hexdigest()
-                    hash_matches = file_hash == media_file.file_hash
+            # Verify hash
+            try:
+                async with aiofiles.open(file_path, 'rb') as f:
+                    file_data = await f.read()
+                file_hash = hashlib.sha256(file_data).hexdigest()
+                hash_matches = file_hash == media_file.file_hash
             except Exception as e:
-                hash_matches = False
-                security_validated = False
                 issues.append(f"Error during integrity check: {str(e)}")
 
-        # Add additional issues
-        
-        if missing_chunks:
-            issues.append(f"Missing {len(missing_chunks)} chunks: {missing_chunks[:5]}{'...' if len(missing_chunks) > 5 else ''}")
-        
-        if actual_size != media_file.file_size:
-            issues.append(f"Size mismatch: expected {media_file.file_size}, got {actual_size}")
-        
-        if not hash_matches and not missing_chunks:
-            issues.append("File hash mismatch - data corruption detected")
-        
-        if self.use_filesystem_cache and not filesystem_exists:
-            issues.append("Filesystem backup missing")
-        elif filesystem_exists and filesystem_size != media_file.file_size:
-            issues.append(f"Filesystem size mismatch: expected {media_file.file_size}, got {filesystem_size}")
-        
+            if not hash_matches:
+                issues.append("File hash mismatch - data corruption detected")
+
+            if filesystem_size != media_file.file_size:
+                issues.append(f"Filesystem size mismatch: expected {media_file.file_size}, got {filesystem_size}")
+        else:
+            issues.append("Filesystem file missing")
+
         # Determine overall status
         if not issues:
             status = "ok"
-        elif missing_chunks:
-            status = "incomplete"
+        elif not filesystem_exists:
+            status = "missing"
         elif not hash_matches:
             status = "corrupted"
         else:
             status = "warning"
-        
+
         return FileIntegrityCheck(
             media_file_id=media_file_id,
             original_filename=media_file.original_filename,
             expected_size=media_file.file_size,
-            actual_size=actual_size,
-            expected_chunks=expected_chunks,
-            actual_chunks=actual_chunks,
-            missing_chunks=missing_chunks,
             filesystem_exists=filesystem_exists,
             filesystem_size=filesystem_size,
             hash_matches=hash_matches,
             status=status,
             issues=issues,
-            security_validated=security_validated
+            security_validated=not bool(issues)
         )
-    
+
     async def repair_file(self, session: AsyncSession, media_file_id: int) -> bool:
-        """Attempt to repair a corrupted or incomplete file"""
-        
+        """Attempt to repair a corrupted or missing file (no-op if file is intact)"""
+
         integrity = await self.check_file_integrity(session, media_file_id)
-        
+
         if integrity.status == "ok":
             _logger.info(f"File {media_file_id} is already intact")
             return True
-        
-        # Try to restore from filesystem backup
-        if integrity.filesystem_exists and integrity.status in ["incomplete", "corrupted"]:
-            _logger.info(f"Attempting to restore file {media_file_id} from filesystem backup")
-            
-            media_query = select(MediaFile).where(MediaFile.id == media_file_id)
-            media_result = await session.exec(media_query)
-            media_file = media_result.first()
-            
-            if media_file:
-                try:
-                    # Read filesystem file with async I/O
-                    file_path = Path(media_file.file_path)
-                    async with aiofiles.open(file_path, 'rb') as f:
-                        file_data = await f.read()
-                    
-                    # Verify hash
-                    file_hash = hashlib.sha256(file_data).hexdigest()
-                    if file_hash != media_file.file_hash:
-                        _logger.error(f"Filesystem backup hash mismatch for file {media_file_id}")
-                        return False
-                    
-                    # Delete existing chunks
-                    chunks_query = select(FileChunk).where(FileChunk.media_file_id == media_file_id)
-                    chunks_result = await session.exec(chunks_query)
-                    chunks = chunks_result.all()
-                    
-                    for chunk in chunks:
-                        await session.delete(chunk)
-                    
-                    # Recreate chunks from filesystem file
-                    total_chunks = (len(file_data) + self.chunk_size - 1) // self.chunk_size
-                    
-                    for chunk_number in range(total_chunks):
-                        start_offset = chunk_number * self.chunk_size
-                        end_offset = min(start_offset + self.chunk_size, len(file_data))
-                        chunk_data = file_data[start_offset:end_offset]
-                        chunk_hash = hashlib.sha256(chunk_data).hexdigest()
-                        
-                        # Create chunk file path for repair
-                        chunk_filename = f"{media_file_id}_chunk_{chunk_number:04d}.bin"
-                        observation_dir = self.storage_path / str(media_file.observation_id)
-                        await aiofiles.os.makedirs(observation_dir, exist_ok=True)
-                        chunk_file_path = observation_dir / chunk_filename
 
-                        # Save chunk to filesystem
-                        async with aiofiles.open(chunk_file_path, 'wb') as f:
-                            await f.write(chunk_data)
-
-                        file_chunk = FileChunk(
-                            media_file_id=media_file_id,
-                            chunk_number=chunk_number,
-                            chunk_size=len(chunk_data),
-                            chunk_hash=chunk_hash,
-                            chunk_file_path=str(chunk_file_path)
-                        )
-                        
-                        session.add(file_chunk)
-                    
-                    await session.commit()
-                    _logger.info(f"Successfully repaired file {media_file_id} from filesystem backup")
-                    return True
-                
-                except Exception as e:
-                    _logger.error(f"Failed to repair file {media_file_id} from filesystem: {e}")
-                    await session.rollback()
-        
-        _logger.warning(f"Could not repair file {media_file_id}")
+        _logger.warning(f"Could not repair file {media_file_id} - no backup source available")
         return False
-    
-    async def cleanup_orphaned_files(self, session: AsyncSession) -> Tuple[int, int]:
+
+    async def cleanup_orphaned_files(self, session: AsyncSession) -> tuple[int, int]:
         """Clean up orphaned files and database records"""
-        
+
         db_cleaned = 0
         fs_cleaned = 0
-        
+
         # Find orphaned database records (files without observation)
         if self.auto_cleanup:
             from app.backend.models.observation import Observation
 
             orphaned_query = select(MediaFile).join(
                 Observation, isouter=True
-            ).where(MediaFile.observation_id is None)
-            
+            ).where(
+                MediaFile.observation_id == None,
+                MediaFile.is_deleted == False
+            )
+
             orphaned_result = await session.exec(orphaned_query)
             orphaned_files = orphaned_result.all()
-            
+
             for media_file in orphaned_files:
                 _logger.info(f"Cleaning up orphaned media file: {media_file.original_filename}")
-                
-                # Delete chunks
-                chunks_query = select(FileChunk).where(FileChunk.media_file_id == media_file.id)
-                chunks_result = await session.exec(chunks_query)
-                chunks = chunks_result.all()
-                
-                for chunk in chunks:
-                    await session.delete(chunk)
-                
+
                 # Delete filesystem file if exists
-                if self.use_filesystem_cache:
-                    try:
-                        file_path = Path(media_file.file_path)
-                        if file_path.exists():
-                            file_path.unlink()
-                            fs_cleaned += 1
-                    except Exception as e:
-                        _logger.warning(f"Could not delete orphaned filesystem file {media_file.file_path}: {e}")
-                
+                try:
+                    file_path = Path(media_file.file_path)
+                    if file_path.exists():
+                        file_path.unlink()
+                        fs_cleaned += 1
+                except Exception as e:
+                    _logger.warning(f"Could not delete orphaned filesystem file {media_file.file_path}: {e}")
+
                 # Delete media file record
                 await session.delete(media_file)
                 db_cleaned += 1
-            
+
             if db_cleaned > 0:
                 await session.commit()
-        
+
         # Clean up orphaned filesystem files
-        if self.use_filesystem_cache and self.storage_path.exists():
+        if self.storage_path.exists():
             try:
                 for observation_dir in self.storage_path.iterdir():
                     if observation_dir.is_dir():
@@ -1093,90 +670,297 @@ class MediaManager:
                                     MediaFile.stored_filename == filename
                                 )
                                 file_result = await session.exec(file_query)
-                                
+
                                 if not file_result.first():
                                     _logger.info(f"Removing orphaned filesystem file: {file_path}")
                                     file_path.unlink()
                                     fs_cleaned += 1
-                        
+
                         # Remove empty directories
                         if not any(observation_dir.iterdir()):
                             observation_dir.rmdir()
-            
+
             except Exception as e:
                 _logger.error(f"Error during filesystem cleanup: {e}")
-        
+
         _logger.info(f"Cleanup completed: {db_cleaned} database records, {fs_cleaned} filesystem files")
         return db_cleaned, fs_cleaned
 
-    async def cleanup_legacy_chunk_files(self, session: AsyncSession) -> int:
-        """Clean up chunk files that exist on filesystem but have corresponding complete files"""
-        chunks_cleaned = 0
+    async def create_nginx_symlink(self, media_file: MediaFile) -> bool:
+        """Create symlink in Nginx directory for video files"""
+        if not self.enable_nginx_streaming or not self.nginx_symlink_path:
+            return False
 
-        if not self.use_filesystem_cache or not self.storage_path.exists():
-            return 0
+        if media_file.media_type.lower() != 'video':
+            return False
 
         try:
-            # Get all media files that have complete filesystem backups
-            media_query = select(MediaFile)
-            media_result = await session.exec(media_query)
-            all_media_files = media_result.all()
+            source_path = Path(media_file.file_path)
+            if not source_path.exists() or not source_path.is_file():
+                _logger.warning(f"Source file not found for symlink: {source_path}")
+                return False
 
-            for media_file in all_media_files:
-                # Check if complete file exists on filesystem
-                complete_file_path = Path(media_file.file_path)
-                if complete_file_path.exists() and complete_file_path.is_file():
-                    # Look for chunk files for this media file
-                    observation_dir = self.storage_path / str(media_file.observation_id)
-                    if observation_dir.exists():
-                        chunk_pattern = f"{media_file.id}_chunk_*.bin"
-                        chunk_files = list(observation_dir.glob(chunk_pattern))
+            symlink_path = self.nginx_symlink_path / media_file.stored_filename
 
-                        if chunk_files:
-                            _logger.info(f"Cleaning up {len(chunk_files)} legacy chunk files for media_file {media_file.id}")
+            if symlink_path.exists() or symlink_path.is_symlink():
+                try:
+                    symlink_path.unlink()
+                    _logger.debug(f"Removed existing symlink: {symlink_path}")
+                except Exception as e:
+                    _logger.warning(f"Failed to remove existing symlink: {e}")
 
-                            for chunk_file in chunk_files:
-                                try:
-                                    chunk_file.unlink()
-                                    chunks_cleaned += 1
-                                    _logger.debug(f"Removed legacy chunk file: {chunk_file}")
-                                except Exception as e:
-                                    _logger.warning(f"Failed to remove chunk file {chunk_file}: {e}")
+            symlink_path.symlink_to(source_path.resolve())
+            _logger.info(f"Created Nginx symlink: {symlink_path} -> {source_path}")
+            return True
 
-            _logger.info(f"Legacy chunk cleanup completed: {chunks_cleaned} chunk files removed")
+        except OSError as e:
+            _logger.error(f"Failed to create symlink for {media_file.stored_filename}: {e}")
+            return False
+        except Exception as e:
+            _logger.error(f"Unexpected error creating symlink: {e}")
+            return False
+
+    async def delete_nginx_symlink(self, media_file: MediaFile) -> bool:
+        """Delete symlink from Nginx directory"""
+        if not self.enable_nginx_streaming or not self.nginx_symlink_path:
+            return False
+
+        if media_file.media_type.lower() != 'video':
+            return False
+
+        try:
+            symlink_path = self.nginx_symlink_path / media_file.stored_filename
+
+            if symlink_path.exists() or symlink_path.is_symlink():
+                symlink_path.unlink()
+                _logger.info(f"Deleted Nginx symlink: {symlink_path}")
+                return True
+            else:
+                _logger.debug(f"Symlink not found: {symlink_path}")
+                return False
 
         except Exception as e:
-            _logger.error(f"Error during legacy chunk cleanup: {e}")
+            _logger.error(f"Failed to delete symlink for {media_file.stored_filename}: {e}")
+            return False
 
-        return chunks_cleaned
+    def get_nginx_symlink_path(self, media_file: MediaFile) -> Optional[str]:
+        """Get the path to the Nginx symlink for X-Accel-Redirect"""
+        if not self.enable_nginx_streaming or not self.nginx_symlink_path:
+            return None
+
+        if media_file.media_type.lower() != 'video':
+            return None
+
+        return f"/{media_file.stored_filename}"
+
+    async def cleanup_orphaned_symlinks(self) -> int:
+        """Clean up broken symlinks in Nginx directory"""
+        if not self.enable_nginx_streaming or not self.nginx_symlink_path:
+            return 0
+
+        if not self.nginx_symlink_path.exists():
+            return 0
+
+        cleaned = 0
+        try:
+            for symlink_path in self.nginx_symlink_path.iterdir():
+                if symlink_path.is_symlink():
+                    if not symlink_path.exists():
+                        symlink_path.unlink()
+                        _logger.info(f"Removed broken symlink: {symlink_path}")
+                        cleaned += 1
+
+            _logger.info(f"Cleaned up {cleaned} orphaned symlinks")
+
+        except Exception as e:
+            _logger.error(f"Error during symlink cleanup: {e}")
+
+        return cleaned
+
+    async def _compute_file_hash(self, file_path: Path, chunk_size: int = 1024 * 1024) -> str:
+        """Compute SHA256 hash by streaming the file in chunks (default 1MB), never loading entirely into memory"""
+        sha256 = hashlib.sha256()
+        async with aiofiles.open(file_path, 'rb') as f:
+            while True:
+                chunk = await f.read(chunk_size)
+                if not chunk:
+                    break
+                sha256.update(chunk)
+        return sha256.hexdigest()
+
+    async def _detect_mime_from_path(self, file_path: Path, filename: str) -> str:
+        """Detect MIME type from file header without loading the entire file"""
+        async with aiofiles.open(file_path, 'rb') as f:
+            header = await f.read(8192)
+        detected_mime, _ = mime_detector.detect_mime_type(header, filename)
+        return detected_mime
+
+    async def _move_file_to_storage(self, source: Path, destination: Path):
+        """Move file to storage. Uses rename if same filesystem, copy+delete otherwise."""
+        await aiofiles.os.makedirs(destination.parent, exist_ok=True)
+        try:
+            source.rename(destination)
+        except OSError:
+            shutil.copy2(str(source), str(destination))
+            source.unlink()
+        os.chmod(destination, 0o644)
+
+    async def store_file_from_path(
+            self,
+            session: AsyncSession,
+            observation_id: int,
+            source_path: str,
+            original_filename: str,
+            media_type: str,
+            user_id: Optional[int] = None,
+            validation_config: Optional[FileValidationConfig] = None
+    ) -> int:
+        """
+        Store a file from a filesystem path (for Nginx upload offloading).
+        The file is never loaded entirely into memory -- hash is computed by streaming,
+        MIME type is detected from the first 8KB, and the file is moved (not copied)
+        to its final storage location.
+        """
+        upload_session_id = str(uuid.uuid4())
+
+        try:
+            if len(self._active_uploads) >= self._max_concurrent_uploads:
+                raise ValueError("Too many concurrent uploads. Please try again later.")
+
+            self._active_uploads.add(upload_session_id)
+
+            source = Path(source_path)
+            if not source.exists() or not source.is_file():
+                raise ValueError(f"Nginx temp file not found at: {source_path}")
+
+            config = validation_config or FileValidationConfig()
+
+            # -- Size validation (stat, no read) --
+            file_size = source.stat().st_size
+            if file_size > config.max_size:
+                raise ValueError(f"File size {file_size} exceeds maximum {config.max_size}")
+            if file_size == 0:
+                raise ValueError("File is empty")
+
+            # -- Filename sanitization --
+            safe_filename = self.sanitize_filename(original_filename) if config.sanitize_filename else original_filename
+            file_ext = Path(safe_filename).suffix.lower()
+
+            if file_ext in DANGEROUS_EXTENSIONS:
+                raise ValueError(f"Dangerous file extension: {file_ext}")
+            if config.allowed_extensions and file_ext not in config.allowed_extensions:
+                raise ValueError(f"File extension {file_ext} not allowed")
+
+            # -- Media type validation --
+            try:
+                media_type_enum = MediaType(media_type.lower())
+            except ValueError:
+                raise ValueError(f"Invalid media type: {media_type}")
+
+            # -- MIME detection (first 8KB only) --
+            mime_type = await self._detect_mime_from_path(source, original_filename)
+            if config.allowed_mime_types and mime_type not in config.allowed_mime_types:
+                raise ValueError(f"MIME type {mime_type} not allowed")
+
+            # -- Content header validation (first 16 bytes) --
+            if config.validate_content_headers:
+                async with aiofiles.open(source, 'rb') as f:
+                    header_bytes = await f.read(16)
+                content_issues = self._validate_content_headers(header_bytes, mime_type)
+                if content_issues:
+                    raise ValueError(f"Content validation failed: {'; '.join(content_issues)}")
+
+            # -- Hash computation (streaming, 1MB chunks) --
+            file_hash = await self._compute_file_hash(source)
+
+            # -- Deduplication --
+            if self.enable_deduplication:
+                existing_id = await self._check_for_duplicate(session, file_hash, observation_id)
+                if existing_id:
+                    _logger.info(f"Duplicate file detected, returning existing ID: {existing_id}")
+                    try:
+                        source.unlink()
+                    except Exception:
+                        pass
+                    return existing_id
+
+            # -- Prepare storage path --
+            organized_dir = await self._get_organized_path(session, observation_id)
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            temp_hash = hashlib.md5(f"{safe_filename}_{timestamp}".encode()).hexdigest()[:16]
+            temp_stored_filename = f"temp_{temp_hash}{file_ext}"
+
+            # -- Create DB record with temp filename --
+            media_file = MediaFile(
+                observation_id=observation_id,
+                user_id=user_id,
+                original_filename=safe_filename,
+                stored_filename=temp_stored_filename,
+                file_path=str(organized_dir / temp_stored_filename),
+                file_size=file_size,
+                mime_type=mime_type,
+                file_extension=file_ext,
+                media_type=media_type_enum.value,
+                file_hash=file_hash
+            )
+
+            session.add(media_file)
+            await session.commit()
+            await session.refresh(media_file)
+
+            # -- Generate final filename with DB id --
+            md5_hash = hashlib.md5(safe_filename.encode()).hexdigest()[:16]
+            stored_filename = f"{media_file.id}_{md5_hash}{file_ext}"
+            full_file_path = organized_dir / stored_filename
+
+            media_file.stored_filename = stored_filename
+            media_file.file_path = str(full_file_path)
+            await session.commit()
+            await session.refresh(media_file)
+
+            # -- Move file from Nginx temp to final storage --
+            await self._move_file_to_storage(source, full_file_path)
+
+            if self.enable_deduplication:
+                self._hash_cache[file_hash] = media_file.id
+
+            _logger.info(f"Stored file from Nginx temp: {safe_filename} -> {stored_filename} ({file_size} bytes)")
+            return media_file.id
+
+        finally:
+            self._active_uploads.discard(upload_session_id)
 
     async def get_storage_statistics(self, session: AsyncSession) -> Dict[str, Any]:
         """Get storage statistics and health information"""
-        
+
         # Database statistics
         files_query = select(MediaFile)
         files_result = await session.exec(files_query)
         all_files = files_result.all()
-        
-        chunks_query = select(FileChunk)
-        chunks_result = await session.exec(chunks_query)
-        all_chunks = chunks_result.all()
-        
+
+        active_files = [f for f in all_files if not f.is_deleted]
+        deleted_files = [f for f in all_files if f.is_deleted]
+
         total_files = len(all_files)
-        total_chunks = len(all_chunks)
-        total_db_size = sum(chunk.chunk_size for chunk in all_chunks)
+        total_file_size = sum(f.file_size for f in all_files)
         
-        # File type breakdown
+        active_count = len(active_files)
+        active_size = sum(f.file_size for f in active_files)
+        
+        deleted_count = len(deleted_files)
+        deleted_size = sum(f.file_size for f in deleted_files)
+
+        # File type breakdown (active only)
         media_types = {}
-        for file in all_files:
+        for file in active_files:
             media_types[file.media_type] = media_types.get(file.media_type, 0) + 1
-        
+
         # Filesystem statistics
         fs_stats = {}
-        if self.use_filesystem_cache and self.storage_path.exists():
+        if self.storage_path.exists():
             fs_size = 0
             fs_files = 0
-            
+
             for root, dirs, files in os.walk(self.storage_path):
                 for file in files:
                     file_path = Path(root) / file
@@ -1185,21 +969,20 @@ class MediaManager:
                         fs_files += 1
                     except Exception:
                         pass
-            
+
             fs_stats = {
-                "filesystem_enabled": True,
                 "filesystem_files": fs_files,
                 "filesystem_size_bytes": fs_size,
                 "storage_path": str(self.storage_path)
             }
-        else:
-            fs_stats = {"filesystem_enabled": False}
-        
+
         return {
             "total_files": total_files,
-            "total_chunks": total_chunks,
-            "total_database_size_bytes": total_db_size,
+            "total_file_size_bytes": total_file_size,
+            "active_count": active_count,
+            "active_size_bytes": active_size,
+            "deleted_count": deleted_count,
+            "deleted_size_bytes": deleted_size,
             "media_types": media_types,
-            "chunk_size": self.chunk_size,
             **fs_stats
         }

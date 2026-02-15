@@ -1,5 +1,5 @@
 from typing import Optional
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 from jose import JWTError, jwt
@@ -14,24 +14,21 @@ security = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
+        request: Request,
         credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
         session: AsyncSession = Depends(get_session)
 ) -> User:
     """Get current authenticated user"""
     logger.debug("Attempting to authenticate user")
-    print("Attempting to authenticate user")
 
     if not credentials:
         logger.warning("Authentication failed: No credentials provided")
-        print("Authentication failed: No credentials provided")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication credentials required"
         )
 
     token = credentials.credentials
-    logger.debug(f"Token received, payload: {token}, length: {len(token)}")
-    print(f"Token received, payload: {token}, length: {len(token)}")
 
     try:
         payload = jwt.decode(
@@ -40,8 +37,11 @@ async def get_current_user(
             algorithms=[settings.security.algorithm]
         )
         user_id: int = payload.get("sub")
-        logger.debug(f"JWT decoded successfully, user_id: {user_id}")
-        print(f"JWT decoded successfully, user_id: {user_id}")
+        # Explicitly get sid or default to None
+        session_id = payload.get("sid", None)
+        
+        # Store in request state for auditing
+        request.state.session_id = session_id
 
         if user_id is None:
             logger.warning("Authentication failed: Missing user_id in JWT payload")
@@ -51,13 +51,11 @@ async def get_current_user(
             )
     except JWTError as e:
         logger.warning(f"JWT decode error: {str(e)}")
-        print(f"JWT decode error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials"
         )
 
-    logger.debug(f"Fetching user from database: user_id={user_id}")
     result = await session.exec(select(User).where(User.id == user_id))
     user = result.first()
 
@@ -91,3 +89,5 @@ async def get_current_active_user(
 
     logger.debug(f"Active user confirmed: user_id={current_user.id}, username={current_user.username}")
     return current_user
+
+

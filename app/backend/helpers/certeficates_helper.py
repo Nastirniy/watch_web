@@ -81,11 +81,11 @@ class CertificateParser:
                     _logger.debug(f"Using full subject DN as identifier: {cn}")
 
             # Extract Serial Number
-            serial_number = format(cert.serial_number, 'x').upper()
+            serial_number = format(cert.serial_number, 'x').lower()
             _logger.debug(f"Extracted serial number: {serial_number}")
 
-            # Generate SHA256 fingerprint
-            fingerprint = cert.fingerprint(hashes.SHA256()).hex().upper()
+            # Generate SHA1 fingerprint (matches nginx $ssl_client_fingerprint)
+            fingerprint = cert.fingerprint(hashes.SHA1()).hex().lower()
             _logger.debug(f"Generated fingerprint: {fingerprint[:16]}...")
 
             return {
@@ -115,62 +115,81 @@ class CertificateParser:
         except Exception:
             return False
 
-    @staticmethod
-    def get_certificate_info(cert_data: bytes) -> Optional[Dict[str, str]]:
-        """
-        Get additional certificate information for logging/debugging
-
-        Args:
-            cert_data: Certificate data
-
-        Returns:
-            Dictionary with certificate details or None if parsing fails
-        """
-        try:
-            try:
-                cert = x509.load_pem_x509_certificate(cert_data, default_backend())
-            except ValueError:
-                cert = x509.load_der_x509_certificate(cert_data, default_backend())
-
-            # Extract subject fields
-            subject_fields = {}
-            for attribute in cert.subject:
-                subject_fields[attribute.oid._name] = attribute.value
-
-            # Extract issuer fields
-            issuer_fields = {}
-            for attribute in cert.issuer:
-                issuer_fields[attribute.oid._name] = attribute.value
-
-            return {
-                "subject": str(cert.subject),
-                "issuer": str(cert.issuer),
-                "serial_number": format(cert.serial_number, 'x').upper(),
-                "not_valid_before": cert.not_valid_before_utc.isoformat(),
-                "not_valid_after": cert.not_valid_after_utc.isoformat(),
-                "version": cert.version.name,
-                "subject_fields": subject_fields,
-                "issuer_fields": issuer_fields
-            }
-        except Exception as e:
-            _logger.error(f"Error getting certificate info: {str(e)}")
+    # @staticmethod
+    # def get_certificate_info(cert_data: bytes) -> Optional[Dict[str, str]]:
+    #     """
+    #     Get additional certificate information for logging/debugging
+    #
+    #     Args:
+    #         cert_data: Certificate data
+    #
+    #     Returns:
+    #         Dictionary with certificate details or None if parsing fails
+    #     """
+    #     try:
+    #         try:
+    #             cert = x509.load_pem_x509_certificate(cert_data, default_backend())
+    #         except ValueError:
+    #             cert = x509.load_der_x509_certificate(cert_data, default_backend())
+    #
+    #         # Extract subject fields
+    #         subject_fields = {}
+    #         for attribute in cert.subject:
+    #             subject_fields[attribute.oid._name] = attribute.value
+    #
+    #         # Extract issuer fields
+    #         issuer_fields = {}
+    #         for attribute in cert.issuer:
+    #             issuer_fields[attribute.oid._name] = attribute.value
+    #
+    #         return {
+    #             "subject": str(cert.subject),
+    #             "issuer": str(cert.issuer),
+    #             "serial_number": format(cert.serial_number, 'x').lower(),
+    #             "not_valid_before": cert.not_valid_before_utc.isoformat(),
+    #             "not_valid_after": cert.not_valid_after_utc.isoformat(),
+    #             "version": cert.version.name,
+    #             "subject_fields": subject_fields,
+    #             "issuer_fields": issuer_fields
+    #         }
+    #     except Exception as e:
+    #         _logger.error(f"Error getting certificate info: {str(e)}")
             return None
 
 
 async def parse_cn(dn: str) -> Optional[str]:
-    """Parse CN from Distinguished Name"""
+    """Parse CN from Distinguished Name.
+
+    Handles both RFC 2253 format (CN=value,O=...) used by newer nginx
+    and OpenSSL format (/CN=value/O=...) used by older nginx.
+    """
     if not dn:
         return None
+
+    # OpenSSL format: /CN=value/O=...
+    if dn.startswith("/"):
+        parts = [p.strip() for p in dn.split("/") if p]
+        for p in parts:
+            if p.startswith("CN="):
+                return p[3:]
+
+    # RFC 2253 format: CN=value,O=...
     parts = [p.strip() for p in dn.split(",")]
     for p in parts:
         if p.startswith("CN="):
             return p[3:]
+
     return None
 
 
 async def hash_data(data: str) -> str:
-    """Hash data using SHA256"""
-    return hashlib.sha256(data.encode('utf-8')).hexdigest()
+    """Hash data using SHA256 with normalization.
+
+    Strips colons and dashes before lowercasing so that
+    'AB:CD:EF', 'ab-cd-ef' and 'abcdef' all produce the same hash.
+    """
+    normalized = data.replace(":", "").replace("-", "").strip().lower()
+    return hashlib.sha256(normalized.encode('utf-8')).hexdigest()
 
 
 async def validate_pki_certificate_data(

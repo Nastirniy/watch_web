@@ -43,6 +43,18 @@ class Permissions(Enum):
     SIGNAL_TYPE_UPDATE = "signal_type.update"
     SIGNAL_TYPE_DELETE = "signal_type.delete"
 
+    # Tag permissions
+    TAG_VIEW = "tag.view"
+    TAG_CREATE = "tag.create"
+    TAG_UPDATE = "tag.update"
+    TAG_DELETE = "tag.delete"
+
+    # Media permissions
+    MEDIA_VIEW = "media.view"
+    MEDIA_CREATE = "media.create"
+    MEDIA_UPDATE = "media.update"
+    MEDIA_DELETE = "media.delete"
+
 
 class ObservationStatus(Enum):
     ACTIVE = "active"

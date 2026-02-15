@@ -141,6 +141,7 @@ class SecureBaseModel(BaseModel):
     model_config = {
         "str_strip_whitespace": True,
         "validate_assignment": True,
+        "from_attributes": True,
         "extra": "forbid"  # Reject unknown fields
     }
 

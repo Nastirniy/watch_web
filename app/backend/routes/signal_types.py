@@ -1,9 +1,10 @@
 from typing import List, Optional
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status as fapi_status
+from fastapi import APIRouter, Depends, HTTPException, status as fapi_status, Request
 from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import selectinload
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -14,9 +15,13 @@ from app.backend.dependencies import get_current_user
 from app.backend.services.permissions import PermissionService
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import SignalTypeRoutes
+from app.backend.helpers.audit_helper import create_audit_log
 from app.backend.routes.models.request.signal_type_request import SignalTypeCreate, SignalTypeUpdate
 from app.backend.routes.models.response.signal_type_response import SignalTypeResponse, SignalTypeWithCategoryResponse
 from app.backend.routes.models.response.observations_response import MessageResponse
+from app.backend.filters.params.signal_type_params import SignalTypeFilterParams
+from app.backend.filters.signal_type_filter import SignalTypeFilterService
+from app.backend.routes.models.response.search_response import EntitySchemaInfo
 
 router = APIRouter()
 
@@ -24,52 +29,42 @@ router = APIRouter()
 @router.get(SignalTypeRoutes.LIST_ALL.value, response_model=List[SignalTypeResponse])
 @PermissionService.require_permission(Permissions.SIGNAL_TYPE_VIEW.value)
 async def list_signal_types(
-        skip: int = 0,
-        limit: int = 100,
-        category_id: Optional[int] = None,
-        include_inactive: bool = False,
-        include_deleted: bool = False,
+        filters: SignalTypeFilterParams = Depends(),
         session: AsyncSession = Depends(get_session),
         current_user: User = Depends(get_current_user)
 ):
     query = select(SignalType)
-
-    if not include_deleted:
-        query = query.where(SignalType.is_deleted == False)
-
-    if category_id is not None:
-        query = query.where(SignalType.category_id == category_id)
-
-    if not include_inactive:
-        query = query.where(SignalType.is_active == True)
-
-    result = await session.exec(query.offset(skip).limit(limit))
+    query = SignalTypeFilterService.apply_filters(query, filters)
+    result = await session.exec(query)
     signal_types = result.all()
 
-    return [SignalTypeResponse(**st.model_dump()) for st in signal_types]
+    return [SignalTypeResponse.model_validate(st) for st in signal_types]
+
+
+@router.get(SignalTypeRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo)
+@PermissionService.require_permission(Permissions.SIGNAL_TYPE_VIEW.value)
+async def get_signal_type_filter_schema(
+        session: AsyncSession = Depends(get_session),
+        current_user: User = Depends(get_current_user)
+):
+    """Available filter params and sortable fields for signal types."""
+    user_is_admin = await PermissionService.has_permission(
+        session, current_user, Permissions.IS_ADMIN.value
+    )
+    return EntitySchemaInfo(**SignalTypeFilterService.get_schema(is_admin=user_is_admin))
 
 
 @router.post(SignalTypeRoutes.CREATE.value, response_model=SignalType)
-@PermissionService.require_permission(Permissions.SIGNAL_TYPE_CREATE.value)
+@PermissionService.require_permissions({"all": [
+    Permissions.SIGNAL_TYPE_CREATE.value,
+    Permissions.IS_ADMIN.value]})
 async def create_signal_type(
+        request: Request,
         signal_type_data: SignalTypeCreate,
         session: AsyncSession = Depends(get_session),
         current_user: User = Depends(get_current_user)
 ):
-    existing_result = await session.exec(
-        select(SignalType).where(
-            func.lower(SignalType.code) == func.lower(signal_type_data.code),
-            SignalType.is_deleted == False
-        )
-    )
-    existing_signal_type = existing_result.first()
-
-    if existing_signal_type:
-        raise HTTPException(
-            status_code=fapi_status.HTTP_400_BAD_REQUEST,
-            detail=f"SignalType with code '{signal_type_data.code}' already exists"
-        )
-
+    # Validate category if provided
     if signal_type_data.category_id is not None:
         category_result = await session.exec(
             select(Category).where(
@@ -85,22 +80,70 @@ async def create_signal_type(
                 detail=f"Category with id {signal_type_data.category_id} does not exist"
             )
 
-    signal_type = SignalType(
-        code=signal_type_data.code,
-        name=signal_type_data.name,
-        category_id=signal_type_data.category_id,
-        description=signal_type_data.description,
-        is_active=signal_type_data.is_active,
-        sort_order=signal_type_data.sort_order,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc)
+    existing_result = await session.exec(
+        select(SignalType).where(
+            func.lower(SignalType.code) == func.lower(signal_type_data.code)
+        )
     )
+    existing_signal_type = existing_result.first()
+
+    if existing_signal_type:
+        if not existing_signal_type.is_deleted:
+            raise HTTPException(
+                status_code=fapi_status.HTTP_400_BAD_REQUEST,
+                detail=f"SignalType with code '{signal_type_data.code}' already exists"
+            )
+        
+        # Restore soft-deleted signal type
+        old_values = existing_signal_type.model_dump()
+        
+        # Update fields from request
+        update_data = signal_type_data.model_dump()
+        for field, value in update_data.items():
+            setattr(existing_signal_type, field, value)
+            
+        existing_signal_type.is_deleted = False
+        existing_signal_type.created_at = datetime.now(timezone.utc)
+        existing_signal_type.updated_at = datetime.now(timezone.utc)
+        signal_type = existing_signal_type
+        action = "restore"
+    else:
+        signal_type = SignalType(
+            code=signal_type_data.code,
+            name=signal_type_data.name,
+            category_id=signal_type_data.category_id,
+            description=signal_type_data.description,
+            is_active=signal_type_data.is_active,
+            sort_order=signal_type_data.sort_order,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
+        )
+        old_values = None
+        action = "create"
 
     session.add(signal_type)
 
     try:
         await session.commit()
         await session.refresh(signal_type)
+
+        # Create audit log
+        await create_audit_log(
+            session=session,
+            action=action,
+            resource_type="signal_type",
+            resource_id=signal_type.id,
+            user_id=current_user.id,
+            session_id=getattr(request.state, "session_id", None),
+            old_values=old_values,
+            new_values=signal_type.model_dump(),
+            details={"message": f"User {current_user.username} {action}d signal type '{signal_type.name}' ({signal_type.code})"},
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+            request_url=str(request.url)
+        )
+        await session.commit()
+
         return signal_type
     except IntegrityError as e:
         await session.rollback()
@@ -122,7 +165,7 @@ async def get_signal_type(
         select(SignalType).where(
             SignalType.id == signal_type_id,
             SignalType.is_deleted == False
-        )
+        ).options(selectinload(SignalType.category))
     )
     signal_type = result.first()
 
@@ -132,24 +175,15 @@ async def get_signal_type(
             detail="SignalType not found"
         )
 
-    category_name = None
-    if signal_type.category_id:
-        category_result = await session.exec(
-            select(Category).where(Category.id == signal_type.category_id)
-        )
-        category = category_result.first()
-        if category:
-            category_name = category.name
-
-    response_data = signal_type.model_dump()
-    response_data['category_name'] = category_name
-
-    return SignalTypeWithCategoryResponse(**response_data)
+    return SignalTypeWithCategoryResponse.model_validate(signal_type)
 
 
 @router.put(SignalTypeRoutes.SIGNAL_TYPE_BY_ID.value, response_model=SignalType)
-@PermissionService.require_permission(Permissions.SIGNAL_TYPE_UPDATE.value)
+@PermissionService.require_permissions({"all": [
+    Permissions.SIGNAL_TYPE_UPDATE.value,
+    Permissions.IS_ADMIN.value]})
 async def update_signal_type(
+        request: Request,
         signal_type_id: int,
         signal_type_data: SignalTypeUpdate,
         session: AsyncSession = Depends(get_session),
@@ -168,6 +202,25 @@ async def update_signal_type(
             status_code=fapi_status.HTTP_404_NOT_FOUND,
             detail="SignalType not found"
         )
+
+    # Store old values for auditing
+    old_values = signal_type.model_dump()
+
+    if signal_type_data.code is not None:
+        existing_result = await session.exec(
+            select(SignalType).where(
+                func.lower(SignalType.code) == func.lower(signal_type_data.code),
+                SignalType.id != signal_type_id
+            )
+        )
+        existing_signal_type = existing_result.first()
+
+        if existing_signal_type:
+            status_msg = "already exists" if not existing_signal_type.is_deleted else "already exists as a deleted signal type"
+            raise HTTPException(
+                status_code=fapi_status.HTTP_400_BAD_REQUEST,
+                detail=f"SignalType with code '{signal_type_data.code}' {status_msg}"
+            )
 
     if signal_type_data.category_id is not None:
         category_result = await session.exec(
@@ -195,6 +248,24 @@ async def update_signal_type(
     try:
         await session.commit()
         await session.refresh(signal_type)
+
+        # Create audit log
+        await create_audit_log(
+            session=session,
+            action="update",
+            resource_type="signal_type",
+            resource_id=signal_type.id,
+            user_id=current_user.id,
+            session_id=getattr(request.state, "session_id", None),
+            old_values=old_values,
+            new_values=signal_type.model_dump(),
+            details={"message": f"User {current_user.username} updated signal type '{signal_type.name}'"},
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+            request_url=str(request.url)
+        )
+        await session.commit()
+
         return signal_type
     except IntegrityError as e:
         await session.rollback()
@@ -206,8 +277,11 @@ async def update_signal_type(
 
 
 @router.delete(SignalTypeRoutes.SIGNAL_TYPE_BY_ID.value, response_model=MessageResponse)
-@PermissionService.require_permission(Permissions.SIGNAL_TYPE_DELETE.value)
+@PermissionService.require_permissions({"all": [
+    Permissions.SIGNAL_TYPE_UPDATE.value,
+    Permissions.IS_ADMIN.value]})
 async def delete_signal_type(
+        request: Request,
         signal_type_id: int,
         session: AsyncSession = Depends(get_session),
         current_user: User = Depends(get_current_user)
@@ -237,11 +311,31 @@ async def delete_signal_type(
     if has_observations:
         raise HTTPException(
             status_code=fapi_status.HTTP_400_BAD_REQUEST,
-            detail="Cannot delete signal type that has active observations"
+            detail="Cannot delete signal type that has observations"
         )
+
+    # Store old values for auditing
+    old_values = signal_type.model_dump()
 
     signal_type.is_deleted = True
     session.add(signal_type)
+    
+    # Create audit log
+    await create_audit_log(
+        session=session,
+        action="delete",
+        resource_type="signal_type",
+        resource_id=signal_type.id,
+        user_id=current_user.id,
+        session_id=getattr(request.state, "session_id", None),
+        old_values=old_values,
+        new_values=signal_type.model_dump(),
+        details={"message": f"User {current_user.username} deleted signal type '{signal_type.name}'"},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_url=str(request.url)
+    )
+    
     await session.commit()
 
     return MessageResponse(message="SignalType deleted successfully")

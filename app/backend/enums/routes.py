@@ -109,6 +109,7 @@ class ExportRoutes(str, Enum):
 class PostRoutes(str, Enum):
     """Post/content management routes"""
     BASE = "/posts"
+    FILTER_SCHEMA = "/filter-schema"
     POST_BY_ID = "/{post_id}"
     POST_STATUS = "/{post_id}/status"
     BULK_STATUS_UPDATE = "/bulk/status-update"
@@ -171,6 +172,7 @@ class ObservationRoutes(str, Enum):
     BASE = "/observations"
     CREATE = "/create"
     LIST_ALL = "/list-all"
+    FILTER_SCHEMA = "/filter-schema"
     OBSERVATION_BY_ID = "/{observation_id}"
     MARK_DISAPPEARED = "/{observation_id}/disappeared"
     BULK_UPDATE = "/bulk-update"
@@ -197,10 +199,13 @@ class ObservationRoutes(str, Enum):
 class MediaRoutes(str, Enum):
     """Media file management routes"""
     BASE = "/media"
+    FILTER_SCHEMA = "/filter-schema"
     UPLOAD = "/upload"
+    NGINX_UPLOAD = "/nginx-upload"
     # UPLOAD_CHUNKED_START = "/upload/chunked/start"
     # UPLOAD_CHUNKED_CHUNK = "/upload/chunked/chunk"
     MEDIA_BY_ID = "/{media_id}"
+    MEDIA_STREAM = "/{media_id}/stream"
     MEDIA_DOWNLOAD = "/{media_id}/download"
     MEDIA_INFO = "/{media_id}/info"
     MEDIA_THUMBNAIL = "/{media_id}/thumbnail"
@@ -236,6 +241,7 @@ class MediaRoutes(str, Enum):
 class UserRoutes(str, Enum):
     """User management routes"""
     BASE = "/users"
+    FILTER_SCHEMA = "/filter-schema"
     USER_BY_ID = "/{user_id}"
     USER_ROLES = "/{user_id}/roles"
 
@@ -260,6 +266,7 @@ class UserRoutes(str, Enum):
 class RoleRoutes(str, Enum):
     """Role management routes"""
     BASE = "/roles"
+    FILTER_SCHEMA = "/filter-schema"
     ROLE_BY_ID = "/{role_id}"
     ROLE_PERMISSIONS = "/{role_id}/permissions"
     ROLE_PERMISSION_BY_ID = "/{role_id}/permissions/{permission_id}"
@@ -288,6 +295,7 @@ class CategoryRoutes(str, Enum):
     BASE = "/categories"
     LIST_ALL = "/list-all"
     CREATE = "/create"
+    FILTER_SCHEMA = "/filter-schema"
     CATEGORY_BY_ID = "/{category_id}"
     CATEGORY_SIGNAL_TYPES = "/{category_id}/signal-types"
 
@@ -314,6 +322,7 @@ class SignalTypeRoutes(str, Enum):
     BASE = "/signal-types"
     LIST_ALL = "/list-all"
     CREATE = "/create"
+    FILTER_SCHEMA = "/filter-schema"
     SIGNAL_TYPE_BY_ID = "/{signal_type_id}"
 
     def versioned_path(self) -> str:
@@ -332,6 +341,32 @@ class SignalTypeRoutes(str, Enum):
     @staticmethod
     def tag() -> str:
         return "SIGNAL_TYPES"
+
+
+class TagRoutes(str, Enum):
+    """Tag management routes"""
+    BASE = "/tags"
+    LIST_ALL = "/list-all"
+    CREATE = "/create"
+    FILTER_SCHEMA = "/filter-schema"
+    TAG_BY_ID = "/{tag_id}"
+
+    def versioned_path(self) -> str:
+        """Get the full path with base prefix and api version prefix"""
+        api_ver = APIVersionRoutes.current_version()
+        if self == self.BASE:
+            return f"{api_ver}{self.BASE.value}"
+        return f"{api_ver}{self.BASE.value}{self.value}" if self.BASE.value else f"{api_ver}{self.value}"
+
+    def path(self) -> str:
+        """Get the full path with base prefix"""
+        if self == self.BASE:
+            return f"{self.BASE.value}"
+        return f"{self.BASE.value}{self.value}" if self.BASE.value else str(self.value)
+
+    @staticmethod
+    def tag() -> str:
+        return "TAGS"
 
 
 class SystemRoutes(str, Enum):
@@ -361,6 +396,30 @@ class SystemRoutes(str, Enum):
         return "SYSTEM"
 
 
+class SearchRoutes(str, Enum):
+    """Unified search routes"""
+    BASE = "/search"
+    ENTITY = "/{entity}"
+    FILTER_SCHEMA = "/filter-schema"
+
+    def versioned_path(self) -> str:
+        """Get the full path with base prefix and api version prefix"""
+        api_ver = APIVersionRoutes.current_version()
+        if self == self.BASE:
+            return f"{api_ver}{self.BASE.value}"
+        return f"{api_ver}{self.BASE.value}{self.value}" if self.BASE.value else f"{api_ver}{self.value}"
+
+    def path(self) -> str:
+        """Get the full path with base prefix"""
+        if self == self.BASE:
+            return f"{self.BASE.value}"
+        return f"{self.BASE.value}{self.value}" if self.BASE.value else str(self.value)
+
+    @staticmethod
+    def tag() -> str:
+        return "SEARCH"
+
+
 # Helper class to access all routes
 class Routes:
     """Centralized access to all route enums"""
@@ -375,8 +434,10 @@ class Routes:
     ROLES = RoleRoutes
     CATEGORIES = CategoryRoutes
     SIGNAL_TYPES = SignalTypeRoutes
+    TAGS = TagRoutes
     API_VERSION = APIVersionRoutes
     SYSTEM = SystemRoutes
+    SEARCH = SearchRoutes
 
 
 if __name__ == "__main__":

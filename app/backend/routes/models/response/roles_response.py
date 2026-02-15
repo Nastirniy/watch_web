@@ -16,3 +16,5 @@ class RoleResponse(SecureBaseModel):
 class PermissionResponse(SecureBaseModel):
     id: int
     name: str
+    display_name: str
+    description: str

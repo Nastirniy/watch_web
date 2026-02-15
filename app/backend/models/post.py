@@ -14,8 +14,9 @@ class Post(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(max_length=255)
     code: str = Field(unique=True, index=True, max_length=50)
-    description: Optional[str] = Field(default=None)
-    region: Optional[str] = Field(default=None)
+    description: Optional[str] = Field(default=None, max_length=1000)
+    region: Optional[str] = Field(default=None, max_length=255)
+    city: Optional[str] = Field(default=None, max_length=255)
     is_active: bool = Field(default=True, index=True)
     last_connection_at: Optional[datetime] = Field(default=None, index=True)
     connection_status: str = Field(

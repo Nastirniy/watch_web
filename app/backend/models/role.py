@@ -12,7 +12,7 @@ class Role(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(unique=True, index=True, max_length=100)
     display_name: str = Field(max_length=255)
-    description: Optional[str] = Field(default=None)
+    description: Optional[str] = Field(default=None, max_length=1000)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -26,6 +26,8 @@ class Permission(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(unique=True, index=True)
+    display_name: str = Field(default="", max_length=255)
+    description: str = Field(default="", max_length=1000)
 
     # Relationships
     role_permissions: List["RolePermission"] = Relationship(back_populates="permission", cascade_delete=True)

@@ -1,0 +1,52 @@
+# ============================================================================
+# media-watcher.service
+# ============================================================================
+# Long-running service that monitors the uploads directory for new media files
+# using inotifywait and triggers thumbnailgen@.service instances.
+#
+# Install:
+#   sudo cp systemd/media-watcher.service /etc/systemd/system/
+#   sudo cp systemd/media-watcher.sh /opt/watch_web/systemd/
+#   sudo chmod +x /opt/watch_web/systemd/media-watcher.sh
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now media-watcher.service
+#
+# Logs:
+#   journalctl -u media-watcher -f
+# ============================================================================
+
+[Unit]
+Description=Media file watcher for thumbnail generation
+After=network.target mysql.service
+Wants=network.target
+
+[Service]
+Type=simple
+
+# -- Adjust these to match your deployment --
+User=sh1zik
+Group=sh1zik
+WorkingDirectory=/home/sh1zik/mil-scan-api/app/uploads
+
+# Path to the uploads directory (relative to WorkingDirectory or absolute)
+Environment=MEDIA_UPLOADS_DIR=/home/sh1zik/mil-scan-api/app/uploads
+
+ExecStart=/home/sh1zik/mil-scan-api/systemd/media-watcher.sh
+
+# Restart automatically on failure
+Restart=always
+RestartSec=5
+
+# Logging to systemd journal
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=media-watcher
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/sh1zik/mil-scan-api/app/uploads
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

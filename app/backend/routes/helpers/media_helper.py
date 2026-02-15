@@ -5,9 +5,8 @@ from fastapi.responses import StreamingResponse
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.backend.models.media import MediaFile, FileChunk
+from app.backend.models.media import MediaFile
 from app.backend.models.observation import Observation
-from app.backend.utils.datetime_utils import get_default_timezone_datetime
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.config import settings
 
@@ -32,104 +31,37 @@ async def get_observation_from_media(session: AsyncSession, media_file: MediaFil
     return observation
 
 
-async def assemble_chunks_into_file(session: AsyncSession, media_file_id: int):
-    """Assemble all chunks into a single complete file"""
+def get_x_accel_redirect_path(media_file: MediaFile, media_manager) -> str:
+    """Get the path for Nginx X-Accel-Redirect header"""
+    symlink_path = media_manager.get_nginx_symlink_path(media_file)
 
-    # Get media file info
-    media_query = select(MediaFile).where(MediaFile.id == media_file_id)
-    media_result = await session.exec(media_query)
-    media_file = media_result.first()
+    if not symlink_path:
+        raise HTTPException(
+            status_code=fapi_status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Nginx streaming not available for this file type"
+        )
 
-    if not media_file:
-        _logger.error(f"Media file {media_file_id} not found for assembly")
-        return
+    return f"{settings.storage.nginx_symlink_path}{symlink_path}"
 
-    # Get all chunks ordered by chunk number
-    chunks_query = select(FileChunk).where(
-        FileChunk.media_file_id == media_file_id
-    ).order_by(FileChunk.chunk_number)
-    chunks_result = await session.exec(chunks_query)
-    chunks = chunks_result.all()
 
-    if not chunks:
-        _logger.error(f"No chunks found for media file {media_file_id}")
-        return
-
+def get_download_accel_redirect_path(media_file: MediaFile, media_manager) -> str:
+    """
+    Build the Nginx internal path for X-Accel-Redirect file downloads.
+    Constructs: {nginx_internal_uploads_prefix}/{relative_path_from_uploads_dir}
+    e.g. /protected_uploads/2025/06/15/obs_001/42_abc123.mp4
+    """
     try:
-        # Create complete file path
-        uploads_dir = Path(settings.storage.upload_path)
-        observation_dir = uploads_dir / str(media_file.observation_id)
-        complete_file_path = observation_dir / media_file.stored_filename
+        file_path = Path(media_file.file_path)
+        storage_root = Path(media_manager.storage_path)
+        relative = file_path.relative_to(storage_root)
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=fapi_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Cannot resolve file path relative to storage root"
+        )
 
-        # Ensure observation directory exists
-        observation_dir.mkdir(parents=True, exist_ok=True)
-
-        # Assemble chunks into complete file
-        with open(complete_file_path, "wb") as complete_file:
-            for chunk in chunks:
-                try:
-                    with open(chunk.chunk_file_path, "rb") as chunk_file:
-                        chunk_data = chunk_file.read()
-                        complete_file.write(chunk_data)
-                except FileNotFoundError:
-                    _logger.error(f"Chunk file not found: {chunk.chunk_file_path}")
-                    return
-
-        # Update media file with complete file path
-        media_file.file_path = str(complete_file_path)
-        media_file.upload_complete = True
-
-        _logger.info(f"Successfully assembled {len(chunks)} chunks into {complete_file_path}")
-
-    except Exception as e:
-        _logger.error(f"Failed to assemble chunks for media file {media_file_id}: {e}")
-
-
-async def cleanup_expired_upload_session(session: AsyncSession, media_file_id: int):
-    """Clean up expired upload session - remove all chunks and reset media file"""
-
-    # Get media file
-    media_query = select(MediaFile).where(MediaFile.id == media_file_id)
-    media_result = await session.exec(media_query)
-    media_file = media_result.first()
-
-    if not media_file:
-        return
-
-    # Get all chunks for this media file
-    chunks_query = select(FileChunk).where(FileChunk.media_file_id == media_file_id)
-    chunks_result = await session.exec(chunks_query)
-    chunks = chunks_result.all()
-
-    # Delete chunk files from filesystem
-    for chunk in chunks:
-        try:
-            chunk_path = Path(chunk.chunk_file_path)
-            if chunk_path.exists():
-                chunk_path.unlink()
-        except Exception as e:
-            _logger.warning(f"Failed to delete expired chunk file {chunk.chunk_file_path}: {e}")
-
-        # Delete chunk record from database
-        await session.delete(chunk)
-
-    # Clean up chunk directory
-    try:
-        uploads_dir = Path(settings.storage.upload_path)
-        observation_dir = uploads_dir / str(media_file.observation_id)
-        chunks_dir = observation_dir / f"media_{media_file_id}"
-
-        if chunks_dir.exists():
-            chunks_dir.rmdir()  # Only removes if empty
-    except Exception as e:
-        _logger.warning(f"Failed to cleanup expired chunk directory: {e}")
-
-    # Reset media file session tracking
-    media_file.upload_session_started = get_default_timezone_datetime()
-    media_file.upload_last_activity = get_default_timezone_datetime()
-    media_file.upload_complete = False
-
-    _logger.info(f"Cleaned up expired upload session for media file {media_file_id}")
+    prefix = settings.storage.nginx_internal_uploads_prefix.rstrip("/")
+    return f"{prefix}/{relative.as_posix()}"
 
 
 async def stream_media_file(session: AsyncSession, media_file: MediaFile, media_manager, validate_integrity: bool = True):

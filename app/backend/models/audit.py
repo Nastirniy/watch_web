@@ -17,6 +17,7 @@ class AuditLog(SQLModel, table=True):
 
     old_values: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
     new_values: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
+    details: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
 
     ip_address: Optional[str] = Field(default=None, max_length=45)
     user_agent: Optional[str] = Field(default=None)

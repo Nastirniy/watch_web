@@ -1,43 +1,34 @@
 from typing import List, Optional
-from datetime import datetime, timezone, timedelta
 from pathlib import Path
-import hashlib
-import asyncio
 import gc
-from fastapi import APIRouter, Depends, HTTPException, status as fapi_status, UploadFile, File, Form, BackgroundTasks
-from fastapi.responses import StreamingResponse, FileResponse, Response
+from fastapi import APIRouter, Depends, HTTPException, status as fapi_status, UploadFile, File, Form, BackgroundTasks, Query, Request
+from fastapi.responses import FileResponse, Response
 from sqlmodel import select, desc
-from pydantic import BaseModel
 from sqlmodel.ext.asyncio.session import AsyncSession
-import io
 
 from app.backend.database import get_session, get_session_maker
-from app.backend.models.media import MediaFile, FileChunk
+from app.backend.models.media import MediaFile
 from app.backend.models.observation import Observation
 from app.backend.models.user import User
-from app.backend.utils.datetime_utils import get_default_timezone_datetime
 from app.backend.dependencies import get_current_user
 from app.backend.services.permissions import PermissionService
 from app.backend.services.access_control import AccessControlService
-from app.backend.services.media_manager import MediaManager, FileIntegrityCheck, FileValidationConfig, UploadSession
+from app.backend.services.media_manager import MediaManager, FileValidationConfig
 from app.backend.enums.general import Permissions, MediaType
 from app.backend.enums.routes import MediaRoutes, SystemRoutes
-from app.backend.utils.mime_detector import mime_detector
-from app.backend.utils.logging_config import get_logger, get_api_logger
+from app.backend.helpers.audit_helper import create_audit_log
+from app.backend.utils.logging_config import get_api_logger
 from app.backend.config import settings
-from app.backend.routes.models.request.media_request import ChunkedUploadStart, ResumeUploadRequest, ListAttachedMediaRequest
-from app.backend.routes.models.response.media_response import (
-    ChunkedUploadResponse,
-    ChunkUploadResponse,
-    MediaFileInfo,
-    UploadSessionInfo,
-    ThumbnailInfo
-)
+from app.backend.routes.models.request.media_request import ListAttachedMediaRequest
+from app.backend.routes.models.response.media_response import MediaFileInfo
+from app.backend.filters.params.media_params import MediaFilterParams
+from app.backend.filters.media_filter import MediaFilterService
+from app.backend.routes.models.response.search_response import EntitySchemaInfo
 from app.backend.routes.helpers.media_helper import (
     get_observation_from_media,
-    assemble_chunks_into_file,
-    cleanup_expired_upload_session,
-    stream_media_file
+    stream_media_file,
+    get_x_accel_redirect_path,
+    get_download_accel_redirect_path
 )
 from app.backend.services.thumbnail_generator import ThumbnailGenerator
 
@@ -45,255 +36,35 @@ router = APIRouter()
 _logger = get_api_logger()
 
 
-# @router.post(MediaRoutes.UPLOAD_CHUNKED_START.value, response_model=ChunkedUploadResponse)
-# @PermissionService.require_permission(Permissions.OBSERVATION_CREATE.value)
-# async def start_chunked_upload(
-#     upload_data: ChunkedUploadStart,
-#     session: AsyncSession = Depends(get_session),
-#     current_user: User = Depends(get_current_user)
-# ):
-#     """
-#     Start a chunked file upload session.
-#     Users can only upload media for observations from their assigned post.
-#     """
-#
-#     # Verify observation exists and user has access
-#     observation_query = select(Observation).where(
-#         Observation.id == upload_data.observation_id,
-#         Observation.is_deleted == False
-#     )
-#     observation = await session.exec(observation_query)
-#     observation_result = observation.first()
-#
-#     if not observation_result:
-#         raise HTTPException(
-#             status_code=fapi_status.HTTP_404_NOT_FOUND,
-#             detail="Observation not found"
-#         )
-#
-#     # Check if user has access to this observation's post
-#     await AccessControlService.check_post_membership(
-#         current_user,
-#         observation_result.post_id,
-#         session,
-#         f"{Permissions.OBSERVATION_CREATE.name} for {MediaRoutes.UPLOAD_CHUNKED_START.value}"
-#     )
-#
-#     # Validate media type
-#     try:
-#         media_type_enum = MediaType(upload_data.media_type.lower())
-#     except ValueError:
-#         raise HTTPException(
-#             status_code=fapi_status.HTTP_400_BAD_REQUEST,
-#             detail=f"Invalid media type: {upload_data.media_type}"
-#         )
-#
-#     # Generate unique file hash for deduplication and resume
-#     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-#     file_hash_base = f"{upload_data.original_filename}_{upload_data.file_size}_{timestamp}"
-#     file_hash = hashlib.sha256(file_hash_base.encode()).hexdigest()[:16]
-#
-#     # Generate MD5 hash of original filename
-#     md5_hash = hashlib.md5(upload_data.original_filename.encode()).hexdigest()[:16]
-#
-#     # Generate unique part using timestamp and file_hash
-#     unique_part = f"{timestamp}_{file_hash[:8]}"
-#
-#     # Create temporary stored filename (will be updated after getting media_file.id)
-#     temp_stored_filename = f"{unique_part}_{md5_hash}{upload_data.file_extension}"
-#
-#     # Create media file record
-#     media_file = MediaFile(
-#         observation_id=upload_data.observation_id,
-#         original_filename=upload_data.original_filename,
-#         stored_filename=temp_stored_filename,
-#         file_path=f"{settings.storage.upload_path}/{observation_result.id}/{temp_stored_filename}",
-#         file_size=upload_data.file_size,
-#         mime_type="application/octet-stream",  # Will be updated when first chunk arrives
-#         file_extension=upload_data.file_extension,
-#         media_type=media_type_enum.value,
-#         file_hash=file_hash
-#     )
-#
-#     session.add(media_file)
-#     await session.commit()
-#     await session.refresh(media_file)
-#
-#     # Update stored filename with media_file.id
-#     stored_filename = f"{media_file.id}_{md5_hash}{upload_data.file_extension}"
-#     media_file.stored_filename = stored_filename
-#     media_file.file_path = f"{settings.storage.upload_path}/{observation_result.id}/{stored_filename}"
-#     await session.commit()
-#     await session.refresh(media_file)
-#
-#     upload_id = f"{media_file.id}_{file_hash}"
-#
-#     return ChunkedUploadResponse(
-#         upload_id=upload_id,
-#         media_file_id=media_file.id,
-#         chunk_size=upload_data.chunk_size,
-#         total_chunks=upload_data.total_chunks,
-#         uploaded_chunks=[]
-#     )
-
-
-# @router.post(MediaRoutes.UPLOAD_CHUNKED_CHUNK.value, response_model=ChunkUploadResponse)
-# @PermissionService.require_permission(Permissions.OBSERVATION_CREATE.value)
-# async def upload_chunk(
-#     upload_id: str = Form(...),
-#     chunk_number: int = Form(...),
-#     chunk_file: UploadFile = File(...),
-#     session: AsyncSession = Depends(get_session),
-#     current_user: User = Depends(get_current_user),
-#     background_tasks: BackgroundTasks = BackgroundTasks()
-# ):
-#     """
-#     Upload a single chunk of a file.
-#     Users can only upload chunks for media from their assigned post.
-#     """
-#
-#     # Parse upload_id to get media_file_id
-#     try:
-#         media_file_id = int(upload_id.split('_')[0])
-#     except (ValueError, IndexError):
-#         raise HTTPException(
-#             status_code=fapi_status.HTTP_400_BAD_REQUEST,
-#             detail="Invalid upload_id format"
-#         )
-#
-#     # Get media file
-#     media_query = select(MediaFile).where(MediaFile.id == media_file_id)
-#     media_result = await session.exec(media_query)
-#     media_file = media_result.first()
-#
-#     if not media_file:
-#         raise HTTPException(
-#             status_code=fapi_status.HTTP_404_NOT_FOUND,
-#             detail="Media file not found"
-#         )
-#
-#     # Check if user has access to this media's observation post
-#     observation = await get_observation_from_media(session, media_file)
-#     await AccessControlService.check_post_membership(
-#         current_user,
-#         observation.post_id,
-#         session,
-#         f"{Permissions.OBSERVATION_CREATE.name} for {MediaRoutes.UPLOAD_CHUNKED_CHUNK.value}"
-#     )
-#
-#     # Check upload session timeout (30 minutes default)
-#     current_time = get_default_timezone_datetime()
-#     timeout_duration = timedelta(minutes=settings.storage.upload_timeout_minutes)
-#
-#     # Ensure upload_last_activity has timezone info before comparison
-#     last_activity = media_file.upload_last_activity
-#     if last_activity.tzinfo is None:
-#         last_activity = last_activity.replace(tzinfo=timezone.utc)
-#
-#     if current_time - last_activity > timeout_duration:
-#         # Session expired, clean up chunks and restart
-#         await cleanup_expired_upload_session(session, media_file_id)
-#         raise HTTPException(
-#             status_code=fapi_status.HTTP_408_REQUEST_TIMEOUT,
-#             detail=f"Upload session expired after {settings.storage.upload_timeout_minutes} minutes. Please restart upload."
-#         )
-#
-#     # Update last activity time
-#     media_file.upload_last_activity = current_time
-#
-#     # Check if chunk already exists
-#     chunk_query = select(FileChunk).where(
-#         FileChunk.media_file_id == media_file_id,
-#         FileChunk.chunk_number == chunk_number
-#     )
-#     existing_chunk = await session.exec(chunk_query)
-#     if existing_chunk.first():
-#         # Chunk already uploaded, skip
-#         pass
-#     else:
-#         # Read and validate chunk data
-#         chunk_data = await chunk_file.read()
-#         chunk_size = len(chunk_data)
-#         chunk_hash = hashlib.sha256(chunk_data).hexdigest()
-#
-#         # Create uploads directory structure
-#         uploads_dir = Path(settings.storage.upload_path)
-#         observation_dir = uploads_dir / str(media_file.observation_id)
-#         chunks_dir = observation_dir / f"media_{media_file_id}"
-#
-#         chunks_dir.mkdir(parents=True, exist_ok=True)
-#
-#         # Save chunk to filesystem
-#         chunk_filename = f"chunk_{chunk_number:04d}.bin"
-#         chunk_file_path = chunks_dir / chunk_filename
-#
-#         with open(chunk_file_path, "wb") as f:
-#             f.write(chunk_data)
-#
-#         # Detect mime type from first chunk using advanced detection
-#         if chunk_number == 0:
-#             detected_mime, detection_method = mime_detector.detect_mime_type(
-#                 chunk_data,
-#                 media_file.original_filename
-#             )
-#
-#             media_file.mime_type = detected_mime
-#
-#             # Log detection method for debugging
-#             _logger.info(f"MIME type detected for {media_file.original_filename}: {detected_mime} (method: {detection_method})")
-#
-#         # Create chunk record with file path
-#         file_chunk = FileChunk(
-#             media_file_id=media_file_id,
-#             chunk_number=chunk_number,
-#             chunk_size=chunk_size,
-#             chunk_hash=chunk_hash,
-#             chunk_file_path=str(chunk_file_path)
-#         )
-#
-#         session.add(file_chunk)
-#
-#     # Get all uploaded chunks
-#     all_chunks_query = select(FileChunk).where(FileChunk.media_file_id == media_file_id)
-#     all_chunks = await session.exec(all_chunks_query)
-#     uploaded_chunks = [chunk.chunk_number for chunk in all_chunks.all()]
-#
-#     # Calculate expected total chunks based on file size
-#     expected_chunks = (media_file.file_size + 1048576 - 1) // 1048576  # 1MB chunks
-#     remaining_chunks = expected_chunks - len(uploaded_chunks)
-#     upload_complete = remaining_chunks == 0
-#
-#     # If upload is complete, assemble the chunks into a single file
-#     if upload_complete:
-#         await assemble_chunks_into_file(session, media_file_id)
-#
-#         # Trigger background thumbnail generation for images and videos
-#         if media_file.media_type.lower() in ['image', 'video']:
-#             background_tasks.add_task(generate_thumbnail_background, media_file_id, session)
-#
-#     await session.commit()
-#
-#     return ChunkUploadResponse(
-#         chunk_number=chunk_number,
-#         uploaded=True,
-#         remaining_chunks=remaining_chunks,
-#         upload_complete=upload_complete
-#     )
+@router.get(MediaRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo)
+@PermissionService.require_permission(Permissions.MEDIA_VIEW.value)
+async def get_media_filter_schema(
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    """Available filter params and sortable fields for media files."""
+    user_is_admin = await PermissionService.has_permission(
+        session, current_user, Permissions.IS_ADMIN.value
+    )
+    return EntitySchemaInfo(**MediaFilterService.get_schema(is_admin=user_is_admin))
 
 
 @router.get(MediaRoutes.MEDIA_INFO.value, response_model=MediaFileInfo)
-@PermissionService.require_permission(Permissions.OBSERVATION_VIEW.value)
+@PermissionService.require_permission(Permissions.MEDIA_VIEW.value)
 async def get_media_info(
     media_id: int,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Get information about a media file and its upload status.
+    Get information about a media file.
     Users can only access media from their assigned post.
     """
 
-    media_query = select(MediaFile).where(MediaFile.id == media_id)
+    media_query = select(MediaFile).where(
+        MediaFile.id == media_id,
+        MediaFile.is_deleted == False
+    )
     media_result = await session.exec(media_query)
     media_file = media_result.first()
 
@@ -303,41 +74,21 @@ async def get_media_info(
             detail="Media file not found"
         )
 
-    # Get observation and check post access
+    # Get observation and check post access (handles admin bypass)
     observation = await get_observation_from_media(session, media_file)
-    await AccessControlService.check_post_membership(
-        current_user,
-        observation.post_id,
-        session,
-        f"{Permissions.OBSERVATION_VIEW.name} for {MediaRoutes.MEDIA_INFO.value}"
+    await AccessControlService.check_resource_access(
+        user=current_user,
+        resource_post_id=observation.post_id,
+        session=session,
+        resource_type="media",
+        operation="view"
     )
-    
-    # Get chunk information
-    chunks_query = select(FileChunk).where(FileChunk.media_file_id == media_id)
-    chunks_result = await session.exec(chunks_query)
-    chunks = chunks_result.all()
-    
-    expected_chunks = (media_file.file_size + 1048576 - 1) // 1048576  # 1MB chunks
-    upload_complete = len(chunks) == expected_chunks
-    
-    return MediaFileInfo(
-        id=media_file.id,
-        original_filename=media_file.original_filename,
-        stored_filename=media_file.stored_filename,
-        file_size=media_file.file_size,
-        mime_type=media_file.mime_type,
-        media_type=media_file.media_type,
-        width=media_file.width,
-        height=media_file.height,
-        uploaded_at=media_file.uploaded_at,
-        upload_complete=upload_complete,
-        total_chunks=expected_chunks,
-        uploaded_chunks=len(chunks)
-    )
+
+    return MediaFileInfo.model_validate(media_file)
 
 
 @router.get(MediaRoutes.MEDIA_DOWNLOAD.value)
-@PermissionService.require_permission(Permissions.OBSERVATION_VIEW.value)
+@PermissionService.require_permission(Permissions.MEDIA_VIEW.value)
 async def download_media_file(
     media_id: int,
     validate_integrity: bool = True,
@@ -351,7 +102,10 @@ async def download_media_file(
     """
 
     # Get media file info first
-    media_query = select(MediaFile).where(MediaFile.id == media_id)
+    media_query = select(MediaFile).where(
+        MediaFile.id == media_id,
+        MediaFile.is_deleted == False
+    )
     media_result = await session.exec(media_query)
     media_file = media_result.first()
 
@@ -361,19 +115,49 @@ async def download_media_file(
             detail="Media file not found"
         )
 
-    # Check if user has access to this media's observation post
+    # Check if user has access to this media's observation post (handles admin bypass)
     observation = await get_observation_from_media(session, media_file)
-    await AccessControlService.check_post_membership(
-        current_user,
-        observation.post_id,
-        session,
-        f"{Permissions.OBSERVATION_VIEW.name} for {MediaRoutes.MEDIA_DOWNLOAD.value}"
+    await AccessControlService.check_resource_access(
+        user=current_user,
+        resource_post_id=observation.post_id,
+        session=session,
+        resource_type="media",
+        operation="download"
     )
+
+    # --- Nginx X-Accel-Redirect download (offloads file serving to Nginx) ---
+    if settings.storage.enable_nginx_download:
+        try:
+            accel_path = get_download_accel_redirect_path(media_file, media_manager)
+        except HTTPException:
+            raise
+        except Exception as e:
+            _logger.error(f"Failed to build X-Accel-Redirect path for media {media_id}: {e}")
+            raise HTTPException(
+                status_code=fapi_status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to prepare download"
+            )
+
+        return Response(
+            content=b"",
+            status_code=200,
+            headers={
+                "X-Accel-Redirect": accel_path,
+                "Content-Type": media_file.mime_type,
+                "Content-Disposition": f"attachment; filename={media_file.original_filename}",
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=3600",
+                "ETag": f'"{media_file.file_hash}"',
+                "X-Accel-Buffering": "yes"
+            }
+        )
+
+    # --- Direct download (fallback when not behind Nginx) ---
 
     # Handle streaming download for large files
     if stream and media_file.file_size > 10 * 1024 * 1024:  # 10MB threshold
         return await stream_media_file(session, media_file, media_manager, validate_integrity)
-    
+
     # Use the enhanced media manager for retrieval
     try:
         file_data = await media_manager.retrieve_file(
@@ -419,77 +203,24 @@ async def download_media_file(
         )
 
 
-@router.get(SystemRoutes.ROOT.value, response_model=List[MediaFileInfo])
-@PermissionService.require_permission(Permissions.OBSERVATION_VIEW.value)
-async def list_media_files(
-    observation_id: Optional[int] = None,
-    media_type: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 100,
-    session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user)
-):
-    """List media files with optional filtering"""
-    
-    query = select(MediaFile)
-    
-    if observation_id:
-        query = query.where(MediaFile.observation_id == observation_id)
-    
-    if media_type:
-        query = query.where(MediaFile.media_type == media_type)
-    
-    query = query.offset(skip).limit(limit).order_by(desc(MediaFile.uploaded_at))
-    
-    result = await session.exec(query)
-    media_files = result.all()
-    
-    # Get chunk information for each file
-    media_info_list = []
-    for media_file in media_files:
-        chunks_query = select(FileChunk).where(FileChunk.media_file_id == media_file.id)
-        chunks_result = await session.exec(chunks_query)
-        chunks = chunks_result.all()
-        
-        expected_chunks = (media_file.file_size + 1048576 - 1) // 1048576
-        upload_complete = len(chunks) == expected_chunks
-        
-        media_info_list.append(MediaFileInfo(
-            id=media_file.id,
-            original_filename=media_file.original_filename,
-            stored_filename=media_file.stored_filename,
-            file_size=media_file.file_size,
-            mime_type=media_file.mime_type,
-            media_type=media_file.media_type,
-            width=media_file.width,
-            height=media_file.height,
-            uploaded_at=media_file.uploaded_at,
-            upload_complete=upload_complete,
-            total_chunks=expected_chunks,
-            uploaded_chunks=len(chunks)
-        ))
-    
-    return media_info_list
-
-
-@router.delete(MediaRoutes.MEDIA_BY_ID.value)
-@PermissionService.require_permissions({
-    "all": [
-        {"any": [Permissions.OBSERVATION_DELETE.value, Permissions.IS_ADMIN.value]},
-        Permissions.OBSERVATION_VIEW.value
-    ]
-})
-async def delete_media_file(
+@router.get(MediaRoutes.MEDIA_STREAM.value)
+@PermissionService.require_permission(Permissions.MEDIA_VIEW.value)
+async def stream_media_file_nginx(
     media_id: int,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Delete a media file and all its chunks.
-    Users can only delete media from their assigned post.
+    Stream media file using Nginx X-Accel-Redirect for optimal performance.
+    Offloads file serving to Nginx, preventing Python worker blocking.
+    Only works for video files with symlinks created.
     """
 
-    media_query = select(MediaFile).where(MediaFile.id == media_id)
+    # Get media file info first
+    media_query = select(MediaFile).where(
+        MediaFile.id == media_id,
+        MediaFile.is_deleted == False
+    )
     media_result = await session.exec(media_query)
     media_file = media_result.first()
 
@@ -499,135 +230,193 @@ async def delete_media_file(
             detail="Media file not found"
         )
 
-    # Check if user has access to this media's observation post
+    # Check if user has access to this media's observation post (handles admin bypass)
     observation = await get_observation_from_media(session, media_file)
-    await AccessControlService.check_post_membership(
-        current_user,
-        observation.post_id,
-        session,
-        f"{Permissions.OBSERVATION_DELETE.name} for {MediaRoutes.MEDIA_BY_ID.value}"
+    await AccessControlService.check_resource_access(
+        user=current_user,
+        resource_post_id=observation.post_id,
+        session=session,
+        resource_type="media",
+        operation="stream"
     )
 
-    # Delete all chunks first (due to foreign key constraint)
-    chunks_query = select(FileChunk).where(FileChunk.media_file_id == media_id)
-    chunks_result = await session.exec(chunks_query)
-    chunks = chunks_result.all()
+    # Check if file is a video
+    if media_file.media_type.lower() != 'video':
+        raise HTTPException(
+            status_code=fapi_status.HTTP_400_BAD_REQUEST,
+            detail="Streaming is only available for video files"
+        )
 
-    for chunk in chunks:
-        # Delete chunk file from filesystem
-        try:
-            chunk_path = Path(chunk.chunk_file_path)
-            if chunk_path.exists():
-                chunk_path.unlink()
-        except Exception as e:
-            _logger.warning(f"Failed to delete chunk file {chunk.chunk_file_path}: {e}")
-        
-        # Delete chunk record from database
-        await session.delete(chunk)
-    
-    # Try to remove empty directories
+    # Check if Nginx streaming is enabled
+    if not media_manager.enable_nginx_streaming:
+        raise HTTPException(
+            status_code=fapi_status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Nginx streaming is not enabled"
+        )
+
+    # Get X-Accel-Redirect path
     try:
-        uploads_dir = Path(settings.storage.upload_path)
-        observation_dir = uploads_dir / str(media_file.observation_id)
-        chunks_dir = observation_dir / f"media_{media_id}"
-        
-        if chunks_dir.exists():
-            chunks_dir.rmdir()  # Only removes if empty
-            
-        # Try to remove observation directory if empty
-        if observation_dir.exists() and not any(observation_dir.iterdir()):
-            observation_dir.rmdir()
-    except Exception as e:
-        _logger.warning(f"Failed to cleanup directories: {e}")
+        accel_path = get_x_accel_redirect_path(media_file, media_manager)
+    except HTTPException as e:
+        _logger.error(f"Failed to get X-Accel-Redirect path for media {media_id}: {e.detail}")
+        raise
+
+    # Return empty response with X-Accel-Redirect header
+    # Nginx will intercept and serve the file
+    return Response(
+        content=b"",
+        status_code=200,
+        headers={
+            "X-Accel-Redirect": accel_path,
+            "Content-Type": media_file.mime_type,
+            "Content-Disposition": f"inline; filename={media_file.original_filename}",
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "private, max-age=3600",
+            "ETag": f'"{media_file.file_hash}"',
+            "X-Accel-Buffering": "yes"
+        }
+    )
+
+
+@router.get(SystemRoutes.ROOT.value, response_model=List[MediaFileInfo])
+@PermissionService.require_permission(Permissions.MEDIA_VIEW.value)
+async def list_media_files(
+    filters: MediaFilterParams = Depends(),
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    """List media files with filters"""
+
+    # Get post filter based on user access (handles admin bypass)
+    access_post_id = await AccessControlService.filter_query_by_post_access(
+        user=current_user,
+        session=session
+    )
+
+    query = select(MediaFile).where(MediaFile.is_deleted == False)
+    query = MediaFilterService.apply_filters(query, filters, access_post_id)
+    result = await session.exec(query)
+    media_files = result.all()
+
+    return [MediaFileInfo.model_validate(mf) for mf in media_files]
+
+
+@router.delete(MediaRoutes.MEDIA_BY_ID.value)
+@PermissionService.require_permission(Permissions.MEDIA_DELETE.value)
+async def delete_media_file(
+    request: Request,
+    media_id: int,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Delete a media file.
+    Admins can delete any file.
+    Regular users can only delete files they uploaded/created within their post.
+    Implements soft delete (unlinks from observation but keeps file).
+    """
+
+    media_query = select(MediaFile).where(
+        MediaFile.id == media_id,
+        MediaFile.is_deleted == False
+    )
+    media_result = await session.exec(media_query)
+    media_file = media_result.first()
+
+    if not media_file:
+        raise HTTPException(
+            status_code=fapi_status.HTTP_404_NOT_FOUND,
+            detail="Media file not found"
+        )
+
+    # Check post membership and ownership (handles admin bypass internally)
+    if media_file.observation_id:
+        observation = await get_observation_from_media(session, media_file)
+        await AccessControlService.check_combined_access(
+            user=current_user,
+            resource_post_id=observation.post_id,
+            resource_owner_id=media_file.user_id,
+            session=session,
+            resource_type="media",
+            operation="delete",
+            require_ownership=True
+        )
+    else:
+        # If no observation, check ownership or admin
+        await AccessControlService.check_ownership_or_admin(
+            user=current_user,
+            resource_owner_id=media_file.user_id,
+            session=session,
+            resource_type="media"
+        )
+
+    # Store old values for auditing
+    old_values = media_file.model_dump()
+
+    # Soft delete: mark as deleted and unlink from observation
+    media_file.is_deleted = True
+    media_file.observation_id = None
     
-    # Delete media file record
-    await session.delete(media_file)
+    # Old implementation with FS deletion (kept but not executed)
+    if False:
+        # Delete Nginx symlink for video files before deleting the media file
+        if media_file.media_type.lower() == 'video':
+            symlink_deleted = await media_manager.delete_nginx_symlink(media_file)
+            if symlink_deleted:
+                _logger.info(f"Nginx symlink deleted for video file {media_id}")
+            else:
+                _logger.debug(f"No symlink found or failed to delete for video file {media_id}")
+
+        # Delete the filesystem file
+        try:
+            file_path = Path(media_file.file_path)
+            if file_path.exists():
+                file_path.unlink()
+        except Exception as e:
+            _logger.warning(f"Failed to delete file {media_file.file_path}: {e}")
+
+        # Try to remove empty directories
+        try:
+            file_path = Path(media_file.file_path)
+            parent_dir = file_path.parent
+            if parent_dir.exists() and not any(parent_dir.iterdir()):
+                parent_dir.rmdir()
+        except Exception as e:
+            _logger.warning(f"Failed to cleanup directories: {e}")
+
+        # Delete media file record
+        await session.delete(media_file)
+    
+    # Create audit log
+    await create_audit_log(
+        session=session,
+        action="delete",
+        resource_type="media",
+        resource_id=media_id,
+        user_id=current_user.id,
+        session_id=getattr(request.state, "session_id", None),
+        old_values=old_values,
+        details={"message": f"User {current_user.username} soft-deleted media file '{old_values.get('original_filename')}'"},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_url=str(request.url)
+    )
+    
     await session.commit()
-    
-    return {"message": "Media file deleted successfully"}
+
+    return {"message": "Media file deleted successfully (soft-delete)"}
 
 
-# Initialize media manager instance with enterprise features
+# Initialize media manager instance
 media_manager = MediaManager(
     use_filesystem_cache=True,
     auto_cleanup=True,
     enable_deduplication=True,
     storage_path=getattr(settings.storage, 'upload_path', 'uploads'),
-    temp_path=getattr(settings.storage, 'temp_path', 'temp')
+    temp_path=getattr(settings.storage, 'temp_path', 'temp'),
+    nginx_symlink_path=getattr(settings.storage, 'nginx_symlink_path', None),
+    enable_nginx_streaming=getattr(settings.storage, 'enable_nginx_streaming', True)
 )
-
-
-# @router.get(MediaRoutes.FILE_INTEGRITY.value, response_model=FileIntegrityCheck)
-# @PermissionService.require_permission(Permissions.OBSERVATION_VIEW.value)
-# async def check_file_integrity(
-#     media_id: int,
-#     session: AsyncSession = Depends(get_session),
-#     current_user: User = Depends(get_current_user)
-# ):
-#     """
-#     Check file integrity and detect any issues.
-#     Users can only check integrity for media from their assigned post.
-#     """
-#
-#     # Get media file first
-#     media_query = select(MediaFile).where(MediaFile.id == media_id)
-#     media_result = await session.exec(media_query)
-#     media_file = media_result.first()
-#
-#     if not media_file:
-#         raise HTTPException(
-#             status_code=fapi_status.HTTP_404_NOT_FOUND,
-#             detail="Media file not found"
-#         )
-#
-#     # Check if user has access to this media's observation post
-#     observation = await get_observation_from_media(session, media_file)
-#     await AccessControlService.check_post_membership(
-#         current_user,
-#         observation.post_id,
-#         session,
-#         f"{Permissions.OBSERVATION_VIEW.name} for {MediaRoutes.FILE_INTEGRITY.value}"
-#     )
-#
-#     integrity = await media_manager.check_file_integrity(session, media_id)
-#     return integrity
-
-
-# @router.post(MediaRoutes.FILE_REPAIR.value)
-# @PermissionService.require_permission(Permissions.OBSERVATION_UPDATE.value)
-# async def repair_file(
-#     media_id: int,
-#     session: AsyncSession = Depends(get_session),
-#     current_user: User = Depends(get_current_user)
-# ):
-#     """Attempt to repair a corrupted or incomplete file"""
-#
-#     success = await media_manager.repair_file(session, media_id)
-#
-#     if success:
-#         return {"message": f"File {media_id} repaired successfully"}
-#     else:
-#         raise HTTPException(
-#             status_code=fapi_status.HTTP_422_UNPROCESSABLE_ENTITY,
-#             detail="File could not be repaired"
-#         )
-
-
-# @router.post(MediaRoutes.MAINTENANCE_CLEANUP.value)
-# @PermissionService.require_permission(Permissions.IS_ADMIN.value)
-# async def cleanup_orphaned_files(
-#     session: AsyncSession = Depends(get_session),
-#     current_user: User = Depends(get_current_user)
-# ):
-#     """Clean up orphaned files and database records"""
-#
-#     db_cleaned, fs_cleaned = await media_manager.cleanup_orphaned_files(session)
-#
-#     return {
-#         "message": "Cleanup completed",
-#         "database_records_cleaned": db_cleaned,
-#         "filesystem_files_cleaned": fs_cleaned
-#     }
 
 
 @router.get(MediaRoutes.STORAGE_STATISTICS.value)
@@ -637,130 +426,15 @@ async def get_storage_statistics(
     current_user: User = Depends(get_current_user)
 ):
     """Get storage statistics and health information"""
-    
+
     stats = await media_manager.get_storage_statistics(session)
     return stats
 
 
-# @router.post(MediaRoutes.CHECK_UPLOAD_SESSION.value, response_model=Optional[UploadSessionInfo])
-# @PermissionService.require_permission(Permissions.OBSERVATION_VIEW.value)
-# async def check_upload_session(
-#     request: ResumeUploadRequest,
-#     session: AsyncSession = Depends(get_session),
-#     current_user: User = Depends(get_current_user)
-# ):
-#     """
-#     Check if an upload session exists and can be resumed.
-#     Users can only check sessions for their assigned post.
-#     """
-#
-#     # Verify observation exists and user has access
-#     observation_query = select(Observation).where(
-#         Observation.id == request.observation_id,
-#         Observation.is_deleted == False
-#     )
-#     observation = await session.exec(observation_query)
-#     observation_result = observation.first()
-#
-#     if not observation_result:
-#         raise HTTPException(
-#             status_code=fapi_status.HTTP_404_NOT_FOUND,
-#             detail="Observation not found"
-#         )
-#
-#     # Check if user has access to this observation's post
-#     await AccessControlService.check_post_membership(
-#         current_user,
-#         observation_result.post_id,
-#         session,
-#         f"{Permissions.OBSERVATION_VIEW.name} for {MediaRoutes.CHECK_UPLOAD_SESSION.value}"
-#     )
-#
-#     # Check for existing upload session
-#     upload_session = await media_manager.check_existing_upload(
-#         session, request.file_hash, request.observation_id
-#     )
-#
-#     if upload_session:
-#         return UploadSessionInfo(
-#             media_file_id=upload_session.media_file_id,
-#             uploaded_chunks=upload_session.uploaded_chunks,
-#             total_chunks=upload_session.total_chunks,
-#             file_hash=upload_session.file_hash,
-#             last_activity=upload_session.last_activity,
-#             is_expired=upload_session.is_expired,
-#             can_resume=upload_session.can_resume
-#         )
-#
-#     return None
-
-
-# @router.post(MediaRoutes.RESUME_UPLOAD.value)
-# @PermissionService.require_permission(Permissions.OBSERVATION_CREATE.value)
-# async def resume_upload_session(
-#     request: ResumeUploadRequest,
-#     session: AsyncSession = Depends(get_session),
-#     current_user: User = Depends(get_current_user)
-# ):
-#     """Resume an existing upload session"""
-#
-#     # Check for existing upload session
-#     upload_session = await media_manager.check_existing_upload(
-#         session, request.file_hash, request.observation_id
-#     )
-#
-#     if not upload_session:
-#         raise HTTPException(
-#             status_code=fapi_status.HTTP_404_NOT_FOUND,
-#             detail="No upload session found for this file"
-#         )
-#
-#     if not upload_session.can_resume:
-#         if upload_session.is_expired:
-#             raise HTTPException(
-#                 status_code=fapi_status.HTTP_408_REQUEST_TIMEOUT,
-#                 detail="Upload session has expired"
-#             )
-#         else:
-#             raise HTTPException(
-#                 status_code=fapi_status.HTTP_409_CONFLICT,
-#                 detail="Upload session is complete or cannot be resumed"
-#             )
-#
-#     try:
-#         media_file_id = await media_manager.resume_upload(session, upload_session)
-#         return {
-#             "message": "Upload session resumed successfully",
-#             "media_file_id": media_file_id,
-#             "uploaded_chunks": upload_session.uploaded_chunks,
-#             "total_chunks": upload_session.total_chunks
-#         }
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=fapi_status.HTTP_400_BAD_REQUEST,
-#             detail=f"Failed to resume upload: {str(e)}"
-#         )
-
-
-# @router.post(MediaRoutes.CLEANUP_OLD_CHUNKS.value)
-# @PermissionService.require_permission(Permissions.IS_ADMIN.value)
-# async def cleanup_old_chunks(
-#     session: AsyncSession = Depends(get_session),
-#     current_user: User = Depends(get_current_user)
-# ):
-#     """Clean up old chunks based on retention policy"""
-#
-#     chunks_cleaned = await media_manager.cleanup_old_chunks(session)
-#
-#     return {
-#         "message": "Old chunk cleanup completed",
-#         "chunks_cleaned": chunks_cleaned
-#     }
-
-
 @router.post(MediaRoutes.UPLOAD.value)
-@PermissionService.require_permission(Permissions.OBSERVATION_CREATE.value)
+@PermissionService.require_permission(Permissions.MEDIA_CREATE.value)
 async def upload_complete_file(
+    request: Request,
     observation_id: int = Form(...),
     media_type: str = Form(...),
     file: UploadFile = File(...),
@@ -787,12 +461,13 @@ async def upload_complete_file(
             detail="Observation not found"
         )
 
-    # Check if user has access to this observation's post
-    await AccessControlService.check_post_membership(
-        current_user,
-        observation_result.post_id,
-        session,
-        f"{Permissions.OBSERVATION_CREATE.name} for {MediaRoutes.UPLOAD.value}"
+    # Check if user has access to this observation's post (handles admin bypass)
+    await AccessControlService.check_resource_access(
+        user=current_user,
+        resource_post_id=observation_result.post_id,
+        session=session,
+        resource_type="media",
+        operation="create"
     )
 
     # Validate file size before reading (basic check)
@@ -837,25 +512,56 @@ async def upload_complete_file(
     # Log original filename for debugging problematic uploads
     _logger.info(f"Uploading file: '{original_filename}' (size: {len(file_data)} bytes)")
 
-    # Store using enhanced media manager
+    # Store using media manager
     try:
-        media_file_id = await media_manager.store_file_chunked(
+        media_file_id = await media_manager.store_file(
             session=session,
             observation_id=observation_id,
             file_data=file_data,
             original_filename=original_filename,
             media_type=media_type,
+            user_id=current_user.id,
             validation_config=validation_config
         )
-        
+
         # Get file info for response
         media_query = select(MediaFile).where(MediaFile.id == media_file_id)
         result = await session.exec(media_query)
         media_file = result.first()
 
+        # Create Nginx symlink for video files
+        if media_file and media_type.lower() == 'video':
+            symlink_created = await media_manager.create_nginx_symlink(media_file)
+            if symlink_created:
+                _logger.info(f"Nginx symlink created for video file {media_file_id}")
+            else:
+                _logger.warning(f"Failed to create Nginx symlink for video file {media_file_id}")
+
         # Trigger background thumbnail generation for images and videos
-        if media_file and media_type.lower() in ['image', 'video']:
+        # Skip when external_thumbnail_generation is enabled --
+        # the media-watcher systemd service handles it in a separate process.
+        if (
+            media_file
+            and media_type.lower() in ['image', 'video']
+            and not settings.storage.external_thumbnail_generation
+        ):
             background_tasks.add_task(generate_thumbnail_background, media_file_id)
+
+        # Create audit log
+        await create_audit_log(
+            session=session,
+            action="create",
+            resource_type="media",
+            resource_id=media_file_id,
+            user_id=current_user.id,
+            session_id=getattr(request.state, "session_id", None),
+            new_values=media_file.model_dump() if media_file else None,
+            details={"message": f"User {current_user.username} uploaded media file '{original_filename}' for observation #{observation_id}"},
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+            request_url=str(request.url)
+        )
+        await session.commit()
 
         return {
             "message": "File uploaded successfully",
@@ -864,7 +570,7 @@ async def upload_complete_file(
             "file_size": media_file.file_size if media_file else None,
             "mime_type": media_file.mime_type if media_file else None
         }
-        
+
     except ValueError as e:
         _logger.exception(str(e))
         raise HTTPException(
@@ -879,8 +585,159 @@ async def upload_complete_file(
         )
 
 
+@router.post(MediaRoutes.NGINX_UPLOAD.value)
+@PermissionService.require_permission(Permissions.MEDIA_CREATE.value)
+async def nginx_upload_file(
+    request: Request,
+    observation_id: int = Query(..., description="Observation ID to attach file to"),
+    media_type: str = Query(..., description="Media type: image, video, or audio"),
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+    background_tasks: BackgroundTasks = BackgroundTasks()
+):
+    """
+    Upload a file via Nginx offloading (client_body_in_file_only).
+
+    Nginx receives the raw file body, writes it to a temp file on disk, and
+    forwards the temp file path to FastAPI via the X-File-Name header.
+    FastAPI validates the file, moves it to storage, and cleans up the temp file.
+    The file is never loaded entirely into memory.
+
+    Client sends raw binary body (not multipart form) with metadata in query params
+    and the original filename in the X-Original-Filename header.
+    """
+    if not settings.storage.enable_nginx_upload:
+        raise HTTPException(
+            status_code=fapi_status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Nginx upload offloading is not enabled"
+        )
+
+    # Read temp file path from Nginx header
+    temp_file_path = request.headers.get("X-File-Name")
+    if not temp_file_path:
+        raise HTTPException(
+            status_code=fapi_status.HTTP_400_BAD_REQUEST,
+            detail="Missing X-File-Name header (Nginx temp file path)"
+        )
+
+    original_filename = request.headers.get("X-Original-Filename", "uploaded_file")
+
+    # Verify observation exists
+    observation_query = select(Observation).where(
+        Observation.id == observation_id,
+        Observation.is_deleted == False
+    )
+    observation = await session.exec(observation_query)
+    observation_result = observation.first()
+
+    if not observation_result:
+        raise HTTPException(
+            status_code=fapi_status.HTTP_404_NOT_FOUND,
+            detail="Observation not found"
+        )
+
+    # Check post membership (handles admin bypass)
+    await AccessControlService.check_resource_access(
+        user=current_user,
+        resource_post_id=observation_result.post_id,
+        session=session,
+        resource_type="media",
+        operation="create (nginx offload)"
+    )
+
+    # Build validation config based on media type
+    max_size_bytes = settings.storage.max_file_size_gb * 1024 * 1024 * 1024
+    validation_config = FileValidationConfig(
+        max_size=max_size_bytes,
+        sanitize_filename=True,
+        validate_content_headers=True,
+        strict_mime_validation=True
+    )
+
+    if media_type.lower() == 'image':
+        validation_config.allowed_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff'}
+        validation_config.allowed_mime_types = {'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/tiff'}
+    elif media_type.lower() == 'video':
+        validation_config.allowed_extensions = {'.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm'}
+        validation_config.allowed_mime_types = {'video/mp4', 'video/avi', 'video/quicktime', 'video/x-msvideo', 'video/webm'}
+    elif media_type.lower() == 'audio':
+        validation_config.allowed_extensions = {'.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a'}
+        validation_config.allowed_mime_types = {'audio/mpeg', 'audio/wav', 'audio/flac', 'audio/aac', 'audio/ogg'}
+
+    try:
+        media_file_id = await media_manager.store_file_from_path(
+            session=session,
+            observation_id=observation_id,
+            source_path=temp_file_path,
+            original_filename=original_filename,
+            media_type=media_type,
+            user_id=current_user.id,
+            validation_config=validation_config
+        )
+
+        # Get file info for response
+        media_query = select(MediaFile).where(MediaFile.id == media_file_id)
+        result = await session.exec(media_query)
+        media_file = result.first()
+
+        # Create Nginx symlink for video files
+        if media_file and media_type.lower() == 'video':
+            symlink_created = await media_manager.create_nginx_symlink(media_file)
+            if symlink_created:
+                _logger.info(f"Nginx symlink created for video file {media_file_id}")
+            else:
+                _logger.warning(f"Failed to create Nginx symlink for video file {media_file_id}")
+
+        # Queue background thumbnail generation
+        # Skip when external_thumbnail_generation is enabled --
+        # the media-watcher systemd service handles it in a separate process.
+        if (
+            media_file
+            and media_type.lower() in ['image', 'video']
+            and not settings.storage.external_thumbnail_generation
+        ):
+            background_tasks.add_task(generate_thumbnail_background, media_file_id)
+
+        # Create audit log
+        await create_audit_log(
+            session=session,
+            action="create",
+            resource_type="media",
+            resource_id=media_file_id,
+            user_id=current_user.id,
+            session_id=getattr(request.state, "session_id", None),
+            new_values=media_file.model_dump() if media_file else None,
+            details={"message": f"User {current_user.username} uploaded media file '{original_filename}' (nginx offload) for observation #{observation_id}"},
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+            request_url=str(request.url)
+        )
+        await session.commit()
+
+        return {
+            "message": "File uploaded successfully (nginx offload)",
+            "media_file_id": media_file_id,
+            "original_filename": media_file.original_filename if media_file else None,
+            "file_size": media_file.file_size if media_file else None,
+            "mime_type": media_file.mime_type if media_file else None
+        }
+
+    except ValueError as e:
+        _logger.exception(str(e))
+        raise HTTPException(
+            status_code=fapi_status.HTTP_400_BAD_REQUEST,
+            detail="Server side error"
+        )
+    except Exception as e:
+        _logger.exception(f"Nginx upload failed: {str(e)}")
+        raise HTTPException(
+            status_code=fapi_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Upload failed"
+        )
+
+
 @router.post(MediaRoutes.LIST_ALL_ATTACHED_MEDIA.value, response_model=List[MediaFileInfo])
-@PermissionService.require_permission(Permissions.OBSERVATION_VIEW.value)
+@PermissionService.require_permission(Permissions.MEDIA_VIEW.value)
 async def list_media_for_observation(
     request: ListAttachedMediaRequest,
     session: AsyncSession = Depends(get_session),
@@ -905,49 +762,24 @@ async def list_media_for_observation(
             detail="Observation not found"
         )
 
-    # Check if user has access to this observation's post
-    await AccessControlService.check_post_membership(
-        current_user,
-        observation.post_id,
-        session,
-        f"{Permissions.OBSERVATION_VIEW.name} for {MediaRoutes.LIST_ALL_ATTACHED_MEDIA.value}"
+    # Check if user has access to this observation's post (handles admin bypass)
+    await AccessControlService.check_resource_access(
+        user=current_user,
+        resource_post_id=observation.post_id,
+        session=session,
+        resource_type="observation media",
+        operation="list"
     )
 
     # Query media files for the observation
-    media_query = select(MediaFile).where(MediaFile.observation_id == request.observation_id)
+    media_query = select(MediaFile).where(
+        MediaFile.observation_id == request.observation_id,
+        MediaFile.is_deleted == False
+    )
     media_result = await session.exec(media_query)
     media_files = media_result.all()
 
-    # Get chunk information for each file
-    media_info_list = []
-    for media_file in media_files:
-        chunks_query = select(FileChunk).where(FileChunk.media_file_id == media_file.id)
-        chunks_result = await session.exec(chunks_query)
-        chunks = chunks_result.all()
-
-        expected_chunks = (media_file.file_size + 1048576 - 1) // 1048576  # 1MB chunks
-        upload_complete = len(chunks) == expected_chunks
-
-        # Set thumbnail_id if thumbnail exists
-        thumbnail_id = media_file.id if media_file.thumbnail_path else None
-
-        media_info_list.append(MediaFileInfo(
-            id=media_file.id,
-            original_filename=media_file.original_filename,
-            stored_filename=media_file.stored_filename,
-            file_size=media_file.file_size,
-            mime_type=media_file.mime_type,
-            media_type=media_file.media_type,
-            width=media_file.width,
-            height=media_file.height,
-            uploaded_at=media_file.uploaded_at,
-            upload_complete=upload_complete,
-            total_chunks=expected_chunks,
-            uploaded_chunks=len(chunks),
-            thumbnail_id=thumbnail_id
-        ))
-
-    return media_info_list
+    return [MediaFileInfo.model_validate(media_file) for media_file in media_files]
 
 
 # Initialize thumbnail generator
@@ -971,21 +803,26 @@ async def generate_thumbnail_background(media_file_id: int):
                 _logger.warning(f"Media file {media_file_id} not found")
                 return
 
-            _logger.info(f"Generating thumbnail for {media_file.original_filename}")
+            _logger.info(f"Generating thumbnail for {media_file.original_filename} (type: {media_file.media_type})")
 
-            # Generate thumbnail
-            thumbnail_path = await thumbnail_generator.generate_thumbnail(
-                media_file,
-                size="medium"
-            )
-
-            if thumbnail_path:
-                _logger.info(f"Thumbnail generated successfully at {thumbnail_path}")
-                media_file.thumbnail_path = thumbnail_path
-                media_file.thumbnail_error = None
+            # Check for unsupported media types before calling generator
+            if media_file.media_type.lower() not in ['image', 'video']:
+                _logger.info(f"Skipping thumbnail for unsupported media type: {media_file.media_type}")
+                media_file.thumbnail_error = f"Unsupported media type: {media_file.media_type}"
             else:
-                _logger.warning(f"Thumbnail generation returned None for media_file_id={media_file_id}")
-                media_file.thumbnail_error = "Generation failed"
+                # Generate thumbnail
+                thumbnail_path = await thumbnail_generator.generate_thumbnail(
+                    media_file,
+                    size="medium"
+                )
+
+                if thumbnail_path:
+                    _logger.info(f"Thumbnail generated successfully at {thumbnail_path}")
+                    media_file.thumbnail_path = thumbnail_path
+                    media_file.thumbnail_error = None
+                else:
+                    _logger.warning(f"Thumbnail generation returned None for media_file_id={media_file_id}")
+                    media_file.thumbnail_error = "Generation failed"
 
             # Commit the changes
             _logger.info(f"Committing thumbnail path to database for media_file_id={media_file_id}")
@@ -1018,7 +855,7 @@ async def generate_thumbnail_background(media_file_id: int):
 
 
 @router.get(MediaRoutes.MEDIA_THUMBNAIL.value)
-@PermissionService.require_permission(Permissions.OBSERVATION_VIEW.value)
+@PermissionService.require_permission(Permissions.MEDIA_VIEW.value)
 async def get_media_thumbnail(
     media_id: int,
     session: AsyncSession = Depends(get_session),
@@ -1030,7 +867,10 @@ async def get_media_thumbnail(
     Check post access via AccessControlService.
     """
     # Get media file
-    media_query = select(MediaFile).where(MediaFile.id == media_id)
+    media_query = select(MediaFile).where(
+        MediaFile.id == media_id,
+        MediaFile.is_deleted == False
+    )
     media_result = await session.exec(media_query)
     media_file = media_result.first()
 
@@ -1040,13 +880,14 @@ async def get_media_thumbnail(
             detail="Media file not found"
         )
 
-    # Check if user has access to this media's observation post
+    # Check if user has access to this media's observation post (handles admin bypass)
     observation = await get_observation_from_media(session, media_file)
-    await AccessControlService.check_post_membership(
-        current_user,
-        observation.post_id,
-        session,
-        f"{Permissions.OBSERVATION_VIEW.name} for {MediaRoutes.MEDIA_THUMBNAIL.value}"
+    await AccessControlService.check_resource_access(
+        user=current_user,
+        resource_post_id=observation.post_id,
+        session=session,
+        resource_type="media thumbnail",
+        operation="view"
     )
 
     # Check thumbnail status
@@ -1123,61 +964,3 @@ async def regenerate_thumbnail(
     background_tasks.add_task(generate_thumbnail_background, media_id)
 
     return {"message": "Thumbnail regeneration queued"}
-
-
-# @router.get(MediaRoutes.OBSERVATION_THUMBNAILS.value, response_model=List[ThumbnailInfo])
-# @PermissionService.require_permission(Permissions.OBSERVATION_VIEW.value)
-# async def list_observation_thumbnails(
-#     observation_id: int,
-#     size: str = "medium",
-#     session: AsyncSession = Depends(get_session),
-#     current_user: User = Depends(get_current_user)
-# ):
-#     """Get thumbnail URLs for all media in observation"""
-#     # Get observation first and check access
-#     observation_query = select(Observation).where(
-#         Observation.id == observation_id,
-#         Observation.is_deleted == False
-#     )
-#     obs_result = await session.exec(observation_query)
-#     observation = obs_result.first()
-#
-#     if not observation:
-#         raise HTTPException(
-#             status_code=fapi_status.HTTP_404_NOT_FOUND,
-#             detail="Observation not found"
-#         )
-#
-#     # Check if user has access to this observation's post
-#     await AccessControlService.check_post_membership(
-#         current_user,
-#         observation.post_id,
-#         session,
-#         f"{Permissions.OBSERVATION_VIEW.name} for {MediaRoutes.OBSERVATION_THUMBNAILS.value}"
-#     )
-#
-#     # Query media files for the observation
-#     media_query = select(MediaFile).where(MediaFile.observation_id == observation_id)
-#     media_result = await session.exec(media_query)
-#     media_files = media_result.all()
-#
-#     # Build thumbnail info list
-#     thumbnail_list = []
-#     for media_file in media_files:
-#         thumbnail_ready = media_file.thumbnail_path is not None
-#         thumbnail_url = None
-#
-#         if thumbnail_ready:
-#             thumb_path = Path(media_file.thumbnail_path)
-#             if thumb_path.exists():
-#                 # Generate URL for thumbnail using route enum
-#                 thumbnail_url = f"/api/v1{MediaRoutes.BASE.value}{MediaRoutes.MEDIA_THUMBNAIL.value.replace('{media_id}', str(media_file.id))}?size={size}"
-#
-#         thumbnail_list.append(ThumbnailInfo(
-#             media_id=media_file.id,
-#             thumbnail_url=thumbnail_url,
-#             thumbnail_ready=thumbnail_ready,
-#             error=media_file.thumbnail_error
-#         ))
-#
-#     return thumbnail_list

@@ -31,7 +31,7 @@ _pwd_context = CryptContext(
 
 class AuthService:
     @staticmethod
-    def create_access_token(user_id: int, additional_claims: Optional[Dict[str, Any]] = None) -> str:
+    def create_access_token(user_id: int, session_id: Optional[str] = None, additional_claims: Optional[Dict[str, Any]] = None) -> str:
         """Create JWT access token with enhanced security"""
         now = datetime.now(timezone.utc)
         expire = now + timedelta(minutes=settings.security.access_token_expire_minutes)
@@ -45,13 +45,16 @@ class AuthService:
             "jti": secrets.token_urlsafe(32)  # JWT ID for token revocation
         }
         
+        if session_id:
+            payload["sid"] = session_id
+            
         if additional_claims:
             payload.update(additional_claims)
         
         return jwt.encode(payload, settings.security.secret_key, algorithm=settings.security.algorithm)
 
     @staticmethod
-    def create_refresh_token(user_id: int) -> str:
+    def create_refresh_token(user_id: int, session_id: Optional[str] = None) -> str:
         """Create JWT refresh token"""
         now = datetime.now(timezone.utc)
         expire = now + timedelta(days=settings.security.refresh_token_expire_days)
@@ -64,6 +67,9 @@ class AuthService:
             "type": "refresh",
             "jti": secrets.token_urlsafe(32)
         }
+        
+        if session_id:
+            payload["sid"] = session_id
         
         return jwt.encode(payload, settings.security.secret_key, algorithm=settings.security.algorithm)
 
@@ -92,7 +98,8 @@ class AuthService:
             session: AsyncSession,
             user: User,
             ip_address: Optional[str] = None,
-            user_agent: Optional[str] = None
+            user_agent: Optional[str] = None,
+            request_url: Optional[str] = None
     ) -> UserSession:
         """Create user session"""
         session_id = secrets.token_urlsafe(64)
@@ -121,6 +128,8 @@ class AuthService:
             resource_id=user.id,
             ip_address=ip_address,
             user_agent=user_agent,
+            request_url=request_url,
+            details={"message": f"User {user.username} logged in"},
             success=True
         )
 
@@ -153,12 +162,6 @@ class AuthService:
                 certificate_cn, certificate_serial, certificate_fingerprint
             )
 
-            _logger.debug(
-                f"Hashed PKI data - CN hash: {truncate_for_logging(cn_hash)}, "
-                f"Serial hash: {truncate_for_logging(serial_hash)}, "
-                f"Fingerprint hash: {truncate_for_logging(fingerprint_hash)}"
-            )
-
             # Create audit log for authentication attempt using helper
             audit_details = await create_pki_auth_audit_details(
                 certificate_cn, certificate_serial, fingerprint_hash
@@ -186,8 +189,6 @@ class AuthService:
             )
             user = result.first()
 
-            _logger.debug(f"PKI authentication query result: {'User found' if user else 'No matching user'}")
-
             if user:
                 # Update audit log for success
                 audit.success = True
@@ -208,7 +209,9 @@ class AuthService:
     async def invalidate_session(
             session: AsyncSession,
             session_id: str,
-            user_id: Optional[int] = None
+            user_id: Optional[int] = None,
+            ip_address: Optional[str] = None,
+            user_agent: Optional[str] = None
     ) -> bool:
         """Invalidate a user session"""
         try:
@@ -232,7 +235,9 @@ class AuthService:
                     session_id=session_id,
                     action="logout",
                     resource_type="session",
-                    resource_id=int(session_id),
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    details={"message": f"User session invalidated (logout)"},
                     success=True
                 )
 

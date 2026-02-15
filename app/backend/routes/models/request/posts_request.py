@@ -12,6 +12,7 @@ class PostCreate(BaseModel):
     code: str = Field(min_length=1, max_length=50, description="Post code (unique)")
     description: Optional[str] = Field(None, max_length=1000, description="Post description")
     region: Optional[str] = Field(None, max_length=255, description="Post region")
+    city: Optional[str] = Field(None, max_length=255, description="Post city")
 
     @field_validator('name', 'code')
     @classmethod
@@ -19,7 +20,7 @@ class PostCreate(BaseModel):
         """Validate and sanitize required string fields"""
         return SecurityValidators.sanitize_string(v.strip(), max_length=255)
 
-    @field_validator('description', 'region')
+    @field_validator('description', 'region', 'city')
     @classmethod
     def validate_optional_fields(cls, v: Optional[str]) -> Optional[str]:
         """Validate and sanitize optional string fields"""
@@ -34,6 +35,7 @@ class PostUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255, description="Post name")
     description: Optional[str] = Field(None, max_length=1000, description="Post description")
     region: Optional[str] = Field(None, max_length=255, description="Post region")
+    city: Optional[str] = Field(None, max_length=255, description="Post city")
     is_active: Optional[bool] = None
 
     @field_validator('name')
@@ -44,7 +46,7 @@ class PostUpdate(BaseModel):
             return SecurityValidators.sanitize_string(v.strip(), max_length=255)
         return v
 
-    @field_validator('description', 'region')
+    @field_validator('description', 'region', 'city')
     @classmethod
     def validate_optional_fields(cls, v: Optional[str]) -> Optional[str]:
         """Validate and sanitize optional string fields"""

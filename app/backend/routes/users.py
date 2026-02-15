@@ -1,8 +1,8 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Form
+from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Form, Request
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.exc import IntegrityError, DataError
-from sqlmodel import select
+from sqlmodel import select, desc
 from datetime import datetime, timezone
 import json
 
@@ -14,52 +14,51 @@ from app.backend.dependencies import get_current_user
 from app.backend.services.permissions import PermissionService
 from app.backend.services.access_control import AccessControlService
 from app.backend.services.auth import AuthService
-from app.backend.helpers.certeficates_helper import CertificateParser, hash_data
+from app.backend.helpers.certeficates_helper import CertificateParser, hash_data, hash_pki_certificate_data
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import UserRoutes, SystemRoutes
+from app.backend.helpers.audit_helper import create_audit_log
 from app.backend.utils.validators import PaginationParams
 from app.backend.utils.logging_config import get_logger, get_api_logger
 from app.backend.routes.models.request.user_request import UserCreateData, UserUpdateData
 from app.backend.routes.models.response.user_response import UserResponse, UserRoleResponse
+from app.backend.filters.params.user_params import UserFilterParams
+from app.backend.filters.user_filter import UserFilterService
+from app.backend.routes.models.response.search_response import EntitySchemaInfo
 
 router = APIRouter()
 _logger = get_api_logger()
 
 
 @router.get(SystemRoutes.ROOT.value, response_model=List[UserResponse])
-@PermissionService.require_permissions({"all": [
+@PermissionService.require_permissions({"any": [
     Permissions.USER_VIEW.value,
     Permissions.IS_ADMIN.value]})
 async def list_users(
-        pagination: PaginationParams = Depends(),
+        filters: UserFilterParams = Depends(),
         session: AsyncSession = Depends(get_session),
         current_user: User = Depends(get_current_user)
 ):
-    """List all users with secure pagination"""
+    """
+    List users with filters.
+
+    Admin users see all users.
+    Non-admin users only see users that share the same post_id.
+    """
     try:
-        skip = (pagination.page - 1) * pagination.size
-        
-        result = await session.exec(
-            select(User)
-            .where(User.is_deleted == 0)
-            .offset(skip)
-            .limit(pagination.size)
-            .order_by(User.created_at.desc())
+        admin = await PermissionService.has_permission(
+            session, current_user, Permissions.IS_ADMIN.value
         )
-        
+        access_post_id = None if admin else current_user.post_id
+
+        query = select(User)
+        query = UserFilterService.apply_filters(query, filters, access_post_id)
+        result = await session.exec(query)
         users = result.all()
-        _logger.info(f"User {current_user.username} listed {len(users)} users")
-        
-        return [UserResponse(
-            id=user.id,
-            username=user.username,
-            username_alias=user.username_alias,
-            post_id=user.post_id,
-            is_active=user.is_active,
-            created_at=user.created_at,
-            updated_at=user.updated_at,
-            last_login_at=user.last_login_at
-        ) for user in users]
+
+        _logger.info(f"User {current_user.username} listed {len(users)} users (admin={admin})")
+
+        return [UserResponse.model_validate(user) for user in users]
 
     except Exception as e:
         _logger.error(f"Error listing users: {str(e)}")
@@ -74,6 +73,7 @@ async def list_users(
     Permissions.USER_CREATE.value,
     Permissions.IS_ADMIN.value]})
 async def create_user(
+        request: Request,
         certificate: UploadFile = File(..., description="PKI certificate file (PEM or DER format)"),
         username: str = Form(..., min_length=3, max_length=50),
         username_alias: str = Form(..., min_length=1, max_length=255),
@@ -203,9 +203,9 @@ async def create_user(
         roles_to_assign.append(role)
 
     # Hash PKI certificate data before storing
-    pki_cn_hash = await hash_data(pki_cn)
-    pki_serial_hash = await hash_data(pki_serial)
-    pki_fingerprint_hash = await hash_data(pki_fingerprint)
+    pki_cn_hash, pki_serial_hash, pki_fingerprint_hash = await hash_pki_certificate_data(
+        pki_cn, pki_serial, pki_fingerprint
+    )
 
     # Check for duplicate certificate before creating user
     duplicate_check = await session.exec(
@@ -242,6 +242,23 @@ async def create_user(
             session.add(user_role)
 
         await session.commit()
+        
+        # Create audit log
+        await create_audit_log(
+            session=session,
+            action="create",
+            resource_type="user",
+            resource_id=user.id,
+            user_id=current_user.id,
+            session_id=getattr(request.state, "session_id", None),
+            new_values=user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"}),
+            details={"message": f"User {current_user.username} created new user {user.username} with {len(roles_to_assign)} roles"},
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+            request_url=str(request.url)
+        )
+        await session.commit()
+        
         _logger.info(f"User {current_user.username} created user {user_data.username} with {len(roles_to_assign)} roles and PKI authentication")
 
         return UserResponse(
@@ -273,6 +290,21 @@ async def create_user(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Database error occurred"
             )
+
+
+@router.get(UserRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo)
+@PermissionService.require_permissions({"any": [
+    Permissions.USER_VIEW.value,
+    Permissions.IS_ADMIN.value]})
+async def get_user_filter_schema(
+        session: AsyncSession = Depends(get_session),
+        current_user: User = Depends(get_current_user)
+):
+    """Available filter params and sortable fields for users."""
+    user_is_admin = await PermissionService.has_permission(
+        session, current_user, Permissions.IS_ADMIN.value
+    )
+    return EntitySchemaInfo(**UserFilterService.get_schema(is_admin=user_is_admin))
 
 
 @router.get(UserRoutes.USER_BY_ID.value, response_model=UserResponse)
@@ -308,16 +340,7 @@ async def get_user(
             detail="User not found"
         )
 
-    return UserResponse(
-        id=user.id,
-        username=user.username,
-        username_alias=user.username_alias,
-        post_id=user.post_id,
-        is_active=user.is_active,
-        created_at=user.created_at,
-        updated_at=user.updated_at,
-        last_login_at=user.last_login_at
-    )
+    return UserResponse.model_validate(user)
 
 
 @router.patch(UserRoutes.USER_BY_ID.value, response_model=UserResponse)
@@ -326,6 +349,7 @@ async def get_user(
     Permissions.USER_VIEW.value,
     Permissions.IS_ADMIN.value]})
 async def update_user(
+        request: Request,
         user_id: int,
         certificate: Optional[UploadFile] = File(None, description="Optional PKI certificate file to update (PEM or DER format)"),
         username_alias: Optional[str] = Form(None, min_length=1, max_length=255),
@@ -364,6 +388,9 @@ async def update_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
+
+    # Store old values for auditing
+    old_values = user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"})
 
     # Parse role_ids from JSON string if provided
     role_ids_list = None
@@ -523,18 +550,27 @@ async def update_user(
             _logger.info(f"User {current_user.username} updated user {user.username} and replaced roles with {len(roles_to_assign)} new roles")
 
         await session.refresh(user)
+        
+        # Create audit log
+        await create_audit_log(
+            session=session,
+            action="update",
+            resource_type="user",
+            resource_id=user.id,
+            user_id=current_user.id,
+            session_id=getattr(request.state, "session_id", None),
+            old_values=old_values,
+            new_values=user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"}),
+            details={"message": f"User {current_user.username} updated user {user.username}"},
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+            request_url=str(request.url)
+        )
+        await session.commit()
+        
         _logger.info(f"User {current_user.username} updated user {user.username}")
 
-        return UserResponse(
-            id=user.id,
-            username=user.username,
-            username_alias=user.username_alias,
-            post_id=user.post_id,
-            is_active=user.is_active,
-            created_at=user.created_at,
-            updated_at=user.updated_at,
-            last_login_at=user.last_login_at
-        )
+        return UserResponse.model_validate(user)
 
     except (IntegrityError, DataError) as e:
         await session.rollback()
@@ -590,7 +626,7 @@ async def list_user_roles(
         select(Role, UserRole.assigned_at)
         .join(UserRole, UserRole.role_id == Role.id)
         .where(UserRole.user_id == user_id)
-        .order_by(UserRole.assigned_at.desc())
+        .order_by(desc(UserRole.assigned_at))
     )
 
     roles_data = result.all()

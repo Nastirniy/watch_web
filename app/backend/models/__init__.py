@@ -3,9 +3,9 @@ from .role import Role, Permission, RolePermission, UserRole
 from .post import Post
 from .observation import (
     SignalType, Category,
-    Observation
+    Observation, Tag, ObservationTag
 )
-from .media import MediaFile, FileChunk
+from .media import MediaFile
 from .audit import AuditLog, ExportJob
 
 __all__ = [
@@ -13,6 +13,6 @@ __all__ = [
     'Role', 'Permission', 'RolePermission', 'UserRole',
     'Post',
     'SignalType', 'Category',
-    'Observation', 'MediaFile', 'FileChunk',
+    'Observation', 'Tag', 'ObservationTag', 'MediaFile',
     'AuditLog', 'ExportJob'
 ]

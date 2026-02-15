@@ -1,17 +1,19 @@
-from typing import Optional, List, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 from datetime import datetime
 from sqlmodel import Field, SQLModel, Relationship
 from app.backend.utils.datetime_utils import get_default_timezone_datetime
 
 if TYPE_CHECKING:
     from app.backend.models.observation import Observation
+    from app.backend.models.user import User
 
 
 class MediaFile(SQLModel, table=True):
     __tablename__ = "media_files"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    observation_id: int = Field(foreign_key="observations.id", index=True)
+    observation_id: Optional[int] = Field(default=None, foreign_key="observations.id", index=True)
+    user_id: Optional[int] = Field(default=None, foreign_key="users.id", index=True)
 
     original_filename: str = Field(max_length=255)
     stored_filename: str = Field(unique=True, max_length=255)
@@ -31,26 +33,13 @@ class MediaFile(SQLModel, table=True):
     thumbnail_error: Optional[str] = Field(default=None, max_length=500)
 
     uploaded_at: datetime = Field(default_factory=get_default_timezone_datetime, index=True)
-    upload_complete: bool = Field(default=False)
-    upload_session_started: datetime = Field(default_factory=get_default_timezone_datetime, index=True)
-    upload_last_activity: datetime = Field(default_factory=get_default_timezone_datetime, index=True)
-    upload_timeout_minutes: int = Field(default=30)
+    is_deleted: bool = Field(default=False, index=True)
 
     # Relationships
-    observation: "Observation" = Relationship(back_populates="media_files")
-    file_chunks: List["FileChunk"] = Relationship(back_populates="media_file", cascade_delete=True)
+    observation: Optional["Observation"] = Relationship(back_populates="media_files")
+    user: Optional["User"] = Relationship()
 
-
-class FileChunk(SQLModel, table=True):
-    __tablename__ = "file_chunks"
-
-    id: Optional[int] = Field(default=None, primary_key=True)
-    media_file_id: int = Field(foreign_key="media_files.id", index=True)
-    chunk_number: int = Field(index=True)
-    chunk_size: int
-    chunk_hash: str = Field(max_length=64)
-    chunk_file_path: str = Field(max_length=500)  # Path to chunk file on filesystem
-    uploaded_at: datetime = Field(default_factory=get_default_timezone_datetime)
-
-    # Relationships
-    media_file: MediaFile = Relationship(back_populates="file_chunks")
+    @property
+    def thumbnail_id(self) -> Optional[int]:
+        """Convenience property to get thumbnail ID (currently same as media_id if exists)"""
+        return self.id if self.thumbnail_path else None

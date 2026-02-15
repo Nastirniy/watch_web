@@ -115,7 +115,8 @@ async def login(
             session,
             user,
             ip_address=client_ip,
-            user_agent=user_agent
+            user_agent=user_agent,
+            request_url=str(request.url)
         )
 
         # Create both access and refresh tokens
@@ -285,7 +286,9 @@ async def logout(
         success = await AuthService.invalidate_session(
             session,
             session_id,
-            current_user.id
+            current_user.id,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent")
         )
 
         if not success:
