@@ -14,7 +14,7 @@ from app.backend.dependencies import get_current_user
 from app.backend.services.permissions import PermissionService
 from app.backend.services.access_control import AccessControlService
 from app.backend.services.media_manager import MediaManager, FileValidationConfig
-from app.backend.enums.general import Permissions, MediaType
+from app.backend.enums.general import Permissions, MediaType, ObservationStatus
 from app.backend.enums.routes import MediaRoutes, SystemRoutes
 from app.backend.helpers.audit_helper import create_audit_log
 from app.backend.utils.logging_config import get_api_logger
@@ -332,6 +332,23 @@ async def delete_media_file(
     # Check post membership and ownership (handles admin bypass internally)
     if media_file.observation_id:
         observation = await get_observation_from_media(session, media_file)
+        
+        # Check if user is admin
+        is_admin = await PermissionService.has_permission(
+            session, current_user, Permissions.IS_ADMIN.value
+        )
+        
+        # Non-admins can only delete media from active observations
+        if not is_admin and observation.status != ObservationStatus.ACTIVE.value:
+            _logger.warning(
+                f"User {current_user.username} tried to delete media {media_id} "
+                f"from inactive observation {observation.id} (status: {observation.status})"
+            )
+            raise HTTPException(
+                status_code=fapi_status.HTTP_403_FORBIDDEN,
+                detail=f"Cannot delete media from an observation that is no longer active (status: {observation.status})"
+            )
+
         await AccessControlService.check_combined_access(
             user=current_user,
             resource_post_id=observation.post_id,
