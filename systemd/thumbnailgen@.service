@@ -33,11 +33,9 @@ Type=oneshot
 # -- Adjust these to match your deployment --
 User=sh1zik
 Group=sh1zik
+WorkingDirectory=/home/sh1zik/mil-scan-api/
 
-# MUST be the project root so that `python -m app.backend...` can resolve the module
-WorkingDirectory=/home/sh1zik/mil-scan-api
-
-# %I = unescaped instance name = absolute file path
+# %I = unescaped instance name = original file path
 ExecStart=/home/sh1zik/mil-scan-api/venv/bin/python3 -m app.backend.services.thumbnail_worker "%I"
 
 # Timeout: 5 minutes should be enough for even large video files
@@ -55,6 +53,5 @@ CPUQuota=50%%
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/home/sh1zik/mil-scan-api/app/uploads
-ReadOnlyPaths=/home/sh1zik/mil-scan-api
+ReadWritePaths=/home/sh1zik/mil-scan-api/
 PrivateTmp=true

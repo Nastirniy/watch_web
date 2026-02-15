@@ -17,16 +17,17 @@
 
 [Unit]
 Description=Media file watcher for thumbnail generation
-After=network.target mysql.service
+Documentation=/home/sh1zik/mil-scan-api/systemd/media-watcher.sh
+After=network.target
 Wants=network.target
 
 [Service]
 Type=simple
 
 # -- Adjust these to match your deployment --
-User=sh1zik
-Group=sh1zik
-WorkingDirectory=/home/sh1zik/mil-scan-api/app/uploads
+User=root
+Group=root
+WorkingDirectory=/home/sh1zik/mil-scan-api/app
 
 # Path to the uploads directory (relative to WorkingDirectory or absolute)
 Environment=MEDIA_UPLOADS_DIR=/home/sh1zik/mil-scan-api/app/uploads
@@ -45,7 +46,8 @@ SyslogIdentifier=media-watcher
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/home/sh1zik/mil-scan-api/app/uploads
+ReadWritePaths=/home/sh1zik/mil-scan-api/app
+
 PrivateTmp=true
 
 [Install]
