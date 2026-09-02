@@ -1,4 +1,5 @@
 import asyncio
+import os
 from logging.config import fileConfig
 
 from sqlalchemy import pool
@@ -18,7 +19,12 @@ if config.config_file_name is not None:
 
 target_metadata = SQLModel.metadata
 
-config.set_main_option("sqlalchemy.url", settings.database.url)
+# WATCH_WEB_ALEMBIC_URL lets tests and one-off checks run migrations against
+# another database (for example an in-memory sqlite file) without touching config.
+config.set_main_option(
+    "sqlalchemy.url",
+    os.environ.get("WATCH_WEB_ALEMBIC_URL", settings.database.url),
+)
 
 
 def run_migrations_offline() -> None:

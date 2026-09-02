@@ -6,6 +6,7 @@ if TYPE_CHECKING:
     from app.backend.models.post import Post
     from app.backend.models.observation import Observation
     from app.backend.models.role import UserRole
+    from app.backend.models.user_post_access import UserPostAccess
 
 
 class User(SQLModel, table=True):
@@ -29,6 +30,7 @@ class User(SQLModel, table=True):
     post: Optional["Post"] = Relationship(back_populates="users")
     sessions: List["UserSession"] = Relationship(back_populates="user", cascade_delete=True)
     user_roles: List["UserRole"] = Relationship(back_populates="user", cascade_delete=True)
+    post_access: List["UserPostAccess"] = Relationship(back_populates="user", cascade_delete=True)
     observations: List["Observation"] = Relationship(
         back_populates="user",
         sa_relationship_kwargs={"foreign_keys": "[Observation.user_id]"}
@@ -37,6 +39,12 @@ class User(SQLModel, table=True):
         back_populates="disappeared_by_user",
         sa_relationship_kwargs={"foreign_keys": "[Observation.disappeared_by]"}
     )
+
+    # last_activity_at is a column property attached in models/presence_properties.py
+    @property
+    def is_online(self) -> bool:
+        from app.backend.services.presence import is_recent
+        return is_recent(getattr(self, "last_activity_at", None))
 
 
 class UserSession(SQLModel, table=True):

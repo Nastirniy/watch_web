@@ -20,7 +20,7 @@ class DatabaseConfig(BaseModel):
     port: int = 3306
     name: str = "radio_monitoring"
     user: str = "dbuser"
-    password: str = "dbpassword"
+    password: str
     echo: bool = False
     pool_size: int = 20
     max_overflow: int = 40
@@ -31,13 +31,15 @@ class DatabaseConfig(BaseModel):
 
 
 class SecurityConfig(BaseModel):
-    secret_key: str = "change-this-secret-key"
+    secret_key: str
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30  # Reduced from 1440 for better security
     refresh_token_expire_days: int = 7
     session_expire_hours: int = 8  # Reduced from 24 for better security
     allowed_origins: list[str] = ["https://localhost:3000"]
     jwt_leeway_seconds: int = 10
+    online_threshold_seconds: int = 300  # user is online when a session was touched within this window
+    activity_touch_interval_seconds: int = 60  # sessions are touched at most this often
 
 
 class ServerConfig(BaseModel):
@@ -65,8 +67,7 @@ class LoggingConfig(BaseModel):
 
 class TimezoneConfig(BaseModel):
     timezone: str = "UTC"
-    dst_handling: bool = True
-    
+
     @field_validator('timezone')
     @classmethod
     def validate_timezone(cls, v):
@@ -111,16 +112,12 @@ class StorageConfig(BaseModel):
     upload_path: str = "uploads"
     max_file_size_gb: int = 10
     thumbnail: ThumbnailSettings = Field(default_factory=ThumbnailSettings)
+    # Single nginx flag -- enables all nginx offloading:
+    # upload (client_body_in_file_only), download, stream (X-Accel-Redirect + symlinks), thumbnail
+    enable_nginx: bool = False
+
     nginx_symlink_path: str = "/protected_media"
-    enable_nginx_streaming: bool = False
-    streaming_threshold_mb: int = 10
-
-    # Nginx upload offloading (client_body_in_file_only)
-    enable_nginx_upload: bool = False
     nginx_upload_temp_path: str = "/var/www/nginx_uploads"
-
-    # Nginx download offloading (X-Accel-Redirect for all file types)
-    enable_nginx_download: bool = False
     nginx_internal_uploads_prefix: str = "/protected_uploads"
 
     # External thumbnail generation via systemd watcher (media-watcher.service)

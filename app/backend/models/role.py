@@ -1,5 +1,6 @@
 from typing import Optional, List, TYPE_CHECKING
 from datetime import datetime, timezone
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, SQLModel, Relationship
 
 if TYPE_CHECKING:
@@ -15,6 +16,7 @@ class Role(SQLModel, table=True):
     description: Optional[str] = Field(default=None, max_length=1000)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    is_deleted: bool = Field(default=False, index=True)
 
     # Relationships
     role_permissions: List["RolePermission"] = Relationship(back_populates="role", cascade_delete=True)
@@ -35,6 +37,7 @@ class Permission(SQLModel, table=True):
 
 class RolePermission(SQLModel, table=True):
     __tablename__ = "role_permissions"
+    __table_args__ = (UniqueConstraint("role_id", "permission_id", name="uq_role_permissions_role_permission"),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
     role_id: int = Field(foreign_key="roles.id", index=True)
@@ -47,6 +50,7 @@ class RolePermission(SQLModel, table=True):
 
 class UserRole(SQLModel, table=True):
     __tablename__ = "user_roles"
+    __table_args__ = (UniqueConstraint("user_id", "role_id", name="uq_user_roles_user_role"),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="users.id", index=True)

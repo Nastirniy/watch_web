@@ -184,3 +184,11 @@ fabric.properties
 
 # idea folder, uncomment if you don't need it
 # .idea
+# Local certificates, keys and scratch data (never commit)
+*.pem
+certificates/
+app/certificates/
+downloaded_thumbnails/
+test_media/
+.scratch_mig.db
+.claude/

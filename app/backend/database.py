@@ -166,6 +166,105 @@ def _is_admin_pki_data_valid(admin_config) -> bool:
     return True
 
 
+PERMISSION_META = {
+    "user.view": ("Перегляд користувачів", "Дозволяє переглядати інформацію та профілі користувачів"),
+    "user.create": ("Створення користувачів", "Дозволяє створювати нові облікові записи користувачів"),
+    "user.update": ("Оновлення користувачів", "Дозволяє змінювати інформацію та налаштування користувачів"),
+    "user.delete": ("Видалення користувачів", "Дозволяє видаляти облікові записи користувачів із системи"),
+    "post.view": ("Перегляд посту", "Дозволяє переглядати пости та їх деталі"),
+    "post.create": ("Створення посту", "Дозволяє створювати нові пости"),
+    "post.update": ("Оновлення посту", "Дозволяє редагувати існуючі пости"),
+    "post.delete": ("Видалення посту", "Дозволяє видаляти пости із системи"),
+    "observation.view": ("Перегляд спостережень", "Дозволяє переглядати сигнальні спостереження та їх дані"),
+    "observation.create": ("Створення спостережень", "Дозволяє створювати нові сигнальні спостереження"),
+    "observation.update": ("Оновлення спостережень", "Дозволяє змінювати існуючі сигнальні спостереження"),
+    "observation.delete": ("Видалення спостережень", "Дозволяє видаляти сигнальні спостереження із системи"),
+    "role.view": ("Перегляд ролей", "Дозволяє переглядати інформацію про ролі та дозволи"),
+    "role.create": ("Створення ролей", "Дозволяє створювати нові ролі та призначати дозволи"),
+    "role.update": ("Оновлення ролей", "Дозволяє змінювати існуючі ролі та їх дозволи"),
+    "role.delete": ("Видалення ролей", "Дозволяє видаляти ролі із системи"),
+    "admin.true": ("Адміністратор", "Повний доступ до системи з усіма адміністративними привілеями"),
+    "audit.view": ("Перегляд аудиту", "Дозволяє переглядати системні журнали аудиту та історію активності"),
+    "export.create": ("Створення експортів", "Дозволяє створювати та завантажувати експорти даних"),
+    "category.view": ("Перегляд категорій", "Дозволяє переглядати інформацію про категорії"),
+    "category.create": ("Створення категорій", "Дозволяє створювати нові категорії"),
+    "category.update": ("Оновлення категорій", "Дозволяє змінювати існуючі категорії"),
+    "category.delete": ("Видалення категорій", "Дозволяє видаляти категорії із системи"),
+    "signal_type.view": ("Перегляд типів сигналів", "Дозволяє переглядати інформацію про типи сигналів"),
+    "signal_type.create": ("Створення типів сигналів", "Дозволяє створювати нові типи сигналів"),
+    "signal_type.update": ("Оновлення типів сигналів", "Дозволяє змінювати існуючі типи сигналів"),
+    "signal_type.delete": ("Видалення типів сигналів", "Дозволяє видаляти типи сигналів із системи"),
+    "tag.view": ("Перегляд тегів", "Дозволяє переглядати інформацію про теги"),
+    "tag.create": ("Створення тегів", "Дозволяє створювати нові теги"),
+    "tag.update": ("Оновлення тегів", "Дозволяє змінювати існуючі теги"),
+    "tag.delete": ("Видалення тегів", "Дозволяє видаляти теги із системи"),
+    "media.view": ("Перегляд медіафайлів", "Дозволяє переглядати прикріплені медіафайли"),
+    "media.create": ("Завантаження медіафайлів", "Дозволяє завантажувати нові медіафайли"),
+    "media.update": ("Оновлення медіафайлів", "Дозволяє змінювати інформацію про медіафайли"),
+    "media.delete": ("Видалення медіафайлів", "Дозволяє видаляти медіафайли"),
+    "post.access_all": ("Доступ до всіх постів", "Дозволяє переглядати та працювати з даними всіх постів, а не лише призначених"),
+    "observation.manage_any": ("Керування чужими спостереженнями", "Дозволяє змінювати та закривати спостереження, створені іншими користувачами"),
+    "media.manage_any": ("Керування чужими медіафайлами", "Дозволяє видаляти медіафайли, завантажені іншими користувачами"),
+    "statistics.view": ("Перегляд статистики", "Дозволяє переглядати зведену статистику системи на панелі адміністратора"),
+}
+
+
+async def seed_roles_and_permissions(session: AsyncSession):
+    """Idempotent: ensure the admin role, every Permission row from the enum,
+    and that the admin role holds every permission (re-granted on every run).
+
+    Returns the admin Role.
+    """
+    from app.backend.models.role import Role, Permission, RolePermission
+    from app.backend.enums.general import Permissions
+
+    result = await session.exec(select(Role).where(Role.name == "admin"))
+    admin_role = result.first()
+    if not admin_role:
+        admin_role = Role(
+            name="admin",
+            display_name="Administrator",
+            description="Full system access"
+        )
+        session.add(admin_role)
+        await session.flush()
+        _logger.info("Admin role created")
+    elif admin_role.is_deleted:
+        admin_role.is_deleted = False
+        session.add(admin_role)
+        await session.flush()
+        _logger.warning("Admin role was soft-deleted; restored by seeding")
+
+    result = await session.exec(select(Permission))
+    existing_permissions = {p.name for p in result.all()}
+
+    permissions_added = 0
+    for perm in Permissions:
+        if perm.value not in existing_permissions:
+            display_name, description = PERMISSION_META.get(perm.value, (perm.value, ""))
+            session.add(Permission(name=perm.value, display_name=display_name, description=description))
+            permissions_added += 1
+    if permissions_added:
+        await session.flush()
+        _logger.info(f"Seeded {permissions_added} new permissions")
+
+    # Re-grant: the admin role must hold every permission after every startup
+    result = await session.exec(select(Permission.id))
+    all_permission_ids = set(result.all())
+    result = await session.exec(
+        select(RolePermission.permission_id).where(RolePermission.role_id == admin_role.id)
+    )
+    granted_ids = set(result.all())
+    missing_ids = sorted(all_permission_ids - granted_ids)
+    for permission_id in missing_ids:
+        session.add(RolePermission(role_id=admin_role.id, permission_id=permission_id))
+    if missing_ids:
+        _logger.info(f"Re-granted {len(missing_ids)} permissions to the admin role")
+
+    await session.commit()
+    return admin_role
+
+
 async def seed_database():
     """Seed database with initial data (roles, permissions; admin user in dev only)"""
     # First ensure database exists (migrations should already be applied)
@@ -181,88 +280,8 @@ async def seed_database():
         from app.backend.enums.general import Permissions
         from app.backend.utils.pki_generator import generate_admin_pki_credentials
 
-        # 1. Seed Roles and Permissions (Required in all modes)
-        # Check if admin role exists
-        result = await session.exec(select(Role).where(Role.name == "admin"))
-        admin_role = result.first()
-
-        if not admin_role:
-            admin_role = Role(
-                name="admin",
-                display_name="Administrator",
-                description="Full system access"
-            )
-            session.add(admin_role)
-            await session.flush()
-            _logger.info("Admin role created")
-
-        # Check permissions
-        result = await session.exec(select(Permission))
-        existing_permissions = {p.name for p in result.all()}
-
-        # Permission display names and descriptions
-        permission_meta = {
-            "user.view": ("Перегляд користувачів", "Дозволяє переглядати інформацію та профілі користувачів"),
-            "user.create": ("Створення користувачів", "Дозволяє створювати нові облікові записи користувачів"),
-            "user.update": ("Оновлення користувачів", "Дозволяє змінювати інформацію та налаштування користувачів"),
-            "user.delete": ("Видалення користувачів", "Дозволяє видаляти облікові записи користувачів із системи"),
-            "post.view": ("Перегляд посту", "Дозволяє переглядати пости та їх деталі"),
-            "post.create": ("Створення посту", "Дозволяє створювати нові пости"),
-            "post.update": ("Оновлення посту", "Дозволяє редагувати існуючі пости"),
-            "post.delete": ("Видалення посту", "Дозволяє видаляти пости із системи"),
-            "observation.view": ("Перегляд спостережень", "Дозволяє переглядати сигнальні спостереження та їх дані"),
-            "observation.create": ("Створення спостережень", "Дозволяє створювати нові сигнальні спостереження"),
-            "observation.update": ("Оновлення спостережень", "Дозволяє змінювати існуючі сигнальні спостереження"),
-            "observation.delete": ("Видалення спостережень", "Дозволяє видаляти сигнальні спостереження із системи"),
-            "role.view": ("Перегляд ролей", "Дозволяє переглядати інформацію про ролі та дозволи"),
-            "role.create": ("Створення ролей", "Дозволяє створювати нові ролі та призначати дозволи"),
-            "role.update": ("Оновлення ролей", "Дозволяє змінювати існуючі ролі та їх дозволи"),
-            "role.delete": ("Видалення ролей", "Дозволяє видаляти ролі із системи"),
-            "admin.true": ("Адміністратор", "Повний доступ до системи з усіма адміністративними привілеями"),
-            "audit.view": ("Перегляд аудиту", "Дозволяє переглядати системні журнали аудиту та історію активності"),
-            "export.create": ("Створення експортів", "Дозволяє створювати та завантажувати експорти даних"),
-            "category.view": ("Перегляд категорій", "Дозволяє переглядати інформацію про категорії"),
-            "category.create": ("Створення категорій", "Дозволяє створювати нові категорії"),
-            "category.update": ("Оновлення категорій", "Дозволяє змінювати існуючі категорії"),
-            "category.delete": ("Видалення категорій", "Дозволяє видаляти категорії із системи"),
-            "signal_type.view": ("Перегляд типів сигналів", "Дозволяє переглядати інформацію про типи сигналів"),
-            "signal_type.create": ("Створення типів сигналів", "Дозволяє створювати нові типи сигналів"),
-            "signal_type.update": ("Оновлення типів сигналів", "Дозволяє змінювати існуючі типи сигналів"),
-            "signal_type.delete": ("Видалення типів сигналів", "Дозволяє видаляти типи сигналів із системи"),
-            "tag.view": ("Перегляд тегів", "Дозволяє переглядати інформацію про теги"),
-            "tag.create": ("Створення тегів", "Дозволяє створювати нові теги"),
-            "tag.update": ("Оновлення тегів", "Дозволяє змінювати існуючі теги"),
-            "tag.delete": ("Видалення тегів", "Дозволяє видаляти теги із системи"),
-            "media.view": ("Перегляд медіафайлів", "Дозволяє переглядати прикріплені медіафайли"),
-            "media.create": ("Завантаження медіафайлів", "Дозволяє завантажувати нові медіафайли"),
-            "media.update": ("Оновлення медіафайлів", "Дозволяє змінювати інформацію про медіафайли"),
-            "media.delete": ("Видалення медіафайлів", "Дозволяє видаляти медіафайли"),
-        }
-
-        # Create missing permissions
-        permissions_added = 0
-        for perm in Permissions:
-            if perm.value not in existing_permissions:
-                display_name, description = permission_meta.get(perm.value, (perm.value, ""))
-                permission = Permission(
-                    name=perm.value,
-                    display_name=display_name,
-                    description=description
-                )
-                session.add(permission)
-                await session.flush()
-
-                # Assign to admin role
-                role_perm = RolePermission(
-                    role_id=admin_role.id,
-                    permission_id=permission.id
-                )
-                session.add(role_perm)
-                permissions_added += 1
-
-        if permissions_added > 0:
-            await session.commit()
-            _logger.info(f"Seeded {permissions_added} new permissions")
+        # 1. Seed roles and permissions (required in all modes)
+        admin_role = await seed_roles_and_permissions(session)
 
         # 2. Seed Admin User (Development mode only)
         if settings.app.environment == AppEnvironment.DEVELOPMENT.value:

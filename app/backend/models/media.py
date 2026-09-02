@@ -1,5 +1,6 @@
 from typing import Optional, TYPE_CHECKING
 from datetime import datetime
+from pathlib import Path
 from sqlmodel import Field, SQLModel, Relationship
 from app.backend.utils.datetime_utils import get_default_timezone_datetime
 
@@ -38,6 +39,16 @@ class MediaFile(SQLModel, table=True):
     # Relationships
     observation: Optional["Observation"] = Relationship(back_populates="media_files")
     user: Optional["User"] = Relationship()
+
+    def resolve_path(self, storage_root: Path) -> Path:
+        p = Path(self.file_path)
+        return p if p.is_absolute() else storage_root / p
+
+    def resolve_thumbnail_path(self, storage_root: Path) -> Optional[Path]:
+        if not self.thumbnail_path:
+            return None
+        p = Path(self.thumbnail_path)
+        return p if p.is_absolute() else storage_root / p
 
     @property
     def thumbnail_id(self) -> Optional[int]:
