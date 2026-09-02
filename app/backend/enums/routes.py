@@ -51,11 +51,10 @@ class AuthRoutes(str, Enum):
     LOGIN = "/login"
     REFRESH = "/refresh"
     LOGOUT = "/logout"
-    CHANGE_PASSWORD = "/change-password"
     ME = "/me"
     SESSIONS = "/sessions"
     CHECK_PERMISSION = "/check-permission"
-    CERTIFICATE_VALIDATE = "/certificate/validate"
+    ROUTE_ACCESS = "/route-access"
 
     def versioned_path(self) -> str:
         """Get the full path with base prefix and api version prefix"""
@@ -75,50 +74,11 @@ class AuthRoutes(str, Enum):
         return "AUTHENTICATION"
 
 
-class ExportRoutes(str, Enum):
-    """Export job management routes"""
-    BASE = "/exports"
-    JOB_BY_ID = "/{job_id}"
-    JOB_ACTIONS = "/{job_id}/actions"
-    JOB_DOWNLOAD = "/{job_id}/download"
-    JOB_PROGRESS = "/{job_id}/progress"
-    BULK = "/bulk"
-    QUEUE_STATUS = "/queue/status"
-    STATISTICS = "/statistics"
-    POLICY = "/policy"
-    MAINTENANCE_CLEANUP = "/maintenance/cleanup"
-
-    def versioned_path(self) -> str:
-        """Get the full path with base prefix and api version prefix"""
-        api_ver = APIVersionRoutes.current_version()
-        if self == self.BASE:
-            return f"{api_ver}{self.BASE.value}"
-        return f"{api_ver}{self.BASE.value}{self.value}" if self.BASE.value else f"{api_ver}{self.value}"
-
-    def path(self) -> str:
-        """Get the full path with base prefix"""
-        if self == self.BASE:
-            return f"{self.BASE.value}"
-        return f"{self.BASE.value}{self.value}" if self.BASE.value else str(self.value)
-
-    @staticmethod
-    def tag() -> str:
-        return "EXPORTS"
-
-
 class PostRoutes(str, Enum):
     """Post/content management routes"""
     BASE = "/posts"
     FILTER_SCHEMA = "/filter-schema"
     POST_BY_ID = "/{post_id}"
-    POST_STATUS = "/{post_id}/status"
-    BULK_STATUS_UPDATE = "/bulk/status-update"
-    SEARCH_LOCATION = "/search/location"
-    STATISTICS = "/statistics"
-    BY_STATUS = "/by-status/{status}"
-    POST_ACTIVITY = "/{post_id}/activity"
-    REGIONS_SUMMARY = "/regions/summary"
-    MAINTENANCE_CLEANUP = "/maintenance/cleanup-offline"
 
     def versioned_path(self) -> str:
         """Get the full path with base prefix and api version prefix"""
@@ -138,45 +98,16 @@ class PostRoutes(str, Enum):
         return "POSTS"
 
 
-class SignalRoutes(str, Enum):
-    """Signal observation management routes"""
-    BASE = "/signals"
-    TYPES = "/types"
-    TYPE_BY_ID = "/types/{signal_type_id}"
-    OBSERVATIONS = "/observations"
-    OBSERVATION_BY_ID = "/observations/{observation_id}"
-    OBSERVATIONS_BULK_UPDATE = "/observations/bulk-update"
-    OBSERVATIONS_STATISTICS = "/observations/statistics"
-    OBSERVATION_MARK_DISAPPEARED = "/observations/{observation_id}/mark-disappeared"
-
-    def versioned_path(self) -> str:
-        """Get the full path with base prefix and api version prefix"""
-        api_ver = APIVersionRoutes.current_version()
-        if self == self.BASE:
-            return f"{api_ver}{self.BASE.value}"
-        return f"{api_ver}{self.BASE.value}{self.value}" if self.BASE.value else f"{api_ver}{self.value}"
-
-    def path(self) -> str:
-        """Get the full path with base prefix"""
-        if self == self.BASE:
-            return f"{self.BASE.value}"
-        return f"{self.BASE.value}{self.value}" if self.BASE.value else str(self.value)
-
-    @staticmethod
-    def tag() -> str:
-        return "SIGNALS"
-
-
 class ObservationRoutes(str, Enum):
     """Observation management routes"""
     BASE = "/observations"
     CREATE = "/create"
     LIST_ALL = "/list-all"
     FILTER_SCHEMA = "/filter-schema"
+    REPORT = "/report"
+    REPORT_TYPES = "/report/types"
     OBSERVATION_BY_ID = "/{observation_id}"
     MARK_DISAPPEARED = "/{observation_id}/disappeared"
-    BULK_UPDATE = "/bulk-update"
-    STATISTICS = "/statistics"
 
     def versioned_path(self) -> str:
         """Get the full path with base prefix and api version prefix"""
@@ -244,6 +175,8 @@ class UserRoutes(str, Enum):
     FILTER_SCHEMA = "/filter-schema"
     USER_BY_ID = "/{user_id}"
     USER_ROLES = "/{user_id}/roles"
+    USER_POST_ACCESS = "/{user_id}/post-access"
+    USER_POST_ACCESS_BY_POST = "/{user_id}/post-access/{post_id}"
 
     def versioned_path(self) -> str:
         """Get the full path with base prefix and api version prefix"""
@@ -399,8 +332,15 @@ class SystemRoutes(str, Enum):
 class SearchRoutes(str, Enum):
     """Unified search routes"""
     BASE = "/search"
-    ENTITY = "/{entity}"
     FILTER_SCHEMA = "/filter-schema"
+    OBSERVATIONS = "/observations"
+    USERS = "/users"
+    POSTS = "/posts"
+    ROLES = "/roles"
+    CATEGORIES = "/categories"
+    SIGNAL_TYPES = "/signal-types"
+    TAGS = "/tags"
+    MEDIA = "/media"
 
     def versioned_path(self) -> str:
         """Get the full path with base prefix and api version prefix"""
@@ -420,14 +360,35 @@ class SearchRoutes(str, Enum):
         return "SEARCH"
 
 
+class StatisticsRoutes(str, Enum):
+    """Administration dashboard statistics"""
+    BASE = "/statistics"
+
+    def versioned_path(self) -> str:
+        """Get the full path with base prefix and api version prefix"""
+        api_ver = APIVersionRoutes.current_version()
+        if self == self.BASE:
+            return f"{api_ver}{self.BASE.value}"
+        return f"{api_ver}{self.BASE.value}{self.value}" if self.BASE.value else f"{api_ver}{self.value}"
+
+    def path(self) -> str:
+        """Get the full path with base prefix"""
+        if self == self.BASE:
+            return f"{self.BASE.value}"
+        return f"{self.BASE.value}{self.value}" if self.BASE.value else str(self.value)
+
+    @staticmethod
+    def tag() -> str:
+        return "STATISTICS"
+
+
 # Helper class to access all routes
 class Routes:
     """Centralized access to all route enums"""
     DOCS = DocsRoutes
     AUTH = AuthRoutes
-    EXPORTS = ExportRoutes
     POSTS = PostRoutes
-    SIGNALS = SignalRoutes
+    STATISTICS = StatisticsRoutes
     OBSERVATIONS = ObservationRoutes
     MEDIA = MediaRoutes
     USERS = UserRoutes

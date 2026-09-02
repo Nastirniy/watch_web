@@ -55,6 +55,53 @@ class Permissions(Enum):
     MEDIA_UPDATE = "media.update"
     MEDIA_DELETE = "media.delete"
 
+    # Data scope and ownership permissions
+    POST_ACCESS_ALL = "post.access_all"
+    OBSERVATION_MANAGE_ANY = "observation.manage_any"
+    MEDIA_MANAGE_ANY = "media.manage_any"
+
+    # Administration dashboard
+    STATISTICS_VIEW = "statistics.view"
+
+
+class AuthErrorCode(str, Enum):
+    """Error codes returned in HTTP 401 detail for frontend to distinguish error types."""
+    # Token / credentials errors
+    CREDENTIALS_REQUIRED = "credentials_required"
+    INVALID_TOKEN = "invalid_token"
+    INVALID_REFRESH_TOKEN = "invalid_refresh_token"
+
+    # Certificate errors (login only)
+    CERTIFICATE_VERIFICATION_FAILED = "certificate_verification_failed"
+    CERTIFICATE_DATA_MISSING = "certificate_data_missing"
+    CERTIFICATE_NOT_RECOGNIZED = "certificate_not_recognized"
+
+    # Session errors
+    SESSION_EXPIRED = "session_expired"
+    SESSION_NOT_FOUND = "session_not_found"
+
+    # Account status errors
+    ACCOUNT_NOT_FOUND = "account_not_found"
+    ACCOUNT_DEACTIVATED = "account_deactivated"
+    ACCOUNT_DELETED = "account_deleted"
+
+
+class AccessErrorCode(str, Enum):
+    """Error codes returned in HTTP 403 detail so the frontend can distinguish authorization failures."""
+    # Granular permission checks (Require)
+    PERMISSION_DENIED = "permission_denied"
+    ADMIN_REQUIRED = "admin_required"
+
+    # Post data scope
+    POST_ACCESS_DENIED = "post_access_denied"
+    POST_WRITE_DENIED = "post_write_denied"
+    NO_POST_ASSIGNED = "no_post_assigned"
+
+    # Ownership
+    NOT_OWNER = "not_owner"
+    USER_SELF_ONLY = "user_self_only"
+    OBSERVATION_NOT_ACTIVE = "observation_not_active"
+
 
 class ObservationStatus(Enum):
     ACTIVE = "active"

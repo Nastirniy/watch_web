@@ -13,8 +13,9 @@ sys.path.insert(0, str(project_root))
 from app.backend.config import settings
 from app.backend.utils.logging_config import setup_logging, get_logger, get_main_logger
 from app.backend.database import initialize_database_with_migrations
-from app.backend.routes import auth, users, observations, posts, health, media, roles, categories, signal_types, tags, search
-from app.backend.enums.routes import AuthRoutes, UserRoutes, ObservationRoutes, PostRoutes, SystemRoutes, MediaRoutes, RoleRoutes, CategoryRoutes, SignalTypeRoutes, TagRoutes, SearchRoutes
+from app.backend.services.route_access import build_route_access_map
+from app.backend.routes import auth, users, observations, posts, health, media, roles, categories, signal_types, tags, search, statistics
+from app.backend.enums.routes import AuthRoutes, UserRoutes, ObservationRoutes, PostRoutes, SystemRoutes, MediaRoutes, RoleRoutes, CategoryRoutes, SignalTypeRoutes, TagRoutes, SearchRoutes, StatisticsRoutes
 
 # Initialize logging system
 setup_logging(
@@ -71,6 +72,11 @@ fastapi_app.include_router(observations.router, prefix=ObservationRoutes.BASE.ve
 fastapi_app.include_router(posts.router, prefix=PostRoutes.BASE.versioned_path(), tags=[PostRoutes.tag()])
 fastapi_app.include_router(media.router, prefix=MediaRoutes.BASE.versioned_path(), tags=[MediaRoutes.tag()])
 fastapi_app.include_router(search.router, prefix=SearchRoutes.BASE.versioned_path(), tags=[SearchRoutes.tag()])
+fastapi_app.include_router(statistics.router, prefix=StatisticsRoutes.BASE.versioned_path(), tags=[StatisticsRoutes.tag()])
+
+# Route access map: generated from the require() dependencies of every router above.
+# Routers included after this line would be missing from /auth/route-access.
+fastapi_app.state.route_access_map = build_route_access_map(fastapi_app)
 
 
 if __name__ == "__main__":
