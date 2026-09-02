@@ -1,0 +1,82 @@
+"""Contract of /auth/me, /auth/check-permission and token handling."""
+import pytest
+
+from app.backend.enums.routes import AuthRoutes
+from app.backend.services.auth import AuthService
+from tests.helpers import make_post, make_user, make_admin
+
+ME = AuthRoutes.ME.versioned_path()
+CHECK = AuthRoutes.CHECK_PERMISSION.versioned_path()
+
+
+@pytest.mark.asyncio
+async def test_me_exposes_permissions_roles_and_scope(client, db, headers):
+    post = await make_post(db)
+    other = await make_post(db)
+    user = await make_user(db, perms=["tag.view", "observation.view"], post_id=post.id, extra_access={other.id: False})
+
+    response = await client.get(ME, headers=headers(user))
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["id"] == user.id
+    assert body["is_admin"] is False
+    assert body["permissions"] == ["observation.view", "tag.view"]
+    assert body["post_id"] == post.id
+    assert body["accessible_post_ids"] == sorted([post.id, other.id])
+    assert len(body["roles"]) == 1
+    assert set(body["roles"][0]) == {"id", "name", "display_name"}
+
+
+@pytest.mark.asyncio
+async def test_me_for_admin_with_post_access_all(client, db, headers):
+    admin = await make_admin(db)
+    body = (await client.get(ME, headers=headers(admin))).json()
+    assert body["is_admin"] is True
+    assert "post.access_all" in body["permissions"]
+    assert "observation.manage_any" in body["permissions"]
+    assert "media.manage_any" in body["permissions"]
+    assert body["accessible_post_ids"] is None
+    assert body["roles"][0]["name"] == "admin"
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_is_rejected_as_bearer(client, db):
+    user = await make_user(db)
+    refresh = AuthService.create_refresh_token(user.id)
+    response = await client.get(ME, headers={"Authorization": f"Bearer {refresh}"})
+    assert response.status_code == 401
+    assert response.json()["detail"]["code"] == "invalid_token"
+
+
+@pytest.mark.asyncio
+async def test_missing_credentials(client, db):
+    response = await client.get(ME)
+    assert response.status_code == 401
+    assert response.json()["detail"]["code"] == "credentials_required"
+
+
+@pytest.mark.asyncio
+async def test_check_permission(client, db, headers):
+    user = await make_user(db, perms=["tag.view"])
+    ok = await client.post(CHECK, json={"all": ["tag.view"]}, headers=headers(user))
+    assert ok.status_code == 200, ok.text
+    assert ok.json() == {"allowed": True, "missing": [], "admin_required": False}
+
+    denied = await client.post(CHECK, json={"all": ["tag.view", "tag.delete"], "admin": True}, headers=headers(user))
+    assert denied.json() == {"allowed": False, "missing": ["tag.delete"], "admin_required": True}
+
+    unknown = await client.post(CHECK, json={"all": ["does.not.exist"]}, headers=headers(user))
+    assert unknown.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_403_body_is_structured(client, db, headers):
+    from app.backend.enums.routes import TagRoutes
+    user = await make_user(db, perms=["tag.view"])
+    response = await client.post(TagRoutes.CREATE.versioned_path(), json={"name": "x"}, headers=headers(user))
+    assert response.status_code == 403
+    detail = response.json()["detail"]
+    assert detail["code"] == "admin_required"
+    assert detail["required"] == {"all": ["tag.view", "tag.create"], "any": [], "admin": True}
+    assert detail["missing"] == ["tag.create"]
+    assert detail["message"]
