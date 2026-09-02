@@ -9,10 +9,12 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.database import get_session
+from app.backend.services.access_control import AccessControlService
 from app.backend.models.observation import Category, SignalType, Observation
 from app.backend.models.user import User
-from app.backend.dependencies import get_current_user
-from app.backend.services.permissions import PermissionService
+from app.backend.services.auth_context import AuthContext
+from app.backend.routes.models.response.error_response import ACCESS_ERROR_RESPONSES
+from app.backend.services.permissions import require
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import SignalTypeRoutes
 from app.backend.helpers.audit_helper import create_audit_log
@@ -23,16 +25,16 @@ from app.backend.filters.params.signal_type_params import SignalTypeFilterParams
 from app.backend.filters.signal_type_filter import SignalTypeFilterService
 from app.backend.routes.models.response.search_response import EntitySchemaInfo
 
-router = APIRouter()
+router = APIRouter(responses=ACCESS_ERROR_RESPONSES)
 
 
 @router.get(SignalTypeRoutes.LIST_ALL.value, response_model=List[SignalTypeResponse])
-@PermissionService.require_permission(Permissions.SIGNAL_TYPE_VIEW.value)
 async def list_signal_types(
         filters: SignalTypeFilterParams = Depends(),
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.SIGNAL_TYPE_VIEW]))
 ):
+    AccessControlService.check_include_deleted(auth, filters, Permissions.SIGNAL_TYPE_DELETE)
     query = select(SignalType)
     query = SignalTypeFilterService.apply_filters(query, filters)
     result = await session.exec(query)
@@ -42,28 +44,24 @@ async def list_signal_types(
 
 
 @router.get(SignalTypeRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo)
-@PermissionService.require_permission(Permissions.SIGNAL_TYPE_VIEW.value)
 async def get_signal_type_filter_schema(
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.SIGNAL_TYPE_VIEW]))
 ):
     """Available filter params and sortable fields for signal types."""
-    user_is_admin = await PermissionService.has_permission(
-        session, current_user, Permissions.IS_ADMIN.value
-    )
+    current_user = auth.user
+    user_is_admin = auth.is_admin
     return EntitySchemaInfo(**SignalTypeFilterService.get_schema(is_admin=user_is_admin))
 
 
 @router.post(SignalTypeRoutes.CREATE.value, response_model=SignalType)
-@PermissionService.require_permissions({"all": [
-    Permissions.SIGNAL_TYPE_CREATE.value,
-    Permissions.IS_ADMIN.value]})
 async def create_signal_type(
         request: Request,
         signal_type_data: SignalTypeCreate,
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.SIGNAL_TYPE_VIEW, Permissions.SIGNAL_TYPE_CREATE], admin=True))
 ):
+    current_user = auth.user
     # Validate category if provided
     if signal_type_data.category_id is not None:
         category_result = await session.exec(
@@ -155,11 +153,10 @@ async def create_signal_type(
 
 
 @router.get(SignalTypeRoutes.SIGNAL_TYPE_BY_ID.value, response_model=SignalTypeWithCategoryResponse)
-@PermissionService.require_permission(Permissions.SIGNAL_TYPE_VIEW.value)
 async def get_signal_type(
         signal_type_id: int,
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.SIGNAL_TYPE_VIEW]))
 ):
     result = await session.exec(
         select(SignalType).where(
@@ -179,16 +176,14 @@ async def get_signal_type(
 
 
 @router.put(SignalTypeRoutes.SIGNAL_TYPE_BY_ID.value, response_model=SignalType)
-@PermissionService.require_permissions({"all": [
-    Permissions.SIGNAL_TYPE_UPDATE.value,
-    Permissions.IS_ADMIN.value]})
 async def update_signal_type(
         request: Request,
         signal_type_id: int,
         signal_type_data: SignalTypeUpdate,
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.SIGNAL_TYPE_VIEW, Permissions.SIGNAL_TYPE_UPDATE], admin=True))
 ):
+    current_user = auth.user
     result = await session.exec(
         select(SignalType).where(
             SignalType.id == signal_type_id,
@@ -277,15 +272,13 @@ async def update_signal_type(
 
 
 @router.delete(SignalTypeRoutes.SIGNAL_TYPE_BY_ID.value, response_model=MessageResponse)
-@PermissionService.require_permissions({"all": [
-    Permissions.SIGNAL_TYPE_UPDATE.value,
-    Permissions.IS_ADMIN.value]})
 async def delete_signal_type(
         request: Request,
         signal_type_id: int,
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.SIGNAL_TYPE_VIEW, Permissions.SIGNAL_TYPE_DELETE], admin=True))
 ):
+    current_user = auth.user
     result = await session.exec(
         select(SignalType).where(
             SignalType.id == signal_type_id,

@@ -3,6 +3,9 @@ from typing import List, Optional
 from datetime import datetime
 from decimal import Decimal
 
+from app.backend.routes.models.response.user_response import UserPublicResponse
+from app.backend.routes.models.response.tag_response import TagBriefResponse
+
 
 class MessageResponse(BaseModel):  # TODO: i think we need make it global accessible to other routes and use it
     """Generic message response"""
@@ -38,3 +41,8 @@ class ObservationWithMedia(BaseModel):
     disappeared_by: Optional[int] = None
     media_ids: List[int] = []
     tag_ids: List[int] = []
+
+    # Nested projections named after the ORM relationships
+    tags: List[TagBriefResponse] = []
+    user: UserPublicResponse
+    disappeared_by_user: Optional[UserPublicResponse] = None

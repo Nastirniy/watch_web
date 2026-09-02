@@ -7,8 +7,9 @@ from datetime import datetime, timezone
 from app.backend.database import get_session
 from app.backend.models.role import Role, Permission, RolePermission
 from app.backend.models.user import User
-from app.backend.dependencies import get_current_user
-from app.backend.services.permissions import PermissionService
+from app.backend.services.auth_context import AuthContext
+from app.backend.routes.models.response.error_response import ACCESS_ERROR_RESPONSES
+from app.backend.services.permissions import require
 from app.backend.services.access_control import AccessControlService
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import RoleRoutes, SystemRoutes
@@ -26,21 +27,20 @@ from app.backend.routes.helpers.roles_helper import (
 from app.backend.routes.models.request.roles_request import RoleCreate, RoleUpdate
 from app.backend.routes.models.response.roles_response import RoleResponse, PermissionResponse
 
-router = APIRouter()
+router = APIRouter(responses=ACCESS_ERROR_RESPONSES)
 _logger = get_api_logger()
 
 
 @router.get(SystemRoutes.ROOT.value, response_model=List[RoleResponse])
-@PermissionService.require_permissions({"all": [
-    Permissions.ROLE_VIEW.value,
-    Permissions.IS_ADMIN.value]})
 async def list_roles(
         filters: RoleFilterParams = Depends(),
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW], admin=True))
 ):
     """List all roles with filters"""
+    current_user = auth.user
     try:
+        AccessControlService.check_include_deleted(auth, filters, Permissions.ROLE_DELETE)
         query = select(Role)
         query = RoleFilterService.apply_filters(query, filters)
         result = await session.exec(query)
@@ -59,28 +59,23 @@ async def list_roles(
 
 
 @router.get(RoleRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo)
-@PermissionService.require_permissions({"all": [
-    Permissions.ROLE_VIEW.value,
-    Permissions.IS_ADMIN.value]})
 async def get_role_filter_schema(
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW], admin=True))
 ):
     """Available filter params and sortable fields for roles."""
-    return EntitySchemaInfo(**RoleFilterService.get_schema(is_admin=True))
+    return EntitySchemaInfo(**RoleFilterService.get_schema(is_admin=auth.is_admin))
 
 
 @router.post(SystemRoutes.ROOT.value, response_model=RoleResponse, status_code=status.HTTP_201_CREATED)
-@PermissionService.require_permissions({"all": [
-    Permissions.ROLE_CREATE.value,
-    Permissions.IS_ADMIN.value]})
 async def create_role(
         request: Request,
         role_data: RoleCreate,
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW, Permissions.ROLE_CREATE], admin=True))
 ):
     """Create new role"""
+    current_user = auth.user
     # Preventive validation
     await check_role_name_exists(session, role_data.name)
 
@@ -123,12 +118,12 @@ async def create_role(
 
 
 @router.get(RoleRoutes.ALL_PERMISSIONS.value, response_model=List[PermissionResponse])
-@PermissionService.require_permissions({"all": [Permissions.IS_ADMIN.value]})
 async def list_all_permissions(
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW], admin=True))
 ):
     """List all available permissions in the system - admin only"""
+    current_user = auth.user
     try:
         result = await session.exec(
             select(Permission).order_by(Permission.name)
@@ -148,48 +143,43 @@ async def list_all_permissions(
 
 
 @router.get(RoleRoutes.ROLE_BY_ID.value, response_model=RoleResponse)
-@PermissionService.require_permissions({"any": [
-    Permissions.ROLE_VIEW.value,
-    Permissions.IS_ADMIN.value]})
 async def get_role(
         role_id: int,
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW], admin=True))
 ):
-    """Get role by ID - users can only view roles assigned to them or if they have admin.true"""
-    # Check if user has this role or is admin
-    await AccessControlService.check_role_membership(
-        current_user, role_id, session, "view"
-    )
-
-    role = await get_role_or_404(session, role_id)
+    """Get role by ID (administration area)"""
+    current_user = auth.user
+    role = await get_role_or_404(session, role_id, include_deleted=True)
 
     return RoleResponse.model_validate(role)
 
 
 @router.patch(RoleRoutes.ROLE_BY_ID.value, response_model=RoleResponse)
-@PermissionService.require_permissions({"all": [
-    Permissions.ROLE_UPDATE.value,
-    Permissions.ROLE_VIEW.value,
-    Permissions.IS_ADMIN.value]})
 async def update_role(
         request: Request,
         role_id: int,
         role_update: RoleUpdate,
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW, Permissions.ROLE_UPDATE], admin=True))
 ):
     """Update role and optionally replace all permissions"""
-    role = await get_role_or_404(session, role_id)
+    current_user = auth.user
+    role = await get_role_or_404(session, role_id, include_deleted=True)
 
     # Store old values for auditing
     old_values = role.model_dump()
 
     # Update role fields
+    if role_update.name is not None:
+        await check_role_name_exists(session, role_update.name, exclude_id=role_id)
+        role.name = role_update.name
     if role_update.display_name is not None:
         role.display_name = role_update.display_name
     if role_update.description is not None:
         role.description = role_update.description
+    if role_update.is_deleted is not None:
+        role.is_deleted = role_update.is_deleted
 
     role.updated_at = datetime.now(timezone.utc)
     session.add(role)
@@ -241,22 +231,23 @@ async def update_role(
 
 
 @router.delete(RoleRoutes.ROLE_BY_ID.value, status_code=status.HTTP_204_NO_CONTENT)
-@PermissionService.require_permissions({"all": [
-    Permissions.ROLE_DELETE.value,
-    Permissions.IS_ADMIN.value]})
 async def delete_role(
         request: Request,
         role_id: int,
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW, Permissions.ROLE_DELETE], admin=True))
 ):
-    """Delete role"""
+    """Soft-delete role. Deleted roles stop granting permissions, cannot be assigned and are hidden from lists unless include_deleted=true. Restore with PATCH is_deleted=false."""
+    current_user = auth.user
     role = await get_role_or_404(session, role_id)
 
     # Store old values for auditing
     old_values = role.model_dump()
 
-    await session.delete(role)
+    # Soft delete: assignments stay for history, but the role stops applying immediately
+    role.is_deleted = True
+    role.updated_at = datetime.now(timezone.utc)
+    session.add(role)
     
     # Create audit log
     await create_audit_log(
@@ -280,16 +271,14 @@ async def delete_role(
 # RolePermission Management Routes
 
 @router.get(RoleRoutes.ROLE_PERMISSIONS.value, response_model=List[PermissionResponse])
-@PermissionService.require_permissions({"all": [
-    Permissions.ROLE_VIEW.value,
-    Permissions.IS_ADMIN.value]})
 async def list_role_permissions(
         role_id: int,
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW], admin=True))
 ):
     """List all permissions assigned to a role"""
-    role = await get_role_or_404(session, role_id)
+    current_user = auth.user
+    role = await get_role_or_404(session, role_id, include_deleted=True)
 
     result = await session.exec(
         select(Permission)
@@ -301,3 +290,93 @@ async def list_role_permissions(
     _logger.info(f"User {current_user.username} listed {len(permissions)} permissions for role {role.name}")
 
     return [PermissionResponse.model_validate(perm) for perm in permissions]
+
+
+async def _role_permissions(session: AsyncSession, role_id: int) -> List[PermissionResponse]:
+    result = await session.exec(
+        select(Permission).join(RolePermission, RolePermission.permission_id == Permission.id).where(RolePermission.role_id == role_id)
+    )
+    return [PermissionResponse.model_validate(perm) for perm in result.all()]
+
+
+@router.put(RoleRoutes.ROLE_PERMISSION_BY_ID.value, response_model=List[PermissionResponse])
+async def add_role_permission(
+        request: Request,
+        role_id: int,
+        permission_id: int,
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW, Permissions.ROLE_UPDATE], admin=True))
+):
+    """Grant one permission to a role (idempotent). Returns the role's permissions."""
+    current_user = auth.user
+    role = await get_role_or_404(session, role_id)
+    permission = await get_permission_or_404(session, permission_id)
+
+    existing = await session.exec(
+        select(RolePermission).where(RolePermission.role_id == role_id, RolePermission.permission_id == permission_id)
+    )
+    if not existing.first():
+        session.add(RolePermission(role_id=role_id, permission_id=permission_id))
+        role.updated_at = datetime.now(timezone.utc)
+        session.add(role)
+        await session.commit()
+        await create_audit_log(
+            session=session,
+            action="update",
+            resource_type="role",
+            resource_id=role.id,
+            user_id=current_user.id,
+            session_id=getattr(request.state, "session_id", None),
+            new_values={"permission_added": permission.name},
+            details={"message": f"User {current_user.username} granted '{permission.name}' to role '{role.name}'"},
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+            request_url=str(request.url)
+        )
+        await session.commit()
+        _logger.info(f"User {current_user.username} granted {permission.name} to role {role.name}")
+
+    return await _role_permissions(session, role_id)
+
+
+@router.delete(RoleRoutes.ROLE_PERMISSION_BY_ID.value, response_model=List[PermissionResponse])
+async def remove_role_permission(
+        request: Request,
+        role_id: int,
+        permission_id: int,
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW, Permissions.ROLE_UPDATE], admin=True))
+):
+    """Revoke one permission from a role. Returns the role's remaining permissions."""
+    current_user = auth.user
+    role = await get_role_or_404(session, role_id)
+    permission = await get_permission_or_404(session, permission_id)
+
+    existing = await session.exec(
+        select(RolePermission).where(RolePermission.role_id == role_id, RolePermission.permission_id == permission_id)
+    )
+    row = existing.first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Permission is not assigned to this role")
+
+    await session.delete(row)
+    role.updated_at = datetime.now(timezone.utc)
+    session.add(role)
+    await session.commit()
+    await create_audit_log(
+        session=session,
+        action="update",
+        resource_type="role",
+        resource_id=role.id,
+        user_id=current_user.id,
+        session_id=getattr(request.state, "session_id", None),
+        old_values={"permission_removed": permission.name},
+        details={"message": f"User {current_user.username} revoked '{permission.name}' from role '{role.name}'"},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_url=str(request.url)
+    )
+    await session.commit()
+    _logger.info(f"User {current_user.username} revoked {permission.name} from role {role.name}")
+
+    return await _role_permissions(session, role_id)

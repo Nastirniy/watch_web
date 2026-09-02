@@ -131,6 +131,7 @@ class ObservationCreate(BaseModel):
 
 
 class ObservationUpdate(BaseModel):
+    is_deleted: Optional[bool] = Field(None, description="false restores a soft-deleted observation, true soft-deletes it (requires observation.delete)")
     """Update observation with proper validation matching DB constraints"""
 
     signal_type_id: Optional[int] = Field(None, gt=0, description="Signal Type ID must be positive")

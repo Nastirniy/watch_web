@@ -1,5 +1,5 @@
 from typing import List, Optional
-from pydantic import Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from app.backend.utils.validators import SecureBaseModel, SecurityValidators
 
@@ -36,10 +36,19 @@ class UserCreateData(SecureBaseModel):
 
 class UserUpdateData(SecureBaseModel):
     """Pydantic model for user update validation - all fields optional"""
+    username: Optional[str] = Field(default=None, min_length=3, max_length=50)
     username_alias: Optional[str] = Field(default=None, min_length=1, max_length=255)
     post_id: Optional[int] = Field(default=None, gt=0)
     is_active: Optional[bool] = Field(default=None)
+    is_deleted: Optional[bool] = Field(default=None, description="false restores a soft-deleted user, true soft-deletes it (requires user.delete)")
     role_ids: Optional[List[int]] = Field(default=None, min_items=1, description="List of role IDs to replace current roles")
+
+    @field_validator('username')
+    @classmethod
+    def validate_username(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            return SecurityValidators.validate_username(v)
+        return v
 
     @field_validator('username_alias')
     @classmethod
@@ -60,3 +69,8 @@ class UserUpdateData(SecureBaseModel):
                 if role_id <= 0:
                     raise ValueError('Role IDs must be positive integers')
         return v
+
+
+class UserPostAccessUpsert(BaseModel):
+    """Grant or update access of a user to an additional post"""
+    can_write: bool = Field(default=False, description="Allow creating and updating data in that post")

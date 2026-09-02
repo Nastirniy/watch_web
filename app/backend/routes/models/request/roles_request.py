@@ -39,9 +39,18 @@ class RoleCreate(SecureBaseModel):
 
 
 class RoleUpdate(SecureBaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
     display_name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     description: Optional[str] = Field(default=None, max_length=500)
     permission_ids: Optional[List[int]] = Field(default=None)
+    is_deleted: Optional[bool] = Field(default=None, description="false restores a soft-deleted role, true soft-deletes it")
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        if v is not None:
+            return SecurityValidators.sanitize_string(v, max_length=100)
+        return v
 
     @field_validator('display_name')
     @classmethod

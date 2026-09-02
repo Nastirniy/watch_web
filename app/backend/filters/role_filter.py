@@ -2,7 +2,7 @@
 RoleFilterService - Filter service for Role entity
 """
 
-from typing import Optional
+from typing import Optional, Iterable
 from sqlalchemy.sql.selectable import Select
 
 from app.backend.models.role import Role
@@ -22,11 +22,11 @@ class RoleFilterService(SimpleFilterEngine):
         cls,
         query: Select,
         params: RoleFilterParams,
-        access_post_id: Optional[int] = None
+        access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
         """Apply all filters from RoleFilterParams"""
 
-        # Role has no is_deleted or post_id
+        query = cls._apply_soft_delete(query, params)
 
         query = cls._apply_exact(query, Role.id, params.id)
         query = cls._apply_exact(query, Role.name, params.name)
@@ -46,9 +46,10 @@ class RoleFilterService(SimpleFilterEngine):
         cls,
         query: Select,
         params: RoleFilterParams,
-        access_post_id: Optional[int] = None
+        access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
         """Apply filters without pagination"""
+        query = cls._apply_soft_delete(query, params)
         query = cls._apply_exact(query, Role.id, params.id)
         query = cls._apply_exact(query, Role.name, params.name)
         query = cls._apply_contains(query, Role.name, params.name_contains)

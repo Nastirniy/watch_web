@@ -11,6 +11,7 @@ class RoleResponse(SecureBaseModel):
     description: Optional[str]
     created_at: datetime
     updated_at: datetime
+    is_deleted: bool = False
 
 
 class PermissionResponse(SecureBaseModel):

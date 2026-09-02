@@ -25,11 +25,19 @@ class SignalTypeCreate(SecureBaseModel):
 
 
 class SignalTypeUpdate(SecureBaseModel):
+    code: Optional[str] = Field(None, min_length=1, max_length=50)
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     category_id: Optional[int] = Field(None, gt=0)
     description: Optional[str] = Field(None, max_length=1000)
     is_active: Optional[bool] = None
     sort_order: Optional[int] = Field(None, ge=0)
+
+    @field_validator('code')
+    @classmethod
+    def validate_code(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            return SecurityValidators.sanitize_string(v.strip(), max_length=50)
+        return v
 
     @field_validator('name')
     @classmethod

@@ -2,7 +2,7 @@
 SignalTypeFilterService - Filter service for SignalType entity
 """
 
-from typing import Optional
+from typing import Optional, Iterable
 from sqlalchemy.sql.selectable import Select
 
 from app.backend.models.observation import SignalType
@@ -23,7 +23,7 @@ class SignalTypeFilterService(SimpleFilterEngine):
         cls,
         query: Select,
         params: SignalTypeFilterParams,
-        access_post_id: Optional[int] = None
+        access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
         """Apply all filters from SignalTypeFilterParams"""
 
@@ -50,7 +50,7 @@ class SignalTypeFilterService(SimpleFilterEngine):
         cls,
         query: Select,
         params: SignalTypeFilterParams,
-        access_post_id: Optional[int] = None
+        access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
         """Apply filters without pagination"""
         query = cls._apply_soft_delete(query, params)

@@ -11,10 +11,12 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from loguru import logger
 
 from app.backend.database import get_session
-from app.backend.dependencies import get_current_user
+from app.backend.services.auth_context import AuthContext
+from app.backend.services.access_control import AccessControlService
+from app.backend.routes.models.response.error_response import ACCESS_ERROR_RESPONSES
 from app.backend.enums.routes import SearchRoutes
 from app.backend.enums.general import Permissions
-from app.backend.services.permissions import PermissionService
+from app.backend.services.permissions import require, require_spec, Require
 from app.backend.models.user import User
 from app.backend.models.post import Post
 from app.backend.models.role import Role
@@ -46,6 +48,7 @@ from app.backend.filters.media_filter import MediaFilterService
 
 from app.backend.filters.simple_engine import _get_type_name, _BASE_COMMON_FIELDS
 from app.backend.routes.models.response.observations_response import ObservationWithMedia
+from app.backend.routes.models.response.posts_response import post_to_response
 from app.backend.routes.models.response.search_response import (
     SearchResponse,
     SchemaResponse,
@@ -54,18 +57,18 @@ from app.backend.routes.models.response.search_response import (
 )
 
 
-router = APIRouter()
+router = APIRouter(responses=ACCESS_ERROR_RESPONSES)
 
-# Entity registry: name -> (filter_service, permission)
+# Entity registry: name -> filter service and route requirement (shared by the search routes and the schema endpoint)
 ENTITY_REGISTRY: Dict[str, Dict] = {
-    "observations": {"service": ObservationFilterService, "permission": Permissions.OBSERVATION_VIEW},
-    "users": {"service": UserFilterService, "permission": Permissions.USER_VIEW},
-    "posts": {"service": PostFilterService, "permission": Permissions.POST_VIEW},
-    "roles": {"service": RoleFilterService, "permission": Permissions.ROLE_VIEW},
-    "categories": {"service": CategoryFilterService, "permission": Permissions.CATEGORY_VIEW},
-    "signal_types": {"service": SignalTypeFilterService, "permission": Permissions.SIGNAL_TYPE_VIEW},
-    "tags": {"service": TagFilterService, "permission": Permissions.TAG_VIEW},
-    "media": {"service": MediaFilterService, "permission": Permissions.OBSERVATION_VIEW},
+    "observations": {"service": ObservationFilterService, "require": Require.of(all=[Permissions.OBSERVATION_VIEW])},
+    "users": {"service": UserFilterService, "require": Require.of(all=[Permissions.USER_VIEW])},
+    "posts": {"service": PostFilterService, "require": Require.of(all=[Permissions.POST_VIEW])},
+    "roles": {"service": RoleFilterService, "require": Require.of(all=[Permissions.ROLE_VIEW], admin=True)},
+    "categories": {"service": CategoryFilterService, "require": Require.of(all=[Permissions.CATEGORY_VIEW])},
+    "signal_types": {"service": SignalTypeFilterService, "require": Require.of(all=[Permissions.SIGNAL_TYPE_VIEW])},
+    "tags": {"service": TagFilterService, "require": Require.of(all=[Permissions.TAG_VIEW])},
+    "media": {"service": MediaFilterService, "require": Require.of(all=[Permissions.MEDIA_VIEW])},
 }
 
 
@@ -119,21 +122,11 @@ async def log_search(
         logger.error(f"Audit log failed: {e}")
 
 
-async def check_permission(session: AsyncSession, user: User, permission: Permissions) -> bool:
-    """Check if user has permission"""
-    return await PermissionService.has_permission(session, user, permission.value)
-
-
-async def is_admin(session: AsyncSession, user: User) -> bool:
-    """Check if user is admin"""
-    return await PermissionService.has_permission(session, user, Permissions.IS_ADMIN.value)
-
-
 # =============================================================================
 # OBSERVATIONS
 # =============================================================================
 @router.get(
-    "/observations",
+    SearchRoutes.OBSERVATIONS.value,
     response_model=SearchResponse,
     summary="Search observations",
     description="Search observations with typed filters. All params visible in docs."
@@ -141,16 +134,15 @@ async def is_admin(session: AsyncSession, user: User) -> bool:
 async def search_observations(
     request: Request,
     params: ObservationFilterParams = Depends(),
-    current_user: User = Depends(get_current_user),
+    auth: AuthContext = Depends(require_spec(ENTITY_REGISTRY["observations"]["require"])),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
-    if not await check_permission(session, current_user, Permissions.OBSERVATION_VIEW):
-        raise HTTPException(status_code=403, detail="Permission denied")
+    current_user = auth.user
+    access_post_ids = AccessControlService.resolve_post_scope(auth, params.post_id)
 
-    access_post_id = None if await is_admin(session, current_user) else current_user.post_id
-
+    AccessControlService.check_include_deleted(auth, params, Permissions.OBSERVATION_DELETE)
     query = select(Observation)
-    query = ObservationFilterService.apply_filters(query, params, access_post_id)
+    query = ObservationFilterService.apply_filters(query, params, access_post_ids)
     result = await session.exec(query)
     items = result.all()
 
@@ -158,7 +150,7 @@ async def search_observations(
     processed_items = [ObservationWithMedia.model_validate(obs) for obs in items]
 
     count_query = select(func.count()).select_from(Observation)
-    count_query = ObservationFilterService.apply_filters_for_count(count_query, params, access_post_id)
+    count_query = ObservationFilterService.apply_filters_for_count(count_query, params, access_post_ids)
     total = (await session.exec(count_query)).one()
 
     await log_search(request, session, current_user, "observations", params.model_dump(exclude_none=True), len(items))
@@ -170,7 +162,7 @@ async def search_observations(
 # USERS
 # =============================================================================
 @router.get(
-    "/users",
+    SearchRoutes.USERS.value,
     response_model=SearchResponse,
     summary="Search users",
     description="Search users with typed filters."
@@ -178,21 +170,20 @@ async def search_observations(
 async def search_users(
     request: Request,
     params: UserFilterParams = Depends(),
-    current_user: User = Depends(get_current_user),
+    auth: AuthContext = Depends(require_spec(ENTITY_REGISTRY["users"]["require"])),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
-    if not await check_permission(session, current_user, Permissions.USER_VIEW):
-        raise HTTPException(status_code=403, detail="Permission denied")
+    current_user = auth.user
+    access_post_ids = AccessControlService.resolve_post_scope(auth, params.post_id)
 
-    access_post_id = None if await is_admin(session, current_user) else current_user.post_id
-
+    AccessControlService.check_include_deleted(auth, params, Permissions.USER_DELETE)
     query = select(User)
-    query = UserFilterService.apply_filters(query, params, access_post_id)
+    query = UserFilterService.apply_filters(query, params, access_post_ids)
     result = await session.exec(query)
     items = result.all()
 
     count_query = select(func.count()).select_from(User)
-    count_query = UserFilterService.apply_filters_for_count(count_query, params, access_post_id)
+    count_query = UserFilterService.apply_filters_for_count(count_query, params, access_post_ids)
     total = (await session.exec(count_query)).one()
 
     await log_search(request, session, current_user, "users", params.model_dump(exclude_none=True), len(items))
@@ -204,7 +195,7 @@ async def search_users(
 # POSTS
 # =============================================================================
 @router.get(
-    "/posts",
+    SearchRoutes.POSTS.value,
     response_model=SearchResponse,
     summary="Search posts",
     description="Search posts with typed filters."
@@ -212,33 +203,31 @@ async def search_users(
 async def search_posts(
     request: Request,
     params: PostFilterParams = Depends(),
-    current_user: User = Depends(get_current_user),
+    auth: AuthContext = Depends(require_spec(ENTITY_REGISTRY["posts"]["require"])),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
-    if not await check_permission(session, current_user, Permissions.POST_VIEW):
-        raise HTTPException(status_code=403, detail="Permission denied")
-
-    access_post_id = None if await is_admin(session, current_user) else current_user.post_id
+    current_user = auth.user
+    access_post_ids = AccessControlService.post_scope(auth)
 
     query = select(Post)
-    query = PostFilterService.apply_filters(query, params, access_post_id)
+    query = PostFilterService.apply_filters(query, params, access_post_ids)
     result = await session.exec(query)
     items = result.all()
 
     count_query = select(func.count()).select_from(Post)
-    count_query = PostFilterService.apply_filters_for_count(count_query, params, access_post_id)
+    count_query = PostFilterService.apply_filters_for_count(count_query, params, access_post_ids)
     total = (await session.exec(count_query)).one()
 
     await log_search(request, session, current_user, "posts", params.model_dump(exclude_none=True), len(items))
 
-    return SearchResponse.create("posts", items, total, params.page, params.page_size)
+    return SearchResponse.create("posts", [post_to_response(post) for post in items], total, params.page, params.page_size)
 
 
 # =============================================================================
 # ROLES
 # =============================================================================
 @router.get(
-    "/roles",
+    SearchRoutes.ROLES.value,
     response_model=SearchResponse,
     summary="Search roles",
     description="Search roles with typed filters."
@@ -246,12 +235,11 @@ async def search_posts(
 async def search_roles(
     request: Request,
     params: RoleFilterParams = Depends(),
-    current_user: User = Depends(get_current_user),
+    auth: AuthContext = Depends(require_spec(ENTITY_REGISTRY["roles"]["require"])),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
-    if not await check_permission(session, current_user, Permissions.ROLE_VIEW):
-        raise HTTPException(status_code=403, detail="Permission denied")
-
+    current_user = auth.user
+    AccessControlService.check_include_deleted(auth, params, Permissions.ROLE_DELETE)
     query = select(Role)
     query = RoleFilterService.apply_filters(query, params)
     result = await session.exec(query)
@@ -270,7 +258,7 @@ async def search_roles(
 # CATEGORIES
 # =============================================================================
 @router.get(
-    "/categories",
+    SearchRoutes.CATEGORIES.value,
     response_model=SearchResponse,
     summary="Search categories",
     description="Search categories with typed filters."
@@ -278,12 +266,11 @@ async def search_roles(
 async def search_categories(
     request: Request,
     params: CategoryFilterParams = Depends(),
-    current_user: User = Depends(get_current_user),
+    auth: AuthContext = Depends(require_spec(ENTITY_REGISTRY["categories"]["require"])),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
-    if not await check_permission(session, current_user, Permissions.CATEGORY_VIEW):
-        raise HTTPException(status_code=403, detail="Permission denied")
-
+    current_user = auth.user
+    AccessControlService.check_include_deleted(auth, params, Permissions.CATEGORY_DELETE)
     query = select(Category)
     query = CategoryFilterService.apply_filters(query, params)
     result = await session.exec(query)
@@ -302,7 +289,7 @@ async def search_categories(
 # SIGNAL TYPES
 # =============================================================================
 @router.get(
-    "/signal-types",
+    SearchRoutes.SIGNAL_TYPES.value,
     response_model=SearchResponse,
     summary="Search signal types",
     description="Search signal types with typed filters."
@@ -310,12 +297,11 @@ async def search_categories(
 async def search_signal_types(
     request: Request,
     params: SignalTypeFilterParams = Depends(),
-    current_user: User = Depends(get_current_user),
+    auth: AuthContext = Depends(require_spec(ENTITY_REGISTRY["signal_types"]["require"])),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
-    if not await check_permission(session, current_user, Permissions.SIGNAL_TYPE_VIEW):
-        raise HTTPException(status_code=403, detail="Permission denied")
-
+    current_user = auth.user
+    AccessControlService.check_include_deleted(auth, params, Permissions.SIGNAL_TYPE_DELETE)
     query = select(SignalType)
     query = SignalTypeFilterService.apply_filters(query, params)
     result = await session.exec(query)
@@ -334,7 +320,7 @@ async def search_signal_types(
 # TAGS
 # =============================================================================
 @router.get(
-    "/tags",
+    SearchRoutes.TAGS.value,
     response_model=SearchResponse,
     summary="Search tags",
     description="Search tags with typed filters."
@@ -342,12 +328,11 @@ async def search_signal_types(
 async def search_tags(
     request: Request,
     params: TagFilterParams = Depends(),
-    current_user: User = Depends(get_current_user),
+    auth: AuthContext = Depends(require_spec(ENTITY_REGISTRY["tags"]["require"])),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
-    if not await check_permission(session, current_user, Permissions.TAG_VIEW):
-        raise HTTPException(status_code=403, detail="Permission denied")
-
+    current_user = auth.user
+    AccessControlService.check_include_deleted(auth, params, Permissions.TAG_DELETE)
     query = select(Tag)
     query = TagFilterService.apply_filters(query, params)
     result = await session.exec(query)
@@ -366,7 +351,7 @@ async def search_tags(
 # MEDIA
 # =============================================================================
 @router.get(
-    "/media",
+    SearchRoutes.MEDIA.value,
     response_model=SearchResponse,
     summary="Search media files",
     description="Search media files with typed filters."
@@ -374,21 +359,19 @@ async def search_tags(
 async def search_media(
     request: Request,
     params: MediaFilterParams = Depends(),
-    current_user: User = Depends(get_current_user),
+    auth: AuthContext = Depends(require_spec(ENTITY_REGISTRY["media"]["require"])),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
-    if not await check_permission(session, current_user, Permissions.OBSERVATION_VIEW):
-        raise HTTPException(status_code=403, detail="Permission denied")
-
-    access_post_id = None if await is_admin(session, current_user) else current_user.post_id
+    current_user = auth.user
+    access_post_ids = AccessControlService.post_scope(auth)
 
     query = select(MediaFile)
-    query = MediaFilterService.apply_filters(query, params, access_post_id)
+    query = MediaFilterService.apply_filters(query, params, access_post_ids)
     result = await session.exec(query)
     items = result.all()
 
     count_query = select(func.count()).select_from(MediaFile)
-    count_query = MediaFilterService.apply_filters_for_count(count_query, params, access_post_id)
+    count_query = MediaFilterService.apply_filters_for_count(count_query, params, access_post_ids)
     total = (await session.exec(count_query)).one()
 
     await log_search(request, session, current_user, "media", params.model_dump(exclude_none=True), len(items))
@@ -407,21 +390,14 @@ async def search_media(
                 "Fields are filtered based on user access level."
 )
 async def get_search_filter_schema(
-    current_user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_session)
+    auth: AuthContext = Depends(require())
 ) -> SchemaResponse:
-    user_is_admin = await is_admin(session, current_user)
-
     entities: Dict[str, EntitySchemaInfo] = {}
 
     for entity_name, config in ENTITY_REGISTRY.items():
-        service = config["service"]
-        permission = config["permission"]
-
-        if not await check_permission(session, current_user, permission):
+        if not config["require"].evaluate(auth).allowed:
             continue
-
-        entities[entity_name] = EntitySchemaInfo(**service.get_schema(is_admin=user_is_admin))
+        entities[entity_name] = EntitySchemaInfo(**config["service"].get_schema(is_admin=auth.is_admin))
 
     common_params = _build_param_info(BaseFilterParams, list(_BASE_COMMON_FIELDS))
 

@@ -8,10 +8,12 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.database import get_session
+from app.backend.services.access_control import AccessControlService
 from app.backend.models.observation import Tag
 from app.backend.models.user import User
-from app.backend.dependencies import get_current_user
-from app.backend.services.permissions import PermissionService
+from app.backend.services.auth_context import AuthContext
+from app.backend.routes.models.response.error_response import ACCESS_ERROR_RESPONSES
+from app.backend.services.permissions import require
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import TagRoutes
 from app.backend.helpers.audit_helper import create_audit_log
@@ -22,18 +24,16 @@ from app.backend.filters.params.tag_params import TagFilterParams
 from app.backend.filters.tag_filter import TagFilterService
 from app.backend.routes.models.response.search_response import EntitySchemaInfo
 
-router = APIRouter()
+router = APIRouter(responses=ACCESS_ERROR_RESPONSES)
 
 
 @router.get(TagRoutes.LIST_ALL.value, response_model=List[TagResponse])
-@PermissionService.require_permissions({"all": [
-    Permissions.TAG_VIEW.value,
-    Permissions.IS_ADMIN.value]})
 async def list_tags(
         filters: TagFilterParams = Depends(),
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW]))
 ):
+    AccessControlService.check_include_deleted(auth, filters, Permissions.TAG_DELETE)
     query = select(Tag)
     query = TagFilterService.apply_filters(query, filters)
     result = await session.exec(query)
@@ -43,27 +43,22 @@ async def list_tags(
 
 
 @router.get(TagRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo)
-@PermissionService.require_permissions({"all": [
-    Permissions.TAG_VIEW.value,
-    Permissions.IS_ADMIN.value]})
 async def get_tag_filter_schema(
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW]))
 ):
     """Available filter params and sortable fields for tags."""
-    return EntitySchemaInfo(**TagFilterService.get_schema(is_admin=True))
+    return EntitySchemaInfo(**TagFilterService.get_schema(is_admin=auth.is_admin))
 
 
 @router.post(TagRoutes.CREATE.value, response_model=TagResponse)
-@PermissionService.require_permissions({"all": [
-    Permissions.TAG_CREATE.value,
-    Permissions.IS_ADMIN.value]})
 async def create_tag(
         request: Request,
         tag_data: TagCreate,
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW, Permissions.TAG_CREATE], admin=True))
 ):
+    current_user = auth.user
     existing_result = await session.exec(
         select(Tag).where(
             func.lower(Tag.name) == func.lower(tag_data.name)
@@ -123,13 +118,10 @@ async def create_tag(
 
 
 @router.get(TagRoutes.TAG_BY_ID.value, response_model=TagResponse)
-@PermissionService.require_permissions({"all": [
-    Permissions.TAG_VIEW.value,
-    Permissions.IS_ADMIN.value]})
 async def get_tag(
         tag_id: int,
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW]))
 ):
     result = await session.exec(
         select(Tag).where(
@@ -149,16 +141,14 @@ async def get_tag(
 
 
 @router.put(TagRoutes.TAG_BY_ID.value, response_model=TagResponse)
-@PermissionService.require_permissions({"all": [
-    Permissions.TAG_UPDATE.value,
-    Permissions.IS_ADMIN.value]})
 async def update_tag(
         request: Request,
         tag_id: int,
         tag_data: TagUpdate,
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW, Permissions.TAG_UPDATE], admin=True))
 ):
+    current_user = auth.user
     result = await session.exec(
         select(Tag).where(
             Tag.id == tag_id,
@@ -230,15 +220,13 @@ async def update_tag(
 
 
 @router.delete(TagRoutes.TAG_BY_ID.value, response_model=MessageResponse)
-@PermissionService.require_permissions({"all": [
-    Permissions.TAG_DELETE.value,
-    Permissions.IS_ADMIN.value]})
 async def delete_tag(
         request: Request,
         tag_id: int,
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW, Permissions.TAG_DELETE], admin=True))
 ):
+    current_user = auth.user
     result = await session.exec(
         select(Tag).where(
             Tag.id == tag_id,

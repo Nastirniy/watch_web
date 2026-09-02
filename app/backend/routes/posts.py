@@ -6,28 +6,27 @@ from sqlmodel import select
 from app.backend.database import get_session
 from app.backend.models.post import Post
 from app.backend.models.user import User
-from app.backend.dependencies import get_current_user
+from app.backend.services.auth_context import AuthContext
+from app.backend.routes.models.response.error_response import ACCESS_ERROR_RESPONSES
 from app.backend.routes.models.request.posts_request import PostCreate, PostUpdate
 from app.backend.services.access_control import AccessControlService
-from app.backend.services.permissions import PermissionService
+from app.backend.services.permissions import require
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import PostRoutes, SystemRoutes
 from app.backend.helpers.audit_helper import create_audit_log
 from app.backend.filters.params.post_params import PostFilterParams
 from app.backend.filters.post_filter import PostFilterService
 from app.backend.routes.models.response.search_response import EntitySchemaInfo
+from app.backend.routes.models.response.posts_response import PostResponse, post_to_response
 
-router = APIRouter()
+router = APIRouter(responses=ACCESS_ERROR_RESPONSES)
 
 
-@router.get(SystemRoutes.ROOT.value, response_model=List[Post])
-@PermissionService.require_permissions({"all": [
-    Permissions.POST_VIEW.value,
-    Permissions.IS_ADMIN.value]})
+@router.get(SystemRoutes.ROOT.value, response_model=List[PostResponse])
 async def list_posts(
         filters: PostFilterParams = Depends(),
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW]))
 ):
     """List posts with filters
 
@@ -35,28 +34,22 @@ async def list_posts(
         - Admin users can see all posts
         - Regular users only see their assigned post
     """
-    admin = await PermissionService.has_permission(
-        session, current_user, Permissions.IS_ADMIN.value
-    )
-    access_post_id = None if admin else current_user.post_id
-
+    current_user = auth.user
     query = select(Post)
-    query = PostFilterService.apply_filters(query, filters, access_post_id)
+    query = PostFilterService.apply_filters(query, filters, AccessControlService.post_scope(auth))
     result = await session.exec(query)
-    return result.all()
+    return [post_to_response(post) for post in result.all()]
 
 
-@router.post(SystemRoutes.ROOT.value, response_model=Post)
-@PermissionService.require_permissions({"all": [
-    Permissions.POST_CREATE.value,
-    Permissions.IS_ADMIN.value]})
+@router.post(SystemRoutes.ROOT.value, response_model=PostResponse)
 async def create_post(
         request: Request,
         post_data: PostCreate,
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW, Permissions.POST_CREATE], admin=True))
 ):
     """Create new post"""
+    current_user = auth.user
     # Check if post with code exists
     result = await session.exec(
         select(Post).where(Post.code == post_data.code)
@@ -88,29 +81,23 @@ async def create_post(
     )
     await session.commit()
 
-    return post
+    return post_to_response(post)
 
 
 @router.get(PostRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo)
-@PermissionService.require_permissions({"all": [
-    Permissions.POST_VIEW.value,
-    Permissions.IS_ADMIN.value]})
 async def get_post_filter_schema(
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW]))
 ):
     """Available filter params and sortable fields for posts."""
-    return EntitySchemaInfo(**PostFilterService.get_schema(is_admin=True))
+    return EntitySchemaInfo(**PostFilterService.get_schema(is_admin=auth.is_admin))
 
 
-@router.get(PostRoutes.POST_BY_ID.value, response_model=Post)
-@PermissionService.require_permissions({"any": [
-    Permissions.POST_VIEW.value,
-    Permissions.IS_ADMIN.value]})
+@router.get(PostRoutes.POST_BY_ID.value, response_model=PostResponse)
 async def get_post(
         post_id: int,
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW]))
 ):
     """Get post by ID
 
@@ -118,9 +105,8 @@ async def get_post(
         - Admin users can view any post
         - Regular users can only view their assigned post
     """
-    await AccessControlService.check_post_membership(
-        current_user, post_id, session, "view"
-    )
+    current_user = auth.user
+    AccessControlService.check_post_view(auth, post_id, "post")
 
     result = await session.exec(
         select(Post).where(Post.id == post_id)
@@ -134,20 +120,16 @@ async def get_post(
             detail="Post not found"
         )
 
-    return post
+    return post_to_response(post)
 
 
-@router.put(PostRoutes.POST_BY_ID.value, response_model=Post)
-@PermissionService.require_permissions({"all": [
-    Permissions.POST_UPDATE.value,
-    Permissions.POST_VIEW.value,
-    Permissions.IS_ADMIN.value]})
+@router.put(PostRoutes.POST_BY_ID.value, response_model=PostResponse)
 async def update_post(
         request: Request,
         post_id: int,
         post_data: PostUpdate,
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW, Permissions.POST_UPDATE], admin=True))
 ):
     """Update post by ID
 
@@ -155,6 +137,7 @@ async def update_post(
         - Admin users can update any post
         - Regular users can only update their assigned post
     """
+    current_user = auth.user
     result = await session.exec(
         select(Post).where(Post.id == post_id)
     )
@@ -166,10 +149,21 @@ async def update_post(
             detail="Post not found"
         )
 
+    # Check code uniqueness if being updated
+    update_data = post_data.model_dump(exclude_unset=True)
+    if "code" in update_data:
+        existing = await session.exec(
+            select(Post).where(Post.code == update_data["code"], Post.id != post_id)
+        )
+        if existing.first():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Post with this code already exists"
+            )
+
     # Store old values for auditing
     old_values = post.model_dump()
 
-    update_data = post_data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(post, key, value)
 
@@ -194,5 +188,5 @@ async def update_post(
     )
     await session.commit()
 
-    return post
+    return post_to_response(post)
 

@@ -46,7 +46,14 @@ def _get_model_columns(model: Type) -> Set[str]:
     if model is None:
         return set()
     if hasattr(model, '__table__'):
-        return {c.name for c in model.__table__.columns}
+        columns = {c.name for c in model.__table__.columns}
+        # Mapper-level column properties (e.g. presence values attached in models/presence_properties.py)
+        try:
+            from sqlalchemy import inspect as sa_inspect
+            columns |= {attr.key for attr in sa_inspect(model).column_attrs}
+        except Exception:
+            pass
+        return columns
     if hasattr(model, 'model_fields'):
         return set(model.model_fields.keys())
     return set()

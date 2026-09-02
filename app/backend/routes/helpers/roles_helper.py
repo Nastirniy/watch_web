@@ -24,11 +24,13 @@ async def validate_permission_id(permission_id: int) -> None:
         )
 
 
-async def get_role_or_404(session: AsyncSession, role_id: int) -> Role:
-    """Get role by ID or raise 404"""
+async def get_role_or_404(session: AsyncSession, role_id: int, include_deleted: bool = False) -> Role:
+    """Get role by ID or raise 404. Soft-deleted roles are 404 unless include_deleted is set."""
     await validate_role_id(role_id)
     result = await session.exec(select(Role).where(Role.id == role_id))
     role = result.first()
+    if role and role.is_deleted and not include_deleted:
+        role = None
     if not role:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -56,7 +58,13 @@ async def check_role_name_exists(session: AsyncSession, name: str, exclude_id: O
     if exclude_id:
         query = query.where(Role.id != exclude_id)
     result = await session.exec(query)
-    if result.first():
+    existing = result.first()
+    if existing:
+        if existing.is_deleted:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Role with this name exists as a soft-deleted role (id {existing.id}). Restore it with PATCH is_deleted=false or choose another name"
+            )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Role with this name already exists"

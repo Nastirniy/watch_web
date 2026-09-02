@@ -1,6 +1,8 @@
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel, Field, field_validator
 import re
+
+from app.backend.enums.general import Permissions
 
 
 class LoginRequest(BaseModel):
@@ -39,3 +41,19 @@ class RefreshRequest(BaseModel):
 
 class LogoutRequest(BaseModel):
     session_id: Optional[str] = None
+
+
+class PermissionCheckRequest(BaseModel):
+    """Same shape as a route requirement: all AND any AND (admin.true if admin)"""
+    all: List[str] = Field(default_factory=list)
+    any: List[str] = Field(default_factory=list)
+    admin: bool = False
+
+    @field_validator('all', 'any')
+    @classmethod
+    def validate_known_permissions(cls, v: List[str]) -> List[str]:
+        known = {p.value for p in Permissions}
+        unknown = [name for name in v if name not in known]
+        if unknown:
+            raise ValueError(f"Unknown permissions: {unknown}")
+        return v

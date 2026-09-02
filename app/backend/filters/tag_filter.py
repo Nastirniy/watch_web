@@ -2,7 +2,7 @@
 TagFilterService - Filter service for Tag entity
 """
 
-from typing import Optional
+from typing import Optional, Iterable
 from sqlalchemy.sql.selectable import Select
 
 from app.backend.models.observation import Tag
@@ -23,7 +23,7 @@ class TagFilterService(SimpleFilterEngine):
         cls,
         query: Select,
         params: TagFilterParams,
-        access_post_id: Optional[int] = None
+        access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
         """Apply all filters from TagFilterParams"""
 
@@ -44,7 +44,7 @@ class TagFilterService(SimpleFilterEngine):
         cls,
         query: Select,
         params: TagFilterParams,
-        access_post_id: Optional[int] = None
+        access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
         """Apply filters without pagination"""
         query = cls._apply_soft_delete(query, params)

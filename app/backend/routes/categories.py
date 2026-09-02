@@ -9,10 +9,12 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.database import get_session
+from app.backend.services.access_control import AccessControlService
 from app.backend.models.observation import Category, SignalType
 from app.backend.models.user import User
-from app.backend.dependencies import get_current_user
-from app.backend.services.permissions import PermissionService
+from app.backend.services.auth_context import AuthContext
+from app.backend.routes.models.response.error_response import ACCESS_ERROR_RESPONSES
+from app.backend.services.permissions import require
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import CategoryRoutes
 from app.backend.helpers.audit_helper import create_audit_log
@@ -24,18 +26,16 @@ from app.backend.filters.params.category_params import CategoryFilterParams
 from app.backend.filters.category_filter import CategoryFilterService
 from app.backend.routes.models.response.search_response import EntitySchemaInfo
 
-router = APIRouter()
+router = APIRouter(responses=ACCESS_ERROR_RESPONSES)
 
 
 @router.get(CategoryRoutes.LIST_ALL.value, response_model=List[CategoryResponse])
-@PermissionService.require_permissions({"all": [
-    Permissions.CATEGORY_VIEW.value,
-    Permissions.IS_ADMIN.value]})
 async def list_categories(
         filters: CategoryFilterParams = Depends(),
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW]))
 ):
+    AccessControlService.check_include_deleted(auth, filters, Permissions.CATEGORY_DELETE)
     query = select(Category)
     query = CategoryFilterService.apply_filters(query, filters)
     result = await session.exec(query)
@@ -45,27 +45,22 @@ async def list_categories(
 
 
 @router.get(CategoryRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo)
-@PermissionService.require_permissions({"all": [
-    Permissions.CATEGORY_VIEW.value,
-    Permissions.IS_ADMIN.value]})
 async def get_category_filter_schema(
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW]))
 ):
     """Available filter params and sortable fields for categories."""
-    return EntitySchemaInfo(**CategoryFilterService.get_schema(is_admin=True))
+    return EntitySchemaInfo(**CategoryFilterService.get_schema(is_admin=auth.is_admin))
 
 
 @router.post(CategoryRoutes.CREATE.value, response_model=Category)
-@PermissionService.require_permissions({"all": [
-    Permissions.CATEGORY_CREATE.value,
-    Permissions.IS_ADMIN.value]})
 async def create_category(
         request: Request,
         category_data: CategoryCreate,
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW, Permissions.CATEGORY_CREATE], admin=True))
 ):
+    current_user = auth.user
     existing_result = await session.exec(
         select(Category).where(
             func.lower(Category.name) == func.lower(category_data.name)
@@ -128,13 +123,10 @@ async def create_category(
 
 
 @router.get(CategoryRoutes.CATEGORY_BY_ID.value, response_model=CategoryResponse)
-@PermissionService.require_permissions({"all": [
-    Permissions.CATEGORY_VIEW.value,
-    Permissions.IS_ADMIN.value]})
 async def get_category(
         category_id: int,
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW]))
 ):
     result = await session.exec(
         select(Category).where(
@@ -154,16 +146,14 @@ async def get_category(
 
 
 @router.put(CategoryRoutes.CATEGORY_BY_ID.value, response_model=Category)
-@PermissionService.require_permissions({"all": [
-    Permissions.CATEGORY_UPDATE.value,
-    Permissions.IS_ADMIN.value]})
 async def update_category(
         request: Request,
         category_id: int,
         category_data: CategoryUpdate,
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW, Permissions.CATEGORY_UPDATE], admin=True))
 ):
+    current_user = auth.user
     result = await session.exec(
         select(Category).where(
             Category.id == category_id,
@@ -235,15 +225,13 @@ async def update_category(
 
 
 @router.delete(CategoryRoutes.CATEGORY_BY_ID.value, response_model=MessageResponse)
-@PermissionService.require_permissions({"all": [
-    Permissions.CATEGORY_CREATE.value,
-    Permissions.IS_ADMIN.value]})
 async def delete_category(
         request: Request,
         category_id: int,
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW, Permissions.CATEGORY_DELETE], admin=True))
 ):
+    current_user = auth.user
     result = await session.exec(
         select(Category).where(
             Category.id == category_id,
@@ -286,16 +274,13 @@ async def delete_category(
 
 
 @router.get(CategoryRoutes.CATEGORY_SIGNAL_TYPES.value, response_model=List[SignalTypeResponse])
-@PermissionService.require_permissions({"all": [
-    Permissions.CATEGORY_VIEW.value,
-    Permissions.IS_ADMIN.value]})
 async def list_category_signal_types(
         category_id: int,
         skip: int = 0,
         limit: int = 100,
         include_inactive: bool = False,
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW, Permissions.SIGNAL_TYPE_VIEW]))
 ):
     category_result = await session.exec(
         select(Category).where(

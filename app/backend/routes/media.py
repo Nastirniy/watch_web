@@ -2,7 +2,8 @@ from typing import List, Optional
 from pathlib import Path
 import gc
 from fastapi import APIRouter, Depends, HTTPException, status as fapi_status, UploadFile, File, Form, BackgroundTasks, Query, Request
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
+from sqlalchemy.orm import selectinload
 from sqlmodel import select, desc
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -10,8 +11,9 @@ from app.backend.database import get_session, get_session_maker
 from app.backend.models.media import MediaFile
 from app.backend.models.observation import Observation
 from app.backend.models.user import User
-from app.backend.dependencies import get_current_user
-from app.backend.services.permissions import PermissionService
+from app.backend.services.auth_context import AuthContext
+from app.backend.routes.models.response.error_response import ACCESS_ERROR_RESPONSES
+from app.backend.services.permissions import require
 from app.backend.services.access_control import AccessControlService
 from app.backend.services.media_manager import MediaManager, FileValidationConfig
 from app.backend.enums.general import Permissions, MediaType, ObservationStatus
@@ -32,36 +34,34 @@ from app.backend.routes.helpers.media_helper import (
 )
 from app.backend.services.thumbnail_generator import ThumbnailGenerator
 
-router = APIRouter()
+router = APIRouter(responses=ACCESS_ERROR_RESPONSES)
 _logger = get_api_logger()
 
 
 @router.get(MediaRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo)
-@PermissionService.require_permission(Permissions.MEDIA_VIEW.value)
 async def get_media_filter_schema(
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user)
+    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW]))
 ):
     """Available filter params and sortable fields for media files."""
-    user_is_admin = await PermissionService.has_permission(
-        session, current_user, Permissions.IS_ADMIN.value
-    )
+    current_user = auth.user
+    user_is_admin = auth.is_admin
     return EntitySchemaInfo(**MediaFilterService.get_schema(is_admin=user_is_admin))
 
 
 @router.get(MediaRoutes.MEDIA_INFO.value, response_model=MediaFileInfo)
-@PermissionService.require_permission(Permissions.MEDIA_VIEW.value)
 async def get_media_info(
     media_id: int,
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user)
+    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW]))
 ):
     """
     Get information about a media file.
     Users can only access media from their assigned post.
     """
+    current_user = auth.user
 
-    media_query = select(MediaFile).where(
+    media_query = select(MediaFile).options(selectinload(MediaFile.user)).where(
         MediaFile.id == media_id,
         MediaFile.is_deleted == False
     )
@@ -76,30 +76,24 @@ async def get_media_info(
 
     # Get observation and check post access (handles admin bypass)
     observation = await get_observation_from_media(session, media_file)
-    await AccessControlService.check_resource_access(
-        user=current_user,
-        resource_post_id=observation.post_id,
-        session=session,
-        resource_type="media",
-        operation="view"
-    )
+    AccessControlService.check_post_view(auth, observation.post_id, "media")
 
     return MediaFileInfo.model_validate(media_file)
 
 
 @router.get(MediaRoutes.MEDIA_DOWNLOAD.value)
-@PermissionService.require_permission(Permissions.MEDIA_VIEW.value)
 async def download_media_file(
     media_id: int,
     validate_integrity: bool = True,
     stream: bool = False,
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user)
+    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW]))
 ):
     """
     Download a complete media file with integrity validation and optional streaming.
     Users can only download media from their assigned post.
     """
+    current_user = auth.user
 
     # Get media file info first
     media_query = select(MediaFile).where(
@@ -117,16 +111,10 @@ async def download_media_file(
 
     # Check if user has access to this media's observation post (handles admin bypass)
     observation = await get_observation_from_media(session, media_file)
-    await AccessControlService.check_resource_access(
-        user=current_user,
-        resource_post_id=observation.post_id,
-        session=session,
-        resource_type="media",
-        operation="download"
-    )
+    AccessControlService.check_post_view(auth, observation.post_id, "media")
 
     # --- Nginx X-Accel-Redirect download (offloads file serving to Nginx) ---
-    if settings.storage.enable_nginx_download:
+    if settings.storage.enable_nginx:
         try:
             accel_path = get_download_accel_redirect_path(media_file, media_manager)
         except HTTPException:
@@ -204,17 +192,17 @@ async def download_media_file(
 
 
 @router.get(MediaRoutes.MEDIA_STREAM.value)
-@PermissionService.require_permission(Permissions.MEDIA_VIEW.value)
 async def stream_media_file_nginx(
     media_id: int,
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user)
+    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW]))
 ):
     """
     Stream media file using Nginx X-Accel-Redirect for optimal performance.
     Offloads file serving to Nginx, preventing Python worker blocking.
     Only works for video files with symlinks created.
     """
+    current_user = auth.user
 
     # Get media file info first
     media_query = select(MediaFile).where(
@@ -232,13 +220,7 @@ async def stream_media_file_nginx(
 
     # Check if user has access to this media's observation post (handles admin bypass)
     observation = await get_observation_from_media(session, media_file)
-    await AccessControlService.check_resource_access(
-        user=current_user,
-        resource_post_id=observation.post_id,
-        session=session,
-        resource_type="media",
-        operation="stream"
-    )
+    AccessControlService.check_post_view(auth, observation.post_id, "media")
 
     # Check if file is a video
     if media_file.media_type.lower() != 'video':
@@ -248,7 +230,7 @@ async def stream_media_file_nginx(
         )
 
     # Check if Nginx streaming is enabled
-    if not media_manager.enable_nginx_streaming:
+    if not media_manager.enable_nginx:
         raise HTTPException(
             status_code=fapi_status.HTTP_501_NOT_IMPLEMENTED,
             detail="Nginx streaming is not enabled"
@@ -279,22 +261,17 @@ async def stream_media_file_nginx(
 
 
 @router.get(SystemRoutes.ROOT.value, response_model=List[MediaFileInfo])
-@PermissionService.require_permission(Permissions.MEDIA_VIEW.value)
 async def list_media_files(
     filters: MediaFilterParams = Depends(),
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user)
+    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW]))
 ):
     """List media files with filters"""
+    current_user = auth.user
 
     # Get post filter based on user access (handles admin bypass)
-    access_post_id = await AccessControlService.filter_query_by_post_access(
-        user=current_user,
-        session=session
-    )
-
     query = select(MediaFile).where(MediaFile.is_deleted == False)
-    query = MediaFilterService.apply_filters(query, filters, access_post_id)
+    query = MediaFilterService.apply_filters(query, filters, AccessControlService.post_scope(auth))
     result = await session.exec(query)
     media_files = result.all()
 
@@ -302,12 +279,11 @@ async def list_media_files(
 
 
 @router.delete(MediaRoutes.MEDIA_BY_ID.value)
-@PermissionService.require_permission(Permissions.MEDIA_DELETE.value)
 async def delete_media_file(
     request: Request,
     media_id: int,
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user)
+    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW, Permissions.MEDIA_DELETE]))
 ):
     """
     Delete a media file.
@@ -315,6 +291,7 @@ async def delete_media_file(
     Regular users can only delete files they uploaded/created within their post.
     Implements soft delete (unlinks from observation but keeps file).
     """
+    current_user = auth.user
 
     media_query = select(MediaFile).where(
         MediaFile.id == media_id,
@@ -329,43 +306,12 @@ async def delete_media_file(
             detail="Media file not found"
         )
 
-    # Check post membership and ownership (handles admin bypass internally)
+    # Post scope, then ownership (media.manage_any overrides ownership and the active-observation rule)
+    observation = None
     if media_file.observation_id:
         observation = await get_observation_from_media(session, media_file)
-        
-        # Check if user is admin
-        is_admin = await PermissionService.has_permission(
-            session, current_user, Permissions.IS_ADMIN.value
-        )
-        
-        # Non-admins can only delete media from active observations
-        if not is_admin and observation.status != ObservationStatus.ACTIVE.value:
-            _logger.warning(
-                f"User {current_user.username} tried to delete media {media_id} "
-                f"from inactive observation {observation.id} (status: {observation.status})"
-            )
-            raise HTTPException(
-                status_code=fapi_status.HTTP_403_FORBIDDEN,
-                detail=f"Cannot delete media from an observation that is no longer active (status: {observation.status})"
-            )
-
-        await AccessControlService.check_combined_access(
-            user=current_user,
-            resource_post_id=observation.post_id,
-            resource_owner_id=media_file.user_id,
-            session=session,
-            resource_type="media",
-            operation="delete",
-            require_ownership=True
-        )
-    else:
-        # If no observation, check ownership or admin
-        await AccessControlService.check_ownership_or_admin(
-            user=current_user,
-            resource_owner_id=media_file.user_id,
-            session=session,
-            resource_type="media"
-        )
+        AccessControlService.check_post_write(auth, observation.post_id, "media")
+    AccessControlService.check_media_ownership(auth, media_file, observation)
 
     # Store old values for auditing
     old_values = media_file.model_dump()
@@ -386,7 +332,7 @@ async def delete_media_file(
 
         # Delete the filesystem file
         try:
-            file_path = Path(media_file.file_path)
+            file_path = media_file.resolve_path(Path(settings.storage.upload_path))
             if file_path.exists():
                 file_path.unlink()
         except Exception as e:
@@ -394,7 +340,7 @@ async def delete_media_file(
 
         # Try to remove empty directories
         try:
-            file_path = Path(media_file.file_path)
+            file_path = media_file.resolve_path(Path(settings.storage.upload_path))
             parent_dir = file_path.parent
             if parent_dir.exists() and not any(parent_dir.iterdir()):
                 parent_dir.rmdir()
@@ -432,15 +378,14 @@ media_manager = MediaManager(
     storage_path=getattr(settings.storage, 'upload_path', 'uploads'),
     temp_path=getattr(settings.storage, 'temp_path', 'temp'),
     nginx_symlink_path=getattr(settings.storage, 'nginx_symlink_path', None),
-    enable_nginx_streaming=getattr(settings.storage, 'enable_nginx_streaming', True)
+    enable_nginx=getattr(settings.storage, 'enable_nginx', False)
 )
 
 
 @router.get(MediaRoutes.STORAGE_STATISTICS.value)
-@PermissionService.require_permission(Permissions.IS_ADMIN.value)
 async def get_storage_statistics(
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user)
+    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW], admin=True))
 ):
     """Get storage statistics and health information"""
 
@@ -449,20 +394,20 @@ async def get_storage_statistics(
 
 
 @router.post(MediaRoutes.UPLOAD.value)
-@PermissionService.require_permission(Permissions.MEDIA_CREATE.value)
 async def upload_complete_file(
     request: Request,
     observation_id: int = Form(...),
     media_type: str = Form(...),
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW, Permissions.MEDIA_CREATE])),
     background_tasks: BackgroundTasks = BackgroundTasks()
 ):
     """
     Upload a complete file with comprehensive validation and security checks.
     Users can only upload files for observations from their assigned post.
     """
+    current_user = auth.user
 
     # Verify observation exists
     observation_query = select(Observation).where(
@@ -479,13 +424,7 @@ async def upload_complete_file(
         )
 
     # Check if user has access to this observation's post (handles admin bypass)
-    await AccessControlService.check_resource_access(
-        user=current_user,
-        resource_post_id=observation_result.post_id,
-        session=session,
-        resource_type="media",
-        operation="create"
-    )
+    AccessControlService.check_post_write(auth, observation_result.post_id, "media")
 
     # Validate file size before reading (basic check)
     if file.size and file.size > 500 * 1024 * 1024:  # 500MB limit  #TODO make it configurable
@@ -603,13 +542,12 @@ async def upload_complete_file(
 
 
 @router.post(MediaRoutes.NGINX_UPLOAD.value)
-@PermissionService.require_permission(Permissions.MEDIA_CREATE.value)
 async def nginx_upload_file(
     request: Request,
     observation_id: int = Query(..., description="Observation ID to attach file to"),
     media_type: str = Query(..., description="Media type: image, video, or audio"),
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW, Permissions.MEDIA_CREATE])),
     background_tasks: BackgroundTasks = BackgroundTasks()
 ):
     """
@@ -623,7 +561,8 @@ async def nginx_upload_file(
     Client sends raw binary body (not multipart form) with metadata in query params
     and the original filename in the X-Original-Filename header.
     """
-    if not settings.storage.enable_nginx_upload:
+    current_user = auth.user
+    if not settings.storage.enable_nginx:
         raise HTTPException(
             status_code=fapi_status.HTTP_501_NOT_IMPLEMENTED,
             detail="Nginx upload offloading is not enabled"
@@ -654,13 +593,7 @@ async def nginx_upload_file(
         )
 
     # Check post membership (handles admin bypass)
-    await AccessControlService.check_resource_access(
-        user=current_user,
-        resource_post_id=observation_result.post_id,
-        session=session,
-        resource_type="media",
-        operation="create (nginx offload)"
-    )
+    AccessControlService.check_post_write(auth, observation_result.post_id, "media")
 
     # Build validation config based on media type
     max_size_bytes = settings.storage.max_file_size_gb * 1024 * 1024 * 1024
@@ -754,16 +687,16 @@ async def nginx_upload_file(
 
 
 @router.post(MediaRoutes.LIST_ALL_ATTACHED_MEDIA.value, response_model=List[MediaFileInfo])
-@PermissionService.require_permission(Permissions.MEDIA_VIEW.value)
 async def list_media_for_observation(
     request: ListAttachedMediaRequest,
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user)
+    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW]))
 ):
     """
     List all media files for a specific observation.
     Users can only list media from their assigned post.
     """
+    current_user = auth.user
 
     # Get observation first and check access
     observation_query = select(Observation).where(
@@ -780,16 +713,10 @@ async def list_media_for_observation(
         )
 
     # Check if user has access to this observation's post (handles admin bypass)
-    await AccessControlService.check_resource_access(
-        user=current_user,
-        resource_post_id=observation.post_id,
-        session=session,
-        resource_type="observation media",
-        operation="list"
-    )
+    AccessControlService.check_post_view(auth, observation.post_id, "observation media")
 
     # Query media files for the observation
-    media_query = select(MediaFile).where(
+    media_query = select(MediaFile).options(selectinload(MediaFile.user)).where(
         MediaFile.observation_id == request.observation_id,
         MediaFile.is_deleted == False
     )
@@ -800,7 +727,7 @@ async def list_media_for_observation(
 
 
 # Initialize thumbnail generator
-thumbnail_generator = ThumbnailGenerator(settings.storage.thumbnail)
+thumbnail_generator = ThumbnailGenerator(settings.storage.thumbnail, Path(settings.storage.upload_path))
 
 
 async def generate_thumbnail_background(media_file_id: int):
@@ -819,6 +746,13 @@ async def generate_thumbnail_background(media_file_id: int):
             if not media_file:
                 _logger.warning(f"Media file {media_file_id} not found")
                 return
+
+            # Skip if the external worker already finished while this task was queued
+            if media_file.thumbnail_path:
+                thumb_path = media_file.resolve_thumbnail_path(Path(settings.storage.upload_path))
+                if thumb_path and thumb_path.exists():
+                    _logger.info(f"Thumbnail already exists for media_file_id={media_file_id}, skipping")
+                    return
 
             _logger.info(f"Generating thumbnail for {media_file.original_filename} (type: {media_file.media_type})")
 
@@ -872,17 +806,17 @@ async def generate_thumbnail_background(media_file_id: int):
 
 
 @router.get(MediaRoutes.MEDIA_THUMBNAIL.value)
-@PermissionService.require_permission(Permissions.MEDIA_VIEW.value)
 async def get_media_thumbnail(
     media_id: int,
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW])),
     background_tasks: BackgroundTasks = BackgroundTasks()
 ):
     """
     Serve thumbnail. If not generated, return 202 and queue generation.
     Check post access via AccessControlService.
     """
+    current_user = auth.user
     # Get media file
     media_query = select(MediaFile).where(
         MediaFile.id == media_id,
@@ -899,20 +833,26 @@ async def get_media_thumbnail(
 
     # Check if user has access to this media's observation post (handles admin bypass)
     observation = await get_observation_from_media(session, media_file)
-    await AccessControlService.check_resource_access(
-        user=current_user,
-        resource_post_id=observation.post_id,
-        session=session,
-        resource_type="media thumbnail",
-        operation="view"
-    )
+    AccessControlService.check_post_view(auth, observation.post_id, "media thumbnail")
 
     # Check thumbnail status
     if media_file.thumbnail_path:
         # Thumbnail exists, serve it
-        thumb_path = Path(media_file.thumbnail_path)
+        thumb_path = media_file.resolve_thumbnail_path(Path(settings.storage.upload_path))
 
         if thumb_path.exists():
+            if settings.storage.enable_nginx:
+                upload_root = Path(settings.storage.upload_path).resolve()
+                relative = thumb_path.resolve().relative_to(upload_root)
+                prefix = settings.storage.nginx_internal_uploads_prefix
+                return Response(
+                    headers={
+                        "X-Accel-Redirect": f"{prefix}/{relative}",
+                        "Content-Type": "image/jpeg",
+                        "Cache-Control": "public, max-age=3600",
+                        "ETag": f'"{media_file.file_hash}"'
+                    }
+                )
             return FileResponse(
                 path=str(thumb_path),
                 media_type="image/jpeg",
@@ -922,34 +862,48 @@ async def get_media_thumbnail(
                 }
             )
         else:
-            # Thumbnail path set but file missing, regenerate
+            # Thumbnail path set but file missing — clear state and allow regeneration
             media_file.thumbnail_path = None
-            media_file.thumbnail_error = "Thumbnail file missing"
+            media_file.thumbnail_error = None
             await session.commit()
 
-    # Check if there was an error
     if media_file.thumbnail_error:
-        # Return placeholder or error
-        raise HTTPException(
-            status_code=fapi_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Thumbnail generation error: {media_file.thumbnail_error}"
+        # Unsupported type (e.g. audio) — will never succeed, tell the client
+        if media_file.media_type.lower() not in ['image', 'video']:
+            raise HTTPException(
+                status_code=fapi_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Thumbnails are not supported for this media type"
+            )
+        # Previous failure on image/video — clear error and force internal retry.
+        # The external watcher (inotify) only fires on new writes, so it will
+        # never re-trigger for already-existing files. Use the internal task
+        # unconditionally here to guarantee a retry actually happens.
+        media_file.thumbnail_error = None
+        await session.commit()
+        background_tasks.add_task(generate_thumbnail_background, media_id)
+        return JSONResponse(
+            status_code=202,
+            content={"detail": "Thumbnail generation in progress"}
         )
 
-    # Thumbnail not generated yet, queue generation
+    # Always queue the internal task as a guaranteed fallback. The external
+    # watcher only fires on new filesystem events so it misses files uploaded
+    # while it was down or files that already existed. If the external worker
+    # finishes first, generate_thumbnail_background detects the existing
+    # thumbnail on disk and exits immediately without any CPU work.
     background_tasks.add_task(generate_thumbnail_background, media_id)
 
-    raise HTTPException(
-        status_code=fapi_status.HTTP_202_ACCEPTED,
-        detail="Thumbnail generation in progress"
+    return JSONResponse(
+        status_code=202,
+        content={"detail": "Thumbnail generation in progress"}
     )
 
 
 @router.post(MediaRoutes.MEDIA_THUMBNAIL_REGENERATE.value)
-@PermissionService.require_permission(Permissions.IS_ADMIN.value)
 async def regenerate_thumbnail(
     media_id: int,
     session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW, Permissions.MEDIA_UPDATE], admin=True)),
     background_tasks: BackgroundTasks = BackgroundTasks()
 ):
     """Force regenerate thumbnail (admin only)"""
@@ -966,7 +920,7 @@ async def regenerate_thumbnail(
 
     # Clear existing thumbnail
     if media_file.thumbnail_path:
-        thumb_path = Path(media_file.thumbnail_path)
+        thumb_path = media_file.resolve_thumbnail_path(Path(settings.storage.upload_path))
         if thumb_path.exists():
             try:
                 thumb_path.unlink()

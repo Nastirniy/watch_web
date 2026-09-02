@@ -2,7 +2,7 @@
 CategoryFilterService - Filter service for Category entity
 """
 
-from typing import Optional
+from typing import Optional, Iterable
 from sqlalchemy.sql.selectable import Select
 
 from app.backend.models.observation import Category
@@ -23,7 +23,7 @@ class CategoryFilterService(SimpleFilterEngine):
         cls,
         query: Select,
         params: CategoryFilterParams,
-        access_post_id: Optional[int] = None
+        access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
         """Apply all filters from CategoryFilterParams"""
 
@@ -45,7 +45,7 @@ class CategoryFilterService(SimpleFilterEngine):
         cls,
         query: Select,
         params: CategoryFilterParams,
-        access_post_id: Optional[int] = None
+        access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
         """Apply filters without pagination"""
         query = cls._apply_soft_delete(query, params)

@@ -51,9 +51,9 @@ def get_download_accel_redirect_path(media_file: MediaFile, media_manager) -> st
     e.g. /protected_uploads/2025/06/15/obs_001/42_abc123.mp4
     """
     try:
-        file_path = Path(media_file.file_path)
-        storage_root = Path(media_manager.storage_path)
-        relative = file_path.relative_to(storage_root)
+        abs_path = media_file.resolve_path(Path(media_manager.storage_path))
+        storage_root = Path(media_manager.storage_path).resolve()
+        relative = abs_path.resolve().relative_to(storage_root)
     except (ValueError, TypeError):
         raise HTTPException(
             status_code=fapi_status.HTTP_500_INTERNAL_SERVER_ERROR,

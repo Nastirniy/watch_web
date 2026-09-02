@@ -1,9 +1,12 @@
+import io
 from typing import List, Optional
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status as fapi_status, Request
+from fastapi.responses import StreamingResponse
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
+from sqlalchemy import or_
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -11,8 +14,9 @@ from app.backend.database import get_session
 from app.backend.models.observation import Observation, SignalType, Tag
 from app.backend.models.user import User
 from app.backend.models.post import Post
-from app.backend.dependencies import get_current_user
-from app.backend.services.permissions import PermissionService
+from app.backend.services.auth_context import AuthContext
+from app.backend.routes.models.response.error_response import ACCESS_ERROR_RESPONSES
+from app.backend.services.permissions import require
 from app.backend.services.access_control import AccessControlService
 from app.backend.enums.general import Permissions, ObservationStatus
 from app.backend.enums.routes import ObservationRoutes
@@ -25,18 +29,42 @@ from app.backend.routes.models.request.observations_request import (
 from app.backend.routes.models.response.observations_response import MessageResponse, ObservationWithMedia
 from app.backend.filters.params.observation_params import ObservationFilterParams
 from app.backend.filters.observation_filter import ObservationFilterService
+from app.backend.filters.params.observation_report_params import ObservationReportParams, ObservationReportType
+from app.backend.filters.observation_report_filter import ObservationReportFilter
+from app.backend.services.observation_report_service import ObservationReportService
 from app.backend.routes.models.response.search_response import EntitySchemaInfo
 
-router = APIRouter()
+router = APIRouter(responses=ACCESS_ERROR_RESPONSES)
 
 
-async def _validate_and_get_tags(session: AsyncSession, tag_ids: List[int]) -> List[Tag]:
+OBSERVATION_LOAD_OPTIONS = (
+    selectinload(Observation.media_files),
+    selectinload(Observation.tags),
+    selectinload(Observation.user),
+    selectinload(Observation.disappeared_by_user),
+)
+
+
+async def _load_observation_response(session: AsyncSession, observation_id: int) -> ObservationWithMedia:
+    """Re-select with every relationship the response needs (refresh() does not load relationships)"""
+    result = await session.exec(
+        select(Observation).where(Observation.id == observation_id).options(*OBSERVATION_LOAD_OPTIONS)
+    )
+    return ObservationWithMedia.model_validate(result.one())
+
+
+async def _validate_and_get_tags(session: AsyncSession, tag_ids: List[int], keep_ids: Optional[List[int]] = None) -> List[Tag]:
     """
     Validate that all tag IDs exist and are not deleted.
+    Tags listed in keep_ids (already attached to the observation) may stay even if soft-deleted,
+    so editing an observation never silently drops history.
     Returns a list of Tag instances ready to be associated with an observation.
     """
+    condition = Tag.is_deleted == False
+    if keep_ids:
+        condition = or_(condition, Tag.id.in_(list(keep_ids)))
     result = await session.exec(
-        select(Tag).where(Tag.id.in_(tag_ids), Tag.is_deleted == False)
+        select(Tag).where(Tag.id.in_(tag_ids), condition)
     )
     tags = list(result.all())
 
@@ -52,11 +80,10 @@ async def _validate_and_get_tags(session: AsyncSession, tag_ids: List[int]) -> L
 
 
 @router.get(ObservationRoutes.LIST_ALL.value, response_model=List[ObservationWithMedia])
-@PermissionService.require_permission(Permissions.OBSERVATION_VIEW.value)
 async def list_observations(
         filters: ObservationFilterParams = Depends(),
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW]))
 ):
     """
     List observations with attached media IDs and comprehensive filtering.
@@ -81,18 +108,15 @@ async def list_observations(
     DB Load: Uses eager loading (selectinload) to fetch media_files in a single additional query,
     preventing N+1 query problem. For N observations, this executes 2 queries instead of N+1.
     """
+    current_user = auth.user
 
     # Apply post access filter (enforced for regular users, optional for admins)
-    filtered_post_id = await AccessControlService.filter_query_by_post_access(
-        current_user, session, filters.post_id
-    )
+    AccessControlService.check_include_deleted(auth, filters, Permissions.OBSERVATION_DELETE)
+    filtered_post_ids = AccessControlService.resolve_post_scope(auth, filters.post_id)
 
     # Build base query and apply filters
-    query = select(Observation).options(
-        selectinload(Observation.media_files),
-        selectinload(Observation.tags)
-    )
-    query = ObservationFilterService.apply_filters(query, filters, filtered_post_id)
+    query = select(Observation).options(*OBSERVATION_LOAD_OPTIONS)
+    query = ObservationFilterService.apply_filters(query, filters, filtered_post_ids)
 
     # Execute query
     result = await session.exec(query)
@@ -103,31 +127,29 @@ async def list_observations(
 
 
 @router.get(ObservationRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo)
-@PermissionService.require_permission(Permissions.OBSERVATION_VIEW.value)
 async def get_observation_filter_schema(
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW]))
 ):
     """Available filter params and sortable fields for observations."""
-    user_is_admin = await PermissionService.has_permission(
-        session, current_user, Permissions.IS_ADMIN.value
-    )
+    current_user = auth.user
+    user_is_admin = auth.is_admin
     return EntitySchemaInfo(**ObservationFilterService.get_schema(is_admin=user_is_admin))
 
 
-@router.post(ObservationRoutes.CREATE.value, response_model=Observation)
-@PermissionService.require_permission(Permissions.OBSERVATION_CREATE.value)
+@router.post(ObservationRoutes.CREATE.value, response_model=ObservationWithMedia)
 async def create_observation(
         request: Request,
         observation_data: ObservationCreate,
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW, Permissions.OBSERVATION_CREATE]))
 ):
     """
     Create new observation.
     Users can only create observations for their assigned post.
     Note: Field validation is handled by Pydantic model validators.
     """
+    current_user = auth.user
     # Validate post exists and user has access
     post_result = await session.exec(
         select(Post).where(Post.id == observation_data.post_id)
@@ -140,12 +162,7 @@ async def create_observation(
         )
 
     # Check if user has access to the post
-    await AccessControlService.check_post_membership(
-        current_user,
-        observation_data.post_id,
-        session,
-        f"{Permissions.OBSERVATION_CREATE.name} for {ObservationRoutes.BASE.value}"
-    )
+    AccessControlService.check_post_write(auth, observation_data.post_id, "observation")
 
     # Validate signal_type exists and is active
     signal_type_result = await session.exec(
@@ -234,7 +251,7 @@ async def create_observation(
         )
         await session.commit()
 
-        return observation
+        return await _load_observation_response(session, observation.id)
     except IntegrityError as e:
         await session.rollback()
         # This should rarely happen since we pre-validate foreign keys
@@ -246,23 +263,22 @@ async def create_observation(
         )
 
 
-@router.put(ObservationRoutes.OBSERVATION_BY_ID.value, response_model=Observation)
-@PermissionService.require_permission(Permissions.OBSERVATION_UPDATE.value)
+@router.put(ObservationRoutes.OBSERVATION_BY_ID.value, response_model=ObservationWithMedia)
 async def update_observation(
         request: Request,
         observation_id: int,
         observation_data: ObservationUpdate,
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW, Permissions.OBSERVATION_UPDATE]))
 ):
     """
     Update existing observation.
     Users can only update observations from their assigned post.
     """
+    current_user = auth.user
     # Get observation by ID with tags pre-loaded
     query = select(Observation).where(
-        Observation.id == observation_id,
-        Observation.is_deleted == False
+        Observation.id == observation_id
     ).options(selectinload(Observation.tags))
     
     result = await session.exec(query)
@@ -278,12 +294,14 @@ async def update_observation(
     old_values = observation.model_dump()
 
     # Check if user has access to this observation's post
-    await AccessControlService.check_post_membership(
-        current_user,
-        observation.post_id,
-        session,
-        f"{Permissions.OBSERVATION_UPDATE.name} for {ObservationRoutes.BASE.value}"
-    )
+    AccessControlService.check_post_write(auth, observation.post_id, "observation")
+    AccessControlService.check_observation_ownership(auth, observation)
+
+    # Soft delete / restore through the update require observation.delete
+    if observation_data.is_deleted is not None:
+        AccessControlService.check_permission(auth, Permissions.OBSERVATION_DELETE, "changing is_deleted")
+    if observation.is_deleted and observation_data.is_deleted is not False:
+        raise HTTPException(status_code=fapi_status.HTTP_404_NOT_FOUND, detail="Observation not found")
 
     if observation_data.signal_type_id is not None:
         signal_type_result = await session.exec(
@@ -343,7 +361,7 @@ async def update_observation(
     # Using model_dump(exclude_unset=True) to check if key was actually in request
     if "tag_ids" in observation_data.model_dump(exclude_unset=True):
         if observation_data.tag_ids:
-            tags = await _validate_and_get_tags(session, observation_data.tag_ids)
+            tags = await _validate_and_get_tags(session, observation_data.tag_ids, keep_ids=[t.id for t in observation.tags])
             observation.tags = tags
         else:
             observation.tags = []
@@ -371,7 +389,7 @@ async def update_observation(
         )
         await session.commit()
 
-        return observation
+        return await _load_observation_response(session, observation.id)
     except IntegrityError as e:
         await session.rollback()
         # This should rarely happen since we pre-validate foreign keys
@@ -385,18 +403,18 @@ async def update_observation(
 
 
 @router.post(ObservationRoutes.MARK_DISAPPEARED.value, response_model=MessageResponse)
-@PermissionService.require_permission(Permissions.OBSERVATION_UPDATE.value)
 async def mark_observation_disappeared(
         request: Request,
         observation_id: int,
         disappeared_data: ObservationDisappeared,
         session: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+        auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW, Permissions.OBSERVATION_UPDATE]))
 ):
     """
     Mark observation as disappeared.
     Users can only mark observations from their assigned post.
     """
+    current_user = auth.user
     result = await session.exec(
         select(Observation).where(
             Observation.id == observation_id,
@@ -415,12 +433,8 @@ async def mark_observation_disappeared(
     old_values = observation.model_dump()
 
     # Check if user has access to this observation's post
-    await AccessControlService.check_post_membership(
-        current_user,
-        observation.post_id,
-        session,
-        f"{Permissions.OBSERVATION_UPDATE.name} for {ObservationRoutes.MARK_DISAPPEARED.value}"
-    )
+    AccessControlService.check_post_write(auth, observation.post_id, "observation")
+    AccessControlService.check_observation_ownership(auth, observation)
 
     observation.status = ObservationStatus.DISAPPEARED.value
     observation.disappeared_at = disappeared_data.disappeared_at
@@ -453,3 +467,104 @@ async def mark_observation_disappeared(
     await session.commit()
 
     return MessageResponse(message="Observation marked as disappeared")
+
+
+@router.get(ObservationRoutes.REPORT_TYPES.value)
+async def get_report_types(
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW]))
+):
+    """
+    Returns available observation report types for web UI select/dropdown.
+    Each entry: {value, label (Ukrainian), description (Ukrainian)}
+    """
+    return ObservationReportType.choices()
+
+
+@router.post(ObservationRoutes.REPORT.value)
+async def generate_observation_report(
+        params: ObservationReportParams,
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW, Permissions.EXPORT_CREATE], admin=True))
+):
+    """
+    Generate an Excel (.xlsx) report for observations. Admin only.
+
+    The report header contains the filter criteria used (in Ukrainian).
+    Data columns: user, post, signal type, all frequency/bandwidth fields,
+    observed time, disappeared time, duration, comment, creation date, tags.
+    All datetimes are displayed in Kyiv local time (EET/EEST).
+
+    Filter combinations supported:
+    - By specific observation IDs
+    - By date range (observed_at or created_at)
+    - By user IDs (one or many)
+    - By post IDs (one or many)
+    - By signal type IDs
+    - By statuses
+    - Any combination of the above
+    """
+    query = select(Observation)
+    AccessControlService.check_include_deleted(auth, params, Permissions.OBSERVATION_DELETE)
+    query = ObservationReportFilter.apply_filters(query, params)
+
+    result = await session.exec(query)
+    observations = list(result.all())
+
+    tag_names = None
+    if params.tag_ids:
+        tag_rows = await session.exec(select(Tag.id, Tag.name).where(Tag.id.in_(params.tag_ids)))
+        tag_names = {tag_id: name for tag_id, name in tag_rows.all()}
+    excel_bytes = ObservationReportService.generate_excel(observations, params, tag_names=tag_names)
+
+    filename = f"observations_report_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return StreamingResponse(
+        io.BytesIO(excel_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.delete(ObservationRoutes.OBSERVATION_BY_ID.value, response_model=MessageResponse)
+async def delete_observation(
+        request: Request,
+        observation_id: int,
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW, Permissions.OBSERVATION_DELETE]))
+):
+    """Soft-delete an observation (owner or observation.manage_any, write access to its post).
+    Media files stay attached. Restore with PUT is_deleted=false."""
+    current_user = auth.user
+    result = await session.exec(
+        select(Observation).where(Observation.id == observation_id, Observation.is_deleted == False)
+    )
+    observation = result.first()
+    if not observation:
+        raise HTTPException(status_code=fapi_status.HTTP_404_NOT_FOUND, detail="Observation not found")
+
+    AccessControlService.check_post_write(auth, observation.post_id, "observation")
+    AccessControlService.check_observation_ownership(auth, observation)
+
+    old_values = observation.model_dump()
+    observation.is_deleted = True
+    observation.updated_at = datetime.now(timezone.utc)
+    session.add(observation)
+    await session.commit()
+
+    await create_audit_log(
+        session=session,
+        action="delete",
+        resource_type="observation",
+        resource_id=observation.id,
+        user_id=current_user.id,
+        session_id=getattr(request.state, "session_id", None),
+        old_values=old_values,
+        new_values=observation.model_dump(),
+        details={"message": f"User {current_user.username} soft-deleted observation #{observation.id}"},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_url=str(request.url)
+    )
+    await session.commit()
+    logger.info(f"User {current_user.username} soft-deleted observation {observation.id}")
+    return MessageResponse(message="Observation deleted")

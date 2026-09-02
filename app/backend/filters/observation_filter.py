@@ -3,7 +3,7 @@ ObservationFilterService - Filter service for Observation entity
 Uses simple typed params for clear FastAPI docs
 """
 
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Iterable
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql.selectable import Select
@@ -30,7 +30,7 @@ class ObservationFilterService(SimpleFilterEngine):
         cls,
         query: Select,
         params: ObservationFilterParams,
-        access_post_id: Optional[int] = None
+        access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
         """Apply all filters from ObservationFilterParams"""
 
@@ -38,8 +38,8 @@ class ObservationFilterService(SimpleFilterEngine):
         query = cls._apply_soft_delete(query, params)
 
         # Access control (non-admin sees only their post)
-        if access_post_id is not None:
-            query = query.where(Observation.post_id == access_post_id)
+        if access_post_ids is not None:
+            query = query.where(Observation.post_id.in_(list(access_post_ids)))
 
         # === ID Filters ===
         query = cls._apply_exact(query, Observation.id, params.id)
@@ -89,17 +89,16 @@ class ObservationFilterService(SimpleFilterEngine):
         # === Comment Search ===
         query = cls._apply_contains(query, Observation.comment, params.comment_contains)
 
-        # === Tag Filters (AND logic - must have ALL tags) ===
+        # === Tag Filters (OR logic - must have ANY of the tags) ===
         if params.tag_ids:
             tag_id_list = params.get_tag_id_list()
             if tag_id_list:
-                for tag_id in tag_id_list:
-                    query = query.where(
-                        Observation.id.in_(
-                            select(ObservationTag.observation_id)
-                            .where(ObservationTag.tag_id == tag_id)
-                        )
+                query = query.where(
+                    Observation.id.in_(
+                        select(ObservationTag.observation_id)
+                        .where(ObservationTag.tag_id.in_(tag_id_list))
                     )
+                )
 
         # === Sorting & Pagination ===
         query = cls._apply_sorting(query, params)
@@ -108,6 +107,8 @@ class ObservationFilterService(SimpleFilterEngine):
         # Eager load relationships
         query = query.options(selectinload(Observation.media_files))
         query = query.options(selectinload(Observation.tags))
+        query = query.options(selectinload(Observation.user))
+        query = query.options(selectinload(Observation.disappeared_by_user))
 
         return query
 
@@ -116,14 +117,14 @@ class ObservationFilterService(SimpleFilterEngine):
         cls,
         query: Select,
         params: ObservationFilterParams,
-        access_post_id: Optional[int] = None
+        access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
         """Apply filters without pagination (for counting)"""
         # Same as apply_filters but without pagination and eager loading
         query = cls._apply_soft_delete(query, params)
 
-        if access_post_id is not None:
-            query = query.where(Observation.post_id == access_post_id)
+        if access_post_ids is not None:
+            query = query.where(Observation.post_id.in_(list(access_post_ids)))
 
         query = cls._apply_exact(query, Observation.id, params.id)
         query = cls._apply_exact(query, Observation.user_id, params.user_id)
@@ -166,12 +167,11 @@ class ObservationFilterService(SimpleFilterEngine):
         if params.tag_ids:
             tag_id_list = params.get_tag_id_list()
             if tag_id_list:
-                for tag_id in tag_id_list:
-                    query = query.where(
-                        Observation.id.in_(
-                            select(ObservationTag.observation_id)
-                            .where(ObservationTag.tag_id == tag_id)
-                        )
+                query = query.where(
+                    Observation.id.in_(
+                        select(ObservationTag.observation_id)
+                        .where(ObservationTag.tag_id.in_(tag_id_list))
                     )
+                )
 
         return query

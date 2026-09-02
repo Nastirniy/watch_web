@@ -2,7 +2,8 @@
 MediaFilterService - Filter service for MediaFile entity
 """
 
-from typing import Optional
+from typing import Optional, Iterable
+from sqlalchemy.orm import selectinload
 from sqlalchemy.sql.selectable import Select
 
 from app.backend.models.media import MediaFile
@@ -23,16 +24,17 @@ class MediaFilterService(SimpleFilterEngine):
         cls,
         query: Select,
         params: MediaFilterParams,
-        access_post_id: Optional[int] = None
+        access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
         """Apply all filters from MediaFilterParams"""
+        query = query.options(selectinload(MediaFile.user))
 
         # MediaFile has no is_deleted
 
         # Access control through observation's post_id
-        if access_post_id is not None:
+        if access_post_ids is not None:
             query = query.join(Observation, MediaFile.observation_id == Observation.id)
-            query = query.where(Observation.post_id == access_post_id)
+            query = query.where(Observation.post_id.in_(list(access_post_ids)))
 
         query = cls._apply_exact(query, MediaFile.id, params.id)
         query = cls._apply_exact(query, MediaFile.observation_id, params.observation_id)
@@ -61,12 +63,12 @@ class MediaFilterService(SimpleFilterEngine):
         cls,
         query: Select,
         params: MediaFilterParams,
-        access_post_id: Optional[int] = None
+        access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
         """Apply filters without pagination"""
-        if access_post_id is not None:
+        if access_post_ids is not None:
             query = query.join(Observation, MediaFile.observation_id == Observation.id)
-            query = query.where(Observation.post_id == access_post_id)
+            query = query.where(Observation.post_id.in_(list(access_post_ids)))
 
         query = cls._apply_exact(query, MediaFile.id, params.id)
         query = cls._apply_exact(query, MediaFile.observation_id, params.observation_id)

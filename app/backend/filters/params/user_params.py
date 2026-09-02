@@ -19,6 +19,7 @@ class UserFilterParams(BaseFilterParams):
     username_alias_contains: Optional[str] = Field(default=None, max_length=50, description="Alias contains text")
     post_id: Optional[int] = Field(default=None, description="Filter by post ID")
     is_active: Optional[bool] = Field(default=None, description="Filter by active status")
+    is_online: Optional[bool] = Field(default=None, description="Online now (session touched within the online threshold)")
     created_at_from: Optional[datetime] = Field(default=None, description="Created after")
     created_at_to: Optional[datetime] = Field(default=None, description="Created before")
     last_login_from: Optional[datetime] = Field(default=None, description="Last login after")

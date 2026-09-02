@@ -4,28 +4,38 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.database import get_session
 from app.backend.services.auth import AuthService
-from app.backend.services.permissions import PermissionService
-from app.backend.dependencies import get_current_user
+from app.backend.services.presence import is_expired
+from datetime import datetime, timezone
+from app.backend.services.permissions import require
+from app.backend.services.auth_context import AuthContext, load_auth_context
+from app.backend.services.permissions import Require
+from app.backend.services.route_access import routes_allowed_for
+from app.backend.routes.helpers.auth_helper import build_user_info, build_login_response
+from app.backend.routes.models.response.error_response import ACCESS_ERROR_RESPONSES, RequiredPermissions
 from app.backend.models.user import User, UserSession
 from app.backend.enums.routes import AuthRoutes
-from app.backend.enums.general import Permissions, AppEnvironment
+from app.backend.enums.general import Permissions, AppEnvironment, AuthErrorCode
 from app.backend.utils.logging_config import get_auth_logger
 from app.backend.config import settings
 from app.backend.helpers.certeficates_helper import parse_cn
 from app.backend.routes.models.request.auth_request import (
     LoginRequest,
     RefreshRequest,
-    LogoutRequest
+    LogoutRequest,
+    PermissionCheckRequest
 )
 from app.backend.routes.models.response.auth_response import (
     LoginResponse,
     LogoutResponse,
     UserInfoResponse,
     SessionInfoResponse,
-    UserSessionsResponse
+    UserSessionsResponse,
+    PermissionCheckResponse,
+    RouteAccessResponse,
+    RouteAccessEntryResponse
 )
 
-router = APIRouter()
+router = APIRouter(responses=ACCESS_ERROR_RESPONSES)
 _logger = get_auth_logger()
 
 
@@ -72,7 +82,7 @@ async def login(
                 )
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Certificate verification failed",
+                    detail={"code": AuthErrorCode.CERTIFICATE_VERIFICATION_FAILED, "message": "Certificate verification failed"},
                     headers={"WWW-Authenticate": "Bearer"}
                 )
 
@@ -87,12 +97,12 @@ async def login(
                 )
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid certificate data",
+                    detail={"code": AuthErrorCode.CERTIFICATE_DATA_MISSING, "message": "Invalid certificate data"},
                     headers={"WWW-Authenticate": "Bearer"}
                 )
 
         # Authenticate with enhanced PKI method
-        user = await AuthService.authenticate_pki(
+        user, auth_error = await AuthService.authenticate_pki(
             session,
             certificate_cn=cn,
             certificate_serial=ssl_serial,
@@ -102,11 +112,21 @@ async def login(
         if not user:
             _logger.warning(
                 f"Failed login attempt from IP: {client_ip}, "
-                f"CN: {cn}, Serial: {ssl_serial}"
+                f"CN: {cn}, Serial: {ssl_serial}, error: {auth_error}"
             )
+
+            error_messages = {
+                AuthErrorCode.CERTIFICATE_NOT_RECOGNIZED: "Certificate not recognized",
+                AuthErrorCode.CERTIFICATE_DATA_MISSING: "Invalid certificate data",
+                AuthErrorCode.ACCOUNT_DEACTIVATED: "Account deactivated",
+                AuthErrorCode.ACCOUNT_DELETED: "Account deleted",
+            }
+            error_code = auth_error or AuthErrorCode.CERTIFICATE_NOT_RECOGNIZED
+            message = error_messages.get(error_code, "Authentication failed")
+
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid certificate credentials",
+                detail={"code": error_code, "message": message},
                 headers={"WWW-Authenticate": "Bearer"}
             )
 
@@ -119,22 +139,17 @@ async def login(
             request_url=str(request.url)
         )
 
-        # Create both access and refresh tokens
-        access_token = AuthService.create_access_token(user.id)
-        refresh_token = AuthService.create_refresh_token(user.id)
+        # Create both access and refresh tokens with session binding
+        access_token = AuthService.create_access_token(user.id, session_id=user_session.id)
+        refresh_token = AuthService.create_refresh_token(user.id, session_id=user_session.id)
 
         _logger.info(
             f"Successful login for user {user.username} from IP: {client_ip}, "
             f"CN: {cn}, Serial: {ssl_serial}"
         )
 
-        return LoginResponse(
-            access_token=access_token,
-            refresh_token=refresh_token,
-            expires_in=settings.security.access_token_expire_minutes * 60,
-            user_id=user.id,
-            username=user.username
-        )
+        auth_context = await load_auth_context(session, user)
+        return build_login_response(auth_context, access_token, refresh_token)
 
     except HTTPException:
         raise
@@ -219,41 +234,68 @@ async def refresh_token(
         if not payload:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid refresh token"
+                detail={"code": AuthErrorCode.INVALID_REFRESH_TOKEN, "message": "Invalid refresh token"}
             )
 
         user_id = int(payload.get("sub"))
+        session_id = payload.get("sid", None)
 
-        # Verify user still exists and is active
+        # Verify user still exists
         from sqlmodel import select
         user_result = await session.exec(
-            select(User).where(
-                User.id == user_id,
-                User.is_active == True,
-                User.is_deleted == False
-            )
+            select(User).where(User.id == user_id)
         )
         user = user_result.first()
 
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User not found or inactive"
+                detail={"code": AuthErrorCode.ACCOUNT_NOT_FOUND, "message": "Account not found"}
             )
 
-        # Create new tokens
-        access_token = AuthService.create_access_token(user.id)
-        new_refresh_token = AuthService.create_refresh_token(user.id)
+        if user.is_deleted:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"code": AuthErrorCode.ACCOUNT_DELETED, "message": "Account deleted"}
+            )
+
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"code": AuthErrorCode.ACCOUNT_DEACTIVATED, "message": "Account deactivated"}
+            )
+
+        # Verify the session is still active (reject if sessions were invalidated)
+        if session_id:
+            session_result = await session.exec(
+                select(UserSession).where(
+                    UserSession.id == session_id,
+                    UserSession.user_id == user_id,
+                    UserSession.is_active == True
+                )
+            )
+            refresh_session = session_result.first()
+            if refresh_session and is_expired(refresh_session.expires_at):
+                refresh_session.is_active = False
+                refresh_session.ended_at = datetime.now(timezone.utc)
+                session.add(refresh_session)
+                await session.commit()
+                refresh_session = None
+            if not refresh_session:
+                _logger.warning(f"Refresh attempt with invalidated or expired session: user_id={user_id}, session_id={session_id}")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail={"code": AuthErrorCode.SESSION_EXPIRED, "message": "Session expired or invalidated"}
+                )
+
+        # Create new tokens bound to the same session
+        access_token = AuthService.create_access_token(user.id, session_id=session_id)
+        new_refresh_token = AuthService.create_refresh_token(user.id, session_id=session_id)
 
         _logger.info(f"Token refreshed for user {user.username}")
 
-        return LoginResponse(
-            access_token=access_token,
-            refresh_token=new_refresh_token,
-            expires_in=settings.security.access_token_expire_minutes * 60,
-            user_id=user.id,
-            username=user.username
-        )
+        auth_context = await load_auth_context(session, user)
+        return build_login_response(auth_context, access_token, new_refresh_token)
 
     except HTTPException:
         raise
@@ -269,10 +311,11 @@ async def refresh_token(
 async def logout(
         request: Request,
         logout_request: LogoutRequest,
-        current_user: User = Depends(get_current_user),
+        auth: AuthContext = Depends(require()),
         session: AsyncSession = Depends(get_session)
 ):
     """Logout user and invalidate session"""
+    current_user = auth.user
     try:
         session_id = getattr(request.state, 'session_id', logout_request.session_id)
 
@@ -313,35 +356,20 @@ async def logout(
 
 @router.get(AuthRoutes.ME.value, response_model=UserInfoResponse)
 async def get_current_user_info(
-        current_user: User = Depends(get_current_user),
+        auth: AuthContext = Depends(require()),
         session: AsyncSession = Depends(get_session)
 ):
     """Get current user information"""
-
-    # Check if user has admin permission
-    is_admin = await PermissionService.has_permission(
-        session,
-        current_user,
-        Permissions.IS_ADMIN.value
-    )
-
-    return UserInfoResponse(
-        id=current_user.id,
-        username=current_user.username,
-        username_alias=current_user.username_alias,
-        post_id=current_user.post_id,
-        is_active=current_user.is_active,
-        is_admin=is_admin,
-        last_login_at=current_user.last_login_at.isoformat() if current_user.last_login_at else None
-    )
+    return build_user_info(auth)
 
 
 @router.get(AuthRoutes.SESSIONS.value, response_model=UserSessionsResponse)
 async def get_user_sessions(
-        current_user: User = Depends(get_current_user),
+        auth: AuthContext = Depends(require()),
         session: AsyncSession = Depends(get_session)
 ):
     """Get current user's active sessions"""
+    current_user = auth.user
     try:
         from sqlmodel import select
         from datetime import datetime, timezone
@@ -397,3 +425,36 @@ async def get_user_sessions(
 #         "ssl_serial": ssl_serial,
 #         "ssl_issuer": ssl_issuer
 #     })
+
+
+@router.post(AuthRoutes.CHECK_PERMISSION.value, response_model=PermissionCheckResponse)
+async def check_permission(
+        check: PermissionCheckRequest,
+        auth: AuthContext = Depends(require())
+):
+    """Evaluate a permission requirement for the current user without calling the guarded route"""
+    result = Require.of(all=check.all, any=check.any, admin=check.admin).evaluate(auth)
+    return PermissionCheckResponse(
+        allowed=result.allowed,
+        missing=list(result.missing),
+        admin_required=result.admin_missing
+    )
+
+
+@router.get(AuthRoutes.ROUTE_ACCESS.value, response_model=RouteAccessResponse)
+async def get_route_access(
+        request: Request,
+        auth: AuthContext = Depends(require())
+):
+    """Routes the current user may call. Generated from route metadata; routes the user cannot call are not listed."""
+    entries = routes_allowed_for(request.app.state.route_access_map, auth)
+    return RouteAccessResponse(routes=[
+        RouteAccessEntryResponse(
+            method=entry.method,
+            path=entry.path,
+            name=entry.name,
+            tags=list(entry.tags),
+            required=RequiredPermissions(**entry.require.as_dict())
+        )
+        for entry in entries
+    ])
