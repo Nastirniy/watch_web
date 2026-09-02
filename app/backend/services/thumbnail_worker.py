@@ -11,7 +11,14 @@ appear in the uploads directory. It:
   3. Updates the database with the thumbnail path
 
 Usage:
-    python -m app.backend.services.thumbnail_worker /path/to/media/file.mp4
+    python -m app.backend.services.thumbnail_worker <stored_filename>
+
+    stored_filename is the unique filename as stored in the DB, e.g.:
+        42_abc123def456.mp4
+
+    The full file path is resolved from the database record and
+    settings.storage.upload_path. Set MYSETTINGS_STORAGE__UPLOAD_PATH to
+    an absolute path in production to avoid CWD-dependent resolution.
 
 Exit codes:
     0 - Thumbnail generated successfully
@@ -37,22 +44,21 @@ MAX_RETRIES = 5
 RETRY_DELAY_SECONDS = 2
 
 
-async def generate_thumbnail_for_file(file_path: str) -> int:
+async def generate_thumbnail_for_file(stored_filename: str) -> int:
     """
     Look up the MediaFile record by stored_filename and generate a thumbnail.
 
-    The file is identified by its stored_filename (unique in DB), not the full
-    path. This avoids issues with relative vs absolute path mismatches.
+    The file is identified by its stored_filename (unique in DB). The full
+    path is resolved via media_file.resolve_path(storage_root) where
+    storage_root comes from settings.storage.upload_path.
 
     Returns:
         0 on success, 1 on error, 2 on skip.
     """
-    source = Path(file_path)
-    if not source.exists() or not source.is_file():
-        _logger.error(f"File not found: {file_path}")
-        return 1
+    # Older watcher versions passed the full systemd-escaped path as the
+    # instance name instead of just the stored filename. Normalize defensively.
+    stored_filename = Path(stored_filename).name
 
-    stored_filename = source.name
     _logger.info(f"Processing: {stored_filename}")
 
     session_maker = await get_session_maker()
@@ -83,28 +89,34 @@ async def generate_thumbnail_for_file(file_path: str) -> int:
         _logger.warning(f"No MediaFile record found for: {stored_filename}")
         return 1
 
-    # Override the relative DB path with the verified absolute path so that
-    # ThumbnailGenerator can find the source file regardless of CWD.
-    media_file.file_path = str(source.resolve())
+    # Resolve storage root from config.
+    # In production set MYSETTINGS_STORAGE__UPLOAD_PATH to an absolute path
+    # so this is CWD-independent.
+    storage_root = Path(settings.storage.upload_path)
+    if not storage_root.is_absolute():
+        storage_root = storage_root.resolve()
+
+    # Verify source file exists before attempting generation
+    source_path = media_file.resolve_path(storage_root)
+    if not source_path.exists() or not source_path.is_file():
+        _logger.error(f"Source file not found: {source_path}")
+        return 1
 
     # Check if thumbnail already exists on disk
     if media_file.thumbnail_path:
-        thumb = Path(media_file.thumbnail_path)
-        if thumb.exists():
+        thumb = media_file.resolve_thumbnail_path(storage_root)
+        if thumb and thumb.exists():
             _logger.info(f"Thumbnail already exists for media {media_file.id}")
             return 2
 
-    # Preparation for status update
     thumbnail_path = None
     error_msg = None
 
-    # Check if media type supports thumbnails
     if media_file.media_type.lower() not in ("image", "video"):
         _logger.info(f"Skipping thumbnail for media type: {media_file.media_type}")
         error_msg = f"Unsupported media type: {media_file.media_type}"
     else:
-        # Generate thumbnail
-        generator = ThumbnailGenerator(settings.storage.thumbnail)
+        generator = ThumbnailGenerator(settings.storage.thumbnail, storage_root)
         _logger.info(
             f"Generating thumbnail for media {media_file.id} "
             f"({media_file.original_filename}, type={media_file.media_type})"
@@ -122,7 +134,6 @@ async def generate_thumbnail_for_file(file_path: str) -> int:
 
     # Update DB
     async with session_maker() as session:
-        # Re-fetch to avoid stale data
         db_file = await session.get(MediaFile, media_file.id)
         if not db_file:
             _logger.error(f"MediaFile {media_file.id} disappeared from DB")
@@ -145,9 +156,9 @@ async def generate_thumbnail_for_file(file_path: str) -> int:
     return 0 if thumbnail_path else 2
 
 
-async def main(file_path: str) -> int:
+async def main(stored_filename: str) -> int:
     try:
-        return await generate_thumbnail_for_file(file_path)
+        return await generate_thumbnail_for_file(stored_filename)
     finally:
         await close_db()
         gc.collect()
@@ -156,7 +167,7 @@ async def main(file_path: str) -> int:
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print(
-            f"Usage: python -m app.backend.services.thumbnail_worker <file_path>",
+            "Usage: python -m app.backend.services.thumbnail_worker <stored_filename>",
             file=sys.stderr,
         )
         sys.exit(1)

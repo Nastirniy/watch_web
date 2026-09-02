@@ -9,6 +9,7 @@ import secrets
 from app.backend.config import settings
 from app.backend.utils.logging_config import get_auth_logger
 from app.backend.models.user import User, UserSession
+from app.backend.enums.general import AuthErrorCode
 from app.backend.helpers.certeficates_helper import (
     validate_pki_certificate_data,
     hash_pki_certificate_data,
@@ -143,13 +144,19 @@ class AuthService:
             certificate_serial: str,
             certificate_fingerprint: str,
             ip_address: Optional[str] = None
-    ) -> Optional[User]:
-        """Authenticate user by PKI certificate with enhanced security"""
+    ) -> tuple[Optional[User], Optional[str]]:
+        """
+        Authenticate user by PKI certificate with enhanced security.
+
+        Returns:
+            (user, None) on success
+            (None, error_code) on failure -- error_code is an AuthErrorCode value
+        """
         try:
             # Validate certificate data format using helper
             if not await validate_pki_certificate_data(certificate_cn, certificate_serial, certificate_fingerprint):
                 _logger.warning("Invalid PKI certificate data provided")
-                return None
+                return None, AuthErrorCode.CERTIFICATE_DATA_MISSING
 
             _logger.debug(
                 f"PKI authentication attempt - CN: {certificate_cn}, "
@@ -175,35 +182,48 @@ class AuthService:
                 details=audit_details
             )
 
-            # Find user with matching hashed PKI credentials
+            # Find user by certificate (without status filters first)
             result = await session.exec(
                 select(User).where(
                     and_(
                         User.pki_certificate_cn_hash == cn_hash,
                         User.pki_certificate_serial_hash == serial_hash,
                         User.pki_certificate_fingerprint_hash == fingerprint_hash,
-                        User.is_active == True,
-                        User.is_deleted == False
                     )
                 )
             )
             user = result.first()
 
-            if user:
-                # Update audit log for success
-                audit.success = True
+            if not user:
+                _logger.warning(f"No user found for certificate CN: {certificate_cn}")
+                await session.commit()
+                return None, AuthErrorCode.CERTIFICATE_NOT_RECOGNIZED
+
+            # Check account status separately for distinct error codes
+            if user.is_deleted:
+                _logger.warning(f"Deleted user attempted login: user_id={user.id}, username={user.username}")
                 audit.user_id = user.id
-                _logger.info(f"Successful PKI authentication for user {user.username}")
-            else:
-                _logger.warning(f"Failed PKI authentication attempt for CN: {certificate_cn}")
+                await session.commit()
+                return None, AuthErrorCode.ACCOUNT_DELETED
+
+            if not user.is_active:
+                _logger.warning(f"Deactivated user attempted login: user_id={user.id}, username={user.username}")
+                audit.user_id = user.id
+                await session.commit()
+                return None, AuthErrorCode.ACCOUNT_DEACTIVATED
+
+            # Success
+            audit.success = True
+            audit.user_id = user.id
+            _logger.info(f"Successful PKI authentication for user {user.username}")
 
             await session.commit()
-            return user
+            return user, None
 
         except Exception as e:
             _logger.error(f"PKI authentication error: {str(e)}")
             await session.rollback()
-            return None
+            return None, None
 
     @staticmethod
     async def invalidate_session(
@@ -249,6 +269,58 @@ class AuthService:
             await session.rollback()
 
         return False
+
+    @staticmethod
+    async def invalidate_all_user_sessions(
+            session: AsyncSession,
+            user_id: int,
+            reason: str = "account_deactivated",
+            actor_user_id: Optional[int] = None,
+            ip_address: Optional[str] = None,
+            user_agent: Optional[str] = None
+    ) -> int:
+        """Invalidate all active sessions for a user (e.g. on deactivation or soft-delete)"""
+        try:
+            result = await session.exec(
+                select(UserSession).where(
+                    UserSession.user_id == user_id,
+                    UserSession.is_active == True
+                )
+            )
+            active_sessions = result.all()
+
+            count = 0
+            now = datetime.now(timezone.utc)
+            for user_session in active_sessions:
+                user_session.is_active = False
+                user_session.ended_at = now
+                session.add(user_session)
+                count += 1
+
+            if count > 0:
+                await create_audit_log(
+                    session=session,
+                    user_id=actor_user_id or user_id,
+                    action="force_logout",
+                    resource_type="session",
+                    resource_id=user_id,
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    details={
+                        "message": f"All {count} active sessions invalidated for user_id={user_id}",
+                        "reason": reason
+                    },
+                    success=True
+                )
+                await session.commit()
+                _logger.info(f"Invalidated {count} active sessions for user_id={user_id}, reason={reason}")
+
+            return count
+
+        except Exception as e:
+            _logger.error(f"Error invalidating all sessions for user_id={user_id}: {str(e)}")
+            await session.rollback()
+            return 0
 
     @staticmethod
     async def cleanup_expired_sessions(session: AsyncSession) -> int:

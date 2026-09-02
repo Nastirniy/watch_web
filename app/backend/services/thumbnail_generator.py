@@ -18,8 +18,9 @@ _logger = get_api_logger()
 class ThumbnailGenerator:
     """Generate thumbnails for images and videos"""
 
-    def __init__(self, settings: ThumbnailSettings):
+    def __init__(self, settings: ThumbnailSettings, storage_path: Path = Path("uploads")):
         self.settings = settings
+        self.storage_path = storage_path.resolve()
         self._executor = ThreadPoolExecutor(max_workers=settings.max_concurrent)
 
     async def generate_thumbnail(
@@ -47,8 +48,8 @@ class ThumbnailGenerator:
             _logger.info(f"Skipping thumbnail for media type: {media_file.media_type}")
             return None
 
-        # Get source file path
-        source_path = Path(media_file.file_path)
+        # Get source file path (resolve relative path against storage root)
+        source_path = media_file.resolve_path(self.storage_path)
         if not source_path.exists():
             _logger.error(f"Source file not found: {source_path}")
             return None
@@ -61,9 +62,10 @@ class ThumbnailGenerator:
         }
         dimensions = size_map.get(size, self.settings.medium_size)
 
-        # Generate output path
-        output_path = self._get_thumbnail_path(media_file, size)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+        # Generate output path: relative for DB storage, absolute for filesystem ops
+        rel_output_path = self._get_thumbnail_path(media_file, size)
+        abs_output_path = self.storage_path / rel_output_path
+        abs_output_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
             # Generate thumbnail based on media type
@@ -72,7 +74,7 @@ class ThumbnailGenerator:
                     self._executor,
                     self._generate_image_thumbnail,
                     source_path,
-                    output_path,
+                    abs_output_path,
                     dimensions
                 )
             elif media_file.media_type.lower() == 'video':
@@ -80,15 +82,15 @@ class ThumbnailGenerator:
                     self._executor,
                     self._generate_video_thumbnail,
                     source_path,
-                    output_path,
+                    abs_output_path,
                     dimensions
                 )
             else:
                 return None
 
             if success:
-                _logger.info(f"Thumbnail generated: {output_path}")
-                return str(output_path)
+                _logger.info(f"Thumbnail generated: {abs_output_path}")
+                return str(rel_output_path)
             else:
                 _logger.error(f"Thumbnail generation failed for {media_file.id}")
                 return None

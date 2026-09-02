@@ -95,27 +95,27 @@ class MediaManager:
                  enable_deduplication: bool = True,
                  _max_concurrent_uploads: int = 10,
                  nginx_symlink_path: Optional[str] = None,
-                 enable_nginx_streaming: bool = True):
+                 enable_nginx: bool = False):
         self.storage_path = Path(storage_path)
         self.temp_path = Path(temp_path)
         self.use_filesystem_cache = use_filesystem_cache
         self.auto_cleanup = auto_cleanup
         self.enable_deduplication = enable_deduplication
         self.nginx_symlink_path = Path(nginx_symlink_path) if nginx_symlink_path else None
-        self.enable_nginx_streaming = enable_nginx_streaming
+        self.enable_nginx = enable_nginx
 
         # Ensure directories exist with proper permissions
         for path in [self.storage_path, self.temp_path]:
             path.mkdir(parents=True, exist_ok=True, mode=0o755)
 
         # Create Nginx symlink directory if enabled
-        if self.enable_nginx_streaming and self.nginx_symlink_path:
+        if self.enable_nginx and self.nginx_symlink_path:
             try:
                 self.nginx_symlink_path.mkdir(parents=True, exist_ok=True, mode=0o755)
                 _logger.info(f"Nginx symlink directory initialized at: {self.nginx_symlink_path}")
             except Exception as e:
                 _logger.error(f"Failed to create Nginx symlink directory: {e}")
-                self.enable_nginx_streaming = False
+                self.enable_nginx = False
 
         # Rate limiting and concurrency control
         self._upload_sessions: Dict[str, datetime] = {}
@@ -373,7 +373,7 @@ class MediaManager:
                 user_id=user_id,
                 original_filename=safe_filename,
                 stored_filename=temp_stored_filename,
-                file_path=str(organized_dir / temp_stored_filename),
+                file_path=str((organized_dir / temp_stored_filename).relative_to(self.storage_path)),
                 file_size=file_size,
                 mime_type=mime_type,
                 file_extension=file_extension,
@@ -399,12 +399,18 @@ class MediaManager:
 
             # Update media file with final filename
             media_file.stored_filename = stored_filename
-            media_file.file_path = str(full_file_path)
+            media_file.file_path = str(full_file_path.relative_to(self.storage_path))
             await session.commit()
             await session.refresh(media_file)
 
-            # Save file to filesystem
-            await self._create_filesystem_backup(media_file.id, file_data, organized_dir, stored_filename)
+            # Save file to filesystem — if this fails, delete the DB record
+            try:
+                await self._create_filesystem_backup(media_file.id, file_data, organized_dir, stored_filename)
+            except Exception as e:
+                _logger.error(f"File write failed for media_file {media_file.id}, rolling back DB record: {e}")
+                await session.delete(media_file)
+                await session.commit()
+                raise ValueError(f"Failed to store file on filesystem: {e}") from e
 
             # Update deduplication cache
             if self.enable_deduplication:
@@ -418,34 +424,33 @@ class MediaManager:
             self._active_uploads.discard(upload_session_id)
 
     async def _check_for_duplicate(self, session: AsyncSession, file_hash: str, observation_id: int) -> Optional[int]:
-        """Check if file already exists based on hash"""
-        # Check cache first
+        """Check if file already exists based on hash and confirm the file is on disk."""
+        # Invalidate cache entry if present
         if file_hash in self._hash_cache:
-            # Verify the file still exists in database
-            media_query = select(MediaFile).where(
-                MediaFile.id == self._hash_cache[file_hash],
-                MediaFile.observation_id == observation_id
-            )
-            result = await session.exec(media_query)
-            if result.first():
-                return self._hash_cache[file_hash]
-            else:
-                # Remove stale cache entry
-                del self._hash_cache[file_hash]
+            del self._hash_cache[file_hash]
 
         # Check database
         duplicate_query = select(MediaFile).where(
             MediaFile.file_hash == file_hash,
-            MediaFile.observation_id == observation_id
+            MediaFile.observation_id == observation_id,
+            MediaFile.is_deleted == False
         )
         result = await session.exec(duplicate_query)
         duplicate = result.first()
 
-        if duplicate and hasattr(duplicate, 'id'):
-            self._hash_cache[file_hash] = duplicate.id
-            return duplicate.id
+        if not duplicate:
+            return None
 
-        return None
+        # Confirm the file physically exists — a DB record without a file is not a usable duplicate
+        if not duplicate.resolve_path(self.storage_path).exists():
+            _logger.warning(
+                f"Duplicate hash {file_hash} found in DB (media {duplicate.id}) "
+                f"but file is missing on disk — ignoring as duplicate"
+            )
+            return None
+
+        self._hash_cache[file_hash] = duplicate.id
+        return duplicate.id
 
     async def _get_organized_path(self, session: AsyncSession, observation_id: int, observed_at: str = None) -> Path:
         """Generate organized directory path based on date and observation info"""
@@ -470,23 +475,13 @@ class MediaManager:
                                       file_data: bytes,
                                       organized_dir: Path,
                                       stored_filename: str):
-        """Save file to filesystem with async I/O"""
-        try:
-            await aiofiles.os.makedirs(organized_dir, exist_ok=True)
-
-            file_path = organized_dir / stored_filename
-
-            # Use async file I/O for better performance
-            async with aiofiles.open(file_path, 'wb') as f:
-                await f.write(file_data)
-
-            # Set secure file permissions
-            os.chmod(file_path, 0o644)
-
-            _logger.debug(f"Saved file to filesystem: {file_path}")
-
-        except Exception as e:
-            _logger.error(f"Failed to save file for media_file {media_file_id}: {e}")
+        """Save file to filesystem with async I/O. Raises on failure so the caller can roll back the DB record."""
+        await aiofiles.os.makedirs(organized_dir, exist_ok=True)
+        file_path = organized_dir / stored_filename
+        async with aiofiles.open(file_path, 'wb') as f:
+            await f.write(file_data)
+        os.chmod(file_path, 0o644)
+        _logger.debug(f"Saved file to filesystem: {file_path}")
 
     async def retrieve_file(self, session: AsyncSession, media_file_id: int,
                           validate_integrity: bool = True) -> Optional[bytes]:
@@ -507,7 +502,7 @@ class MediaManager:
                                       validate_integrity: bool = True) -> Optional[bytes]:
         """Retrieve file from filesystem with async I/O"""
         try:
-            file_path = Path(media_file.file_path)
+            file_path = media_file.resolve_path(self.storage_path)
 
             if file_path.exists() and file_path.is_file():
                 # Use async file I/O
@@ -558,7 +553,7 @@ class MediaManager:
         hash_matches = False
         issues = []
 
-        file_path = Path(media_file.file_path)
+        file_path = media_file.resolve_path(self.storage_path)
         filesystem_exists = file_path.exists() and file_path.is_file()
 
         if filesystem_exists:
@@ -643,7 +638,7 @@ class MediaManager:
 
                 # Delete filesystem file if exists
                 try:
-                    file_path = Path(media_file.file_path)
+                    file_path = media_file.resolve_path(self.storage_path)
                     if file_path.exists():
                         file_path.unlink()
                         fs_cleaned += 1
@@ -688,14 +683,14 @@ class MediaManager:
 
     async def create_nginx_symlink(self, media_file: MediaFile) -> bool:
         """Create symlink in Nginx directory for video files"""
-        if not self.enable_nginx_streaming or not self.nginx_symlink_path:
+        if not self.enable_nginx or not self.nginx_symlink_path:
             return False
 
         if media_file.media_type.lower() != 'video':
             return False
 
         try:
-            source_path = Path(media_file.file_path)
+            source_path = media_file.resolve_path(self.storage_path)
             if not source_path.exists() or not source_path.is_file():
                 _logger.warning(f"Source file not found for symlink: {source_path}")
                 return False
@@ -722,7 +717,7 @@ class MediaManager:
 
     async def delete_nginx_symlink(self, media_file: MediaFile) -> bool:
         """Delete symlink from Nginx directory"""
-        if not self.enable_nginx_streaming or not self.nginx_symlink_path:
+        if not self.enable_nginx or not self.nginx_symlink_path:
             return False
 
         if media_file.media_type.lower() != 'video':
@@ -745,7 +740,7 @@ class MediaManager:
 
     def get_nginx_symlink_path(self, media_file: MediaFile) -> Optional[str]:
         """Get the path to the Nginx symlink for X-Accel-Redirect"""
-        if not self.enable_nginx_streaming or not self.nginx_symlink_path:
+        if not self.enable_nginx or not self.nginx_symlink_path:
             return None
 
         if media_file.media_type.lower() != 'video':
@@ -755,7 +750,7 @@ class MediaManager:
 
     async def cleanup_orphaned_symlinks(self) -> int:
         """Clean up broken symlinks in Nginx directory"""
-        if not self.enable_nginx_streaming or not self.nginx_symlink_path:
+        if not self.enable_nginx or not self.nginx_symlink_path:
             return 0
 
         if not self.nginx_symlink_path.exists():
@@ -896,7 +891,7 @@ class MediaManager:
                 user_id=user_id,
                 original_filename=safe_filename,
                 stored_filename=temp_stored_filename,
-                file_path=str(organized_dir / temp_stored_filename),
+                file_path=str((organized_dir / temp_stored_filename).relative_to(self.storage_path)),
                 file_size=file_size,
                 mime_type=mime_type,
                 file_extension=file_ext,
@@ -914,12 +909,18 @@ class MediaManager:
             full_file_path = organized_dir / stored_filename
 
             media_file.stored_filename = stored_filename
-            media_file.file_path = str(full_file_path)
+            media_file.file_path = str(full_file_path.relative_to(self.storage_path))
             await session.commit()
             await session.refresh(media_file)
 
-            # -- Move file from Nginx temp to final storage --
-            await self._move_file_to_storage(source, full_file_path)
+            # -- Move file from Nginx temp to final storage — if this fails, delete the DB record --
+            try:
+                await self._move_file_to_storage(source, full_file_path)
+            except Exception as e:
+                _logger.error(f"File move failed for media_file {media_file.id}, rolling back DB record: {e}")
+                await session.delete(media_file)
+                await session.commit()
+                raise ValueError(f"Failed to move file to storage: {e}") from e
 
             if self.enable_deduplication:
                 self._hash_cache[file_hash] = media_file.id
