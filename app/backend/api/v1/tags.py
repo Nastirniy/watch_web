@@ -1,9 +1,7 @@
 from typing import List, Annotated
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request, Query
-from loguru import logger
 from sqlalchemy import func
-from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -48,7 +46,7 @@ async def list_tags(
 @router.post(
     TagRoutes.CREATE.value,
     response_model=TagResponse,
-    responses=problems(ErrorCode.TAG_NAME_TAKEN, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN),
+    responses=problems(ErrorCode.TAG_NAME_TAKEN, *ADMIN),
 )
 async def create_tag(
         request: Request,
@@ -81,29 +79,24 @@ async def create_tag(
 
     session.add(tag)
 
-    try:
-        await session.commit()
-        await session.refresh(tag)
+    await session.commit()
+    await session.refresh(tag)
 
-        # Create audit log
-        await create_audit_log(
-            session=session,
-            action=action,
-            resource_type="tag",
-            resource_id=tag.id,
-            user_id=current_user.id,
-            old_values=old_values,
-            new_values=tag.model_dump(),
-            details={"message": f"User {current_user.username} {action}d tag '{tag.name}'"},
-            **client_info(request, auth)
-        )
-        await session.commit()
+    # Create audit log
+    await create_audit_log(
+        session=session,
+        action=action,
+        resource_type="tag",
+        resource_id=tag.id,
+        user_id=current_user.id,
+        old_values=old_values,
+        new_values=tag.model_dump(),
+        details={"message": f"User {current_user.username} {action}d tag '{tag.name}'"},
+        **client_info(request, auth)
+    )
+    await session.commit()
 
-        return TagResponse.model_validate(tag)
-    except IntegrityError as e:
-        await session.rollback()
-        logger.exception(f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}")
-        raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
+    return TagResponse.model_validate(tag)
 
 
 @router.get(
@@ -135,7 +128,7 @@ async def get_tag(
     response_model=TagResponse,
     responses=problems(
         ErrorCode.TAG_NAME_ARCHIVED, ErrorCode.TAG_NAME_TAKEN, ErrorCode.TAG_NOT_FOUND,
-        ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,
+        *ADMIN,
     ),
 )
 async def update_tag(
@@ -179,29 +172,24 @@ async def update_tag(
 
     session.add(tag)
 
-    try:
-        await session.commit()
-        await session.refresh(tag)
+    await session.commit()
+    await session.refresh(tag)
 
-        # Create audit log
-        await create_audit_log(
-            session=session,
-            action="update",
-            resource_type="tag",
-            resource_id=tag.id,
-            user_id=current_user.id,
-            old_values=old_values,
-            new_values=tag.model_dump(),
-            details={"message": f"User {current_user.username} updated tag '{tag.name}'"},
-            **client_info(request, auth)
-        )
-        await session.commit()
+    # Create audit log
+    await create_audit_log(
+        session=session,
+        action="update",
+        resource_type="tag",
+        resource_id=tag.id,
+        user_id=current_user.id,
+        old_values=old_values,
+        new_values=tag.model_dump(),
+        details={"message": f"User {current_user.username} updated tag '{tag.name}'"},
+        **client_info(request, auth)
+    )
+    await session.commit()
 
-        return TagResponse.model_validate(tag)
-    except IntegrityError as e:
-        await session.rollback()
-        logger.exception(f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}")
-        raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
+    return TagResponse.model_validate(tag)
 
 
 @router.post(

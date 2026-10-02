@@ -69,6 +69,16 @@ def upgrade() -> None:
 
     storage_root = Path(settings.storage.upload_path).resolve()
 
+    # thumbnail_path is gone (006) in a table built from the current models (create_all, no alembic_version)
+    columns = {c["name"] for c in sa.inspect(bind).get_columns("media_files")}
+    if "thumbnail_path" not in columns:
+        rows = bind.execute(text("SELECT id, file_path FROM media_files")).fetchall()
+        for row in rows:
+            new_file_path = _to_relative(row.file_path, storage_root)
+            if new_file_path != row.file_path:
+                bind.execute(text("UPDATE media_files SET file_path = :fp WHERE id = :id"), {"fp": new_file_path, "id": row.id})
+        return
+
     rows = bind.execute(text("SELECT id, file_path, thumbnail_path FROM media_files")).fetchall()
 
     for row in rows:

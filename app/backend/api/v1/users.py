@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError, DataError
 from sqlmodel import select, desc
 from datetime import datetime, timezone
 
+from app.backend.api.shared.helpers.db_errors import is_data_too_long, is_unique_violation
 from app.backend.database import get_session
 from app.backend.models.user import User
 from app.backend.models.role import Role, UserRole
@@ -42,11 +43,6 @@ def _username_taken(username: str, exclude_user_id: Optional[int] = None):
     if exclude_user_id is not None:
         query = query.where(User.id != exclude_user_id)
     return query
-
-
-def _is_unique_violation(error_msg: str) -> bool:
-    # MySQL: "Duplicate entry ... for key ...", sqlite: "UNIQUE constraint failed: ..."
-    return "Duplicate entry" in error_msg or "UNIQUE constraint failed" in error_msg or "already exists" in error_msg
 
 
 @router.get(
@@ -89,7 +85,7 @@ async def list_users(
         ErrorCode.CERTIFICATE_FILE_EMPTY, ErrorCode.CERTIFICATE_INVALID, ErrorCode.CERTIFICATE_TAKEN,
         ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, ErrorCode.USERNAME_OR_CERTIFICATE_TAKEN, ErrorCode.USERNAME_TAKEN,
         ErrorCode.POST_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.CERTIFICATE_FILE_TOO_LARGE,
-        ErrorCode.DATA_TOO_LONG, ErrorCode.DATABASE_ERROR, *ADMIN,
+        ErrorCode.DATA_TOO_LONG, *ADMIN,
     ),
 )
 async def create_user(
@@ -226,14 +222,11 @@ async def create_user(
         )
     except (IntegrityError, DataError) as e:
         await session.rollback()
-        error_msg = str(e)
-        if "Data too long" in error_msg:
+        if is_data_too_long(e):
             raise ApiError(ErrorCode.DATA_TOO_LONG)
-        elif _is_unique_violation(error_msg):
+        if isinstance(e, IntegrityError) and is_unique_violation(e):
             raise ApiError(ErrorCode.USERNAME_OR_CERTIFICATE_TAKEN)
-        else:
-            _logger.error(f"Error creating user: {error_msg}")
-            raise ApiError(ErrorCode.DATABASE_ERROR)
+        raise
 
 
 @router.get(
@@ -270,7 +263,7 @@ async def get_user(
         ErrorCode.CERTIFICATE_TAKEN, ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, ErrorCode.USERNAME_TAKEN,
         ErrorCode.POST_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.USER_NOT_FOUND,
         ErrorCode.CERTIFICATE_FILE_TOO_LARGE, ErrorCode.FORM_CONTENT_TYPE_REQUIRED,
-        ErrorCode.DATABASE_ERROR, *ADMIN,
+        *ADMIN,
     ),
 )
 async def update_user(
@@ -468,17 +461,13 @@ async def update_user(
 
         return UserResponse.model_validate(user)
 
-    except (IntegrityError, DataError) as e:
+    except IntegrityError as e:
         await session.rollback()
-        error_msg = str(e)
-        if _is_unique_violation(error_msg):
-            # A concurrent request took the username or the certificate after the checks above
-            # e.orig holds only the database message; str(e) also carries the SQL, which names every column
-            code = ErrorCode.USERNAME_TAKEN if "username" in str(getattr(e, "orig", e)) else ErrorCode.CERTIFICATE_TAKEN
-            raise ApiError(code)
-        else:
-            _logger.error(f"Error updating user: {error_msg}")
-            raise ApiError(ErrorCode.DATABASE_ERROR)
+        if not is_unique_violation(e):
+            raise
+        # A concurrent request took the username or the certificate after the checks above
+        # e.orig holds only the database message; str(e) also carries the SQL, which names every column
+        raise ApiError(ErrorCode.USERNAME_TAKEN if "username" in str(e.orig) else ErrorCode.CERTIFICATE_TAKEN)
 
 
 # UserRole Management Routes

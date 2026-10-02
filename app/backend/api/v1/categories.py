@@ -1,8 +1,6 @@
 from typing import List, Annotated
 from fastapi import APIRouter, Depends, Request, Query
-from loguru import logger
 from sqlalchemy import func
-from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -48,7 +46,7 @@ async def list_categories(
 @router.post(
     CategoryRoutes.CREATE.value,
     response_model=CategoryResponse,
-    responses=problems(ErrorCode.CATEGORY_NAME_TAKEN, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN),
+    responses=problems(ErrorCode.CATEGORY_NAME_TAKEN, *ADMIN),
 )
 async def create_category(
         request: Request,
@@ -84,29 +82,24 @@ async def create_category(
 
     session.add(category)
 
-    try:
-        await session.commit()
-        await session.refresh(category)
+    await session.commit()
+    await session.refresh(category)
 
-        # Create audit log
-        await create_audit_log(
-            session=session,
-            action=action,
-            resource_type="category",
-            resource_id=category.id,
-            user_id=current_user.id,
-            old_values=old_values,
-            new_values=category.model_dump(),
-            details={"message": f"User {current_user.username} {action}d category '{category.name}'"},
-            **client_info(request, auth)
-        )
-        await session.commit()
+    # Create audit log
+    await create_audit_log(
+        session=session,
+        action=action,
+        resource_type="category",
+        resource_id=category.id,
+        user_id=current_user.id,
+        old_values=old_values,
+        new_values=category.model_dump(),
+        details={"message": f"User {current_user.username} {action}d category '{category.name}'"},
+        **client_info(request, auth)
+    )
+    await session.commit()
 
-        return category
-    except IntegrityError as e:
-        await session.rollback()
-        logger.exception(f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}")
-        raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
+    return category
 
 
 @router.get(
@@ -138,7 +131,7 @@ async def get_category(
     response_model=CategoryResponse,
     responses=problems(
         ErrorCode.CATEGORY_NAME_ARCHIVED, ErrorCode.CATEGORY_NAME_TAKEN, ErrorCode.CATEGORY_NOT_FOUND,
-        ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,
+        *ADMIN,
     ),
 )
 async def update_category(
@@ -182,29 +175,24 @@ async def update_category(
 
     session.add(category)
 
-    try:
-        await session.commit()
-        await session.refresh(category)
+    await session.commit()
+    await session.refresh(category)
 
-        # Create audit log
-        await create_audit_log(
-            session=session,
-            action="update",
-            resource_type="category",
-            resource_id=category.id,
-            user_id=current_user.id,
-            old_values=old_values,
-            new_values=category.model_dump(),
-            details={"message": f"User {current_user.username} updated category '{category.name}'"},
-            **client_info(request, auth)
-        )
-        await session.commit()
+    # Create audit log
+    await create_audit_log(
+        session=session,
+        action="update",
+        resource_type="category",
+        resource_id=category.id,
+        user_id=current_user.id,
+        old_values=old_values,
+        new_values=category.model_dump(),
+        details={"message": f"User {current_user.username} updated category '{category.name}'"},
+        **client_info(request, auth)
+    )
+    await session.commit()
 
-        return category
-    except IntegrityError as e:
-        await session.rollback()
-        logger.exception(f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}")
-        raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
+    return category
 
 
 @router.post(

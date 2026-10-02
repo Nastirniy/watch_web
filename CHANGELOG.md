@@ -28,11 +28,26 @@ could act on. Those clauses are gone or catch only the failure they are about; t
   the user's sessions failed (the user is archived either way; a session left live is ended the first time its
   token is used).
 - `/search/*`: a failure to write the search audit entry fails the request (500) instead of being only logged.
+- `database_constraint_violation` and `database_error` are gone (create / update of categories, signal types, tags,
+  observations, media formats and users): an unexpected database error is 500 `internal_error` with its `error_id`.
+  The status was 500 before too; only the code changes. Known constraints keep their codes:
+  `username_or_certificate_taken`, `username_taken`, `certificate_taken`, `post_code_taken`, `data_too_long`.
+- `post_code_taken` answers only when the unique index on the code refused the row; any other constraint failure of
+  a post write was reported as "code taken" and is now 500.
 
 ### Backend
 
 - Startup: a failing Alembic migration stops the startup. The `create_all` fallback, which created the missing tables
-  and left the schema half migrated, is gone. Seeding stops when the admin PKI credentials cannot be generated
+  and left the schema half migrated, is gone. It hid a real failure: `alembic.ini` resolved `script_location` and
+  `prepend_sys_path` against the working directory, so a start from `app/` (the IDE run configuration) never ran a
+  migration and got its tables from `create_all`. Both are now relative to `alembic.ini` (`%(here)s`) with
+  `path_separator = os` (the legacy split on `:` cut `E:\...` in two). The first start after this applies every
+  migration such a database missed, the data migrations included (`007` HTML entities, `010` permission renames).
+  `001` no longer reads `media_files.thumbnail_path` when the table has no such column (built by `create_all` from
+  the current models).
+- Unique and length violations are recognised by the driver's error number (`api/shared/helpers/db_errors.py`:
+  MySQL 1062 / 1406, sqlite message) instead of `str(exc)`, which carries the SQL and its parameters and depends on
+  the server's message language. Seeding stops when the admin PKI credentials cannot be generated
   instead of silently skipping the admin user.
 - Best-effort blocks catch only their own failure: `OSError` in the media manager (integrity check, cleanup,
   storage statistics), `ImportError` / `RuntimeError` for the optional `imageio_ffmpeg`,

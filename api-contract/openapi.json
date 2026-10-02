@@ -1188,25 +1188,11 @@
             }
           },
           "500": {
-            "description": "`database_error`: Database error occurred; `internal_error`: Internal server error",
+            "description": "`internal_error`: Internal server error",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/DatabaseErrorProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InternalErrorProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "database_error": "#/components/schemas/DatabaseErrorProblem",
-                      "internal_error": "#/components/schemas/InternalErrorProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/InternalErrorProblem"
                 }
               }
             }
@@ -1554,25 +1540,11 @@
             }
           },
           "500": {
-            "description": "`database_error`: Database error occurred; `internal_error`: Internal server error",
+            "description": "`internal_error`: Internal server error",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/DatabaseErrorProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InternalErrorProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "database_error": "#/components/schemas/DatabaseErrorProblem",
-                      "internal_error": "#/components/schemas/InternalErrorProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/InternalErrorProblem"
                 }
               }
             }
@@ -4746,25 +4718,11 @@
             }
           },
           "500": {
-            "description": "`database_constraint_violation`: Unexpected database constraint violation; `internal_error`: Internal server error",
+            "description": "`internal_error`: Internal server error",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/DatabaseConstraintViolationProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InternalErrorProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "database_constraint_violation": "#/components/schemas/DatabaseConstraintViolationProblem",
-                      "internal_error": "#/components/schemas/InternalErrorProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/InternalErrorProblem"
                 }
               }
             }
@@ -5021,25 +4979,11 @@
             }
           },
           "500": {
-            "description": "`database_constraint_violation`: Unexpected database constraint violation; `internal_error`: Internal server error",
+            "description": "`internal_error`: Internal server error",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/DatabaseConstraintViolationProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InternalErrorProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "database_constraint_violation": "#/components/schemas/DatabaseConstraintViolationProblem",
-                      "internal_error": "#/components/schemas/InternalErrorProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/InternalErrorProblem"
                 }
               }
             }
@@ -6024,25 +5968,11 @@
             }
           },
           "500": {
-            "description": "`database_constraint_violation`: Unexpected database constraint violation; `internal_error`: Internal server error",
+            "description": "`internal_error`: Internal server error",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/DatabaseConstraintViolationProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InternalErrorProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "database_constraint_violation": "#/components/schemas/DatabaseConstraintViolationProblem",
-                      "internal_error": "#/components/schemas/InternalErrorProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/InternalErrorProblem"
                 }
               }
             }
@@ -6309,25 +6239,11 @@
             }
           },
           "500": {
-            "description": "`database_constraint_violation`: Unexpected database constraint violation; `internal_error`: Internal server error",
+            "description": "`internal_error`: Internal server error",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/DatabaseConstraintViolationProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InternalErrorProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "database_constraint_violation": "#/components/schemas/DatabaseConstraintViolationProblem",
-                      "internal_error": "#/components/schemas/InternalErrorProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/InternalErrorProblem"
                 }
               }
             }
@@ -7052,25 +6968,11 @@
             }
           },
           "500": {
-            "description": "`database_constraint_violation`: Unexpected database constraint violation; `internal_error`: Internal server error",
+            "description": "`internal_error`: Internal server error",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/DatabaseConstraintViolationProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InternalErrorProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "database_constraint_violation": "#/components/schemas/DatabaseConstraintViolationProblem",
-                      "internal_error": "#/components/schemas/InternalErrorProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/InternalErrorProblem"
                 }
               }
             }
@@ -7327,25 +7229,11 @@
             }
           },
           "500": {
-            "description": "`database_constraint_violation`: Unexpected database constraint violation; `internal_error`: Internal server error",
+            "description": "`internal_error`: Internal server error",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/DatabaseConstraintViolationProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InternalErrorProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "database_constraint_violation": "#/components/schemas/DatabaseConstraintViolationProblem",
-                      "internal_error": "#/components/schemas/InternalErrorProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/InternalErrorProblem"
                 }
               }
             }
@@ -8408,25 +8296,11 @@
             }
           },
           "500": {
-            "description": "`database_constraint_violation`: Unexpected database constraint violation; `internal_error`: Internal server error",
+            "description": "`internal_error`: Internal server error",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/DatabaseConstraintViolationProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InternalErrorProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "database_constraint_violation": "#/components/schemas/DatabaseConstraintViolationProblem",
-                      "internal_error": "#/components/schemas/InternalErrorProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/InternalErrorProblem"
                 }
               }
             }
@@ -8605,25 +8479,11 @@
             }
           },
           "500": {
-            "description": "`database_constraint_violation`: Unexpected database constraint violation; `internal_error`: Internal server error",
+            "description": "`internal_error`: Internal server error",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/DatabaseConstraintViolationProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InternalErrorProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "database_constraint_violation": "#/components/schemas/DatabaseConstraintViolationProblem",
-                      "internal_error": "#/components/schemas/InternalErrorProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/InternalErrorProblem"
                 }
               }
             }
@@ -16123,25 +15983,11 @@
             }
           },
           "500": {
-            "description": "`database_constraint_violation`: Unexpected database constraint violation; `internal_error`: Internal server error",
+            "description": "`internal_error`: Internal server error",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/DatabaseConstraintViolationProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InternalErrorProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "database_constraint_violation": "#/components/schemas/DatabaseConstraintViolationProblem",
-                      "internal_error": "#/components/schemas/InternalErrorProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/InternalErrorProblem"
                 }
               }
             }
@@ -16422,25 +16268,11 @@
             }
           },
           "500": {
-            "description": "`database_constraint_violation`: Unexpected database constraint violation; `internal_error`: Internal server error",
+            "description": "`internal_error`: Internal server error",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/DatabaseConstraintViolationProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InternalErrorProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "database_constraint_violation": "#/components/schemas/DatabaseConstraintViolationProblem",
-                      "internal_error": "#/components/schemas/InternalErrorProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/InternalErrorProblem"
                 }
               }
             }
@@ -22057,132 +21889,6 @@
             "status": 422,
             "title": "Data too long for one or more fields",
             "type": "https://example.org/problems/data_too_long"
-          }
-        ]
-      },
-      "DatabaseConstraintViolationProblem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "title": "Type",
-            "description": "URI of the problem type; dereference it for its documentation"
-          },
-          "title": {
-            "type": "string",
-            "const": "Unexpected database constraint violation",
-            "title": "Title",
-            "description": "Summary of the problem type"
-          },
-          "status": {
-            "type": "integer",
-            "const": 500,
-            "title": "Status",
-            "description": "HTTP status code"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "Explanation of this occurrence",
-            "examples": [
-              "Unexpected database constraint violation"
-            ]
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "description": "Path of the request that failed"
-          },
-          "code": {
-            "type": "string",
-            "const": "database_constraint_violation",
-            "title": "Code",
-            "description": "Key of exactly this problem in the localization package"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "code"
-        ],
-        "title": "DatabaseConstraintViolationProblem",
-        "description": "Unexpected database constraint violation (HTTP 500). Problem type database_constraint_violation.",
-        "examples": [
-          {
-            "code": "database_constraint_violation",
-            "detail": "Unexpected database constraint violation",
-            "instance": "/api/v1/...",
-            "status": 500,
-            "title": "Unexpected database constraint violation",
-            "type": "https://example.org/problems/database_constraint_violation"
-          }
-        ]
-      },
-      "DatabaseErrorProblem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "title": "Type",
-            "description": "URI of the problem type; dereference it for its documentation"
-          },
-          "title": {
-            "type": "string",
-            "const": "Database error occurred",
-            "title": "Title",
-            "description": "Summary of the problem type"
-          },
-          "status": {
-            "type": "integer",
-            "const": 500,
-            "title": "Status",
-            "description": "HTTP status code"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "Explanation of this occurrence",
-            "examples": [
-              "Database error occurred"
-            ]
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "description": "Path of the request that failed"
-          },
-          "code": {
-            "type": "string",
-            "const": "database_error",
-            "title": "Code",
-            "description": "Key of exactly this problem in the localization package"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "code"
-        ],
-        "title": "DatabaseErrorProblem",
-        "description": "Database error occurred (HTTP 500). Problem type database_error.",
-        "examples": [
-          {
-            "code": "database_error",
-            "detail": "Database error occurred",
-            "instance": "/api/v1/...",
-            "status": 500,
-            "title": "Database error occurred",
-            "type": "https://example.org/problems/database_error"
           }
         ]
       },

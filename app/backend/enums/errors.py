@@ -156,8 +156,6 @@ class ErrorCode(ProblemType):
     BODY_PARSE_ERROR = ("body_parse_error", problem(400, "The request body could not be parsed"))
     INTERNAL_ERROR = ("internal_error", problem(
         500, "Internal server error", "Internal server error; quote {error_id} when reporting it", error_id=str))
-    DATABASE_CONSTRAINT_VIOLATION = ("database_constraint_violation", problem(500, "Unexpected database constraint violation"))
-    DATABASE_ERROR = ("database_error", problem(500, "Database error occurred"))
     DATA_TOO_LONG = ("data_too_long", problem(422, "Data too long for one or more fields"))
     FORM_CONTENT_TYPE_REQUIRED = ("form_content_type_required", problem(
         415, "Form fields required",

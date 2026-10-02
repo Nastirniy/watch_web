@@ -6,6 +6,7 @@ from sqlmodel import select
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
+from app.backend.api.shared.helpers.db_errors import is_unique_violation
 from app.backend.database import get_session
 from app.backend.models.post import Post
 from app.backend.services.auth_context import AuthContext
@@ -39,9 +40,11 @@ async def _commit_post(session: AsyncSession) -> None:
     """Commit a post write; a code taken by a concurrent request after the check hits the unique index"""
     try:
         await session.commit()
-    except IntegrityError:
+    except IntegrityError as e:
         await session.rollback()
-        raise ApiError(ErrorCode.POST_CODE_TAKEN)
+        if is_unique_violation(e):  # code is the only unique index of posts
+            raise ApiError(ErrorCode.POST_CODE_TAKEN)
+        raise
 
 
 @router.get(PostRoutes.ROOT.value, response_model=List[PostResponse], responses=problems(*GUARDED))

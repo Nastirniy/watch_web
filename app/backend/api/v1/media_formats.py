@@ -12,8 +12,6 @@ pick the change up within REGISTRY_CACHE_TTL_SECONDS.
 from typing import List, Optional, Annotated
 
 from fastapi import APIRouter, Depends, Request, Query
-from loguru import logger
-from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -97,7 +95,7 @@ async def list_media_formats(
     responses=problems(
         ErrorCode.MEDIA_FORMAT_CONTENT_TYPE_CLASH, ErrorCode.MEDIA_FORMAT_EXISTS,
         ErrorCode.MEDIA_FORMAT_EXTENSION_CLASH, ErrorCode.MEDIA_FORMAT_SIZE_ABOVE_CEILING,
-        ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,
+        *ADMIN,
     ),
 )
 async def create_media_format(
@@ -130,13 +128,8 @@ async def create_media_format(
         action = "create"
 
     session.add(row)
-    try:
-        await session.commit()
-        await session.refresh(row)
-    except IntegrityError as e:
-        await session.rollback()
-        logger.exception(f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}")
-        raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
+    await session.commit()
+    await session.refresh(row)
     invalidate_registry_cache()
 
     await create_audit_log(
@@ -171,7 +164,7 @@ async def get_media_format(
         ErrorCode.MEDIA_FORMAT_CONTENT_TYPE_CLASH, ErrorCode.MEDIA_FORMAT_CONTENT_TYPE_MISMATCH,
         ErrorCode.MEDIA_FORMAT_EXISTS, ErrorCode.MEDIA_FORMAT_EXTENSION_CLASH, ErrorCode.MEDIA_FORMAT_NO_FIELDS,
         ErrorCode.MEDIA_FORMAT_SIZE_ABOVE_CEILING, ErrorCode.MEDIA_FORMAT_NOT_FOUND,
-        ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,
+        *ADMIN,
     ),
 )
 async def update_media_format(
@@ -210,13 +203,8 @@ async def update_media_format(
         setattr(row, field_name, value)
     row.updated_at = get_default_timezone_datetime()
     session.add(row)
-    try:
-        await session.commit()
-        await session.refresh(row)
-    except IntegrityError as e:
-        await session.rollback()
-        logger.exception(f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}")
-        raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
+    await session.commit()
+    await session.refresh(row)
     invalidate_registry_cache()
 
     await create_audit_log(

@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request, Query
 from fastapi.responses import Response
 from loguru import logger
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from sqlalchemy import or_
 from sqlmodel import select
@@ -139,7 +138,7 @@ async def list_observations(
     responses=problems(
         ErrorCode.SIGNAL_TYPE_INACTIVE, AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED,
         AccessErrorCode.POST_WRITE_DENIED, ErrorCode.POST_NOT_FOUND, ErrorCode.SIGNAL_TYPE_NOT_FOUND,
-        ErrorCode.TAGS_NOT_FOUND, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *GUARDED,
+        ErrorCode.TAGS_NOT_FOUND, *GUARDED,
     ),
 )
 async def create_observation(
@@ -201,30 +200,23 @@ async def create_observation(
     current_user.last_record_created_at = datetime.now(timezone.utc)
     session.add(current_user)
 
-    try:
-        await session.commit()
-        observation = await _load_observation(session, observation.id)
+    await session.commit()
+    observation = await _load_observation(session, observation.id)
 
-        # Create audit log
-        await create_audit_log(
-            session=session,
-            action="create",
-            resource_type="observation",
-            resource_id=observation.id,
-            user_id=current_user.id,
-            new_values=observation_audit_values(observation),
-            details={"message": f"User {current_user.username} created new observation #{observation.id}"},
-            **client_info(request, auth)
-        )
-        await session.commit()
+    # Create audit log
+    await create_audit_log(
+        session=session,
+        action="create",
+        resource_type="observation",
+        resource_id=observation.id,
+        user_id=current_user.id,
+        new_values=observation_audit_values(observation),
+        details={"message": f"User {current_user.username} created new observation #{observation.id}"},
+        **client_info(request, auth)
+    )
+    await session.commit()
 
-        return await _load_observation_response(session, observation.id)
-    except IntegrityError as e:
-        await session.rollback()
-        # This should rarely happen since we pre-validate foreign keys
-        # but kept as safety net for unexpected constraints
-        logger.exception(f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}")  #TODO: make it as loggers config
-        raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
+    return await _load_observation_response(session, observation.id)
 
 
 @router.put(
@@ -233,7 +225,7 @@ async def create_observation(
     responses=problems(
         ErrorCode.SIGNAL_TYPE_INACTIVE, AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_OWNER,
         AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND,
-        ErrorCode.SIGNAL_TYPE_NOT_FOUND, ErrorCode.TAGS_NOT_FOUND, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *GUARDED,
+        ErrorCode.SIGNAL_TYPE_NOT_FOUND, ErrorCode.TAGS_NOT_FOUND, *GUARDED,
     ),
 )
 async def update_observation(
@@ -300,32 +292,24 @@ async def update_observation(
 
     session.add(observation)
 
-    try:
-        await session.commit()
-        await session.refresh(observation)
+    await session.commit()
+    await session.refresh(observation)
 
-        # Create audit log
-        await create_audit_log(
-            session=session,
-            action="update",
-            resource_type="observation",
-            resource_id=observation.id,
-            user_id=current_user.id,
-            old_values=old_values,
-            new_values=observation_audit_values(observation),
-            details={"message": f"User {current_user.username} updated observation #{observation.id}"},
-            **client_info(request, auth)
-        )
-        await session.commit()
+    # Create audit log
+    await create_audit_log(
+        session=session,
+        action="update",
+        resource_type="observation",
+        resource_id=observation.id,
+        user_id=current_user.id,
+        old_values=old_values,
+        new_values=observation_audit_values(observation),
+        details={"message": f"User {current_user.username} updated observation #{observation.id}"},
+        **client_info(request, auth)
+    )
+    await session.commit()
 
-        return await _load_observation_response(session, observation.id)
-    except IntegrityError as e:
-        await session.rollback()
-        # This should rarely happen since we pre-validate foreign keys
-        # but kept as safety net for unexpected constraints
-        logger.exception(
-            f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}")  # TODO: make it as loggers config
-        raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
+    return await _load_observation_response(session, observation.id)
 
 
 @router.post(

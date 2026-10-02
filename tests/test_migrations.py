@@ -11,13 +11,35 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 HEAD = "014_drop_post_connection_columns"
 
 
-def run_migrate(db_file: Path) -> subprocess.CompletedProcess:
+def run_migrate(db_file: Path, cwd: Path = PROJECT_ROOT) -> subprocess.CompletedProcess:
     env = dict(os.environ)
     env["WATCH_WEB_ALEMBIC_URL"] = f"sqlite+aiosqlite:///{db_file.as_posix()}"
+    env["PYTHONPATH"] = str(PROJECT_ROOT)
     return subprocess.run(
         [sys.executable, "-m", "app.backend.migrations_manager", "migrate"],
-        cwd=PROJECT_ROOT, env=env, capture_output=True, text=True, timeout=300,
+        cwd=cwd, env=env, capture_output=True, text=True, timeout=300,
     )
+
+
+@pytest.mark.slow
+def test_migrate_from_another_directory_over_create_all_tables(tmp_path):
+    """The IDE starts the app in app/. alembic.ini resolved script_location against the working directory, the
+    startup swallowed the failure and built the tables with create_all, without alembic_version. Paths are now
+    relative to alembic.ini (%(here)s, path_separator = os), and such a database upgrades to head."""
+    from sqlalchemy import create_engine
+    from sqlmodel import SQLModel
+    import app.backend.models  # noqa: F401  (registers every table)
+
+    db_file = tmp_path / "create_all.db"
+    engine = create_engine(f"sqlite:///{db_file.as_posix()}")
+    SQLModel.metadata.create_all(engine)
+    engine.dispose()
+
+    result = run_migrate(db_file, cwd=PROJECT_ROOT / "app")
+    assert result.returncode == 0, result.stdout + result.stderr
+    conn = sqlite3.connect(db_file)
+    assert conn.execute("select version_num from alembic_version").fetchone()[0] == HEAD
+    conn.close()
 
 
 @pytest.mark.slow

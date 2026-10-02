@@ -1,9 +1,7 @@
 from typing import List, Annotated
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request, Query
-from loguru import logger
 from sqlalchemy import func
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -50,7 +48,7 @@ async def list_signal_types(
     SignalTypeRoutes.CREATE.value,
     response_model=SignalTypeResponse,
     responses=problems(
-        ErrorCode.SIGNAL_TYPE_CODE_TAKEN, ErrorCode.CATEGORY_NOT_FOUND, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,
+        ErrorCode.SIGNAL_TYPE_CODE_TAKEN, ErrorCode.CATEGORY_NOT_FOUND, *ADMIN,
     ),
 )
 async def create_signal_type(
@@ -113,29 +111,24 @@ async def create_signal_type(
 
     session.add(signal_type)
 
-    try:
-        await session.commit()
-        await session.refresh(signal_type)
+    await session.commit()
+    await session.refresh(signal_type)
 
-        # Create audit log
-        await create_audit_log(
-            session=session,
-            action=action,
-            resource_type="signal_type",
-            resource_id=signal_type.id,
-            user_id=current_user.id,
-            old_values=old_values,
-            new_values=signal_type.model_dump(),
-            details={"message": f"User {current_user.username} {action}d signal type '{signal_type.name}' ({signal_type.code})"},
-            **client_info(request, auth)
-        )
-        await session.commit()
+    # Create audit log
+    await create_audit_log(
+        session=session,
+        action=action,
+        resource_type="signal_type",
+        resource_id=signal_type.id,
+        user_id=current_user.id,
+        old_values=old_values,
+        new_values=signal_type.model_dump(),
+        details={"message": f"User {current_user.username} {action}d signal type '{signal_type.name}' ({signal_type.code})"},
+        **client_info(request, auth)
+    )
+    await session.commit()
 
-        return signal_type
-    except IntegrityError as e:
-        await session.rollback()
-        logger.exception(f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}")
-        raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
+    return signal_type
 
 
 @router.get(
@@ -167,7 +160,7 @@ async def get_signal_type(
     response_model=SignalTypeResponse,
     responses=problems(
         ErrorCode.SIGNAL_TYPE_CODE_ARCHIVED, ErrorCode.SIGNAL_TYPE_CODE_TAKEN, ErrorCode.CATEGORY_NOT_FOUND,
-        ErrorCode.SIGNAL_TYPE_NOT_FOUND, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,
+        ErrorCode.SIGNAL_TYPE_NOT_FOUND, *ADMIN,
     ),
 )
 async def update_signal_type(
@@ -225,29 +218,24 @@ async def update_signal_type(
 
     session.add(signal_type)
 
-    try:
-        await session.commit()
-        await session.refresh(signal_type)
+    await session.commit()
+    await session.refresh(signal_type)
 
-        # Create audit log
-        await create_audit_log(
-            session=session,
-            action="update",
-            resource_type="signal_type",
-            resource_id=signal_type.id,
-            user_id=current_user.id,
-            old_values=old_values,
-            new_values=signal_type.model_dump(),
-            details={"message": f"User {current_user.username} updated signal type '{signal_type.name}'"},
-            **client_info(request, auth)
-        )
-        await session.commit()
+    # Create audit log
+    await create_audit_log(
+        session=session,
+        action="update",
+        resource_type="signal_type",
+        resource_id=signal_type.id,
+        user_id=current_user.id,
+        old_values=old_values,
+        new_values=signal_type.model_dump(),
+        details={"message": f"User {current_user.username} updated signal type '{signal_type.name}'"},
+        **client_info(request, auth)
+    )
+    await session.commit()
 
-        return signal_type
-    except IntegrityError as e:
-        await session.rollback()
-        logger.exception(f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}")
-        raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
+    return signal_type
 
 
 @router.post(
