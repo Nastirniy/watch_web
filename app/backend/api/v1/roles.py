@@ -75,7 +75,8 @@ async def get_role_filter_schema(
     response_model=RoleResponse,
     status_code=status.HTTP_201_CREATED,
     responses=problems(
-        ErrorCode.PERMISSION_ID_INVALID, ErrorCode.ROLE_NAME_TAKEN, ErrorCode.PERMISSION_NOT_FOUND, ErrorCode.ROLE_NAME_ARCHIVED, *ADMIN,
+        ErrorCode.PERMISSION_ID_INVALID, ErrorCode.ROLE_NAME_TAKEN, ErrorCode.PERMISSION_NOT_FOUND,
+        ErrorCode.ROLE_NAME_ARCHIVED, *ADMIN,
     ),
 )
 async def create_role(
@@ -170,7 +171,8 @@ async def get_role(
     RoleRoutes.ROLE_BY_ID.value,
     response_model=RoleResponse,
     responses=problems(
-        ErrorCode.PERMISSION_ID_INVALID, ErrorCode.ROLE_ID_INVALID, ErrorCode.ROLE_NAME_TAKEN, ErrorCode.PERMISSION_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.ROLE_NAME_ARCHIVED, *ADMIN,
+        ErrorCode.PERMISSION_ID_INVALID, ErrorCode.ROLE_ID_INVALID, ErrorCode.ROLE_NAME_TAKEN,
+        ErrorCode.PERMISSION_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.ROLE_NAME_ARCHIVED, *ADMIN,
     ),
 )
 async def update_role(
@@ -328,7 +330,8 @@ async def restore_role(
     RoleRoutes.ROLE_BY_ID.value,
     status_code=status.HTTP_204_NO_CONTENT,
     responses=problems(
-        ErrorCode.ROLE_ID_INVALID, ErrorCode.ROLE_NOT_FOUND, ErrorCode.ADMIN_ROLE_NOT_DELETABLE, ErrorCode.ROLE_DELETE_REQUIRES_ARCHIVE, ErrorCode.ROLE_HAS_ACTIVE_USERS, *ADMIN,
+        ErrorCode.ROLE_ID_INVALID, ErrorCode.ROLE_NOT_FOUND, ErrorCode.ADMIN_ROLE_NOT_DELETABLE,
+        ErrorCode.ROLE_DELETE_REQUIRES_ARCHIVE, ErrorCode.ROLE_HAS_ACTIVE_USERS, *ADMIN,
     ),
 )
 async def delete_role(
@@ -436,7 +439,8 @@ async def _role_permissions(session: AsyncSession, role_id: int) -> List[Permiss
     RoleRoutes.ROLE_PERMISSION_BY_ID.value,
     response_model=List[PermissionResponse],
     responses=problems(
-        ErrorCode.PERMISSION_ID_INVALID, ErrorCode.ROLE_ID_INVALID, ErrorCode.PERMISSION_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, *ADMIN,
+        ErrorCode.PERMISSION_ID_INVALID, ErrorCode.ROLE_ID_INVALID, ErrorCode.PERMISSION_NOT_FOUND,
+        ErrorCode.ROLE_NOT_FOUND, *ADMIN,
     ),
 )
 async def add_role_permission(
@@ -479,7 +483,8 @@ async def add_role_permission(
     RoleRoutes.ROLE_PERMISSION_BY_ID.value,
     response_model=List[PermissionResponse],
     responses=problems(
-        ErrorCode.PERMISSION_ID_INVALID, ErrorCode.ROLE_ID_INVALID, ErrorCode.PERMISSION_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.ROLE_PERMISSION_NOT_ASSIGNED, *ADMIN,
+        ErrorCode.PERMISSION_ID_INVALID, ErrorCode.ROLE_ID_INVALID, ErrorCode.PERMISSION_NOT_FOUND,
+        ErrorCode.ROLE_NOT_FOUND, ErrorCode.ROLE_PERMISSION_NOT_ASSIGNED, *ADMIN,
     ),
 )
 async def remove_role_permission(

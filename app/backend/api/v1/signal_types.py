@@ -177,7 +177,8 @@ async def get_signal_type(
     SignalTypeRoutes.SIGNAL_TYPE_BY_ID.value,
     response_model=SignalType,
     responses=problems(
-        ErrorCode.SIGNAL_TYPE_CODE_ARCHIVED, ErrorCode.SIGNAL_TYPE_CODE_TAKEN, ErrorCode.CATEGORY_NOT_FOUND, ErrorCode.SIGNAL_TYPE_NOT_FOUND, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,
+        ErrorCode.SIGNAL_TYPE_CODE_ARCHIVED, ErrorCode.SIGNAL_TYPE_CODE_TAKEN, ErrorCode.CATEGORY_NOT_FOUND,
+        ErrorCode.SIGNAL_TYPE_NOT_FOUND, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,
     ),
 )
 async def update_signal_type(

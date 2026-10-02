@@ -144,7 +144,8 @@ async def get_tag(
     TagRoutes.TAG_BY_ID.value,
     response_model=TagResponse,
     responses=problems(
-        ErrorCode.TAG_NAME_ARCHIVED, ErrorCode.TAG_NAME_TAKEN, ErrorCode.TAG_NOT_FOUND, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,
+        ErrorCode.TAG_NAME_ARCHIVED, ErrorCode.TAG_NAME_TAKEN, ErrorCode.TAG_NOT_FOUND,
+        ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,
     ),
 )
 async def update_tag(

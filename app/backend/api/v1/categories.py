@@ -147,7 +147,8 @@ async def get_category(
     CategoryRoutes.CATEGORY_BY_ID.value,
     response_model=Category,
     responses=problems(
-        ErrorCode.CATEGORY_NAME_ARCHIVED, ErrorCode.CATEGORY_NAME_TAKEN, ErrorCode.CATEGORY_NOT_FOUND, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,
+        ErrorCode.CATEGORY_NAME_ARCHIVED, ErrorCode.CATEGORY_NAME_TAKEN, ErrorCode.CATEGORY_NOT_FOUND,
+        ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,
     ),
 )
 async def update_category(

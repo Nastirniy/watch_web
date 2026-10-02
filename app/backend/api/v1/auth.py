@@ -48,7 +48,9 @@ _logger = get_auth_logger()
     AuthRoutes.LOGIN.value,
     response_model=LoginResponse,
     responses=problems(
-        ErrorCode.LOGIN_DATA_REQUIRED, AuthErrorCode.ACCOUNT_DEACTIVATED, AuthErrorCode.ACCOUNT_DELETED, AuthErrorCode.CERTIFICATE_DATA_MISSING, AuthErrorCode.CERTIFICATE_NOT_RECOGNIZED, AuthErrorCode.CERTIFICATE_VERIFICATION_FAILED, ErrorCode.AUTHENTICATION_UNAVAILABLE,
+        ErrorCode.LOGIN_DATA_REQUIRED, AuthErrorCode.ACCOUNT_DEACTIVATED, AuthErrorCode.ACCOUNT_DELETED,
+        AuthErrorCode.CERTIFICATE_DATA_MISSING, AuthErrorCode.CERTIFICATE_NOT_RECOGNIZED,
+        AuthErrorCode.CERTIFICATE_VERIFICATION_FAILED, ErrorCode.AUTHENTICATION_UNAVAILABLE,
     ),
 )
 async def login(
@@ -154,7 +156,8 @@ async def login(
     AuthRoutes.REFRESH.value,
     response_model=LoginResponse,
     responses=problems(
-        AuthErrorCode.ACCOUNT_DEACTIVATED, AuthErrorCode.ACCOUNT_DELETED, AuthErrorCode.ACCOUNT_NOT_FOUND, AuthErrorCode.INVALID_REFRESH_TOKEN, AuthErrorCode.SESSION_EXPIRED, ErrorCode.TOKEN_REFRESH_FAILED,
+        AuthErrorCode.ACCOUNT_DEACTIVATED, AuthErrorCode.ACCOUNT_DELETED, AuthErrorCode.ACCOUNT_NOT_FOUND,
+        AuthErrorCode.INVALID_REFRESH_TOKEN, AuthErrorCode.SESSION_EXPIRED, ErrorCode.TOKEN_REFRESH_FAILED,
     ),
 )
 async def refresh_token(

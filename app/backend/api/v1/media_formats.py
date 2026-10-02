@@ -104,7 +104,9 @@ async def get_media_format_filter_schema(
     MediaFormatRoutes.CREATE.value,
     response_model=MediaFormatResponse,
     responses=problems(
-        ErrorCode.MEDIA_FORMAT_CONTENT_TYPE_CLASH, ErrorCode.MEDIA_FORMAT_EXISTS, ErrorCode.MEDIA_FORMAT_EXTENSION_CLASH, ErrorCode.MEDIA_FORMAT_SIZE_ABOVE_CEILING, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,
+        ErrorCode.MEDIA_FORMAT_CONTENT_TYPE_CLASH, ErrorCode.MEDIA_FORMAT_EXISTS,
+        ErrorCode.MEDIA_FORMAT_EXTENSION_CLASH, ErrorCode.MEDIA_FORMAT_SIZE_ABOVE_CEILING,
+        ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,
     ),
 )
 async def create_media_format(
@@ -175,7 +177,10 @@ async def get_media_format(
     MediaFormatRoutes.FORMAT_BY_ID.value,
     response_model=MediaFormatResponse,
     responses=problems(
-        ErrorCode.MEDIA_FORMAT_CONTENT_TYPE_CLASH, ErrorCode.MEDIA_FORMAT_CONTENT_TYPE_MISMATCH, ErrorCode.MEDIA_FORMAT_EXISTS, ErrorCode.MEDIA_FORMAT_EXTENSION_CLASH, ErrorCode.MEDIA_FORMAT_NO_FIELDS, ErrorCode.MEDIA_FORMAT_SIZE_ABOVE_CEILING, ErrorCode.MEDIA_FORMAT_NOT_FOUND, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,
+        ErrorCode.MEDIA_FORMAT_CONTENT_TYPE_CLASH, ErrorCode.MEDIA_FORMAT_CONTENT_TYPE_MISMATCH,
+        ErrorCode.MEDIA_FORMAT_EXISTS, ErrorCode.MEDIA_FORMAT_EXTENSION_CLASH, ErrorCode.MEDIA_FORMAT_NO_FIELDS,
+        ErrorCode.MEDIA_FORMAT_SIZE_ABOVE_CEILING, ErrorCode.MEDIA_FORMAT_NOT_FOUND,
+        ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,
     ),
 )
 async def update_media_format(
@@ -268,7 +273,8 @@ async def archive_media_format(
     MediaFormatRoutes.FORMAT_RESTORE.value,
     response_model=MediaFormatResponse,
     responses=problems(
-        ErrorCode.MEDIA_FORMAT_CONTENT_TYPE_CLASH, ErrorCode.MEDIA_FORMAT_EXTENSION_CLASH, ErrorCode.MEDIA_FORMAT_NOT_FOUND, ErrorCode.MEDIA_FORMAT_NOT_ARCHIVED, *ADMIN,
+        ErrorCode.MEDIA_FORMAT_CONTENT_TYPE_CLASH, ErrorCode.MEDIA_FORMAT_EXTENSION_CLASH,
+        ErrorCode.MEDIA_FORMAT_NOT_FOUND, ErrorCode.MEDIA_FORMAT_NOT_ARCHIVED, *ADMIN,
     ),
 )
 async def restore_media_format(

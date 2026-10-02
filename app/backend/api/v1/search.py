@@ -124,7 +124,8 @@ async def log_search(
     summary="Search observations",
     description="Search observations with typed filters. All params visible in docs.",
     responses=problems(
-        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, AccessErrorCode.POST_ACCESS_DENIED, *GUARDED,
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION,
+        AccessErrorCode.POST_ACCESS_DENIED, *GUARDED,
     ),
 )
 async def search_observations(
@@ -162,7 +163,8 @@ async def search_observations(
     summary="Search users",
     description="Search users with typed filters.",
     responses=problems(
-        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, AccessErrorCode.POST_ACCESS_DENIED, *GUARDED,
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION,
+        AccessErrorCode.POST_ACCESS_DENIED, *GUARDED,
     ),
 )
 async def search_users(

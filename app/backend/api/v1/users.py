@@ -74,7 +74,8 @@ def _is_unique_violation(error_msg: str) -> bool:
     UserRoutes.ROOT.value,
     response_model=List[UserResponse],
     responses=problems(
-        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.USERS_LIST_FAILED, *GUARDED,
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION,
+        AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.USERS_LIST_FAILED, *GUARDED,
     ),
 )
 async def list_users(
@@ -113,7 +114,11 @@ async def list_users(
     UserRoutes.ROOT.value,
     response_model=UserResponse,
     responses=problems(
-        ErrorCode.CERTIFICATE_FILE_EMPTY, ErrorCode.CERTIFICATE_INVALID, ErrorCode.CERTIFICATE_TAKEN, ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, ErrorCode.ROLE_IDS_NOT_JSON_ARRAY, ErrorCode.USERNAME_OR_CERTIFICATE_TAKEN, ErrorCode.USERNAME_TAKEN, ErrorCode.POST_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.CERTIFICATE_FILE_TOO_LARGE, ErrorCode.DATA_TOO_LONG, ErrorCode.CERTIFICATE_PROCESSING_FAILED, ErrorCode.DATABASE_ERROR, *ADMIN,
+        ErrorCode.CERTIFICATE_FILE_EMPTY, ErrorCode.CERTIFICATE_INVALID, ErrorCode.CERTIFICATE_TAKEN,
+        ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, ErrorCode.ROLE_IDS_NOT_JSON_ARRAY,
+        ErrorCode.USERNAME_OR_CERTIFICATE_TAKEN, ErrorCode.USERNAME_TAKEN, ErrorCode.POST_NOT_FOUND,
+        ErrorCode.ROLE_NOT_FOUND, ErrorCode.CERTIFICATE_FILE_TOO_LARGE, ErrorCode.DATA_TOO_LONG,
+        ErrorCode.CERTIFICATE_PROCESSING_FAILED, ErrorCode.DATABASE_ERROR, *ADMIN,
     ),
 )
 async def create_user(
@@ -328,7 +333,11 @@ async def get_user(
     UserRoutes.USER_BY_ID.value,
     response_model=UserResponse,
     responses=problems(
-        ErrorCode.CANNOT_DEACTIVATE_SELF, ErrorCode.CERTIFICATE_FILE_EMPTY, ErrorCode.CERTIFICATE_INVALID, ErrorCode.CERTIFICATE_TAKEN, ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, ErrorCode.ROLE_IDS_NOT_JSON_ARRAY, ErrorCode.USER_ID_INVALID, ErrorCode.USERNAME_TAKEN, ErrorCode.POST_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.USER_NOT_FOUND, ErrorCode.CERTIFICATE_FILE_TOO_LARGE, ErrorCode.FORM_CONTENT_TYPE_REQUIRED, ErrorCode.CERTIFICATE_PROCESSING_FAILED, ErrorCode.DATABASE_ERROR, *ADMIN,
+        ErrorCode.CANNOT_DEACTIVATE_SELF, ErrorCode.CERTIFICATE_FILE_EMPTY, ErrorCode.CERTIFICATE_INVALID,
+        ErrorCode.CERTIFICATE_TAKEN, ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, ErrorCode.ROLE_IDS_NOT_JSON_ARRAY,
+        ErrorCode.USER_ID_INVALID, ErrorCode.USERNAME_TAKEN, ErrorCode.POST_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND,
+        ErrorCode.USER_NOT_FOUND, ErrorCode.CERTIFICATE_FILE_TOO_LARGE, ErrorCode.FORM_CONTENT_TYPE_REQUIRED,
+        ErrorCode.CERTIFICATE_PROCESSING_FAILED, ErrorCode.DATABASE_ERROR, *ADMIN,
     ),
 )
 async def update_user(

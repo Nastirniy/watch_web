@@ -164,7 +164,8 @@ async def reconcile_posters(
     MediaRoutes.MEDIA_INFO.value,
     response_model=MediaFileInfo,
     responses=problems(
-        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.MEDIA_NOT_FOUND, ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, *GUARDED,
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.MEDIA_NOT_FOUND,
+        ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, *GUARDED,
     ),
 )
 async def get_media_info(
@@ -189,10 +190,14 @@ async def get_media_info(
 @router.get(
     MediaRoutes.MEDIA_DOWNLOAD.value,
     response_class=Response,
-    responses={**{
+    responses={
         **file_response("The original file (attachment), in its own Content-Type", ["*/*"], ORIGINAL_FILE_HEADERS),
         **file_response("The requested byte range (Range header)", ["*/*"], {"Content-Range": header("bytes start-end/size")}, status=206),
-    }, **problems(AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.MEDIA_FILE_MISSING, ErrorCode.MEDIA_NOT_FOUND, ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_PATH_UNRESOLVED, *GUARDED)},
+        **problems(
+            AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.MEDIA_FILE_MISSING,
+            ErrorCode.MEDIA_NOT_FOUND, ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_PATH_UNRESOLVED, *GUARDED,
+        ),
+    },
 )
 async def download_media_file(
     media_id: int,
@@ -209,10 +214,14 @@ async def download_media_file(
 @router.get(
     MediaRoutes.MEDIA_STREAM.value,
     response_class=Response,
-    responses={**{
+    responses={
         **file_response("The original file (inline), in its own Content-Type", ["*/*"], ORIGINAL_FILE_HEADERS),
         **file_response("The requested byte range (Range header)", ["*/*"], {"Content-Range": header("bytes start-end/size")}, status=206),
-    }, **problems(AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.MEDIA_FILE_MISSING, ErrorCode.MEDIA_NOT_FOUND, ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_PATH_UNRESOLVED, *GUARDED)},
+        **problems(
+            AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.MEDIA_FILE_MISSING,
+            ErrorCode.MEDIA_NOT_FOUND, ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_PATH_UNRESOLVED, *GUARDED,
+        ),
+    },
 )
 async def stream_media_file(
     media_id: int,
@@ -260,7 +269,9 @@ async def _set_media_archived(request: Request, session: AsyncSession, auth: Aut
     MediaRoutes.MEDIA_ARCHIVE.value,
     response_model=MediaFileInfo,
     responses=problems(
-        AccessErrorCode.MEDIA_NOT_OWNER, AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_ACTIVE, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.MEDIA_NOT_FOUND, ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_NOT_ARCHIVED, *GUARDED,
+        AccessErrorCode.MEDIA_NOT_OWNER, AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_ACTIVE,
+        AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.MEDIA_NOT_FOUND,
+        ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_NOT_ARCHIVED, *GUARDED,
     ),
 )
 async def archive_media_file(
@@ -280,7 +291,9 @@ async def archive_media_file(
     MediaRoutes.MEDIA_RESTORE.value,
     response_model=MediaFileInfo,
     responses=problems(
-        AccessErrorCode.MEDIA_NOT_OWNER, AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_ACTIVE, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.MEDIA_NOT_FOUND, ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_NOT_ARCHIVED, *GUARDED,
+        AccessErrorCode.MEDIA_NOT_OWNER, AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_ACTIVE,
+        AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.MEDIA_NOT_FOUND,
+        ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_NOT_ARCHIVED, *GUARDED,
     ),
 )
 async def restore_media_file(
@@ -302,7 +315,12 @@ async def restore_media_file(
     MediaRoutes.UPLOAD.value,
     response_model=UploadResultResponse,
     responses=problems(
-        ErrorCode.MEDIA_CONTENT_INVALID, ErrorCode.MEDIA_FILE_EMPTY, ErrorCode.MEDIA_UPLOAD_SOURCE_MISSING, AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_FILE_TOO_LARGE, ErrorCode.MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED, ErrorCode.MEDIA_EXTENSION_DANGEROUS, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, ErrorCode.MEDIA_TYPE_UNKNOWN, ErrorCode.MEDIA_STORE_FAILED, ErrorCode.MEDIA_UPLOAD_FAILED, ErrorCode.MEDIA_UPLOADS_BUSY, *GUARDED,
+        ErrorCode.MEDIA_CONTENT_INVALID, ErrorCode.MEDIA_FILE_EMPTY, ErrorCode.MEDIA_UPLOAD_SOURCE_MISSING,
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED,
+        ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_FILE_TOO_LARGE,
+        ErrorCode.MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED,
+        ErrorCode.MEDIA_EXTENSION_DANGEROUS, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, ErrorCode.MEDIA_TYPE_UNKNOWN,
+        ErrorCode.MEDIA_STORE_FAILED, ErrorCode.MEDIA_UPLOAD_FAILED, ErrorCode.MEDIA_UPLOADS_BUSY, *GUARDED,
     ),
 )
 async def upload_complete_file(
@@ -366,7 +384,13 @@ async def upload_complete_file(
     MediaRoutes.NGINX_UPLOAD.value,
     response_model=UploadResultResponse,
     responses=problems(
-        ErrorCode.MEDIA_CONTENT_INVALID, ErrorCode.MEDIA_FILE_EMPTY, ErrorCode.MEDIA_UPLOAD_SOURCE_MISSING, ErrorCode.NGINX_FILE_NAME_MISSING, AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_FILE_TOO_LARGE, ErrorCode.MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED, ErrorCode.MEDIA_EXTENSION_DANGEROUS, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, ErrorCode.MEDIA_TYPE_UNKNOWN, ErrorCode.MEDIA_STORE_FAILED, ErrorCode.MEDIA_UPLOAD_FAILED, ErrorCode.NGINX_UPLOAD_DISABLED, ErrorCode.MEDIA_UPLOADS_BUSY, *GUARDED,
+        ErrorCode.MEDIA_CONTENT_INVALID, ErrorCode.MEDIA_FILE_EMPTY, ErrorCode.MEDIA_UPLOAD_SOURCE_MISSING,
+        ErrorCode.NGINX_FILE_NAME_MISSING, AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED,
+        AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_FILE_TOO_LARGE,
+        ErrorCode.MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED,
+        ErrorCode.MEDIA_EXTENSION_DANGEROUS, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, ErrorCode.MEDIA_TYPE_UNKNOWN,
+        ErrorCode.MEDIA_STORE_FAILED, ErrorCode.MEDIA_UPLOAD_FAILED, ErrorCode.NGINX_UPLOAD_DISABLED,
+        ErrorCode.MEDIA_UPLOADS_BUSY, *GUARDED,
     ),
 )
 async def nginx_upload_file(
@@ -490,11 +514,16 @@ async def _proxy_render(url: str) -> Response:
 @router.get(
     MediaRoutes.MEDIA_THUMBNAIL.value,
     response_class=Response,
-    responses={**{
+    responses={
         **file_response("The image (WebP when format=auto and the client accepts it)", ["image/webp", "image/jpeg", "image/png"],
                         {"X-Thumbnail-Status": header("ready"), "Cache-Control": header("private, max-age=86400")}),
         **empty_response(202, "The video poster is not extracted yet; ask again after Retry-After", THUMBNAIL_PENDING_HEADERS),
-    }, **problems(AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.MEDIA_NOT_FOUND, ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.POSTER_FAILED, ErrorCode.THUMBNAILS_UNSUPPORTED, ErrorCode.THUMBNAIL_RENDERER_ERROR, ErrorCode.THUMBNAIL_RENDERER_UNAVAILABLE, *GUARDED)},
+        **problems(
+            AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.MEDIA_NOT_FOUND,
+            ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.POSTER_FAILED, ErrorCode.THUMBNAILS_UNSUPPORTED,
+            ErrorCode.THUMBNAIL_RENDERER_ERROR, ErrorCode.THUMBNAIL_RENDERER_UNAVAILABLE, *GUARDED,
+        ),
+    },
 )
 async def get_media_thumbnail(
     media_id: int,
@@ -532,7 +561,13 @@ async def get_media_thumbnail(
 @router.post(
     MediaRoutes.MEDIA_SHARE.value,
     response_model=ShareLinkResponse,
-    responses={**empty_response(202, "The video poster is not extracted yet; ask again after Retry-After", THUMBNAIL_PENDING_HEADERS), **problems(AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.MEDIA_NOT_FOUND, ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.POSTER_FAILED, ErrorCode.THUMBNAILS_UNSUPPORTED, *GUARDED)},
+    responses={
+        **empty_response(202, "The video poster is not extracted yet; ask again after Retry-After", THUMBNAIL_PENDING_HEADERS),
+        **problems(
+            AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.MEDIA_NOT_FOUND,
+            ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.POSTER_FAILED, ErrorCode.THUMBNAILS_UNSUPPORTED, *GUARDED,
+        ),
+    },
 )
 async def share_media_thumbnail(
     request: Request,
