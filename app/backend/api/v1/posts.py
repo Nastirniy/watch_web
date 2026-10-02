@@ -1,6 +1,6 @@
 from typing import List, Optional
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, Query, status, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 from sqlalchemy import func
@@ -8,7 +8,6 @@ from sqlalchemy.exc import IntegrityError
 
 from app.backend.database import get_session
 from app.backend.models.post import Post
-from app.backend.models.user import User
 from app.backend.services.auth_context import AuthContext
 from app.backend.api.shared.models.request.posts_request import PostCreate, PostUpdate
 from app.backend.services.access_control import AccessControlService
@@ -16,8 +15,7 @@ from app.backend.services.permissions import require
 from app.backend.enums.general import Permissions, StatsGroupBy
 from app.backend.config import settings
 from app.backend.enums.routes import PostRoutes
-from app.backend.helpers.audit_helper import create_audit_log
-from app.backend.helpers.audit_helper import client_info
+from app.backend.helpers.audit_helper import client_info, create_audit_log
 from app.backend.filters.params.post_params import PostFilterParams
 from app.backend.filters.post_filter import PostFilterService
 from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
@@ -58,7 +56,6 @@ async def list_posts(
         - Administrators (admin.true) see every post record
         - Everyone else sees the posts of their data scope (home post, user_post_access, or all with post.access_all)
     """
-    current_user = auth.user
     query = select(Post)
     query = PostFilterService.apply_filters(query, filters, AccessControlService.post_record_scope(auth))
     result = await session.exec(query)
@@ -121,7 +118,6 @@ async def get_post(
         - Administrators (admin.true) can view any post record
         - Everyone else needs the post in their data scope
     """
-    current_user = auth.user
     AccessControlService.check_post_record_view(auth, post_id)
 
     result = await session.exec(

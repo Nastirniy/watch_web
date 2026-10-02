@@ -13,10 +13,8 @@ from app.backend.services.permissions import require
 from app.backend.services.access_control import AccessControlService
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import RoleRoutes
-from app.backend.helpers.audit_helper import create_audit_log
-from app.backend.helpers.audit_helper import client_info
-from app.backend.utils.validators import PaginationParams
-from app.backend.utils.logging_config import get_logger, get_api_logger
+from app.backend.helpers.audit_helper import client_info, create_audit_log
+from app.backend.utils.logging_config import get_api_logger
 from app.backend.filters.params.role_params import RoleFilterParams
 from app.backend.filters.role_filter import RoleFilterService
 from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
@@ -143,7 +141,6 @@ async def get_role(
         auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW], admin=True))
 ):
     """Get role by ID (administration area)"""
-    current_user = auth.user
     role = await get_role_or_404(session, role_id, include_deleted=True)
 
     return RoleResponse.model_validate(role)

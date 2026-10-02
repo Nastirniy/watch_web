@@ -1,6 +1,6 @@
 from typing import List
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, status as fapi_status, Request
+from fastapi import APIRouter, Depends, Request
 from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -10,16 +10,13 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.database import get_session
 from app.backend.services.access_control import AccessControlService
 from app.backend.models.observation import Tag
-from app.backend.models.user import User
 from app.backend.services.auth_context import AuthContext
 from app.backend.services.permissions import require
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import TagRoutes
-from app.backend.helpers.audit_helper import create_audit_log
-from app.backend.helpers.audit_helper import client_info
+from app.backend.helpers.audit_helper import client_info, create_audit_log
 from app.backend.api.shared.models.request.tag_request import TagCreate, TagUpdate
 from app.backend.api.shared.models.response.tag_response import TagResponse
-from app.backend.api.shared.models.response.observations_response import MessageResponse
 from app.backend.filters.params.tag_params import TagFilterParams
 from app.backend.filters.tag_filter import TagFilterService
 from app.backend.api.shared.models.response.search_response import EntitySchemaInfo

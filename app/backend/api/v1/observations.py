@@ -11,15 +11,13 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.database import get_session
 from app.backend.models.observation import Observation, SignalType, Tag
-from app.backend.models.user import User
 from app.backend.models.post import Post
 from app.backend.services.auth_context import AuthContext
 from app.backend.services.permissions import require
 from app.backend.services.access_control import AccessControlService
 from app.backend.enums.general import Permissions, ObservationStatus
 from app.backend.enums.routes import ObservationRoutes
-from app.backend.helpers.audit_helper import create_audit_log
-from app.backend.helpers.audit_helper import client_info
+from app.backend.helpers.audit_helper import client_info, create_audit_log
 from app.backend.api.shared.models.request.observations_request import (
     ObservationCreate,
     ObservationUpdate,
@@ -107,30 +105,10 @@ async def list_observations(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW]))
 ):
-    """
-    List observations with attached media IDs and comprehensive filtering.
-    Regular users can only see observations from their assigned post.
-    Admins can see all observations or filter by specific post.
+    """List observations with the ids of their media. Every filter is an optional query parameter.
 
-    Filters (all optional):
-    - Basic: post_id, status
-    - Absolute dates: observed_at_from, observed_at_to
-    - Relative dates: last_n_days (e.g., 3 = last 3 days including today)
-                      day_offset (e.g., 0=today, 1=yesterday, 2=day before)
-    - skip_empty_days: Skip days with no observations (for relative date queries)
-    - Pagination: skip, limit (if not provided, returns all matching records)
-
-    Examples:
-    - Get all observations: /observations
-    - Get last 7 days: /observations?last_n_days=7
-    - Get yesterday's data: /observations?day_offset=1
-    - Get specific date range: /observations?observed_at_from=2025-01-01&observed_at_to=2025-01-31
-    - Paginated: /observations?skip=0&limit=100
-
-    DB Load: Uses eager loading (selectinload) to fetch media_files in a single additional query,
-    preventing N+1 query problem. For N observations, this executes 2 queries instead of N+1.
-    """
-    current_user = auth.user
+    A user sees the posts of their data scope (post.access_all: every post). Media files are loaded with
+    selectinload: two queries for any number of observations."""
 
     # Apply post access filter (enforced for regular users, optional for admins)
     AccessControlService.check_include_deleted(auth, filters, Permissions.OBSERVATION_ARCHIVE)
@@ -154,7 +132,6 @@ async def get_observation_filter_schema(
         auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW]))
 ):
     """Available filter params and sortable fields for observations."""
-    current_user = auth.user
     user_is_admin = auth.is_admin
     return EntitySchemaInfo(**ObservationFilterService.get_schema(is_admin=user_is_admin))
 

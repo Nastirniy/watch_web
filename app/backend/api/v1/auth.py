@@ -1,5 +1,5 @@
 from typing import Optional
-from fastapi import APIRouter, Depends, Header, HTTPException, status, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.database import get_session
@@ -15,7 +15,7 @@ from app.backend.enums.errors import RequiredPermissions
 from app.backend.models.user import User, UserSession
 from app.backend.enums.routes import AuthRoutes
 from app.backend.api.versioning import PublishedVersion, request_version
-from app.backend.enums.general import Permissions, AppEnvironment
+from app.backend.enums.general import AppEnvironment
 from app.backend.enums.errors import AuthErrorCode
 from app.backend.utils.logging_config import get_auth_logger
 from app.backend.config import settings
@@ -141,65 +141,6 @@ async def login(
         _logger.error(f"Login error: {str(e)}")
         raise ApiError(ErrorCode.AUTHENTICATION_UNAVAILABLE)
 
-#
-# @router.post(AuthRoutes.LOGIN.value, response_model=LoginResponse)
-# async def login(
-#         request: Request,
-#         credentials: LoginRequest,
-#         session: AsyncSession = Depends(get_session)
-# ):
-#     """Authenticate user with PKI certificate using enhanced security"""
-#     try:
-#         client_ip = request.client.host if request.client else None
-#         user_agent = request.headers.get("user-agent")
-#
-#         # Authenticate with enhanced PKI method
-#         user = await AuthService.authenticate_pki(
-#             session,
-#             credentials.certificate_cn,
-#             credentials.certificate_serial,
-#             credentials.certificate_fingerprint,
-#             ip_address=client_ip
-#         )
-#
-#         if not user:
-#             logger.warning(f"Failed login attempt from IP: {client_ip}")
-#             raise HTTPException(
-#                 status_code=status.HTTP_401_UNAUTHORIZED,
-#                 detail="Invalid certificate credentials",
-#                 headers={"WWW-Authenticate": "Bearer"}
-#             )
-#
-#         # Create session
-#         user_session = await AuthService.create_session(
-#             session,
-#             user,
-#             ip_address=client_ip,
-#             user_agent=user_agent
-#         )
-#
-#         # Create both access and refresh tokens
-#         access_token = AuthService.create_access_token(user.id)
-#         refresh_token = AuthService.create_refresh_token(user.id)
-#
-#         logger.info(f"Successful login for user {user.username} from IP: {client_ip}")
-#
-#         return LoginResponse(
-#             access_token=access_token,
-#             refresh_token=refresh_token,
-#             expires_in=settings.security.access_token_expire_minutes * 60,
-#             user_id=user.id,
-#             username=user.username
-#         )
-#
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         logger.error(f"Login error: {str(e)}")
-#         raise HTTPException(
-#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#             detail="Authentication service unavailable"
-#         )
 
 
 @router.post(AuthRoutes.REFRESH.value, response_model=LoginResponse)
@@ -357,28 +298,6 @@ async def get_user_sessions(
         raise ApiError(ErrorCode.SESSIONS_LIST_FAILED)
 
 
-# @router.get("/test-cert")
-# async def test_cert(request: Request):
-#     """
-#     Тестовий endpoint для перевірки клієнтського сертифіката.
-#     Повертає інформацію про сертифікат із заголовків, переданих NGINX.
-#     """
-#     ssl_verify = request.headers.get("x-ssl-client-verify")
-#     ssl_dn = request.headers.get("x-ssl-client-dn")
-#     ssl_fingerprint = request.headers.get("x-ssl-client-fingerprint")
-#     ssl_serial = request.headers.get("x-ssl-client-serial")
-#     ssl_issuer = request.headers.get("x-ssl-issuer-dn")
-#
-#     cn = await parse_cn(ssl_dn)
-#
-#     print({
-#         "ssl_verify": ssl_verify,
-#         "ssl_dn": ssl_dn,
-#         "ssl_cn": cn,
-#         "ssl_fingerprint": ssl_fingerprint,
-#         "ssl_serial": ssl_serial,
-#         "ssl_issuer": ssl_issuer
-#     })
 
 
 @router.post(AuthRoutes.CHECK_PERMISSION.value, response_model=PermissionCheckResponse)

@@ -6,9 +6,7 @@ Following OWASP security guidelines and industry standards
 import re
 from app.backend.utils.text import unescape_html, unescape_deep
 import bleach
-from typing import Any, Optional, List, Dict
-from datetime import datetime
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, field_validator
 from email_validator import validate_email, EmailNotValidError
 from app.backend.services.api_errors import invalid
 from app.backend.enums.errors import FieldErrorCode
@@ -167,85 +165,3 @@ class SecureBaseModel(PlainTextModel):
         "from_attributes": True,
         "extra": "forbid"  # Reject unknown fields
     }
-
-
-class PaginationParams(SecureBaseModel):
-    """Secure pagination parameters"""
-    page: int = Field(default=1, ge=1, le=1000)
-    size: int = Field(default=20, ge=1, le=100)
-    
-    @field_validator('page', 'size')
-    @classmethod
-    def validate_positive(cls, v):
-        return SecurityValidators.validate_integer_range(v, 1, 1000)
-
-
-class SearchParams(SecureBaseModel):
-    """Secure search parameters"""
-    query: Optional[str] = Field(default=None, max_length=100)
-    
-    @field_validator('query')
-    @classmethod
-    def validate_search_query(cls, v):
-        if v is not None:
-            return SecurityValidators.sanitize_string(v, max_length=100)
-        return v
-
-
-class GeolocationParams(SecureBaseModel):
-    """Secure geolocation parameters"""
-    latitude: Optional[float] = Field(default=None, ge=-90, le=90)
-    longitude: Optional[float] = Field(default=None, ge=-180, le=180)
-    
-    @field_validator('latitude', 'longitude')
-    @classmethod
-    def validate_coordinates(cls, v):
-        if v is not None:
-            if not isinstance(v, (int, float)):
-                raise invalid(FieldErrorCode.COORDINATES_NOT_NUMERIC)
-        return v
-
-
-class DateRangeParams(SecureBaseModel):
-    """Secure date range parameters"""
-    start_date: Optional[datetime] = None
-    end_date: Optional[datetime] = None
-    
-    @field_validator('end_date')
-    @classmethod
-    def validate_date_range(cls, v, info):
-        if v is not None and 'start_date' in info.data and info.data['start_date'] is not None:
-            if v < info.data['start_date']:
-                raise invalid(FieldErrorCode.END_BEFORE_START)
-        return v
-
-
-class SecurityConfig:
-    """Runtime security configuration"""
-    
-    # Maximum file size (10MB)
-    MAX_FILE_SIZE = 10 * 1024 * 1024
-    
-    # Allowed file extensions
-    ALLOWED_EXTENSIONS = {'.pdf', '.doc', '.docx', '.txt', '.csv', '.xlsx', '.png', '.jpg', '.jpeg'}
-    
-    # Rate limiting
-    RATE_LIMIT_PER_MINUTE = 60
-    RATE_LIMIT_PER_HOUR = 1000
-    
-    # Input limits
-    MAX_STRING_LENGTH = 1000
-    MAX_TEXT_LENGTH = 10000
-    MAX_ARRAY_SIZE = 100
-    
-    @classmethod
-    def validate_file_extension(cls, filename: str) -> bool:
-        """Validate file extension"""
-        import os
-        _, ext = os.path.splitext(filename.lower())
-        return ext in cls.ALLOWED_EXTENSIONS
-    
-    @classmethod
-    def validate_file_size(cls, size: int) -> bool:
-        """Validate file size"""
-        return size <= cls.MAX_FILE_SIZE

@@ -4,7 +4,6 @@ from decimal import Decimal, ROUND_HALF_UP
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.backend.enums.general import ConfidenceLevel, FrequencyKind
-from app.backend.utils.validators import SecureBaseModel, SecurityValidators
 from app.backend.services.api_errors import invalid
 from app.backend.enums.errors import FieldErrorCode
 
@@ -189,98 +188,3 @@ class ObservationDisappeared(BaseModel):
         if v.tzinfo is None:
             return v.replace(tzinfo=timezone.utc)
         return v
-
-
-class ObservationFilterParams(SecureBaseModel):
-    """
-    Comprehensive filter parameters for observations list endpoint.
-    Supports multiple filtering strategies with security validations.
-    """
-
-    # Basic filters
-    post_id: Optional[int] = Field(None, gt=0, description="Filter by specific post")
-    status: Optional[str] = Field(None, max_length=50, description="Filter by observation status")
-
-    # Absolute date range filters
-    observed_at_from: Optional[datetime] = Field(None, description="Filter observations on or after this datetime")
-    observed_at_to: Optional[datetime] = Field(None, description="Filter observations on or before this datetime")
-
-    # Relative date filters
-    last_n_days: Optional[int] = Field(
-        None,
-        ge=1,
-        le=365,
-        description="Get observations from the last N days (counting from today backwards)"
-    )
-    day_offset: Optional[int] = Field(
-        None,
-        ge=0,
-        le=365,
-        description="Get observations from specific day (0=today, 1=yesterday, 2=day before, etc.)"
-    )
-    skip_empty_days: bool = Field(
-        default=False,
-        description="Skip days with no observations in relative date queries"
-    )
-
-    # Tag filter
-    tag_ids: Optional[List[int]] = Field(
-        None,
-        description="Filter by tag IDs. Returns observations that have ALL specified tags."
-    )
-
-    # Pagination
-    skip: Optional[int] = Field(None, ge=0, le=100000, description="Number of records to skip")
-    limit: Optional[int] = Field(None, ge=1, le=1000, description="Maximum number of records to return")
-
-    @field_validator('status')
-    @classmethod
-    def validate_status(cls, v: Optional[str]) -> Optional[str]:
-        """Sanitize status string"""
-        if v is not None:
-            return SecurityValidators.sanitize_string(v, max_length=50)
-        return v
-
-    @field_validator('observed_at_from', 'observed_at_to')
-    @classmethod
-    def validate_datetime(cls, v: Optional[datetime]) -> Optional[datetime]:
-        """Ensure datetime has timezone info"""
-        if v is not None and v.tzinfo is None:
-            return v.replace(tzinfo=timezone.utc)
-        return v
-
-    @field_validator('last_n_days', 'day_offset')
-    @classmethod
-    def validate_day_params(cls, v: Optional[int]) -> Optional[int]:
-        """Validate day parameters"""
-        if v is not None:
-            return SecurityValidators.validate_integer_range(v, 0, 365)
-        return v
-
-    @field_validator('skip', 'limit')
-    @classmethod
-    def validate_pagination(cls, v: Optional[int]) -> Optional[int]:
-        """Validate pagination parameters"""
-        if v is not None:
-            if v < 0:
-                raise invalid(FieldErrorCode.PAGINATION_NEGATIVE)
-        return v
-
-    @model_validator(mode='after')
-    def validate_date_conflicts(self):
-        """Ensure only one date filtering strategy is used"""
-        has_absolute_dates = self.observed_at_from is not None or self.observed_at_to is not None
-        has_relative_days = self.last_n_days is not None or self.day_offset is not None
-
-        if has_absolute_dates and has_relative_days:
-            raise invalid(FieldErrorCode.DATE_FILTERS_CONFLICT)
-
-        if self.last_n_days is not None and self.day_offset is not None:
-            raise invalid(FieldErrorCode.RELATIVE_DATE_FILTERS_CONFLICT)
-
-        # Validate absolute date range
-        if self.observed_at_from and self.observed_at_to:
-            if self.observed_at_from > self.observed_at_to:
-                raise invalid(FieldErrorCode.OBSERVED_AT_RANGE_REVERSED)
-
-        return self

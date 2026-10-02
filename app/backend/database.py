@@ -1,9 +1,8 @@
-from typing import AsyncGenerator, Optional, Dict, Any
+from typing import AsyncGenerator, Optional
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio.engine import AsyncEngine
 from sqlmodel import SQLModel, select
-import contextvars
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -15,12 +14,6 @@ from app.backend.models import *  # Import all models to register them
 
 # Get database logger
 _logger = get_database_logger()
-
-# Context variable to store current user ID for audit logging
-current_user_context = contextvars.ContextVar('current_user_id', default=None)
-current_session_context = contextvars.ContextVar('current_session_id', default=None)
-current_request_context = contextvars.ContextVar('current_request_info', default={})
-
 
 async def create_database_if_not_exists():
     """Create database if it doesn't exist"""
@@ -94,40 +87,16 @@ async def get_session_maker():
     return async_session_maker
 
 
-class AuditedSession(AsyncSession):
-    """Extended session with audit context"""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.audit_user_id: Optional[int] = None
-        self.audit_session_id: Optional[str] = None
-        self.audit_request_info: Dict[str, Any] = {}
-
-
-async def get_session() -> AsyncGenerator[AuditedSession, None]:
-    """Dependency to get database session with audit context and error handling"""
+async def get_session() -> AsyncGenerator[AsyncSession, None]:
+    """Dependency: one database session per request (connections are checked by pool_pre_ping)"""
     session_maker = await get_session_maker()
     async with session_maker() as session:
         try:
-            # Set audit context from context variables
-            session.audit_user_id = current_user_context.get()
-            session.audit_session_id = current_session_context.get()
-            session.audit_request_info = current_request_context.get()
-            
-            # Test connection
-            await session.exec(text("SELECT 1"))
-            
             yield session
         except Exception as e:
             _logger.error(f"Database session error: {e}")
             await session.rollback()
             raise
-        finally:
-            # Ensure session is properly closed
-            try:
-                await session.close()
-            except Exception as e:
-                _logger.warning(f"Error closing session: {e}")
 
 
 def _is_admin_pki_data_valid(admin_config) -> bool:

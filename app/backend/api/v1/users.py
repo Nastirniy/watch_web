@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Form, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Form, Request, Response
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -21,10 +21,8 @@ from app.backend.services.auth import AuthService
 from app.backend.helpers.certeficates_helper import CertificateParser, hash_data, hash_pki_certificate_data
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import UserRoutes
-from app.backend.helpers.audit_helper import create_audit_log
-from app.backend.helpers.audit_helper import client_info
-from app.backend.utils.validators import PaginationParams
-from app.backend.utils.logging_config import get_logger, get_api_logger
+from app.backend.helpers.audit_helper import client_info, create_audit_log
+from app.backend.utils.logging_config import get_api_logger
 from app.backend.api.shared.models.request.user_request import UserCreateData, UserUpdateData, UserPostAccessUpsert
 from app.backend.api.shared.models.response.user_response import UserResponse, UserRoleResponse, UserPostAccessResponse
 from app.backend.filters.params.user_params import UserFilterParams
@@ -281,7 +279,6 @@ async def get_user_filter_schema(
         auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW]))
 ):
     """Available filter params and sortable fields for users."""
-    current_user = auth.user
     user_is_admin = auth.is_admin
     return EntitySchemaInfo(**UserFilterService.get_schema(is_admin=user_is_admin))
 
@@ -293,7 +290,6 @@ async def get_user(
         auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW]))
 ):
     """Get user by ID - visible to the user itself, to administrators and to callers whose post scope covers the user's post"""
-    current_user = auth.user
     if user_id <= 0:
         raise ApiError(ErrorCode.USER_ID_INVALID)
 

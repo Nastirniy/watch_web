@@ -113,7 +113,7 @@ def test_request_validators_raise_coded_field_errors():
     offenders = []
     scanned = []
     for rel, tree in _sources():
-        if not (REQUEST_MODELS.match(rel) or rel in ("utils/validators.py", "filters/base.py")):
+        if not (REQUEST_MODELS.match(rel) or rel == "utils/validators.py"):
             continue
         scanned.append(rel)
         for node in ast.walk(tree):

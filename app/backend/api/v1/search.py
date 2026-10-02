@@ -3,8 +3,8 @@ Unified Search API - Strongly typed endpoints for each entity
 All params visible in FastAPI /docs
 """
 
-from typing import Dict, Any, List
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from typing import Dict, List
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -22,7 +22,6 @@ from app.backend.models.role import Role
 from app.backend.models.observation import Observation, Category, SignalType, Tag
 from app.backend.models.media_format import MediaFormat
 from app.backend.models.media import MediaFile
-from app.backend.models.audit import AuditLog
 from app.backend.helpers.audit_helper import client_info, create_audit_log
 
 # Filter params

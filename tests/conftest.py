@@ -16,7 +16,8 @@ from sqlmodel import SQLModel
 
 import app.backend.models  # noqa: F401  registers every table on the metadata
 from app.main import fastapi_app
-from app.backend.database import get_session, seed_roles_and_permissions, AuditedSession
+from sqlmodel.ext.asyncio.session import AsyncSession
+from app.backend.database import get_session, seed_roles_and_permissions
 from app.backend.services.media.formats import seed_media_formats, invalidate_registry_cache
 from app.backend.services.auth import AuthService
 
@@ -36,7 +37,7 @@ async def engine():
 
 @pytest_asyncio.fixture
 async def session_maker(engine):
-    return async_sessionmaker(engine, class_=AuditedSession, expire_on_commit=False)
+    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 @pytest_asyncio.fixture

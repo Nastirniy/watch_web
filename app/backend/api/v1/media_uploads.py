@@ -18,8 +18,7 @@ from app.backend.config import settings
 from app.backend.database import get_session
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import MediaRoutes
-from app.backend.helpers.audit_helper import create_audit_log
-from app.backend.helpers.audit_helper import client_info
+from app.backend.helpers.audit_helper import client_info, create_audit_log
 from app.backend.models.upload_session import UploadSession
 from app.backend.api.shared.helpers.media_helper import storage_root
 from app.backend.api.versioning import PublishedVersion, request_version

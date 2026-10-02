@@ -1,8 +1,7 @@
 """Helpers shared by the media routes: lookups, access checks and file responses."""
 from pathlib import Path
-from typing import Optional
 
-from fastapi import Response, status as fapi_status
+from fastapi import Response
 from fastapi.responses import FileResponse
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession

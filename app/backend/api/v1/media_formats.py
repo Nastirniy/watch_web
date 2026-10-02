@@ -11,7 +11,7 @@ pick the change up within REGISTRY_CACHE_TTL_SECONDS.
 """
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, status as fapi_status, Request
+from fastapi import APIRouter, Depends, Request
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
@@ -25,12 +25,10 @@ from app.backend.services.permissions import require
 from app.backend.services.media.formats import hard_limit_bytes, invalidate_registry_cache
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import MediaFormatRoutes
-from app.backend.helpers.audit_helper import create_audit_log
-from app.backend.helpers.audit_helper import client_info
+from app.backend.helpers.audit_helper import client_info, create_audit_log
 from app.backend.utils.datetime_utils import get_default_timezone_datetime
 from app.backend.api.shared.models.request.media_format_request import MediaFormatCreate, MediaFormatUpdate
 from app.backend.api.shared.models.response.media_format_response import MediaFormatResponse
-from app.backend.api.shared.models.response.observations_response import MessageResponse
 from app.backend.filters.params.media_format_params import MediaFormatFilterParams
 from app.backend.filters.media_format_filter import MediaFormatFilterService
 from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
