@@ -2,7 +2,7 @@ from typing import Any, Iterable, Optional, TYPE_CHECKING
 from fastapi import status
 
 from app.backend.enums.errors import AccessErrorCode
-from app.backend.routes.models.response.error_response import RequiredPermissions
+from app.backend.enums.errors import RequiredPermissions
 from app.backend.services.api_errors import ApiError
 
 if TYPE_CHECKING:

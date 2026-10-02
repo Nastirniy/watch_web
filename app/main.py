@@ -15,9 +15,9 @@ from app.backend.utils.logging_config import setup_logging, get_logger, get_main
 from app.backend.database import initialize_database_with_migrations
 from app.backend.services.route_access import build_route_access_map
 from app.backend.error_handlers import register_error_handlers
-from app.backend.openapi_problems import API_DESCRIPTION, install_openapi
+from app.backend.openapi_problems import install_openapi
 from app.backend.routes import health, problems, v1
-from app.backend.enums.routes import DocsRoutes
+from app.backend.enums.routes import AuthRoutes, DocsRoutes, SystemRoutes
 
 # Initialize logging system
 setup_logging(
@@ -28,6 +28,39 @@ setup_logging(
 
 # Get application logger
 _logger = get_main_logger()
+
+API_DESCRIPTION = f"""
+Radio monitoring API. This page, `{DocsRoutes.REDOC.path()}` and `{DocsRoutes.OPENAPI_JSON.path()}` are generated
+from the code, errors included.
+
+## Authentication
+`Authorization: Bearer <access token>` from `POST {AuthRoutes.LOGIN.versioned_path()}`. A 401 with `invalid_token` or
+`session_expired` means: refresh with `POST {AuthRoutes.REFRESH.versioned_path()}`; any other 401 code means: log in again.
+
+## Errors (RFC 9457 Problem Details)
+Every error answers `Content-Type: application/problem+json`:
+
+| member | meaning |
+|---|---|
+| `type` | URI of the problem type; open it for its documentation (`{SystemRoutes.PROBLEMS.path()}/<code>`) |
+| `title` | fixed summary of the problem type |
+| `status` | HTTP status code |
+| `detail` | English text of this occurrence |
+| `instance` | path of the request that failed |
+| `code` | **localization key** of exactly this message (never a category) |
+| other members | params of the message (`post_id`, `offset`, `max_file_size_bytes`, ...) |
+
+Each response of each operation lists the problem types it can answer (`oneOf`, discriminator `code`).
+`components.schemas.ProblemCode` lists every code, `{SystemRoutes.PROBLEMS.path()}` documents them all.
+
+`validation_error` (422) carries `errors`: one item per invalid value with `code`, `detail` and either
+`pointer` (JSON Pointer into the body, `#/username`) or `parameter` + `location` (query, path, header, cookie).
+Item codes are `components.schemas.FieldErrorCode` plus pydantic's codes (`missing`, `string_too_short`, ...).
+
+## Typed client
+`npx openapi-typescript <origin>{DocsRoutes.OPENAPI_JSON.path()} -o src/api/schema.ts` generates the types; operation ids
+are the endpoint names (`update_post`).
+"""
 
 
 @asynccontextmanager

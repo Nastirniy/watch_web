@@ -11,7 +11,7 @@ from app.backend.services.auth_context import AuthContext, load_auth_context
 from app.backend.services.permissions import Require
 from app.backend.services.route_access import routes_allowed_for
 from app.backend.routes.helpers.auth_helper import build_user_info, build_login_response
-from app.backend.routes.models.response.error_response import RequiredPermissions
+from app.backend.enums.errors import RequiredPermissions
 from app.backend.models.user import User, UserSession
 from app.backend.enums.routes import AuthRoutes
 from app.backend.enums.general import Permissions, AppEnvironment

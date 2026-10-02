@@ -25,42 +25,9 @@ from pydantic import BaseModel, ConfigDict, Field, create_model
 from app.backend.enums.errors import (
     PROBLEM_ENUMS, AccessErrorCode, ErrorCode, FieldErrorCode, ProblemType, RequiredPermissions, UserRef,
 )
-from app.backend.enums.routes import APIVersionRoutes, AuthRoutes, DocsRoutes, SystemRoutes
+from app.backend.enums.routes import APIVersionRoutes
 from app.backend.services.api_errors import PROBLEM_JSON, is_optional
 from app.backend.services.permissions import REQUIRE_ATTR
-
-API_DESCRIPTION = f"""
-Radio monitoring API. This page, `{DocsRoutes.REDOC.path()}` and `{DocsRoutes.OPENAPI_JSON.path()}` are generated
-from the code, errors included.
-
-## Authentication
-`Authorization: Bearer <access token>` from `POST {AuthRoutes.LOGIN.versioned_path()}`. A 401 with `invalid_token` or
-`session_expired` means: refresh with `POST {AuthRoutes.REFRESH.versioned_path()}`; any other 401 code means: log in again.
-
-## Errors (RFC 9457 Problem Details)
-Every error answers `Content-Type: application/problem+json`:
-
-| member | meaning |
-|---|---|
-| `type` | URI of the problem type; open it for its documentation (`{SystemRoutes.PROBLEMS.path()}/<code>`) |
-| `title` | fixed summary of the problem type |
-| `status` | HTTP status code |
-| `detail` | English text of this occurrence |
-| `instance` | path of the request that failed |
-| `code` | **localization key** of exactly this message (never a category) |
-| other members | params of the message (`post_id`, `offset`, `max_file_size_bytes`, ...) |
-
-Each response of each operation lists the problem types it can answer (`oneOf`, discriminator `code`).
-`components.schemas.ProblemCode` lists every code, `{SystemRoutes.PROBLEMS.path()}` documents them all.
-
-`validation_error` (422) carries `errors`: one item per invalid value with `code`, `detail` and either
-`pointer` (JSON Pointer into the body, `#/username`) or `parameter` + `location` (query, path, header, cookie).
-Item codes are `components.schemas.FieldErrorCode` plus pydantic's codes (`missing`, `string_too_short`, ...).
-
-## Typed client
-`npx openapi-typescript <origin>{DocsRoutes.OPENAPI_JSON.path()} -o src/api/schema.ts` generates the types; operation ids
-are the endpoint names (`update_post`).
-"""
 
 APP_PACKAGE = "app.backend"
 APP_DIR = Path(__file__).resolve().parent

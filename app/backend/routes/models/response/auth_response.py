@@ -1,7 +1,7 @@
 from typing import Optional, List
 from pydantic import BaseModel, Field
 
-from app.backend.routes.models.response.error_response import RequiredPermissions
+from app.backend.enums.errors import RequiredPermissions
 from app.backend.utils.validators import PlainTextModel
 
 
