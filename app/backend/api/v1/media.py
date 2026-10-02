@@ -32,8 +32,8 @@ from app.backend.enums.routes import MediaRoutes
 from app.backend.helpers.audit_helper import create_audit_log
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.config import settings
-from app.backend.routes.models.request.media_request import ListAttachedMediaRequest, ShareLinkRequest, PosterReconcileRequest
-from app.backend.routes.models.response.media_response import (
+from app.backend.api.shared.models.request.media_request import ListAttachedMediaRequest, ShareLinkRequest, PosterReconcileRequest
+from app.backend.api.shared.models.response.media_response import (
     MediaFileInfo,
     ShareLinkResponse,
     PosterStatusResponse,
@@ -46,8 +46,8 @@ from app.backend.routes.models.response.media_response import (
 )
 from app.backend.filters.params.media_params import MediaFilterParams
 from app.backend.filters.media_filter import MediaFilterService
-from app.backend.routes.models.response.search_response import EntitySchemaInfo
-from app.backend.routes.helpers.media_helper import (
+from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
+from app.backend.api.shared.helpers.media_helper import (
     get_observation_from_media,
     get_media_or_404,
     original_file_response,
@@ -55,7 +55,7 @@ from app.backend.routes.helpers.media_helper import (
 )
 from app.backend.enums.errors import ErrorCode
 from app.backend.services.api_errors import ApiError, CodedError
-from app.backend.routes.models.response.openapi_docs import (
+from app.backend.api.shared.models.response.openapi_docs import (
     ORIGINAL_FILE_HEADERS, THUMBNAIL_PENDING_HEADERS, empty_response, file_response, header,
 )
 

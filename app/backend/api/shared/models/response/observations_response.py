@@ -4,8 +4,8 @@ from datetime import datetime
 from decimal import Decimal
 
 from app.backend.utils.validators import PlainTextModel
-from app.backend.routes.models.response.user_response import UserPublicResponse
-from app.backend.routes.models.response.tag_response import TagBriefResponse
+from app.backend.api.shared.models.response.user_response import UserPublicResponse
+from app.backend.api.shared.models.response.tag_response import TagBriefResponse
 
 
 class ReportTypeChoice(BaseModel):

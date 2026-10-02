@@ -24,11 +24,11 @@ from app.backend.enums.routes import UserRoutes
 from app.backend.helpers.audit_helper import create_audit_log
 from app.backend.utils.validators import PaginationParams
 from app.backend.utils.logging_config import get_logger, get_api_logger
-from app.backend.routes.models.request.user_request import UserCreateData, UserUpdateData, UserPostAccessUpsert
-from app.backend.routes.models.response.user_response import UserResponse, UserRoleResponse, UserPostAccessResponse
+from app.backend.api.shared.models.request.user_request import UserCreateData, UserUpdateData, UserPostAccessUpsert
+from app.backend.api.shared.models.response.user_response import UserResponse, UserRoleResponse, UserPostAccessResponse
 from app.backend.filters.params.user_params import UserFilterParams
 from app.backend.filters.user_filter import UserFilterService
-from app.backend.routes.models.response.search_response import EntitySchemaInfo
+from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
 from app.backend.services.api_errors import ApiError
 from app.backend.enums.errors import ErrorCode
 

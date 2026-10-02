@@ -1,7 +1,7 @@
 from app.backend.config import settings
 from app.backend.services.auth_context import AuthContext
 from app.backend.services.presence import online_threshold_seconds
-from app.backend.routes.models.response.auth_response import (
+from app.backend.api.shared.models.response.auth_response import (
     LoginResponse,
     UserInfoResponse,
     RoleBriefResponse,

@@ -17,13 +17,13 @@ from app.backend.services.permissions import require
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import CategoryRoutes
 from app.backend.helpers.audit_helper import create_audit_log
-from app.backend.routes.models.request.category_request import CategoryCreate, CategoryUpdate
-from app.backend.routes.models.response.category_response import CategoryResponse, CategoryWithSignalTypesResponse
-from app.backend.routes.models.response.signal_type_response import SignalTypeResponse
-from app.backend.routes.models.response.observations_response import MessageResponse
+from app.backend.api.shared.models.request.category_request import CategoryCreate, CategoryUpdate
+from app.backend.api.shared.models.response.category_response import CategoryResponse, CategoryWithSignalTypesResponse
+from app.backend.api.shared.models.response.signal_type_response import SignalTypeResponse
+from app.backend.api.shared.models.response.observations_response import MessageResponse
 from app.backend.filters.params.category_params import CategoryFilterParams
 from app.backend.filters.category_filter import CategoryFilterService
-from app.backend.routes.models.response.search_response import EntitySchemaInfo
+from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
 from app.backend.services.api_errors import ApiError
 from app.backend.enums.errors import ErrorCode
 

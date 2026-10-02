@@ -17,12 +17,12 @@ from app.backend.services.permissions import require
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import SignalTypeRoutes
 from app.backend.helpers.audit_helper import create_audit_log
-from app.backend.routes.models.request.signal_type_request import SignalTypeCreate, SignalTypeUpdate
-from app.backend.routes.models.response.signal_type_response import SignalTypeResponse, SignalTypeWithCategoryResponse
-from app.backend.routes.models.response.observations_response import MessageResponse
+from app.backend.api.shared.models.request.signal_type_request import SignalTypeCreate, SignalTypeUpdate
+from app.backend.api.shared.models.response.signal_type_response import SignalTypeResponse, SignalTypeWithCategoryResponse
+from app.backend.api.shared.models.response.observations_response import MessageResponse
 from app.backend.filters.params.signal_type_params import SignalTypeFilterParams
 from app.backend.filters.signal_type_filter import SignalTypeFilterService
-from app.backend.routes.models.response.search_response import EntitySchemaInfo
+from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
 from app.backend.services.api_errors import ApiError
 from app.backend.enums.errors import ErrorCode
 

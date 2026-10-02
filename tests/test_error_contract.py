@@ -32,6 +32,8 @@ EXEMPT = {"services/api_errors.py", "error_handlers.py"}
 CODE_ENUMS = {cls.__name__: cls for cls in ALL_CODE_ENUMS}
 # RFC 9457 section 3.2: extension member names
 MEMBER_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]{2,}")
+# Request models of the API: shared ones and those of a single version
+REQUEST_MODELS = re.compile(r"api/(shared|v\d+)/models/request/")
 
 
 def _sources():
@@ -108,12 +110,15 @@ def test_routes_never_build_error_bodies_by_hand():
 def test_request_validators_raise_coded_field_errors():
     """A plain ValueError in a validator answers pydantic's generic "value_error" code"""
     offenders = []
+    scanned = []
     for rel, tree in _sources():
-        if not (rel.startswith("routes/models/request/") or rel in ("utils/validators.py", "filters/base.py")):
+        if not (REQUEST_MODELS.match(rel) or rel in ("utils/validators.py", "filters/base.py")):
             continue
+        scanned.append(rel)
         for node in ast.walk(tree):
             if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call) and _call_name(node.exc) == "ValueError":
                 offenders.append(f"{rel}:{node.lineno}")
+    assert any(REQUEST_MODELS.match(rel) for rel in scanned), "no request models found: REQUEST_MODELS is out of date"
     assert not offenders, "raise invalid(FieldErrorCode.X, **params) instead:\n" + "\n".join(offenders)
 
 

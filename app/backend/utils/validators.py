@@ -70,7 +70,7 @@ class SecurityValidators:
     def validate_username(cls, username: str) -> str:
         """Validate username with security rules and keep the case the user typed.
 
-        Uniqueness is case-insensitive (see routes/users.py), so "Ivan" and "ivan" can't coexist.
+        Uniqueness is case-insensitive (see api/v1/users.py), so "Ivan" and "ivan" can't coexist.
         """
         if not cls.PATTERNS['username'].match(username):
             raise invalid(FieldErrorCode.USERNAME_INVALID)

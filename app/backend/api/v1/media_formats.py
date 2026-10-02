@@ -27,12 +27,12 @@ from app.backend.enums.general import Permissions
 from app.backend.enums.routes import MediaFormatRoutes
 from app.backend.helpers.audit_helper import create_audit_log
 from app.backend.utils.datetime_utils import get_default_timezone_datetime
-from app.backend.routes.models.request.media_format_request import MediaFormatCreate, MediaFormatUpdate
-from app.backend.routes.models.response.media_format_response import MediaFormatResponse
-from app.backend.routes.models.response.observations_response import MessageResponse
+from app.backend.api.shared.models.request.media_format_request import MediaFormatCreate, MediaFormatUpdate
+from app.backend.api.shared.models.response.media_format_response import MediaFormatResponse
+from app.backend.api.shared.models.response.observations_response import MessageResponse
 from app.backend.filters.params.media_format_params import MediaFormatFilterParams
 from app.backend.filters.media_format_filter import MediaFormatFilterService
-from app.backend.routes.models.response.search_response import EntitySchemaInfo
+from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
 from app.backend.services.api_errors import ApiError
 from app.backend.enums.errors import ErrorCode
 

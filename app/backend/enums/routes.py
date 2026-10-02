@@ -1,6 +1,6 @@
 """Every URL of the service, as enums. No route path is written anywhere else.
 
-- APIVersionRoutes: the published API versions; the value is the prefix of the version router (routes/v1.py).
+- APIVersionRoutes: the published API versions; the value is the prefix of the version router (api/v1/__init__.py).
 - VersionedRouteEnum groups (AuthRoutes, UserRoutes, ...): BASE is the prefix of the resource router,
   every other member a path relative to it. versioned_path() = version prefix + BASE + member.
 - RouteEnum groups (SystemRoutes, DocsRoutes): outside any version, path() only.

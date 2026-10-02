@@ -49,9 +49,9 @@ from app.backend.filters.tag_filter import TagFilterService
 from app.backend.filters.media_filter import MediaFilterService
 
 from app.backend.filters.simple_engine import _get_type_name, _BASE_COMMON_FIELDS
-from app.backend.routes.models.response.observations_response import ObservationWithMedia
-from app.backend.routes.models.response.posts_response import post_to_response
-from app.backend.routes.models.response.search_response import (
+from app.backend.api.shared.models.response.observations_response import ObservationWithMedia
+from app.backend.api.shared.models.response.posts_response import post_to_response
+from app.backend.api.shared.models.response.search_response import (
     SearchResponse,
     SchemaResponse,
     EntitySchemaInfo,

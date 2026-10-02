@@ -7,9 +7,9 @@ from app.backend.database import get_session
 from app.backend.config import settings
 from app.backend.enums.general import ServiceHealthStatus, ServiceUptimeStatus
 from app.backend.enums.routes import SystemRoutes
-from app.backend.routes.models.response.health_response import HealthResponse
+from app.backend.api.shared.models.response.health_response import HealthResponse
 from app.backend.utils.datetime_utils import get_current_time_in_timezone
-from app.backend.routes.helpers.health_helper import (
+from app.backend.api.shared.helpers.health_helper import (
     check_database_health,
     check_services_health,
     health_rate_limiter,

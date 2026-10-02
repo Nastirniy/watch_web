@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from sqlalchemy import inspect as sa_inspect
 
 from app.backend.models.media import MediaFile
-from app.backend.routes.models.response.user_response import UserPublicResponse
+from app.backend.api.shared.models.response.user_response import UserPublicResponse
 from app.backend.utils.validators import PlainTextModel
 from app.backend.services.media.urls import thumbnail_urls
 

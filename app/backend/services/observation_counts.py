@@ -19,7 +19,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.enums.general import StatsGroupBy
 from app.backend.models.observation import Observation
-from app.backend.routes.models.response.posts_response import (
+from app.backend.api.shared.models.response.posts_response import (
     ObservationCount, ObservationStatsBucket, ObservationStatsPeriod, PostObservationStatsResponse,
 )
 from app.backend.services.api_errors import ApiError

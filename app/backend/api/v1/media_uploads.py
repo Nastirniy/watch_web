@@ -20,13 +20,13 @@ from app.backend.enums.general import Permissions
 from app.backend.enums.routes import MediaRoutes
 from app.backend.helpers.audit_helper import create_audit_log
 from app.backend.models.upload_session import UploadSession
-from app.backend.routes.helpers.media_helper import storage_root
-from app.backend.routes.media import (
+from app.backend.api.shared.helpers.media_helper import storage_root
+from app.backend.api.v1.media import (
     _check_declared_format, _client_info, _finish_upload, _load_observation_for_upload,
     _format_rejected, _store_rejected, _too_large, _validation_config_for,
 )
-from app.backend.routes.models.request.media_request import UploadSessionCreate
-from app.backend.routes.models.response.media_response import UploadResultResponse, UploadSessionResponse
+from app.backend.api.shared.models.request.media_request import UploadSessionCreate
+from app.backend.api.shared.models.response.media_response import UploadResultResponse, UploadSessionResponse
 from app.backend.services.access_control import AccessControlService
 from app.backend.services.access_errors import AccessErrorCode, access_denied
 from app.backend.services.auth_context import AuthContext
@@ -37,7 +37,7 @@ from app.backend.services.permissions import Require, require
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.services.api_errors import ApiError, CodedError
 from app.backend.enums.errors import ErrorCode
-from app.backend.routes.models.response.openapi_docs import UPLOAD_SESSION_HEADERS, empty_response, header, with_headers
+from app.backend.api.shared.models.response.openapi_docs import UPLOAD_SESSION_HEADERS, empty_response, header, with_headers
 
 router = APIRouter(prefix=MediaRoutes.BASE.value, tags=[MediaRoutes.tag()])
 _logger = get_api_logger()

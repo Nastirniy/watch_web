@@ -16,7 +16,8 @@ from app.backend.database import initialize_database_with_migrations
 from app.backend.services.route_access import build_route_access_map
 from app.backend.error_handlers import register_error_handlers
 from app.backend.openapi_problems import install_openapi
-from app.backend.routes import health, problems, v1
+from app.backend.api import v1
+from app.backend.api.system import health, problems
 from app.backend.enums.routes import AuthRoutes, DocsRoutes, SystemRoutes
 
 # Initialize logging system

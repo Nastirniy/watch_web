@@ -7,7 +7,7 @@ see "Routes and API versions" in CLAUDE.md.
 from fastapi import APIRouter
 
 from app.backend.enums.routes import APIVersionRoutes
-from app.backend.routes import (
+from app.backend.api.v1 import (
     auth, users, roles, categories, signal_types, tags, observations, posts, media, media_uploads, media_formats,
     search, statistics,
 )

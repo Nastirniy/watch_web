@@ -88,7 +88,7 @@ async def test_post_can_change_only_the_case_of_own_code(client, db, headers):
 @pytest.mark.asyncio
 async def test_code_race_answers_400(client, db, headers, monkeypatch):
     """Another request took the code between the check and the commit: the unique index answers, reported as 400"""
-    from app.backend.routes import posts as posts_routes
+    from app.backend.api.v1 import posts as posts_routes
     monkeypatch.setattr(posts_routes, "_code_taken", lambda *args, **kwargs: select(Post).where(Post.id == -1))
 
     admin = await make_admin(db)

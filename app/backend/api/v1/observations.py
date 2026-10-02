@@ -20,7 +20,7 @@ from app.backend.services.access_control import AccessControlService
 from app.backend.enums.general import Permissions, ObservationStatus
 from app.backend.enums.routes import ObservationRoutes
 from app.backend.helpers.audit_helper import create_audit_log
-from app.backend.routes.models.request.observations_request import (
+from app.backend.api.shared.models.request.observations_request import (
     ObservationCreate,
     ObservationUpdate,
     ObservationDisappeared,
@@ -29,13 +29,13 @@ from app.backend.routes.models.request.observations_request import (
     ObservationFrequencyListParams,
     default_frequency_center,
 )
-from app.backend.routes.models.response.observations_response import (
+from app.backend.api.shared.models.response.observations_response import (
     MessageResponse,
     ReportTypeChoice,
     ObservationWithMedia,
     ObservationFrequencyResponse,
 )
-from app.backend.routes.helpers.observation_helper import (
+from app.backend.api.shared.helpers.observation_helper import (
     get_observation_for_write,
     get_frequency_or_404,
     ensure_other_active_frequency,
@@ -49,10 +49,10 @@ from app.backend.filters.observation_filter import ObservationFilterService
 from app.backend.filters.params.observation_report_params import ObservationReportParams, ObservationReportType
 from app.backend.filters.observation_report_filter import ObservationReportFilter
 from app.backend.services.observation_report_service import ObservationReportService
-from app.backend.routes.models.response.search_response import EntitySchemaInfo
+from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
 from app.backend.services.api_errors import ApiError, field_problem
 from app.backend.enums.errors import ErrorCode, FieldErrorCode
-from app.backend.routes.models.response.openapi_docs import file_response, header
+from app.backend.api.shared.models.response.openapi_docs import file_response, header
 
 router = APIRouter(prefix=ObservationRoutes.BASE.value, tags=[ObservationRoutes.tag()])
 

@@ -58,7 +58,7 @@ async def create_user(
     """
     Create a user with PKI certificate authentication.
 
-    Mirrors the logic from app/backend/routes/users.py create_user route.
+    Mirrors the logic from app/backend/api/v1/users.py create_user route.
     """
     await create_database_if_not_exists()
     session_maker = await get_session_maker()

@@ -18,14 +18,14 @@ from app.backend.utils.validators import PaginationParams
 from app.backend.utils.logging_config import get_logger, get_api_logger
 from app.backend.filters.params.role_params import RoleFilterParams
 from app.backend.filters.role_filter import RoleFilterService
-from app.backend.routes.models.response.search_response import EntitySchemaInfo
-from app.backend.routes.helpers.roles_helper import (
+from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
+from app.backend.api.shared.helpers.roles_helper import (
     get_role_or_404,
     get_permission_or_404,
     check_role_name_exists
 )
-from app.backend.routes.models.request.roles_request import RoleCreate, RoleUpdate
-from app.backend.routes.models.response.roles_response import RoleResponse, PermissionResponse
+from app.backend.api.shared.models.request.roles_request import RoleCreate, RoleUpdate
+from app.backend.api.shared.models.response.roles_response import RoleResponse, PermissionResponse
 from app.backend.services.api_errors import ApiError
 from app.backend.enums.errors import ErrorCode
 

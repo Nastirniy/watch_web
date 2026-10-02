@@ -120,7 +120,7 @@ async def test_username_uniqueness_ignores_case(client, db, headers):
 @pytest.mark.asyncio
 async def test_username_race_answers_400_not_certificate_error(client, db, headers, monkeypatch):
     """Another request took the name between the check and the commit: the unique index answers, reported as 400"""
-    from app.backend.routes import users as users_routes
+    from app.backend.api.v1 import users as users_routes
     from app.backend.models.user import User
     monkeypatch.setattr(users_routes, "_username_taken", lambda *args, **kwargs: select(User).where(User.id == -1))
 

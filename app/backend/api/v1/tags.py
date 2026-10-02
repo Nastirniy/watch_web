@@ -16,12 +16,12 @@ from app.backend.services.permissions import require
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import TagRoutes
 from app.backend.helpers.audit_helper import create_audit_log
-from app.backend.routes.models.request.tag_request import TagCreate, TagUpdate
-from app.backend.routes.models.response.tag_response import TagResponse
-from app.backend.routes.models.response.observations_response import MessageResponse
+from app.backend.api.shared.models.request.tag_request import TagCreate, TagUpdate
+from app.backend.api.shared.models.response.tag_response import TagResponse
+from app.backend.api.shared.models.response.observations_response import MessageResponse
 from app.backend.filters.params.tag_params import TagFilterParams
 from app.backend.filters.tag_filter import TagFilterService
-from app.backend.routes.models.response.search_response import EntitySchemaInfo
+from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
 from app.backend.services.api_errors import ApiError
 from app.backend.enums.errors import ErrorCode
 

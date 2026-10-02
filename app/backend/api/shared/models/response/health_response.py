@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.backend.routes.helpers.health_helper import DatabaseHealthModel, ServicesHealthModel
+from app.backend.api.shared.helpers.health_helper import DatabaseHealthModel, ServicesHealthModel
 
 
 class HealthResponse(BaseModel):

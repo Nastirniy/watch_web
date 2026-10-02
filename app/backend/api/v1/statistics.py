@@ -25,7 +25,7 @@ from app.backend.services.auth_context import AuthContext
 from app.backend.services.access_control import AccessControlService
 from app.backend.services.permissions import require
 from app.backend.services.presence import online_user_ids_select
-from app.backend.routes.models.response.statistics_response import (
+from app.backend.api.shared.models.response.statistics_response import (
     StatisticsResponse, StatisticsPeriod, PostStatistics, UserStatistics,
     ObservationStatistics, ObservationsByPost, MediaStatistics,
 )
