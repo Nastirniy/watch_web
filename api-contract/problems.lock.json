@@ -2160,6 +2160,9 @@
         "403": [
           "permission_denied"
         ],
+        "422": [
+          "validation_error"
+        ],
         "500": [
           "internal_error"
         ]
@@ -2175,6 +2178,9 @@
           "credentials_required",
           "invalid_token",
           "session_expired"
+        ],
+        "422": [
+          "validation_error"
         ],
         "500": [
           "internal_error"
@@ -2194,6 +2200,9 @@
         ],
         "403": [
           "permission_denied"
+        ],
+        "422": [
+          "validation_error"
         ],
         "500": [
           "internal_error"
@@ -2239,6 +2248,9 @@
         "403": [
           "permission_denied"
         ],
+        "422": [
+          "validation_error"
+        ],
         "500": [
           "internal_error"
         ]
@@ -2257,6 +2269,9 @@
         ],
         "403": [
           "permission_denied"
+        ],
+        "422": [
+          "validation_error"
         ],
         "500": [
           "internal_error"
@@ -2343,6 +2358,9 @@
         "403": [
           "permission_denied"
         ],
+        "422": [
+          "validation_error"
+        ],
         "500": [
           "internal_error"
         ]
@@ -2388,6 +2406,9 @@
         ],
         "403": [
           "permission_denied"
+        ],
+        "422": [
+          "validation_error"
         ],
         "500": [
           "internal_error"
@@ -2441,6 +2462,9 @@
           "admin_required",
           "permission_denied"
         ],
+        "422": [
+          "validation_error"
+        ],
         "500": [
           "internal_error"
         ]
@@ -2459,6 +2483,9 @@
         ],
         "403": [
           "permission_denied"
+        ],
+        "422": [
+          "validation_error"
         ],
         "500": [
           "internal_error"
@@ -2509,6 +2536,9 @@
           "admin_required",
           "permission_denied"
         ],
+        "422": [
+          "validation_error"
+        ],
         "500": [
           "internal_error"
         ]
@@ -2525,6 +2555,9 @@
           "invalid_token",
           "session_expired"
         ],
+        "422": [
+          "validation_error"
+        ],
         "500": [
           "internal_error"
         ]
@@ -2540,6 +2573,9 @@
           "credentials_required",
           "invalid_token",
           "session_expired"
+        ],
+        "422": [
+          "validation_error"
         ],
         "500": [
           "internal_error"
@@ -2584,6 +2620,9 @@
         ],
         "403": [
           "permission_denied"
+        ],
+        "422": [
+          "validation_error"
         ],
         "500": [
           "internal_error"
@@ -2630,6 +2669,9 @@
           "admin_required",
           "permission_denied"
         ],
+        "422": [
+          "validation_error"
+        ],
         "500": [
           "internal_error"
         ]
@@ -2673,6 +2715,9 @@
         ],
         "403": [
           "permission_denied"
+        ],
+        "422": [
+          "validation_error"
         ],
         "500": [
           "internal_error"
@@ -2751,6 +2796,9 @@
         "403": [
           "permission_denied"
         ],
+        "422": [
+          "validation_error"
+        ],
         "500": [
           "internal_error"
         ]
@@ -2766,6 +2814,9 @@
           "credentials_required",
           "invalid_token",
           "session_expired"
+        ],
+        "422": [
+          "validation_error"
         ],
         "500": [
           "internal_error",
@@ -2801,6 +2852,9 @@
         "403": [
           "admin_required",
           "permission_denied"
+        ],
+        "422": [
+          "validation_error"
         ],
         "500": [
           "internal_error",

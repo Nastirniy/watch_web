@@ -5,16 +5,25 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
-## Route enums and the v1 router
+## API versions as folders, errors declared on the routes, FastAPI built-ins instead of workarounds
 
-No path, method, tag or operationId changed for API clients (`api-contract/problems.lock.json` is untouched).
+### Changed for API clients
+
+- 18 operations without inputs (`GET /auth/me`, `/auth/sessions`, `/auth/route-access`, the `filter-schema` routes, `/media/formats`, `/media/statistics`, `/media/posters/status`, `/observations/report/types`, `/roles/list-all-permissions`) now also list 422 `validation_error`: the version router declares it for all of its routes. Only their error union widens.
+- `FieldError.pointer`, `.parameter` and `.location` are optional members in OpenAPI (absent when not set) instead of nullable ones; the bodies never carried `null`. The generated type becomes `pointer?: string`.
+- `PATCH /media/uploads/{upload_id}` documents its `Upload-Offset` header as a parameter.
+- `GET /auth/route-access` lists the routes of the API version it is called through (all of them today).
+- No path, method, tag or operationId changed.
 
 ### Backend
 
-- Each resource router declares its prefix and tag (`APIRouter(prefix=XRoutes.BASE.value, tags=[XRoutes.tag()])`); `routes/v1.py` is the version router (`APIRouter(prefix=APIVersionRoutes.V1.value)`) that includes them; `main.py` includes `health`, `v1` and `problems`. How to deprecate and add a version with FastAPI's own `deprecated=` and `generate_unique_id_function=`: CLAUDE.md, "Routes and API versions".
-- `enums/routes.py`: route groups share `RouteEnum` (`path()`) and `VersionedRouteEnum` (`versioned_path(version=None)`) instead of 14 copies of the methods; `APIVersionRoutes.current()`. Collection roots are `ROOT` members of their own group (`UserRoutes.ROOT`, ...) instead of `SystemRoutes.ROOT`. `/docs`, `/docs/oauth2-redirect`, `/redoc` and `/openapi.json` come from `DocsRoutes`. Removed members that no route used: `MediaRoutes.MEDIA_BY_ID`, `SystemRoutes.ROOT`, `STATIC`, `FAVICON`.
-- Search audit entries store the real request path (it was hard-coded as `/api/v1/search/<entity>`, wrong for `signal_types` and `media_formats`). The OpenAPI description builds its paths from the enums.
-- `tests/test_route_registry.py`: every enum member is a registered route, every registered route is an enum member, no route is shadowed by an earlier one.
+- Layout: `app/backend/api/v1/` holds the v1 handler modules (the folder is the version), `api/shared/` the request / response models and helpers, `api/system/` health and the problem pages; `app/backend/routes/` is gone. `api/v1/__init__.py`: `V1 = PublishedVersion(APIVersionRoutes.V1, auth, users, ...)` (`api/versioning.py`) builds the version router, rejects a route or operation published twice and gives full paths: `V1.path(PostRoutes.POST_BY_ID, post_id=7)`. Versions are self-contained and run in parallel; CLAUDE.md, "Routes and API versions".
+- `enums/routes.py`: plain `str` Enums; collection roots are `ROOT` members of their own group; `/docs`, `/docs/oauth2-redirect`, `/redoc`, `/openapi.json` come from `DocsRoutes`. Removed members no route used: `MediaRoutes.MEDIA_BY_ID`, `SystemRoutes.ROOT`, `STATIC`, `FAVICON`.
+- Errors in OpenAPI: every route declares its problems with `responses=problems(...)`; internal_error is declared on the app, the 401 set and validation_error on the version router. The static call graph of `openapi_problems.py` is gone; the `openapi()` hook only moves error content to `application/problem+json` and adds framework problems. A session fixture fails the test run on any problem the app answered that its operation does not declare.
+- `require()` returns a `Require` that is the FastAPI dependency itself (no closure with a marker attribute). `AuthContext.session_id` replaces `request.state.session_id`; the logout fallback to the body's `session_id` works again. One JWT check (`AuthService.verify_token`). `helpers.audit_helper.client_info(request, auth)` replaces 7 copies of the audit fields; the client address is `request.client.host` (uvicorn `--proxy-headers`).
+- Framework errors are mapped by status, the route access map is built on first use, request headers are `Header()` parameters, the report is a plain `Response`, upload helpers live in `api/shared/helpers/upload_helper.py`.
+- Search audit entries store the real request path (it was hard-coded as `/api/v1/search/<entity>`, wrong for `signal_types` and `media_formats`).
+- Removed dead code: `filters/base.py`, `search_request.py`, a second `ObservationFilterParams`, unused validator models, unused audit contextvars, `AuditedSession`, the `SELECT 1` on every request (the engine has `pool_pre_ping`), commented-out routes, unused imports.
 - Fixed imports of `AuthErrorCode` / `AccessErrorCode` from `enums.general` (they live in `enums/errors.py`); the app did not start.
 
 ## Locked error contract and web tooling

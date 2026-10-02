@@ -1,7 +1,9 @@
 """OpenAPI (/docs, /openapi.json) documents every response the API really gives.
 
 - every error response is application/problem+json and names its problem types (oneOf + discriminator on code);
-- the problem types of a route come from its code (openapi_problems.CallGraph), so they cannot drift;
+- the problem types of a route are those its decorator declares (responses=problems(...)), merged by FastAPI with
+  the app (internal_error) and the version router (401 set, validation_error); tests/conftest.py checks that every
+  problem the suite makes the app answer is declared;
 - a real error body validates against the schema of its problem type (the documentation is 1:1);
 - no success response is documented as JSON without a schema.
 """
@@ -12,14 +14,13 @@ import pytest
 from app.backend.enums.errors import PROBLEM_ENUMS, AccessErrorCode, AuthErrorCode, ErrorCode
 from app.backend.enums.routes import APIVersionRoutes, PostRoutes, TagRoutes
 from app.backend.api.v1 import V1
-from app.backend.openapi_problems import problem_models, schema_name
+from app.backend.openapi_problems import FRAMEWORK_PROBLEMS, problem_models, schema_name
 from app.backend.services.api_errors import PROBLEM_JSON
 from app.backend.services.permissions import Require
 from tests.helpers import make_admin, make_user
 
-# Answered by the framework or outside /api/v1, not by one route
-GLOBAL_PROBLEMS = {ErrorCode.ROUTE_NOT_FOUND, ErrorCode.METHOD_NOT_ALLOWED, ErrorCode.BODY_PARSE_ERROR,
-                   ErrorCode.PROBLEM_TYPE_NOT_FOUND}
+# Answered by the framework outside any operation
+GLOBAL_PROBLEMS = set(FRAMEWORK_PROBLEMS)
 API_PREFIXES = tuple(version.value + "/" for version in APIVersionRoutes)
 
 
@@ -93,7 +94,7 @@ def test_authentication_and_permissions_follow_require(schema):
                 assert schema_name(AccessErrorCode.PERMISSION_DENIED) in forbidden, route.path
 
 
-def test_route_problems_come_from_its_code(schema):
+def test_route_problems_come_from_its_declaration(schema):
     update_post = schema["paths"][V1.path(PostRoutes.POST_BY_ID)]["put"]["responses"]
     assert _codes(update_post["404"]) == _names(ErrorCode.POST_NOT_FOUND)
     assert _codes(update_post["400"]) == _names(ErrorCode.POST_CODE_TAKEN)

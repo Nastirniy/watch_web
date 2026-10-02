@@ -11,11 +11,10 @@ from typing import Dict, List
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
-from fastapi.routing import APIRoute
 
 from app.backend.enums.errors import PROBLEM_ENUMS, ErrorCode, ProblemType, problem_type
 from app.backend.enums.routes import SystemRoutes
-from app.backend.openapi_problems import CallGraph, route_problems
+from app.backend.openapi_problems import operation_problems
 from app.backend.services.api_errors import ApiError, is_optional
 
 router = APIRouter(include_in_schema=False)
@@ -39,18 +38,13 @@ def _type_name(annotation) -> str:
 
 
 def _routes_by_problem(request: Request) -> Dict[str, List[str]]:
-    """code -> "METHOD /path" of the routes that answer it; computed once per app"""
-    found = getattr(request.app.state, "routes_by_problem", None)
-    if found is None:
-        graph = CallGraph()
-        found = {}
-        for route in request.app.routes:
-            if not isinstance(route, APIRoute) or not route.include_in_schema:
-                continue
-            for code in route_problems(route, graph):
-                for method in sorted(route.methods):
-                    found.setdefault(code.value, []).append(f"{method} {route.path_format}")
-        request.app.state.routes_by_problem = found
+    """code -> "METHOD /path" of the operations that declare it in the OpenAPI document"""
+    found: Dict[str, List[str]] = {}
+    for path, path_item in request.app.openapi()["paths"].items():
+        for method, operation in path_item.items():
+            for codes in operation_problems(operation).values():
+                for code in codes:
+                    found.setdefault(code, []).append(f"{method.upper()} {path}")
     return found
 
 

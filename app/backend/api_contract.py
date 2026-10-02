@@ -4,9 +4,9 @@
     python -m app.backend.api_contract check                compare the code with api-contract/problems.lock.json
     python -m app.backend.api_contract lock                 accept the current contract (commit the lock with the change)
 
-The problems of each operation are derived from the code (openapi_problems.py), which keeps /docs honest
-but would let a refactoring change the contract silently: a code string renamed, a param renamed or
-retyped, a code no longer found for an operation. The lock file makes every such change visible in the
+The problems of each operation are declared on its route (responses=problems(...)) and read here from the
+OpenAPI document; a change could still alter the contract unnoticed: a code string renamed, a param
+renamed or retyped, a code dropped from a declaration. The lock file makes every such change visible in the
 diff of the pull request and fails tests/test_api_contract.py until it is accepted with "lock".
 The lock names codes and params only, never Python functions or files: moving or renaming code that keeps
 the same codes changes nothing.
@@ -70,18 +70,16 @@ def build_catalog() -> Dict[str, Any]:
 
 
 def build_operations(app) -> Dict[str, Any]:
-    """operationId -> route and the problem codes it answers per status"""
-    from fastapi.routing import APIRoute
-    from app.backend.openapi_problems import CallGraph, route_problems
-    graph = CallGraph()
+    """operationId -> route and the problem codes it answers per status, read from the OpenAPI document"""
+    from app.backend.openapi_problems import operation_problems
     operations = {}
-    for route in app.routes:
-        if not isinstance(route, APIRoute) or not route.include_in_schema:
-            continue
-        by_status: Dict[str, List[str]] = {}
-        for code in sorted(route_problems(route, graph), key=lambda c: (c.status, c.value)):
-            by_status.setdefault(str(code.status), []).append(code.value)
-        operations[route.unique_id] = {"route": f"{','.join(sorted(route.methods))} {route.path_format}", "problems": by_status}
+    for path, path_item in app.openapi()["paths"].items():
+        for method, operation in path_item.items():
+            by_status = operation_problems(operation)
+            operations[operation["operationId"]] = {
+                "route": f"{method.upper()} {path}",
+                "problems": {status: by_status[status] for status in sorted(by_status, key=int)},
+            }
     return dict(sorted(operations.items()))
 
 
@@ -134,8 +132,8 @@ def diff_lock(locked: Dict[str, Any], current: Dict[str, Any]) -> Dict[str, List
         old_codes = {(s, c) for s, codes in old_ops[op]["problems"].items() for c in codes}
         new_codes = {(s, c) for s, codes in new_ops[op]["problems"].items() for c in codes}
         for status, code in sorted(old_codes - new_codes):
-            breaking.append(f"{op}: no longer answers {status} {code} (a refactoring the call graph cannot follow, "
-                            f"or a real change; the web client's handling of it stops compiling)")
+            breaking.append(f"{op}: no longer answers {status} {code} (dropped from its declaration; "
+                            f"the web client's handling of it stops compiling)")
         for status, code in sorted(new_codes - old_codes):
             additive.append(f"{op}: now answers {status} {code} (the web client must handle it)")
         if old_ops[op]["route"] != new_ops[op]["route"]:

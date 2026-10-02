@@ -64,6 +64,35 @@ async def client(session_maker, db):
     fastapi_app.dependency_overrides.clear()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def problems_are_declared():
+    """Every problem a test makes the app answer must be declared on its operation (responses=problems(...)).
+
+    Records (operationId, code) at error_handlers.problem_response and checks them against /openapi.json
+    when the session ends. Framework problems belong to no operation and are not recorded."""
+    from app.backend import error_handlers
+    from app.backend.openapi_problems import FRAMEWORK_PROBLEMS, operation_problems
+
+    recorded = set()
+    original = error_handlers.problem_response
+
+    def recording(request, code, params, headers=None):
+        route = request.scope.get("route")
+        if request.scope.get("app") is fastapi_app and route is not None and getattr(route, "include_in_schema", False) \
+                and code not in FRAMEWORK_PROBLEMS:
+            recorded.add((route.unique_id, code.value))
+        return original(request, code, params, headers)
+
+    error_handlers.problem_response = recording
+    yield recorded
+    error_handlers.problem_response = original
+
+    declared = {operation["operationId"]: {c for codes in operation_problems(operation).values() for c in codes}
+                for path_item in fastapi_app.openapi()["paths"].values() for operation in path_item.values()}
+    undeclared = sorted(f"{op}: {code}" for op, code in recorded if code not in declared.get(op, set()))
+    assert not undeclared, "answered but not declared in responses=problems(...):\n" + "\n".join(undeclared)
+
+
 def auth_headers(user) -> dict:
     """Bearer header for a user. No session id in the token, so no UserSession lookup happens."""
     return {"Authorization": f"Bearer {AuthService.create_access_token(user.id)}"}
