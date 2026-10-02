@@ -14,7 +14,7 @@ from app.backend.enums.routes import APIVersionRoutes, PostRoutes, TagRoutes
 from app.backend.api.v1 import V1
 from app.backend.openapi_problems import problem_models, schema_name
 from app.backend.services.api_errors import PROBLEM_JSON
-from app.backend.services.permissions import REQUIRE_ATTR
+from app.backend.services.permissions import Require
 from tests.helpers import make_admin, make_user
 
 # Answered by the framework or outside /api/v1, not by one route
@@ -81,7 +81,7 @@ def test_authentication_and_permissions_follow_require(schema):
     for route in fastapi_app.routes:
         if not isinstance(route, APIRoute) or not route.path.startswith(API_PREFIXES) or not route.include_in_schema:
             continue
-        spec = next((getattr(d.call, REQUIRE_ATTR) for d in route.dependant.dependencies if hasattr(d.call, REQUIRE_ATTR)), None)
+        spec = next((d.call for d in route.dependant.dependencies if isinstance(d.call, Require)), None)
         if spec is None:
             continue
         for method in route.methods:

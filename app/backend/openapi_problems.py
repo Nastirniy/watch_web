@@ -27,7 +27,7 @@ from app.backend.enums.errors import (
 )
 from app.backend.enums.routes import APIVersionRoutes
 from app.backend.services.api_errors import PROBLEM_JSON, is_optional
-from app.backend.services.permissions import REQUIRE_ATTR
+from app.backend.services.permissions import Require
 
 APP_PACKAGE = "app.backend"
 APP_DIR = Path(__file__).resolve().parent
@@ -195,7 +195,7 @@ def _require_problems(spec) -> Set[ProblemType]:
 def route_problems(route: APIRoute, graph: CallGraph) -> Set[ProblemType]:
     problems = set(ALWAYS) | graph.problems_of_callable(route.endpoint)
     for call in _dependency_calls(route.dependant):
-        spec = getattr(call, REQUIRE_ATTR, None)
+        spec = call if isinstance(call, Require) else None
         # The require() closure itself names both 403 codes; its sub-dependencies (authentication) are walked anyway
         problems |= _require_problems(spec) if spec is not None else graph.problems_of_callable(call)
     if route_validates(route):

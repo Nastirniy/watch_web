@@ -12,7 +12,7 @@ Semantics:
 """
 import builtins
 from dataclasses import dataclass
-from typing import List, Dict, Union, Any, Awaitable, Callable, Iterable, Tuple
+from typing import List, Dict, Union, Any, Iterable, Tuple
 
 from fastapi import Depends
 from loguru import logger
@@ -22,8 +22,6 @@ from app.backend.enums.errors import AccessErrorCode
 from app.backend.dependencies import get_auth_context
 from app.backend.services.auth_context import AuthContext
 from app.backend.services.access_errors import access_denied
-
-REQUIRE_ATTR = "__require__"
 
 
 def _permission_name(permission: Union[Permissions, str]) -> str:
@@ -70,25 +68,17 @@ class Require:
     def as_dict(self) -> Dict[str, Any]:
         return {"all": list(self.all), "any": list(self.any), "admin": self.admin}
 
-
-def require_spec(spec: Require) -> Callable[..., Awaitable[AuthContext]]:
-    """Build a FastAPI dependency enforcing the given Require. Returns the AuthContext."""
-
-    async def _require_dependency(auth: AuthContext = Depends(get_auth_context)) -> AuthContext:
-        result = spec.evaluate(auth)
+    async def __call__(self, auth: AuthContext = Depends(get_auth_context)) -> AuthContext:
+        """A Require is a FastAPI dependency (parameterized dependency): it returns the AuthContext or raises 403"""
+        result = self.evaluate(auth)
         if not result.allowed:
             code = AccessErrorCode.ADMIN_REQUIRED if result.admin_missing else AccessErrorCode.PERMISSION_DENIED
             logger.warning(
                 f"Access denied for user {auth.user.username}: code={code.value} "
-                f"missing={list(result.missing)} admin_required={spec.admin}"
+                f"missing={list(result.missing)} admin_required={self.admin}"
             )
-            raise access_denied(code, required=spec, missing=result.missing)
+            raise access_denied(code, required=self, missing=result.missing)
         return auth
-
-    setattr(_require_dependency, REQUIRE_ATTR, spec)
-    suffix = "_".join(spec.all + spec.any) + ("_admin" if spec.admin else "")
-    _require_dependency.__name__ = "require_" + (suffix or "authenticated")
-    return _require_dependency
 
 
 def require(
@@ -96,10 +86,10 @@ def require(
         all: Iterable[Union[Permissions, str]] = (),
         any: Iterable[Union[Permissions, str]] = (),
         admin: bool = False,
-) -> Callable[..., Awaitable[AuthContext]]:
-    """Dependency factory: Depends(require(all=[...], any=[...], admin=True)).
+) -> Require:
+    """Dependency: Depends(require(all=[...], any=[...], admin=True)).
 
     require() with no arguments only requires an authenticated user and still
     registers the route in the route access map.
     """
-    return require_spec(Require.of(all=all, any=any, admin=admin))
+    return Require.of(all=all, any=any, admin=admin)

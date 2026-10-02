@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 
 from app.backend.services.auth_context import AuthContext
-from app.backend.services.permissions import Require, REQUIRE_ATTR
+from app.backend.services.permissions import Require
 
 
 @dataclass(frozen=True)
@@ -26,9 +26,8 @@ class RouteAccessEntry:
 
 def _find_require(dependant) -> Optional[Require]:
     for sub in dependant.dependencies:
-        spec = getattr(sub.call, REQUIRE_ATTR, None)
-        if spec is not None:
-            return spec
+        if isinstance(sub.call, Require):
+            return sub.call
         nested = _find_require(sub)
         if nested is not None:
             return nested

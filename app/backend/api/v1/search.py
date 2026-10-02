@@ -15,7 +15,7 @@ from app.backend.services.auth_context import AuthContext
 from app.backend.services.access_control import AccessControlService
 from app.backend.enums.routes import SearchRoutes
 from app.backend.enums.general import Permissions
-from app.backend.services.permissions import require, require_spec, Require
+from app.backend.services.permissions import require, Require
 from app.backend.models.user import User
 from app.backend.models.post import Post
 from app.backend.models.role import Role
@@ -137,7 +137,7 @@ async def log_search(
 async def search_observations(
     request: Request,
     params: ObservationFilterParams = Depends(),
-    auth: AuthContext = Depends(require_spec(ENTITY_REGISTRY["observations"]["require"])),
+    auth: AuthContext = Depends(ENTITY_REGISTRY["observations"]["require"]),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
     current_user = auth.user
@@ -173,7 +173,7 @@ async def search_observations(
 async def search_users(
     request: Request,
     params: UserFilterParams = Depends(),
-    auth: AuthContext = Depends(require_spec(ENTITY_REGISTRY["users"]["require"])),
+    auth: AuthContext = Depends(ENTITY_REGISTRY["users"]["require"]),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
     current_user = auth.user
@@ -206,7 +206,7 @@ async def search_users(
 async def search_posts(
     request: Request,
     params: PostFilterParams = Depends(),
-    auth: AuthContext = Depends(require_spec(ENTITY_REGISTRY["posts"]["require"])),
+    auth: AuthContext = Depends(ENTITY_REGISTRY["posts"]["require"]),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
     current_user = auth.user
@@ -238,7 +238,7 @@ async def search_posts(
 async def search_roles(
     request: Request,
     params: RoleFilterParams = Depends(),
-    auth: AuthContext = Depends(require_spec(ENTITY_REGISTRY["roles"]["require"])),
+    auth: AuthContext = Depends(ENTITY_REGISTRY["roles"]["require"]),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
     current_user = auth.user
@@ -269,7 +269,7 @@ async def search_roles(
 async def search_categories(
     request: Request,
     params: CategoryFilterParams = Depends(),
-    auth: AuthContext = Depends(require_spec(ENTITY_REGISTRY["categories"]["require"])),
+    auth: AuthContext = Depends(ENTITY_REGISTRY["categories"]["require"]),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
     current_user = auth.user
@@ -300,7 +300,7 @@ async def search_categories(
 async def search_signal_types(
     request: Request,
     params: SignalTypeFilterParams = Depends(),
-    auth: AuthContext = Depends(require_spec(ENTITY_REGISTRY["signal_types"]["require"])),
+    auth: AuthContext = Depends(ENTITY_REGISTRY["signal_types"]["require"]),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
     current_user = auth.user
@@ -331,7 +331,7 @@ async def search_signal_types(
 async def search_tags(
     request: Request,
     params: TagFilterParams = Depends(),
-    auth: AuthContext = Depends(require_spec(ENTITY_REGISTRY["tags"]["require"])),
+    auth: AuthContext = Depends(ENTITY_REGISTRY["tags"]["require"]),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
     current_user = auth.user
@@ -362,7 +362,7 @@ async def search_tags(
 async def search_media(
     request: Request,
     params: MediaFilterParams = Depends(),
-    auth: AuthContext = Depends(require_spec(ENTITY_REGISTRY["media"]["require"])),
+    auth: AuthContext = Depends(ENTITY_REGISTRY["media"]["require"]),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
     current_user = auth.user
@@ -420,7 +420,7 @@ async def get_search_filter_schema(
 async def search_media_formats(
     request: Request,
     params: MediaFormatFilterParams = Depends(),
-    auth: AuthContext = Depends(require_spec(ENTITY_REGISTRY["media_formats"]["require"])),
+    auth: AuthContext = Depends(ENTITY_REGISTRY["media_formats"]["require"]),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
     current_user = auth.user
