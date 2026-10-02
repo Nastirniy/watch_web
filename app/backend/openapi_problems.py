@@ -59,7 +59,8 @@ class FieldError(BaseModel):
     members are the params of the code (min_length, max_length, accepted, ...)."""
     model_config = ConfigDict(extra="allow", json_schema_extra=lambda schema, cls: _absent_not_null(schema))
 
-    code: str = Field(description="Key of exactly this message in the localization package")
+    # FieldErrorCode lists the codes of the API (a component of its own in OpenAPI); pydantic's come on top
+    code: Union[FieldErrorCode, str] = Field(description="Key of exactly this message in the localization package")
     detail: str = Field(description="English text of the message")
     pointer: Optional[str] = Field(default=None, description='JSON Pointer (RFC 6901) into the body, e.g. "#/username"')
     parameter: Optional[str] = Field(default=None, description="Name of the query, path, header or cookie parameter")
@@ -218,23 +219,6 @@ def _finish(schema: Dict[str, Any]) -> None:
     schemas = schema.setdefault("components", {}).setdefault("schemas", {})
     for code in FRAMEWORK_PROBLEMS:
         _add_component(schemas, problem_models()[code])
-    # Catalog of every code for the web client (replaced by stock openapi-typescript types in the next step)
-    schemas["ProblemCode"] = {
-        "type": "string", "enum": [code.value for cls in PROBLEM_ENUMS for code in cls],
-        "description": "Every problem type of the API: the keys of the localization package",
-    }
-    schemas["FieldErrorCode"] = {
-        "type": "string", "enum": [code.value for code in FieldErrorCode],
-        "description": "Codes of the API for invalid values (items of validation_error); pydantic codes come on top",
-    }
-    for model in problem_models().values():
-        _add_component(schemas, model)
-    schemas["Problem"] = {
-        "description": "Any problem of the API (RFC 9457)",
-        "oneOf": [{"$ref": f"#/components/schemas/{schema_name(code)}"} for code in problem_models()],
-        "discriminator": {"propertyName": "code", "mapping": {
-            code.value: f"#/components/schemas/{schema_name(code)}" for code in problem_models()}},
-    }
 
 
 def install_openapi(app: FastAPI) -> None:

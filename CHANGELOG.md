@@ -15,6 +15,12 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - `GET /auth/route-access` lists the routes of the API version it is called through (all of them today).
 - No path, method, tag or operationId changed.
 
+### Web tooling: stock FastAPI + openapi-typescript + TypeScript only
+
+- The contract is one file, FastAPI's OpenAPI document: `api-contract/openapi.json` (committed) or `GET /openapi.json`. Gone: `problems.json`, `python -m app.backend.api_contract export|check|lock`, `api-contract/problems.lock.json`, `scripts/check-i18n.mjs`. `python -m app.backend.api_contract` only writes `openapi.json`.
+- OpenAPI no longer injects the `Problem` and `ProblemCode` schemas: every problem type is still a component `<Code>Problem`, and `api-contract/web-kit/src/api/client.ts` derives `Problem` / `ProblemCode` from them with plain TypeScript. `FieldErrorCode` is generated from the model (`FieldError.code` is `FieldErrorCode | string`).
+- Translations are checked by `tsc`: a locale `satisfies Messages` (`web-kit/src/i18n/messages.ts`) fails on a missing code (TS2741) and on a code the API no longer has (TS2353). Verified with openapi-typescript 7.13, TypeScript 5 and openapi-fetch 0.17 on a clean project. The placeholder check of the old script is not replaced; see WEB_TOOLING.md section 5.
+
 ### Backend
 
 - Layout: `app/backend/api/v1/` holds the v1 handler modules (the folder is the version), `api/shared/` the request / response models and helpers, `api/system/` health and the problem pages; `app/backend/routes/` is gone. `api/v1/__init__.py`: `V1 = PublishedVersion(APIVersionRoutes.V1, auth, users, ...)` (`api/versioning.py`) builds the version router, rejects a route or operation published twice and gives full paths: `V1.path(PostRoutes.POST_BY_ID, post_id=7)`. Versions are self-contained and run in parallel; CLAUDE.md, "Routes and API versions".

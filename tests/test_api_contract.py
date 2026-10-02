@@ -1,63 +1,47 @@
-"""The error contract of the web client (codes, params, codes per operation) changes only on purpose.
+"""The API contract of the web client (api-contract/openapi.json) changes only on purpose.
 
-Fails when the code no longer matches api-contract/problems.lock.json; the message lists what changed and
-which changes break the web client. Accept an intended change with: python -m app.backend.api_contract lock
+Fails while app.openapi() and the committed file differ and names what differs. Accept an intended change
+with: python -m app.backend.api_contract (then add a CHANGELOG.md entry; the web team regenerates its types).
 """
-import copy
+import json
 
 import pytest
 
-from app.backend.api_contract import build_lock, diff_lock, read_lock, report
+from app.backend.api_contract import OPENAPI_PATH
 from app.backend.enums.routes import MediaRoutes
 from app.backend.api.v1 import V1
+from app.main import fastapi_app
 from tests.helpers import make_admin
 
 
-@pytest.fixture(scope="module")
-def current():
-    from app.main import fastapi_app
-    return build_lock(fastapi_app)
+def _differences(committed: dict, current: dict) -> list:
+    lines = []
+    for path in sorted(set(committed["paths"]) | set(current["paths"])):
+        old, new = committed["paths"].get(path, {}), current["paths"].get(path, {})
+        for method in sorted(set(old) | set(new)):
+            if method not in new:
+                lines.append(f"removed {method.upper()} {path}")
+            elif method not in old:
+                lines.append(f"added {method.upper()} {path}")
+            elif old[method] != new[method]:
+                lines.append(f"changed {method.upper()} {path} ({new[method].get('operationId')})")
+    old_schemas = committed.get("components", {}).get("schemas", {})
+    new_schemas = current.get("components", {}).get("schemas", {})
+    for name in sorted(set(old_schemas) | set(new_schemas)):
+        if old_schemas.get(name) != new_schemas.get(name):
+            state = "removed" if name not in new_schemas else "added" if name not in old_schemas else "changed"
+            lines.append(f"{state} schema {name}")
+    for key in sorted((set(committed) | set(current)) - {"paths", "components"}):
+        if committed.get(key) != current.get(key):
+            lines.append(f"changed {key}")
+    return lines
 
 
-def test_code_matches_the_locked_contract(current):
-    text = report(diff_lock(read_lock(), current))
-    assert not text, "\n" + text
-
-
-def test_renames_and_removals_are_breaking(current):
-    locked = copy.deepcopy(current)
-    changed = copy.deepcopy(current)
-    changed["problems"]["post_not_found_v2"] = changed["problems"].pop("post_not_found")
-    params = changed["problems"]["tag_name_taken"]["params"]
-    params["tag_name"] = params.pop("name")
-    changed["problems"]["upload_offset_mismatch"]["params"]["offset"]["type"] = "str"
-    operation = changed["operations"]["update_post"]["problems"]
-    operation["404"] = [c for c in operation["404"] if c != "post_not_found"]
-
-    changes = diff_lock(locked, changed)
-    breaking = "\n".join(changes["breaking"])
-    assert "problem code removed or renamed: post_not_found" in breaking
-    assert "tag_name_taken: param removed or renamed: name" in breaking
-    assert "upload_offset_mismatch.offset: type int -> str" in breaking
-    assert "update_post: no longer answers 404 post_not_found" in breaking
-    additive = "\n".join(changes["additive"])
-    assert "problem code added: post_not_found_v2" in additive
-    assert "update_post" not in additive
-
-
-def test_additions_are_reported_too(current):
-    changed = copy.deepcopy(current)
-    changed["operations"]["update_post"]["problems"].setdefault("409", []).append("tag_not_archived")
-    changes = diff_lock(current, changed)
-    assert not changes["breaking"]
-    assert changes["additive"] == ["update_post: now answers 409 tag_not_archived (the web client must handle it)"]
-
-
-def test_the_lock_names_codes_never_python_functions(current):
-    """Moving or renaming Python code that keeps the same codes must not touch the lock"""
-    text = str(current)
-    for internal in ("app.backend", ".py", "<locals>", "AccessControlService"):
-        assert internal not in text
+def test_openapi_matches_the_committed_contract():
+    committed = json.loads(OPENAPI_PATH.read_text(encoding="utf-8"))
+    differences = _differences(committed, fastapi_app.openapi())
+    assert not differences, ("api-contract/openapi.json differs from the code:\n  " + "\n  ".join(differences)
+                             + "\nIf intended: python -m app.backend.api_contract, commit the file, add a CHANGELOG entry.")
 
 
 @pytest.mark.asyncio

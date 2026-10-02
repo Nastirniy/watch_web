@@ -23,7 +23,9 @@ With [openapi-fetch](https://openapi-ts.dev/openapi-fetch/) the paths, bodies, s
 import createClient from "openapi-fetch";
 import type { paths, components } from "./api/schema";
 
-type Problem = components["schemas"]["Problem"];
+type Schemas = components["schemas"];
+// Every problem type is a component schema <Code>Problem; together they are the union of all problems
+type Problem = { [K in keyof Schemas]: K extends `${string}Problem` ? Schemas[K] : never }[keyof Schemas];
 
 const api = createClient<paths>({ baseUrl: "https://<api-origin>" });
 
@@ -70,7 +72,7 @@ Every error, whatever the status, answers `Content-Type: application/problem+jso
 
 The localization package needs one entry per code:
 
-- `components.schemas.ProblemCode` in `/openapi.json`: every problem code;
+- every problem code: the `code` constant of each component schema `<Code>Problem` in `/openapi.json` (`Problem["code"]` in TypeScript, see `WEB_TOOLING.md`);
 - `components.schemas.FieldErrorCode`: codes of invalid values inside `validation_error`;
 - pydantic's codes for built-in checks inside `validation_error` (`missing`, `string_too_short`, `string_too_long`, `int_parsing`, `enum`, `json_invalid`, ...; see https://docs.pydantic.dev/latest/errors/validation_errors/). Their params (`min_length`, `max_length`, `expected`, ...) are members of the item.
 

@@ -11,7 +11,7 @@ import json
 
 import pytest
 
-from app.backend.enums.errors import PROBLEM_ENUMS, AccessErrorCode, AuthErrorCode, ErrorCode
+from app.backend.enums.errors import PROBLEM_ENUMS, AccessErrorCode, AuthErrorCode, ErrorCode, FieldErrorCode
 from app.backend.enums.routes import APIVersionRoutes, PostRoutes, TagRoutes
 from app.backend.api.v1 import V1
 from app.backend.openapi_problems import FRAMEWORK_PROBLEMS, problem_models, schema_name
@@ -115,10 +115,13 @@ def test_every_problem_type_is_documented_somewhere(schema):
 
 
 def test_catalog_components(schema):
+    """Every problem type and every field error code is in the document: the web client types its
+    translations from them (WEB_TOOLING.md); nothing is injected besides the framework problems"""
     components = schema["components"]["schemas"]
     every = [code for cls in PROBLEM_ENUMS for code in cls]
-    assert components["ProblemCode"]["enum"] == [code.value for code in every]
-    assert set(components["Problem"]["discriminator"]["mapping"]) == {code.value for code in every}
+    assert {schema_name(code) for code in every} <= set(components)
+    assert components["FieldErrorCode"]["enum"] == [code.value for code in FieldErrorCode]
+    assert "Problem" not in components and "ProblemCode" not in components
     post_not_found = components[schema_name(ErrorCode.POST_NOT_FOUND)]
     assert post_not_found["properties"]["code"]["const"] == "post_not_found"
     assert set(post_not_found["required"]) == {"type", "title", "status", "detail", "instance", "code"}

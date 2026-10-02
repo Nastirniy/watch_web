@@ -1,26 +1,24 @@
 # Web tooling: typed API client, contract checks, error translations
 
-How the web project gets the API contract from this backend and checks itself against it with
-openapi-typescript 7, TypeScript 5 (strict) and openapi-fetch 0.17. Every command below was run on a
-clean project. Background on the error format: `API.md`.
+How the web project takes the API contract from this backend and checks itself against it with the stock
+tools only: openapi-typescript 7, TypeScript 5 (strict) and openapi-fetch 0.17. There is no extra catalog and
+no custom checker: everything comes from the OpenAPI document FastAPI generates. Every command below was run
+on a clean project. Background on the error format: `API.md`.
 
-## 1. What the backend exports
+## 1. The contract: one file
+
+`api-contract/openapi.json` in this repository is the OpenAPI document of the API, committed with every
+change of the API (the backend tests fail until it matches the code). A running API serves the same
+document at `/openapi.json`.
 
 ```bash
-# in this repository (no server needed; uses app/config.toml like the app)
-python -m app.backend.api_contract export --out <folder>
+# in the web project: take the contract of the backend version you build against
+curl -o api-contract/openapi.json https://<api-origin>/openapi.json
+# or copy api-contract/openapi.json from this repository
 ```
 
-| File | Content | Used for |
-|------|---------|----------|
-| `openapi.json` | The full OpenAPI document, the same as `GET /openapi.json` | Types of every path, body, response and error |
-| `problems.json` | `problems` (every problem code: status, title, detail, params with type and whether always present), `field_errors` (codes of invalid values), `builtin_field_errors` (pydantic's codes and params) | Translations of the errors |
-
-A running API serves the same `openapi.json`: `curl -o api-contract/openapi.json https://<api-origin>/openapi.json`.
-`problems.json` comes only from the export command; `/problems` shows the same catalog as a page.
-
-Put both files in the web project, e.g. `api-contract/`, and commit them there: a diff of `openapi.json`
-in a pull request of the web project is the change of the API it adopts.
+Commit it in the web project too: a diff of `openapi.json` in a pull request is the change of the API it
+adopts. To rewrite it in this repository without a server: `python -m app.backend.api_contract`.
 
 ## 2. Set up the web project once
 
@@ -33,9 +31,9 @@ Copy from `api-contract/web-kit/` of this repository:
 
 | File | What it does |
 |------|--------------|
-| `src/api/client.ts` | openapi-fetch client plus `problemText()` and `fieldMessages()` (translation with English fallback, form field from `pointer`) |
+| `src/api/client.ts` | openapi-fetch client; the `Problem`, `ProblemCode`, `FieldErrorCode` types derived from the generated schema; `problemText()` and `fieldMessages()` (translation with English fallback, form field from `pointer`) |
 | `src/api/contract-check.ts` | Compile-time checks of the contract (section 4); not imported by the app |
-| `scripts/check-i18n.mjs` | Translation check against `problems.json` (section 5) |
+| `src/i18n/messages.ts` | The `Messages` type a locale is checked against (section 5) |
 | `tsconfig.json` | `strict` and `noImplicitReturns` are required by the checks; merge into your own tsconfig |
 
 `package.json` scripts:
@@ -45,8 +43,7 @@ Copy from `api-contract/web-kit/` of this repository:
   "scripts": {
     "api:types": "openapi-typescript ./api-contract/openapi.json -o ./src/api/schema.ts",
     "api:check": "tsc --noEmit -p tsconfig.json",
-    "i18n:check": "node scripts/check-i18n.mjs --catalog api-contract/problems.json --locale src/locales/uk.json",
-    "api:all": "npm run api:types && npm run api:check && npm run i18n:check"
+    "api:all": "npm run api:types && npm run api:check"
   }
 }
 ```
@@ -54,14 +51,14 @@ Copy from `api-contract/web-kit/` of this repository:
 ## 3. Every time the API changes
 
 ```bash
-# 1. take the new contract (export or curl, section 1) into api-contract/
+# 1. take the new api-contract/openapi.json (section 1)
 # 2. then:
 npm run api:all
 ```
 
 - `api:types` regenerates `src/api/schema.ts` (commit it with the contract).
-- `api:check` type-checks the whole app against it: every call site of a changed path, body, response or error fails here.
-- `i18n:check` fails on a missing translation or a wrong placeholder.
+- `api:check` type-checks the whole app against it, translations included: every call site of a changed
+  path, body, response or error and every missing or obsolete translation fails here.
 
 ## 4. What the type check catches
 
@@ -75,6 +72,16 @@ if (error) {
     case "validation_error": error.errors ...   // FieldError[] with pointer / parameter
   }
 }
+```
+
+Every problem type is a component schema `<Code>Problem` (`PostNotFoundProblem`). `client.ts` joins them into
+the union of all problems with plain TypeScript:
+
+```ts
+type Schemas = components["schemas"];
+export type Problem = { [K in keyof Schemas]: K extends `${string}Problem` ? Schemas[K] : never }[keyof Schemas];
+export type ProblemCode = Problem["code"];
+export type FieldErrorCode = Schemas["FieldErrorCode"];
 ```
 
 `src/api/contract-check.ts` turns the risky changes into build errors:
@@ -91,34 +98,29 @@ the way `onUnauthorized` does, and the compiler tells you about every new code.
 
 ## 5. Translations
 
-Locale layout (placeholders `{param}` are the members of the error body):
+Write the locale as a TypeScript module checked against `Messages` (`src/i18n/messages.ts`):
 
-```json
-{
-  "problems":            { "tag_name_taken": "Тег з назвою '{name}' уже існує" },
-  "field_errors":        { "username_reserved": "Це ім'я зарезервоване" },
-  "builtin_field_errors": { "missing": "Обов'язкове поле", "string_too_short": "Щонайменше {min_length} символів" }
-}
+```ts
+import type { Messages } from "../i18n/messages";
+
+export default {
+  problems: { tag_name_taken: "Тег з назвою '{name}' уже існує", /* every problem code */ },
+  field_errors: { username_reserved: "Це ім'я зарезервоване", /* every field error code */ },
+  builtin_field_errors: { missing: "Обов'язкове поле", string_too_short: "Щонайменше {min_length} символів" },
+} satisfies Messages;
 ```
 
-```bash
-# add every missing API code with its English text, then translate the new entries
-node scripts/check-i18n.mjs --catalog api-contract/problems.json --locale src/locales/uk.json --fill
-npm run i18n:check
-```
+| Situation | Result of `npm run api:check` |
+|-----------|-------------------------------|
+| A problem or field error code without a translation | `TS2741: Property '<code>' is missing ...` |
+| A translation of a code the API no longer has | `TS2353: Object literal may only specify known properties ...` |
+| pydantic codes (`builtin_field_errors`) without a translation | allowed: the body's English `detail` is shown |
 
-| Situation | Result |
-|-----------|--------|
-| A problem or field error code without a translation | error, exit 1 |
-| A placeholder that is not a param of its code (`{tag}` in `tag_name_taken`) | error, exit 1 |
-| A translation of a code the API no longer has | warning |
-| pydantic codes without a translation | one warning line (`--verbose` lists them; `--strict-builtin` makes them errors). The body's English `detail` is shown instead. |
-
-Options: `--placeholder "\{\{(\w+)\}\}"` for i18next style `{{param}}`. Files saved with a BOM are fine.
-
-Rules for the texts: a param marked `"required": false` in `problems.json` can be absent from the body,
-so do not put it in the text; pydantic's `{expected_plural}` and `{error}` are never sent, write the plural
-in the translation instead.
+Placeholders `{param}` are the members of the problem body; the component schema of each code lists them
+with their types, and `required` tells which are always present (an optional member can be absent, so do not
+put it in the text). pydantic's `{expected_plural}` and `{error}` are never sent; write the plural in the
+translation instead. A placeholder that is not a member stays visible as `{x}` and shows in your i18n
+library's missing-interpolation warning.
 
 ## 6. In CI of the web project
 
@@ -130,22 +132,9 @@ git diff --exit-code src/api/schema.ts   # the committed types match the committ
 
 ## 7. How the backend keeps the contract from changing by accident
 
-The list of errors per operation is derived from the backend code. A refactoring that renames a
-code, renames or retypes a param, or makes a code disappear from an operation would change the contract
-silently, so the backend also locks it: `api-contract/problems.lock.json` lists every code, its status and
-params, and the codes of every operation (by operationId), never Python names. Moving or renaming Python
-code that keeps the same codes changes nothing.
-
-Any difference fails the backend tests with a report such as:
-
-```
-BREAKING for the web client (localization keys, params or handled codes):
-  - tag_name_taken: param removed or renamed: name
-  - update_post: no longer answers 404 post_not_found (...)
-Additions the web client must pick up:
-  - problem code added: tag_name_reserved (needs a translation)
-```
-
-An intended change is accepted with `python -m app.backend.api_contract lock`, committed together with
-the code, noted in `CHANGELOG.md` and announced to the web team; breaking lines need a web release
-that adopts the new contract. `python -m app.backend.api_contract check` prints the same report.
+Every route declares the problems it answers on its decorator (`responses=problems(...)`), and the backend
+tests fail on any problem the app answers that its operation does not declare. `api-contract/openapi.json`
+is committed and `tests/test_api_contract.py` fails while the code and the file differ, naming the changed
+operations and schemas. An intended change is accepted by rewriting the file
+(`python -m app.backend.api_contract`), committed with the code, noted in `CHANGELOG.md` and announced to the
+web team; the web project's `npm run api:all` then shows exactly what it has to adapt.

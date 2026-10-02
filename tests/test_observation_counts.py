@@ -1,8 +1,10 @@
 """Observation counters of a post: GET /posts/{post_id}/observation-stats, the only place they are served."""
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 
+from app.backend.config import settings
 from app.backend.enums.routes import PostRoutes, SearchRoutes
 from app.backend.api.v1 import V1
 from tests.helpers import make_post, make_user, make_dictionary, make_observation
@@ -31,7 +33,10 @@ async def test_all_time_and_last_24h(client, db, headers):
     ids = await make_dictionary(db)
     user = await make_user(db, perms=VIEW, post_id=post.id)
     now = datetime.now(timezone.utc)
-    await observation_at(db, user, post, ids["signal_type_id"], now - timedelta(hours=1))
+    # The latest one must be today in the server zone, or the test fails in the first hour after midnight
+    start_of_day = now.astimezone(ZoneInfo(settings.timezone.timezone)).replace(hour=0, minute=0, second=0, microsecond=0)
+    recent = max(now - timedelta(hours=1), start_of_day.astimezone(timezone.utc))
+    await observation_at(db, user, post, ids["signal_type_id"], recent)
     await observation_at(db, user, post, ids["signal_type_id"], now - timedelta(hours=30))
     await observation_at(db, user, post, ids["signal_type_id"], now - timedelta(days=100))
     await observation_at(db, user, post, ids["signal_type_id"], now - timedelta(hours=2), archived=True)
@@ -39,7 +44,7 @@ async def test_all_time_and_last_24h(client, db, headers):
 
     url = STATS.format(post_id=post.id)
     body = (await client.get(url, headers=headers(user))).json()
-    assert body["last_observation_at"].startswith((now - timedelta(hours=1)).isoformat()[:16])
+    assert body["last_observation_at"].startswith(recent.isoformat()[:16])
     assert body["days_without_observations"] == 0
     assert body["all_time"] == {"not_archived": 3, "archived": None}
     assert body["last_24h"] == {"not_archived": 1, "archived": None}

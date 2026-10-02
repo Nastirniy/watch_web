@@ -52,7 +52,7 @@ Every error answers `Content-Type: application/problem+json`:
 | other members | params of the message (`post_id`, `offset`, `max_file_size_bytes`, ...) |
 
 Each response of each operation lists the problem types it can answer (`oneOf`, discriminator `code`).
-`components.schemas.ProblemCode` lists every code, `{SystemRoutes.PROBLEMS.value}` documents them all.
+Each problem type is a component schema `<Code>Problem` (`PostNotFoundProblem`); `{SystemRoutes.PROBLEMS.value}` documents them all.
 
 `validation_error` (422) carries `errors`: one item per invalid value with `code`, `detail` and either
 `pointer` (JSON Pointer into the body, `#/username`) or `parameter` + `location` (query, path, header, cookie).

@@ -1,6 +1,7 @@
 // Compile-time checks of the API contract. Not imported by the app: `tsc --noEmit` checks it.
 // Each block fails the build when the API changes in a way the web client must react to.
 import type { components, paths } from "./schema";
+import type { Problem, ProblemCode } from "./client";
 
 type Schemas = components["schemas"];
 
@@ -27,10 +28,10 @@ export function uploadOffset(problem: Schemas["UploadOffsetMismatchProblem"]): n
 // 3. The generated types are real, not `any`: each line below MUST be an error.
 //    If one stops being an error, tsc fails with "Unused '@ts-expect-error' directive".
 // @ts-expect-error: not a code of the API
-export const notACode: Schemas["ProblemCode"] = "not_a_code";
+export const notACode: ProblemCode = "not_a_code";
 // @ts-expect-error: status is a constant of the problem type
 export const wrongStatus: Schemas["PostNotFoundProblem"]["status"] = 400;
-export function wrongParam(problem: Schemas["Problem"]): unknown {
+export function wrongParam(problem: Problem): unknown {
   if (problem.code === "post_not_found") {
     // @ts-expect-error: post_not_found has no name
     return problem.name;

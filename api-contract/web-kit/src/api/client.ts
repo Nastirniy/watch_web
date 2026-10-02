@@ -1,8 +1,15 @@
 import createClient from "openapi-fetch";
 import type { components, paths } from "./schema";
 
-export type Problem = components["schemas"]["Problem"];
-export type FieldError = components["schemas"]["FieldError"];
+type Schemas = components["schemas"];
+
+/** Every problem type of the API: its component schemas <Code>Problem, discriminated by `code` */
+export type Problem = { [K in keyof Schemas]: K extends `${string}Problem` ? Schemas[K] : never }[keyof Schemas];
+/** Every problem code: the keys of the "problems" translations */
+export type ProblemCode = Problem["code"];
+/** Codes of the API for invalid values: the keys of the "field_errors" translations */
+export type FieldErrorCode = Schemas["FieldErrorCode"];
+export type FieldError = Schemas["FieldError"];
 
 // Origin of the API, e.g. from your build config (Vite: import.meta.env.VITE_API_URL)
 const API_URL = "https://api.example";
