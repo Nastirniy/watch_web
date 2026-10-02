@@ -11,6 +11,7 @@ import pytest
 
 from app.backend.config import settings
 from app.backend.enums.routes import MediaRoutes
+from app.backend.api.v1 import V1
 from app.backend.models.media import MediaFile
 from app.backend.services.media import renderer
 from app.backend.services.media.renderer import Rendered
@@ -20,7 +21,7 @@ VIEW = ["media.view"]
 
 
 def thumb_url(media_id: int) -> str:
-    return MediaRoutes.MEDIA_THUMBNAIL.versioned_path().format(media_id=media_id)
+    return V1.path(MediaRoutes.MEDIA_THUMBNAIL, media_id=media_id)
 
 
 def decode_source(accel_path: str) -> str:
@@ -146,19 +147,19 @@ async def test_media_info_carries_status_and_signed_urls(client, db, headers):
     image = await make_media(db, observation, user)
     video = await make_media(db, observation, user, media_type="video")
 
-    info = (await client.get(MediaRoutes.MEDIA_INFO.versioned_path().format(media_id=image.id), headers=headers(user))).json()
+    info = (await client.get(V1.path(MediaRoutes.MEDIA_INFO, media_id=image.id), headers=headers(user))).json()
     assert info["thumbnail_status"] == "ready"
     assert set(info["thumbnail_urls"]) == {"small", "medium", "large", "preview"}
     assert info["thumbnail_urls"]["medium"].startswith(settings.storage.imgproxy.public_prefix + "/")
     assert "/exp:" in info["thumbnail_urls"]["medium"]
     assert "thumbnail_id" not in info
 
-    info = (await client.get(MediaRoutes.MEDIA_INFO.versioned_path().format(media_id=video.id), headers=headers(user))).json()
+    info = (await client.get(V1.path(MediaRoutes.MEDIA_INFO, media_id=video.id), headers=headers(user))).json()
     assert info["thumbnail_status"] == "pending" and info["thumbnail_urls"] is None
 
-    listing = await client.get(MediaRoutes.ROOT.versioned_path(), params={"has_thumbnail": "true"}, headers=headers(user))
+    listing = await client.get(V1.path(MediaRoutes.ROOT), params={"has_thumbnail": "true"}, headers=headers(user))
     assert [m["id"] for m in listing.json()] == [image.id]
-    listing = await client.get(MediaRoutes.ROOT.versioned_path(), params={"has_thumbnail": "false"}, headers=headers(user))
+    listing = await client.get(V1.path(MediaRoutes.ROOT), params={"has_thumbnail": "false"}, headers=headers(user))
     assert [m["id"] for m in listing.json()] == [video.id]
 
 
@@ -170,7 +171,7 @@ async def test_share_link(client, db, headers, monkeypatch):
     _, user, observation = await _scene(db)
     image = await make_media(db, observation, user)
     video = await make_media(db, observation, user, media_type="video")
-    url = MediaRoutes.MEDIA_SHARE.versioned_path()
+    url = V1.path(MediaRoutes.MEDIA_SHARE)
 
     response = await client.post(url.format(media_id=image.id), json={"size": "large", "ttl_seconds": 999999}, headers=headers(user))
     assert response.status_code == 200, response.text
@@ -198,7 +199,7 @@ async def test_regenerate_and_poster_administration(client, db, headers, storage
     poster.parent.mkdir(parents=True)
     poster.write_bytes(b"jpeg")
 
-    regen = MediaRoutes.MEDIA_THUMBNAIL_REGENERATE.versioned_path()
+    regen = V1.path(MediaRoutes.MEDIA_THUMBNAIL_REGENERATE)
     assert (await client.post(regen.format(media_id=video.id), headers=headers(user))).status_code == 403
 
     response = await client.post(regen.format(media_id=video.id), headers=headers(admin))
@@ -211,14 +212,14 @@ async def test_regenerate_and_poster_administration(client, db, headers, storage
     response = await client.post(regen.format(media_id=image.id), headers=headers(admin))
     assert response.status_code == 200 and response.json()["thumbnail_status"] == "ready"
 
-    status_url = MediaRoutes.POSTERS_STATUS.versioned_path()
+    status_url = V1.path(MediaRoutes.POSTERS_STATUS)
     assert (await client.get(status_url, headers=headers(user))).status_code == 403
     status = (await client.get(status_url, headers=headers(admin))).json()
     assert status["posters"]["pending"] == 1 and status["workers"] == [] and status["worker_alive"] is False
 
     # a ready video whose poster file is missing gets re-queued by reconcile
     missing = await make_media(db, observation, user, media_type="video", poster_status="ready")
-    reconcile_url = MediaRoutes.POSTERS_RECONCILE.versioned_path()
+    reconcile_url = V1.path(MediaRoutes.POSTERS_RECONCILE)
     assert (await client.post(reconcile_url, json={}, headers=headers(user))).status_code == 403
     response = await client.post(reconcile_url, json={"retry_failed": False}, headers=headers(admin))
     assert response.status_code == 200, response.text

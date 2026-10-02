@@ -3,14 +3,15 @@ import pytest
 from sqlmodel import select
 
 from app.backend.enums.routes import AuthRoutes, UserRoutes
+from app.backend.api.v1 import V1
 from app.backend.models.user import UserSession
 from app.backend.services.auth import AuthService
 from tests.helpers import make_user, make_admin
 
-ME = AuthRoutes.ME.versioned_path()
-REFRESH = AuthRoutes.REFRESH.versioned_path()
-USER = UserRoutes.USER_BY_ID.versioned_path()
-ARCHIVE = UserRoutes.USER_ARCHIVE.versioned_path()
+ME = V1.path(AuthRoutes.ME)
+REFRESH = V1.path(AuthRoutes.REFRESH)
+USER = V1.path(UserRoutes.USER_BY_ID)
+ARCHIVE = V1.path(UserRoutes.USER_ARCHIVE)
 
 
 async def login(db, user):

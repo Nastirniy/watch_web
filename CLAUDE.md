@@ -3,11 +3,13 @@
 
 ## Routes and API versions
 
-- Every path lives in `app/backend/enums/routes.py` (no `"/api/v1/..."` or `"/"` literal anywhere, tests included). New route: add the member to its group first, then `@router.get(XRoutes.MEMBER.value)`. A collection root is the group's own `ROOT = "/"`.
-- A resource router declares its own place: `router = APIRouter(prefix=XRoutes.BASE.value, tags=[XRoutes.tag()])`. A new resource router goes into the list in `api/v1/__init__.py`; `main.py` includes only `health`, `v1` and `problems`.
-- Before a new version, deprecate inside v1 with what FastAPI already has: a new route next to the old one and `deprecated=True` on the old decorator (or on a param: `Query(deprecated=True)`). It lands in OpenAPI and openapi-typescript marks it `@deprecated` for the web client.
-- A new version only for breaking changes on many routes: member `V2` in `APIVersionRoutes`, module `api/v2/__init__.py` like `v1.py` (unchanged routers included again, changed ones from new modules), then in `main.py` `include_router(v1.router, deprecated=True)` and `include_router(v2.router, generate_unique_id_function=lambda r: f"{r.name}_v2")` so operationIds stay unique.
-- `tests/test_route_registry.py` fails on an enum member without a route, a route without an enum member and a route shadowed by an earlier one (register literal paths like `/filter-schema` before `/{id}`).
+- Every path lives in `app/backend/enums/routes.py` as a plain `str` Enum (no `"/api/v1/..."` or `"/"` literal anywhere, tests included). New route: add the member to its group first, then `@router.get(XRoutes.MEMBER.value)`. A collection root is the group's own `ROOT = "/"`. `SystemRoutes` / `DocsRoutes` values are full paths; the other groups are relative to their `BASE`.
+- Layout: `app/backend/api/vN/` holds the handler modules of version N (the folder is the version), `api/shared/` the request / response models and helpers, `api/system/` health and the problem pages. A module declares its place: `router = APIRouter(prefix=XRoutes.BASE.value, tags=[XRoutes.tag()])`.
+- `api/vN/__init__.py` declares what the version publishes: `V1 = PublishedVersion(APIVersionRoutes.V1, auth, users, ...)` (`api/versioning.py`); a new module goes into that list. `main.py` includes `health.router`, `V1.router`, `problems.router`.
+- A full path comes from the version: `V1.path(PostRoutes.POST_BY_ID, post_id=7)` (template without params, `LookupError` if the version does not publish it). A route that returns URLs takes `version: PublishedVersion = Depends(request_version)` and uses `version.path(...)`; never import `V1` inside a handler module.
+- Versions run in parallel and never override each other: a version publishes only its own folder, `api/vN` never imports `api/vM`, no shared routers, no re-publishing. What two versions share lives in `services/` or `api/shared/`. A new version starts with only the resources whose contract changes; the client moves to it resource by resource while v1 keeps serving everything. Then: `include_router(V2.router, generate_unique_id_function=lambda r: f"{r.name}_v2")`, later `include_router(V1.router, deprecated=True)`, retire = remove the include and the folder.
+- Within one version, deprecate with what FastAPI already has: a new route next to the old one and `deprecated=True` on the old decorator (or `Query(deprecated=True)`); openapi-typescript marks it `@deprecated`.
+- `tests/test_route_registry.py` fails on an enum member without a route, a route without an enum member, a route shadowed by an earlier one (register literal paths like `/filter-schema` before `/{id}`) and an import between version folders.
 
 ## Database Migrations
 

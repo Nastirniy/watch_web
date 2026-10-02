@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from app.backend.enums.routes import MediaRoutes
+from app.backend.api.v1 import V1
 from app.backend.services.media import probe
 from app.backend.services.media.posters import resolve_binary
 from tests.helpers import make_post, make_user, make_dictionary, make_observation, make_media
@@ -84,7 +85,7 @@ async def test_media_info_carries_playback_fields(client, db, headers):
     unprobed = await make_media(db, observation, user, media_type="audio")
     image = await make_media(db, observation, user)
 
-    url = MediaRoutes.MEDIA_INFO.versioned_path()
+    url = V1.path(MediaRoutes.MEDIA_INFO)
     body = (await client.get(url.format(media_id=probed.id), headers=headers(user))).json()
     assert body["duration_seconds"] == 12.5 and body["video_codec"] == "h264" and body["audio_codec"] == "aac"
     assert body["playback_type"] == 'video/mp4; codecs="avc1.64001F, mp4a.40.2"' and body["width"] == 1280

@@ -20,6 +20,7 @@ from app.backend.enums.errors import (
     ALL_CODE_ENUMS, PROBLEM_ENUMS, AuthErrorCode, ErrorCode, FieldErrorCode, placeholders,
 )
 from app.backend.enums.routes import APIVersionRoutes, PostRoutes, SystemRoutes
+from app.backend.api.v1 import V1
 from app.backend.error_handlers import register_error_handlers
 from app.backend.services.api_errors import (
     FIELD_MEMBERS, PROBLEM_JSON, RESERVED_MEMBERS, ApiError, invalid, is_optional,
@@ -296,29 +297,29 @@ async def test_unhandled_exception_hides_its_text(probe):
 @pytest.mark.asyncio
 async def test_real_app_answers_problems(client, db, headers):
     admin = await make_admin(db)
-    missing_post = await client.get(PostRoutes.POST_BY_ID.versioned_path().format(post_id=999999), headers=headers(admin))
+    missing_post = await client.get(V1.path(PostRoutes.POST_BY_ID, post_id=999999), headers=headers(admin))
     body = _problem(missing_post, 404)
-    assert body["code"] == "post_not_found" and body["type"].endswith(f"{SystemRoutes.PROBLEMS.path()}/post_not_found")
+    assert body["code"] == "post_not_found" and body["type"].endswith(f"{SystemRoutes.PROBLEMS.value}/post_not_found")
 
-    no_token = await client.get(PostRoutes.ROOT.versioned_path())
+    no_token = await client.get(V1.path(PostRoutes.ROOT))
     assert _problem(no_token, 401)["code"] == AuthErrorCode.CREDENTIALS_REQUIRED.value
     assert no_token.headers["www-authenticate"] == "Bearer"
 
-    unknown = await client.get(APIVersionRoutes.current().value + "/does-not-exist", headers=headers(admin))
+    unknown = await client.get(APIVersionRoutes.V1.value + "/does-not-exist", headers=headers(admin))
     assert _problem(unknown, 404)["code"] == "route_not_found"
 
 
 @pytest.mark.asyncio
 async def test_problem_type_uri_dereferences_to_its_documentation(client, db, headers):
     admin = await make_admin(db)
-    missing_post = await client.get(PostRoutes.POST_BY_ID.versioned_path().format(post_id=999999), headers=headers(admin))
+    missing_post = await client.get(V1.path(PostRoutes.POST_BY_ID, post_id=999999), headers=headers(admin))
     page = await client.get(missing_post.json()["type"])
     assert page.status_code == 200 and page.headers["content-type"].startswith("text/html")
     assert "post_not_found" in page.text and "Post not found" in page.text
     assert "GET /api/v1/posts/{post_id}" in page.text  # the routes that answer it
 
-    index = await client.get(SystemRoutes.PROBLEMS.path())
+    index = await client.get(SystemRoutes.PROBLEMS.value)
     assert index.status_code == 200 and all(code.value in index.text for cls in PROBLEM_ENUMS for code in cls)
 
-    unknown = await client.get(SystemRoutes.PROBLEM_BY_CODE.path().format(code="nope"))
+    unknown = await client.get(SystemRoutes.PROBLEM_BY_CODE.value.format(code="nope"))
     assert _problem(unknown, 404)["code"] == "problem_type_not_found"

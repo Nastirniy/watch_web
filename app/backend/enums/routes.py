@@ -1,42 +1,20 @@
 """Every URL of the service, as enums. No route path is written anywhere else.
 
-- APIVersionRoutes: the published API versions; the value is the prefix of the version router (api/v1/__init__.py).
-- VersionedRouteEnum groups (AuthRoutes, UserRoutes, ...): BASE is the prefix of the resource router,
-  every other member a path relative to it. versioned_path() = version prefix + BASE + member.
-- RouteEnum groups (SystemRoutes, DocsRoutes): outside any version, path() only.
+- APIVersionRoutes: the published API versions; the value is the prefix of a version (app/backend/api/vN).
+- Resource groups (AuthRoutes, UserRoutes, ...): BASE is the prefix of the resource router, every other
+  member a path relative to it. A full path comes from the version that publishes the group:
+  V1.path(UserRoutes.USER_BY_ID, user_id=1) (app/backend/api/versioning.py).
+- SystemRoutes, DocsRoutes: outside any version, the values are full paths.
 """
 from enum import Enum
-from typing import Optional
 
 
 class APIVersionRoutes(str, Enum):
-    """Published API versions; the value is the prefix of the version router"""
+    """Published API versions; the value is the prefix of the version's router"""
     V1 = "/api/v1"
 
-    @classmethod
-    def current(cls) -> "APIVersionRoutes":
-        """The version new clients use; versioned_path() builds it when no version is given"""
-        return cls.V1
 
-
-class RouteEnum(str, Enum):
-    """Base of a route group: BASE is the router prefix, every other member a path relative to it"""
-
-    def path(self) -> str:
-        """Full path without an API version"""
-        base = type(self).BASE
-        return base.value if self is base else base.value + self.value
-
-
-class VersionedRouteEnum(RouteEnum):
-    """Route group published under an API version"""
-
-    def versioned_path(self, version: Optional[APIVersionRoutes] = None) -> str:
-        """Full path under the given version, the current one by default"""
-        return (version or APIVersionRoutes.current()).value + self.path()
-
-
-class DocsRoutes(RouteEnum):
+class DocsRoutes(str, Enum):
     """OpenAPI document and its viewers (FastAPI registers them from these values)"""
     BASE = ""
     OPENAPI_JSON = "/openapi.json"
@@ -49,7 +27,7 @@ class DocsRoutes(RouteEnum):
         return "DOCS"
 
 
-class SystemRoutes(RouteEnum):
+class SystemRoutes(str, Enum):
     """System routes outside any API version"""
     BASE = ""
     HEALTH = "/health"
@@ -62,7 +40,7 @@ class SystemRoutes(RouteEnum):
         return "SYSTEM"
 
 
-class AuthRoutes(VersionedRouteEnum):
+class AuthRoutes(str, Enum):
     """Authentication and authorization routes"""
     BASE = "/auth"
     LOGIN = "/login"
@@ -78,7 +56,7 @@ class AuthRoutes(VersionedRouteEnum):
         return "AUTHENTICATION"
 
 
-class PostRoutes(VersionedRouteEnum):
+class PostRoutes(str, Enum):
     """Post/content management routes"""
     BASE = "/posts"
     ROOT = "/"  # collection: list and create (the trailing slash is part of the published path)
@@ -91,7 +69,7 @@ class PostRoutes(VersionedRouteEnum):
         return "POSTS"
 
 
-class ObservationRoutes(VersionedRouteEnum):
+class ObservationRoutes(str, Enum):
     """Observation management routes"""
     BASE = "/observations"
     CREATE = "/create"
@@ -113,7 +91,7 @@ class ObservationRoutes(VersionedRouteEnum):
         return "OBSERVATIONS"
 
 
-class MediaRoutes(VersionedRouteEnum):
+class MediaRoutes(str, Enum):
     """Media file management routes"""
     BASE = "/media"
     ROOT = "/"  # collection: list
@@ -144,7 +122,7 @@ class MediaRoutes(VersionedRouteEnum):
         return "MEDIA"
 
 
-class UserRoutes(VersionedRouteEnum):
+class UserRoutes(str, Enum):
     """User management routes"""
     BASE = "/users"
     ROOT = "/"  # collection: list and create
@@ -161,7 +139,7 @@ class UserRoutes(VersionedRouteEnum):
         return "USERS"
 
 
-class RoleRoutes(VersionedRouteEnum):
+class RoleRoutes(str, Enum):
     """Role management routes"""
     BASE = "/roles"
     ROOT = "/"  # collection: list and create
@@ -178,7 +156,7 @@ class RoleRoutes(VersionedRouteEnum):
         return "ROLES"
 
 
-class MediaFormatRoutes(VersionedRouteEnum):
+class MediaFormatRoutes(str, Enum):
     """Accepted upload formats (administration dictionary)"""
     BASE = "/media-formats"
     LIST_ALL = "/list-all"
@@ -193,7 +171,7 @@ class MediaFormatRoutes(VersionedRouteEnum):
         return "MEDIA_FORMATS"
 
 
-class CategoryRoutes(VersionedRouteEnum):
+class CategoryRoutes(str, Enum):
     """Category management routes"""
     BASE = "/categories"
     LIST_ALL = "/list-all"
@@ -209,7 +187,7 @@ class CategoryRoutes(VersionedRouteEnum):
         return "CATEGORIES"
 
 
-class SignalTypeRoutes(VersionedRouteEnum):
+class SignalTypeRoutes(str, Enum):
     """Signal type management routes"""
     BASE = "/signal-types"
     LIST_ALL = "/list-all"
@@ -224,7 +202,7 @@ class SignalTypeRoutes(VersionedRouteEnum):
         return "SIGNAL_TYPES"
 
 
-class TagRoutes(VersionedRouteEnum):
+class TagRoutes(str, Enum):
     """Tag management routes"""
     BASE = "/tags"
     LIST_ALL = "/list-all"
@@ -239,7 +217,7 @@ class TagRoutes(VersionedRouteEnum):
         return "TAGS"
 
 
-class SearchRoutes(VersionedRouteEnum):
+class SearchRoutes(str, Enum):
     """Unified search routes"""
     BASE = "/search"
     FILTER_SCHEMA = "/filter-schema"
@@ -258,7 +236,7 @@ class SearchRoutes(VersionedRouteEnum):
         return "SEARCH"
 
 
-class StatisticsRoutes(VersionedRouteEnum):
+class StatisticsRoutes(str, Enum):
     """Administration dashboard statistics"""
     BASE = "/statistics"
     ROOT = "/"

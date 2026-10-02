@@ -8,20 +8,21 @@ from sqlmodel import select
 from app.backend.enums.routes import (
     AuthRoutes, RoleRoutes, StatisticsRoutes, ObservationRoutes, UserRoutes, PostRoutes, Routes,
 )
+from app.backend.api.v1 import V1
 from app.backend.models.user import UserSession
 from app.backend.models.role import Permission
 from app.backend.services.auth import AuthService
 from tests.helpers import make_post, make_user, make_admin, make_role, make_dictionary, make_observation, make_media
 
-ME = AuthRoutes.ME.versioned_path()
-LIST = ObservationRoutes.LIST_ALL.versioned_path()
-OBS = ObservationRoutes.OBSERVATION_BY_ID.versioned_path()
-OBS_ARCHIVE = ObservationRoutes.OBSERVATION_ARCHIVE.versioned_path()
-OBS_RESTORE = ObservationRoutes.OBSERVATION_RESTORE.versioned_path()
-USER = UserRoutes.USER_BY_ID.versioned_path()
-USER_ARCHIVE = UserRoutes.USER_ARCHIVE.versioned_path()
-USER_RESTORE = UserRoutes.USER_RESTORE.versioned_path()
-USERS = UserRoutes.ROOT.versioned_path()
+ME = V1.path(AuthRoutes.ME)
+LIST = V1.path(ObservationRoutes.LIST_ALL)
+OBS = V1.path(ObservationRoutes.OBSERVATION_BY_ID)
+OBS_ARCHIVE = V1.path(ObservationRoutes.OBSERVATION_ARCHIVE)
+OBS_RESTORE = V1.path(ObservationRoutes.OBSERVATION_RESTORE)
+USER = V1.path(UserRoutes.USER_BY_ID)
+USER_ARCHIVE = V1.path(UserRoutes.USER_ARCHIVE)
+USER_RESTORE = V1.path(UserRoutes.USER_RESTORE)
+USERS = V1.path(UserRoutes.ROOT)
 
 
 async def make_session(db, user, expires_in: timedelta) -> UserSession:
@@ -45,7 +46,7 @@ def test_dead_route_members_are_gone():
     assert not hasattr(ObservationRoutes, "BULK_UPDATE")
     assert not hasattr(Routes, "EXPORTS") and not hasattr(Routes, "SIGNALS")
     assert Routes.STATISTICS is StatisticsRoutes
-    assert StatisticsRoutes.BASE.versioned_path() == "/api/v1/statistics"
+    assert V1.path(StatisticsRoutes.BASE) == "/api/v1/statistics"
 
 
 # ----------------------------------------------------------------- session expiry
@@ -69,7 +70,7 @@ async def test_refresh_rejects_expired_session(client, db):
     user = await make_user(db)
     expired = await make_session(db, user, timedelta(minutes=-1))
     refresh_token = AuthService.create_refresh_token(user.id, session_id=expired.id)
-    response = await client.post(AuthRoutes.REFRESH.versioned_path(), json={"refresh_token": refresh_token})
+    response = await client.post(V1.path(AuthRoutes.REFRESH), json={"refresh_token": refresh_token})
     assert response.status_code == 401
     assert response.json()["code"] == "session_expired"
 
@@ -81,7 +82,7 @@ async def test_role_permission_toggle(client, db, headers):
     role = await make_role(db, [])
     user = await make_user(db, role=role)
     permission = (await db.exec(select(Permission).where(Permission.name == "tag.view"))).one()
-    url = RoleRoutes.ROLE_PERMISSION_BY_ID.versioned_path().format(role_id=role.id, permission_id=permission.id)
+    url = V1.path(RoleRoutes.ROLE_PERMISSION_BY_ID, role_id=role.id, permission_id=permission.id)
 
     added = await client.put(url, headers=headers(admin))
     assert added.status_code == 200, added.text
@@ -110,7 +111,7 @@ async def test_statistics_endpoint(client, db, headers):
     await make_media(db, observation, user)
     await make_session(db, user, timedelta(hours=1))
 
-    url = StatisticsRoutes.ROOT.versioned_path()
+    url = V1.path(StatisticsRoutes.ROOT)
     no_perm = await make_user(db, perms=["observation.view"], post_id=post.id)
     assert (await client.get(url, headers=headers(no_perm))).status_code == 403
 

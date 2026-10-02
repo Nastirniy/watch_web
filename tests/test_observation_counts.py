@@ -4,12 +4,13 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.backend.enums.routes import PostRoutes, SearchRoutes
+from app.backend.api.v1 import V1
 from tests.helpers import make_post, make_user, make_dictionary, make_observation
 
-POSTS = PostRoutes.ROOT.versioned_path()
-POST = PostRoutes.POST_BY_ID.versioned_path()
-STATS = PostRoutes.POST_OBSERVATION_STATS.versioned_path()
-SEARCH_POSTS = SearchRoutes.POSTS.versioned_path()
+POSTS = V1.path(PostRoutes.ROOT)
+POST = V1.path(PostRoutes.POST_BY_ID)
+STATS = V1.path(PostRoutes.POST_OBSERVATION_STATS)
+SEARCH_POSTS = V1.path(SearchRoutes.POSTS)
 
 VIEW = ["post.view", "observation.view"]
 

@@ -6,18 +6,19 @@ import pytest
 from sqlmodel import select
 
 from app.backend.enums.routes import ObservationRoutes
+from app.backend.api.v1 import V1
 from app.backend.filters.observation_report_filter import ObservationReportFilter
 from app.backend.filters.params.observation_report_params import ObservationReportParams
 from app.backend.models.observation import Observation, ObservationFrequency
 from tests.helpers import make_post, make_user, make_dictionary, make_observation
 
-CREATE = ObservationRoutes.CREATE.versioned_path()
-LIST = ObservationRoutes.LIST_ALL.versioned_path()
-ARCHIVE_OBSERVATION = ObservationRoutes.OBSERVATION_ARCHIVE.versioned_path()
-BANDS = ObservationRoutes.OBSERVATION_FREQUENCIES.versioned_path()
-BAND = ObservationRoutes.OBSERVATION_FREQUENCY_BY_ID.versioned_path()
-BAND_ARCHIVE = ObservationRoutes.OBSERVATION_FREQUENCY_ARCHIVE.versioned_path()
-BAND_RESTORE = ObservationRoutes.OBSERVATION_FREQUENCY_RESTORE.versioned_path()
+CREATE = V1.path(ObservationRoutes.CREATE)
+LIST = V1.path(ObservationRoutes.LIST_ALL)
+ARCHIVE_OBSERVATION = V1.path(ObservationRoutes.OBSERVATION_ARCHIVE)
+BANDS = V1.path(ObservationRoutes.OBSERVATION_FREQUENCIES)
+BAND = V1.path(ObservationRoutes.OBSERVATION_FREQUENCY_BY_ID)
+BAND_ARCHIVE = V1.path(ObservationRoutes.OBSERVATION_FREQUENCY_ARCHIVE)
+BAND_RESTORE = V1.path(ObservationRoutes.OBSERVATION_FREQUENCY_RESTORE)
 OPERATOR = ["observation.view", "observation.create", "observation.update", "observation.archive"]
 
 
@@ -190,7 +191,7 @@ async def test_sort_by_lowest_matching_band_center(client, db, headers):
     assert await order(sort_order="descending") == [high_rc.id, low_rc.id]
     assert await order(sort_order="ascending", frequency_kind="video") == [high_rc.id, low_rc.id], \
         "the sort uses the bands selected by the band filters"
-    schema = await client.get(ObservationRoutes.FILTER_SCHEMA.versioned_path(), headers=headers(user))
+    schema = await client.get(V1.path(ObservationRoutes.FILTER_SCHEMA), headers=headers(user))
     assert "frequency_center" in schema.json()["sortable_fields"]
 
 

@@ -4,18 +4,19 @@ from sqlmodel import select
 
 from app.backend.config import settings
 from app.backend.enums.routes import MediaRoutes, MediaFormatRoutes
+from app.backend.api.v1 import V1
 from app.backend.models.media_format import MediaFormat
 from app.backend.services.media import formats
 from tests.helpers import make_post, make_user, make_admin, make_dictionary, make_observation
 
-UPLOAD = MediaRoutes.UPLOAD.versioned_path()
-NGINX_UPLOAD = MediaRoutes.NGINX_UPLOAD.versioned_path()
-FORMATS = MediaRoutes.FORMATS.versioned_path()
-LIST = MediaFormatRoutes.LIST_ALL.versioned_path()
-CREATE = MediaFormatRoutes.CREATE.versioned_path()
-BY_ID = MediaFormatRoutes.FORMAT_BY_ID.versioned_path()
-ARCHIVE = MediaFormatRoutes.FORMAT_ARCHIVE.versioned_path()
-RESTORE = MediaFormatRoutes.FORMAT_RESTORE.versioned_path()
+UPLOAD = V1.path(MediaRoutes.UPLOAD)
+NGINX_UPLOAD = V1.path(MediaRoutes.NGINX_UPLOAD)
+FORMATS = V1.path(MediaRoutes.FORMATS)
+LIST = V1.path(MediaFormatRoutes.LIST_ALL)
+CREATE = V1.path(MediaFormatRoutes.CREATE)
+BY_ID = V1.path(MediaFormatRoutes.FORMAT_BY_ID)
+ARCHIVE = V1.path(MediaFormatRoutes.FORMAT_ARCHIVE)
+RESTORE = V1.path(MediaFormatRoutes.FORMAT_RESTORE)
 
 PNG_BYTES = (b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + b"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00"
              + b"\x90wS\xde" + b"\x00\x00\x00\x00IEND\xaeB`\x82")
@@ -221,7 +222,7 @@ async def test_media_formats_searchable(client, db, headers):
     from app.backend.enums.routes import SearchRoutes
     post = await make_post(db)
     viewer = await make_user(db, perms=["media_format.view"], post_id=post.id)
-    response = await client.get(SearchRoutes.MEDIA_FORMATS.versioned_path(), params={"media_type": "video"}, headers=headers(viewer))
+    response = await client.get(V1.path(SearchRoutes.MEDIA_FORMATS), params={"media_type": "video"}, headers=headers(viewer))
     assert response.status_code == 200, response.text
     items = response.json().get("items", response.json())
     assert len(items) == 4

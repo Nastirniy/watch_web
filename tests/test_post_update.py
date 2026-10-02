@@ -3,11 +3,12 @@ import pytest
 from sqlmodel import select
 
 from app.backend.enums.routes import PostRoutes
+from app.backend.api.v1 import V1
 from app.backend.models.post import Post
 from tests.helpers import make_admin, make_post
 
-CREATE = PostRoutes.ROOT.versioned_path()
-POST = PostRoutes.POST_BY_ID.versioned_path()
+CREATE = V1.path(PostRoutes.ROOT)
+POST = V1.path(PostRoutes.POST_BY_ID)
 
 
 def field_error(response, field: str) -> dict:

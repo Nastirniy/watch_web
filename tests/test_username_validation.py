@@ -9,11 +9,12 @@ from cryptography.x509.oid import NameOID
 from sqlmodel import select
 
 from app.backend.enums.routes import UserRoutes
+from app.backend.api.v1 import V1
 from app.backend.models.role import Role
 from tests.helpers import make_admin, make_user
 
-CREATE = UserRoutes.ROOT.versioned_path()
-USER = UserRoutes.USER_BY_ID.versioned_path()
+CREATE = V1.path(UserRoutes.ROOT)
+USER = V1.path(UserRoutes.USER_BY_ID)
 
 
 def make_certificate(common_name: str) -> bytes:

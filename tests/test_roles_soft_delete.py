@@ -6,16 +6,17 @@ from sqlmodel import select
 from app.backend.database import seed_roles_and_permissions
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import RoleRoutes, TagRoutes, UserRoutes, AuthRoutes
+from app.backend.api.v1 import V1
 from app.backend.models.audit import AuditLog
 from app.backend.models.role import Role, UserRole, Permission, RolePermission
 from tests.helpers import make_post, make_user, make_admin, make_role
 
-ROLES = RoleRoutes.ROOT.versioned_path()
-ROLE = RoleRoutes.ROLE_BY_ID.versioned_path()
-ARCHIVE = RoleRoutes.ROLE_ARCHIVE.versioned_path()
-RESTORE = RoleRoutes.ROLE_RESTORE.versioned_path()
-TAGS = TagRoutes.LIST_ALL.versioned_path()
-ROUTE_ACCESS = AuthRoutes.ROUTE_ACCESS.versioned_path()
+ROLES = V1.path(RoleRoutes.ROOT)
+ROLE = V1.path(RoleRoutes.ROLE_BY_ID)
+ARCHIVE = V1.path(RoleRoutes.ROLE_ARCHIVE)
+RESTORE = V1.path(RoleRoutes.ROLE_RESTORE)
+TAGS = V1.path(TagRoutes.LIST_ALL)
+ROUTE_ACCESS = V1.path(AuthRoutes.ROUTE_ACCESS)
 
 
 @pytest.mark.asyncio
@@ -51,16 +52,16 @@ async def test_archive_lifecycle(client, db, headers):
 
     # cannot be archived twice, cannot be assigned, name cannot be reused
     assert (await client.post(ARCHIVE.format(role_id=role.id), headers=headers(admin))).status_code == 404
-    assign = await client.patch(UserRoutes.USER_BY_ID.versioned_path().format(user_id=user.id),
+    assign = await client.patch(V1.path(UserRoutes.USER_BY_ID, user_id=user.id),
                                 data={"role_ids": f"[{role.id}]"}, headers=headers(admin))
     assert assign.status_code == 400, assign.text
     reuse = await client.post(ROLES, json={"name": "viewer", "display_name": "Viewer"}, headers=headers(admin))
     assert reuse.status_code == 409
 
     # the user's role list hides it, /auth/me shows no roles; the assignment row itself is kept
-    user_roles = (await client.get(UserRoutes.USER_ROLES.versioned_path().format(user_id=user.id), headers=headers(admin))).json()
+    user_roles = (await client.get(V1.path(UserRoutes.USER_ROLES, user_id=user.id), headers=headers(admin))).json()
     assert user_roles == []
-    me = (await client.get(AuthRoutes.ME.versioned_path(), headers=headers(user))).json()
+    me = (await client.get(V1.path(AuthRoutes.ME), headers=headers(user))).json()
     assert me["roles"] == [] and me["permissions"] == []
     assert (await db.exec(select(UserRole).where(UserRole.role_id == role.id))).first() is not None
 

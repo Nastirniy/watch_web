@@ -8,16 +8,17 @@ import pytest
 from sqlmodel import select
 
 from app.backend.enums.routes import PostRoutes, TagRoutes, ObservationRoutes, SearchRoutes
+from app.backend.api.v1 import V1
 from app.backend.models.observation import Tag
 from app.backend.models.post import Post
 from app.backend.utils.text import unescape_html, unescape_deep
 from app.backend.utils.validators import SecurityValidators, PlainTextModel
 from tests.helpers import make_admin, make_post, make_dictionary, make_observation
 
-POST = PostRoutes.POST_BY_ID.versioned_path()
-POSTS = PostRoutes.ROOT.versioned_path()
-TAG = TagRoutes.TAG_BY_ID.versioned_path()
-OBS_LIST = ObservationRoutes.LIST_ALL.versioned_path()
+POST = V1.path(PostRoutes.POST_BY_ID)
+POSTS = V1.path(PostRoutes.ROOT)
+TAG = V1.path(TagRoutes.TAG_BY_ID)
+OBS_LIST = V1.path(ObservationRoutes.LIST_ALL)
 
 
 @pytest.mark.parametrize("escaped, plain", [
@@ -94,7 +95,7 @@ async def test_escaped_rows_are_returned_as_plain_text(client, db, headers):
     assert body["comment"] == "зв'язок \"A\""
     assert body["user"]["username_alias"] == "Мар'яна"
 
-    response = await client.get(SearchRoutes.POSTS.versioned_path(), headers=headers(admin))
+    response = await client.get(V1.path(SearchRoutes.POSTS), headers=headers(admin))
     assert response.status_code == 200, response.text
     names = {item["name"] for item in response.json()["items"]}
     assert "Пост 'Північ'" in names

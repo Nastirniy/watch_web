@@ -7,15 +7,16 @@ import pytest
 
 from app.backend.config import settings
 from app.backend.enums.routes import MediaRoutes
+from app.backend.api.v1 import V1
 from app.backend.models.media import MediaFile
 from app.backend.services.media import uploads
 from app.backend.services.media.manager import reset_media_manager
 from tests.helpers import make_post, make_user, make_dictionary, make_observation
 
-CREATE = MediaRoutes.UPLOADS.versioned_path()
-SESSION = MediaRoutes.UPLOAD_SESSION.versioned_path()
-COMPLETE = MediaRoutes.UPLOAD_SESSION_COMPLETE.versioned_path()
-ABORT = MediaRoutes.UPLOAD_SESSION_ABORT.versioned_path()
+CREATE = V1.path(MediaRoutes.UPLOADS)
+SESSION = V1.path(MediaRoutes.UPLOAD_SESSION)
+COMPLETE = V1.path(MediaRoutes.UPLOAD_SESSION_COMPLETE)
+ABORT = V1.path(MediaRoutes.UPLOAD_SESSION_ABORT)
 CHUNK = {"Content-Type": "application/offset+octet-stream"}
 
 

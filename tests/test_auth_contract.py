@@ -2,11 +2,12 @@
 import pytest
 
 from app.backend.enums.routes import AuthRoutes
+from app.backend.api.v1 import V1
 from app.backend.services.auth import AuthService
 from tests.helpers import make_post, make_user, make_admin
 
-ME = AuthRoutes.ME.versioned_path()
-CHECK = AuthRoutes.CHECK_PERMISSION.versioned_path()
+ME = V1.path(AuthRoutes.ME)
+CHECK = V1.path(AuthRoutes.CHECK_PERMISSION)
 
 
 @pytest.mark.asyncio
@@ -73,7 +74,7 @@ async def test_check_permission(client, db, headers):
 async def test_403_body_is_structured(client, db, headers):
     from app.backend.enums.routes import TagRoutes
     user = await make_user(db, perms=["tag.view"])
-    response = await client.post(TagRoutes.CREATE.versioned_path(), json={"name": "x"}, headers=headers(user))
+    response = await client.post(V1.path(TagRoutes.CREATE), json={"name": "x"}, headers=headers(user))
     assert response.status_code == 403
     detail = response.json()
     assert detail["code"] == "admin_required"

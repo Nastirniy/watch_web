@@ -3,13 +3,14 @@ import pytest
 from sqlmodel import select
 
 from app.backend.enums.routes import ObservationRoutes, TagRoutes
+from app.backend.api.v1 import V1
 from app.backend.models.observation import Observation, Tag
 from app.backend.services.observation_report_service import _tag_label, _tag_filter_label, _build_filter_rows
 from app.backend.filters.params.observation_report_params import ObservationReportParams
 from tests.helpers import make_post, make_user, make_admin, make_dictionary, make_observation
 
-LIST = ObservationRoutes.LIST_ALL.versioned_path()
-UPDATE = ObservationRoutes.OBSERVATION_BY_ID.versioned_path()
+LIST = V1.path(ObservationRoutes.LIST_ALL)
+UPDATE = V1.path(ObservationRoutes.OBSERVATION_BY_ID)
 
 
 async def attach_tag(db, observation, tag_id):
@@ -34,10 +35,10 @@ async def test_deleted_tag_stays_visible_and_keepable(client, db, headers):
     listed = (await client.get(LIST, headers=headers(user))).json()
     assert listed[0]["tags"] == [{"id": ids["tag_id"], "name": listed[0]["tags"][0]["name"], "is_deleted": False}]
 
-    deleted = await client.post(TagRoutes.TAG_ARCHIVE.versioned_path().format(tag_id=ids["tag_id"]), headers=headers(admin))
+    deleted = await client.post(V1.path(TagRoutes.TAG_ARCHIVE, tag_id=ids["tag_id"]), headers=headers(admin))
     assert deleted.status_code == 200, deleted.text
     assert deleted.json()["is_deleted"] is True
-    deleted_other = await client.post(TagRoutes.TAG_ARCHIVE.versioned_path().format(tag_id=other["tag_id"]), headers=headers(admin))
+    deleted_other = await client.post(V1.path(TagRoutes.TAG_ARCHIVE, tag_id=other["tag_id"]), headers=headers(admin))
     assert deleted_other.status_code == 200
 
     listed = (await client.get(LIST, headers=headers(user))).json()

@@ -11,6 +11,7 @@ import pytest
 
 from app.backend.enums.errors import PROBLEM_ENUMS, AccessErrorCode, AuthErrorCode, ErrorCode
 from app.backend.enums.routes import APIVersionRoutes, PostRoutes, TagRoutes
+from app.backend.api.v1 import V1
 from app.backend.openapi_problems import problem_models, schema_name
 from app.backend.services.api_errors import PROBLEM_JSON
 from app.backend.services.permissions import REQUIRE_ATTR
@@ -93,7 +94,7 @@ def test_authentication_and_permissions_follow_require(schema):
 
 
 def test_route_problems_come_from_its_code(schema):
-    update_post = schema["paths"][PostRoutes.POST_BY_ID.versioned_path()]["put"]["responses"]
+    update_post = schema["paths"][V1.path(PostRoutes.POST_BY_ID)]["put"]["responses"]
     assert _codes(update_post["404"]) == _names(ErrorCode.POST_NOT_FOUND)
     assert _codes(update_post["400"]) == _names(ErrorCode.POST_CODE_TAKEN)
     assert _codes(update_post["422"]) == _names(ErrorCode.VALIDATION_ERROR)
@@ -128,7 +129,7 @@ def test_catalog_components(schema):
 def test_operation_ids_are_unique_function_names(schema):
     ids = [operation["operationId"] for _, operation in _operations(schema)]
     assert len(ids) == len(set(ids))
-    assert schema["paths"][PostRoutes.POST_BY_ID.versioned_path()]["put"]["operationId"] == "update_post"
+    assert schema["paths"][V1.path(PostRoutes.POST_BY_ID)]["put"]["operationId"] == "update_post"
 
 
 def test_optional_members_are_absent_not_null(schema):
@@ -151,11 +152,11 @@ async def test_real_bodies_validate_against_their_problem_schema(client, db, hea
     admin = await make_admin(db)
     viewer = await make_user(db, perms=["tag.view"])
 
-    _validate(await client.get(PostRoutes.POST_BY_ID.versioned_path().format(post_id=999999), headers=headers(admin)))
-    _validate(await client.get(PostRoutes.ROOT.versioned_path()))
-    denied = _validate(await client.post(TagRoutes.CREATE.versioned_path(), json={"name": "x"}, headers=headers(viewer)))
+    _validate(await client.get(V1.path(PostRoutes.POST_BY_ID, post_id=999999), headers=headers(admin)))
+    _validate(await client.get(V1.path(PostRoutes.ROOT)))
+    denied = _validate(await client.post(V1.path(TagRoutes.CREATE), json={"name": "x"}, headers=headers(viewer)))
     assert denied["required"]["all"] and denied["missing"]
-    invalid = _validate(await client.put(PostRoutes.POST_BY_ID.versioned_path().format(post_id=1), json={"code": None}, headers=headers(admin)))
+    invalid = _validate(await client.put(V1.path(PostRoutes.POST_BY_ID, post_id=1), json={"code": None}, headers=headers(admin)))
     assert invalid["errors"][0]["code"] == "value_null"
 
 

@@ -9,6 +9,7 @@ import pytest
 
 from app.backend.api_contract import build_lock, diff_lock, read_lock, report
 from app.backend.enums.routes import MediaRoutes
+from app.backend.api.v1 import V1
 from tests.helpers import make_admin
 
 
@@ -62,6 +63,6 @@ def test_the_lock_names_codes_never_python_functions(current):
 @pytest.mark.asyncio
 async def test_storage_statistics_do_not_expose_the_storage_path(client, db, headers):
     admin = await make_admin(db)
-    response = await client.get(MediaRoutes.STORAGE_STATISTICS.versioned_path(), headers=headers(admin))
+    response = await client.get(V1.path(MediaRoutes.STORAGE_STATISTICS), headers=headers(admin))
     assert response.status_code == 200, response.text
     assert "storage_path" not in response.json()

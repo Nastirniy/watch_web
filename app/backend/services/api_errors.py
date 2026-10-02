@@ -101,7 +101,7 @@ def field_problem(code: FieldCode, loc: tuple, **params: Any) -> ApiError:
 
 def problem_type_uri(request: Request, code: str) -> str:
     """Absolute URI of the problem type; dereferencing it gives its documentation (RFC 9457 section 3.1.1)"""
-    base = settings.app.problem_base_url.rstrip("/") or (str(request.base_url).rstrip("/") + SystemRoutes.PROBLEMS.path())
+    base = settings.app.problem_base_url.rstrip("/") or (str(request.base_url).rstrip("/") + SystemRoutes.PROBLEMS.value)
     return f"{base}/{code}"
 
 

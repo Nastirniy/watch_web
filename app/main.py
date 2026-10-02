@@ -31,19 +31,19 @@ setup_logging(
 _logger = get_main_logger()
 
 API_DESCRIPTION = f"""
-Radio monitoring API. This page, `{DocsRoutes.REDOC.path()}` and `{DocsRoutes.OPENAPI_JSON.path()}` are generated
+Radio monitoring API. This page, `{DocsRoutes.REDOC.value}` and `{DocsRoutes.OPENAPI_JSON.value}` are generated
 from the code, errors included.
 
 ## Authentication
-`Authorization: Bearer <access token>` from `POST {AuthRoutes.LOGIN.versioned_path()}`. A 401 with `invalid_token` or
-`session_expired` means: refresh with `POST {AuthRoutes.REFRESH.versioned_path()}`; any other 401 code means: log in again.
+`Authorization: Bearer <access token>` from `POST {V1.path(AuthRoutes.LOGIN)}`. A 401 with `invalid_token` or
+`session_expired` means: refresh with `POST {V1.path(AuthRoutes.REFRESH)}`; any other 401 code means: log in again.
 
 ## Errors (RFC 9457 Problem Details)
 Every error answers `Content-Type: application/problem+json`:
 
 | member | meaning |
 |---|---|
-| `type` | URI of the problem type; open it for its documentation (`{SystemRoutes.PROBLEMS.path()}/<code>`) |
+| `type` | URI of the problem type; open it for its documentation (`{SystemRoutes.PROBLEMS.value}/<code>`) |
 | `title` | fixed summary of the problem type |
 | `status` | HTTP status code |
 | `detail` | English text of this occurrence |
@@ -52,14 +52,14 @@ Every error answers `Content-Type: application/problem+json`:
 | other members | params of the message (`post_id`, `offset`, `max_file_size_bytes`, ...) |
 
 Each response of each operation lists the problem types it can answer (`oneOf`, discriminator `code`).
-`components.schemas.ProblemCode` lists every code, `{SystemRoutes.PROBLEMS.path()}` documents them all.
+`components.schemas.ProblemCode` lists every code, `{SystemRoutes.PROBLEMS.value}` documents them all.
 
 `validation_error` (422) carries `errors`: one item per invalid value with `code`, `detail` and either
 `pointer` (JSON Pointer into the body, `#/username`) or `parameter` + `location` (query, path, header, cookie).
 Item codes are `components.schemas.FieldErrorCode` plus pydantic's codes (`missing`, `string_too_short`, ...).
 
 ## Typed client
-`npx openapi-typescript <origin>{DocsRoutes.OPENAPI_JSON.path()} -o src/api/schema.ts` generates the types; operation ids
+`npx openapi-typescript <origin>{DocsRoutes.OPENAPI_JSON.value} -o src/api/schema.ts` generates the types; operation ids
 are the endpoint names (`update_post`).
 """
 
@@ -85,10 +85,10 @@ fastapi_app = FastAPI(
     version=settings.app.version,
     description=API_DESCRIPTION,
     lifespan=lifespan,
-    openapi_url=DocsRoutes.OPENAPI_JSON.path(),
-    docs_url=DocsRoutes.SWAGGER_UI.path(),
-    swagger_ui_oauth2_redirect_url=DocsRoutes.SWAGGER_UI_OAUTH2_REDIRECT.path(),
-    redoc_url=DocsRoutes.REDOC.path(),
+    openapi_url=DocsRoutes.OPENAPI_JSON.value,
+    docs_url=DocsRoutes.SWAGGER_UI.value,
+    swagger_ui_oauth2_redirect_url=DocsRoutes.SWAGGER_UI_OAUTH2_REDIRECT.value,
+    redoc_url=DocsRoutes.REDOC.value,
     # operationId = the endpoint function name (update_post), what client generators name their functions after;
     # tests/test_openapi.py keeps them unique
     generate_unique_id_function=lambda route: route.name,

@@ -5,11 +5,12 @@ import pytest
 from sqlmodel import select
 
 from app.backend.enums.routes import ObservationRoutes, MediaRoutes
+from app.backend.api.v1 import V1
 from app.backend.models.role import Permission, RolePermission, UserRole
 from tests.helpers import make_post, make_user, make_dictionary, make_observation, make_media
 
-UPDATE = ObservationRoutes.OBSERVATION_BY_ID.versioned_path()
-DISAPPEARED = ObservationRoutes.MARK_DISAPPEARED.versioned_path()
+UPDATE = V1.path(ObservationRoutes.OBSERVATION_BY_ID)
+DISAPPEARED = V1.path(ObservationRoutes.MARK_DISAPPEARED)
 OPERATOR = ["observation.view", "observation.update", "media.view", "media.archive"]
 
 
@@ -57,7 +58,7 @@ async def test_media_archive_ownership(client, db, headers):
     colleague = await make_user(db, perms=OPERATOR, post_id=post.id)
     observation = await make_observation(db, uploader, post, ids["signal_type_id"])
     media = await make_media(db, observation, uploader)
-    url = MediaRoutes.MEDIA_ARCHIVE.versioned_path().format(media_id=media.id)
+    url = V1.path(MediaRoutes.MEDIA_ARCHIVE, media_id=media.id)
 
     denied = await client.post(url, headers=headers(colleague))
     assert denied.status_code == 403
@@ -77,7 +78,7 @@ async def test_media_archive_ownership(client, db, headers):
     assert response.json()["is_deleted"] is True and response.json()["observation_id"] == observation.id
 
     # archived media is hidden from the observation, restore brings it back
-    listing = ObservationRoutes.LIST_ALL.versioned_path()
+    listing = V1.path(ObservationRoutes.LIST_ALL)
 
     async def media_ids():
         rows = (await client.get(listing, headers=headers(uploader))).json()
@@ -85,7 +86,7 @@ async def test_media_archive_ownership(client, db, headers):
 
     assert await media_ids() == []
     assert (await client.post(url, headers=headers(colleague))).status_code == 404
-    restore = MediaRoutes.MEDIA_RESTORE.versioned_path().format(media_id=media.id)
+    restore = V1.path(MediaRoutes.MEDIA_RESTORE, media_id=media.id)
     assert (await client.post(restore, headers=headers(uploader))).status_code == 403, "observation is not active"
     restored = await client.post(restore, headers=headers(colleague))
     assert restored.status_code == 200 and restored.json()["is_deleted"] is False
@@ -100,7 +101,7 @@ async def test_media_info_has_uploader(client, db, headers):
     uploader = await make_user(db, perms=OPERATOR, post_id=post.id)
     observation = await make_observation(db, uploader, post, ids["signal_type_id"])
     media = await make_media(db, observation, uploader)
-    info = await client.get(MediaRoutes.MEDIA_INFO.versioned_path().format(media_id=media.id), headers=headers(uploader))
+    info = await client.get(V1.path(MediaRoutes.MEDIA_INFO, media_id=media.id), headers=headers(uploader))
     assert info.status_code == 200, info.text
     user_info = info.json()["user"]
     assert {k: user_info[k] for k in ("id", "username", "username_alias")} == {"id": uploader.id, "username": uploader.username, "username_alias": uploader.username_alias}

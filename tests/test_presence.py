@@ -7,14 +7,15 @@ from sqlmodel import select
 
 from app.backend.config import settings
 from app.backend.enums.routes import AuthRoutes, UserRoutes, PostRoutes, ObservationRoutes
+from app.backend.api.v1 import V1
 from app.backend.models.user import UserSession
 from app.backend.services.auth import AuthService
 from tests.helpers import make_post, make_user, make_admin, make_dictionary, make_observation
 
-ME = AuthRoutes.ME.versioned_path()
-USERS = UserRoutes.ROOT.versioned_path()
-POSTS = PostRoutes.ROOT.versioned_path()
-POST = PostRoutes.POST_BY_ID.versioned_path()
+ME = V1.path(AuthRoutes.ME)
+USERS = V1.path(UserRoutes.ROOT)
+POSTS = V1.path(PostRoutes.ROOT)
+POST = V1.path(PostRoutes.POST_BY_ID)
 
 
 async def make_session(db, user, last_activity: datetime) -> UserSession:
@@ -102,7 +103,7 @@ async def test_logout_makes_user_offline(client, db, headers):
     user_session = await make_session(db, user, datetime.now(timezone.utc))
     assert (await client.get(USERS, params={"is_online": "true"}, headers=headers(viewer))).json()[0]["id"] == user.id
 
-    logout = await client.post(AuthRoutes.LOGOUT.versioned_path(), json={"session_id": user_session.id},
+    logout = await client.post(V1.path(AuthRoutes.LOGOUT), json={"session_id": user_session.id},
                                headers=session_headers(user, user_session))
     assert logout.status_code == 200, logout.text
     assert (await client.get(USERS, params={"is_online": "true"}, headers=headers(viewer))).json() == []
@@ -115,7 +116,7 @@ async def test_creator_projection_has_presence(client, db, headers):
     creator = await make_user(db, perms=["observation.view"], post_id=post.id)
     await make_session(db, creator, datetime.now(timezone.utc))
     await make_observation(db, creator, post, ids["signal_type_id"])
-    listed = (await client.get(ObservationRoutes.LIST_ALL.versioned_path(), headers=headers(creator))).json()
+    listed = (await client.get(V1.path(ObservationRoutes.LIST_ALL), headers=headers(creator))).json()
     assert listed[0]["user"]["is_online"] is True
     assert listed[0]["user"]["last_activity_at"] is not None
 

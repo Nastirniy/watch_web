@@ -263,7 +263,7 @@ def _example(code: ProblemType) -> Dict[str, Any]:
     except (KeyError, IndexError, ValueError):
         detail = code.detail_template
     return {"type": f"https://example.org/problems/{code.value}", "title": code.title, "status": code.status,
-            "detail": detail, "instance": f"{APIVersionRoutes.current().value}/...", "code": code.value, **params}
+            "detail": detail, "instance": f"{APIVersionRoutes.V1.value}/...", "code": code.value, **params}
 
 
 _EXAMPLE_VALUES: Dict[str, Any] = {

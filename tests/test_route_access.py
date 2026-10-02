@@ -4,10 +4,11 @@ from fastapi.routing import APIRoute
 
 from app.main import fastapi_app
 from app.backend.enums.routes import APIVersionRoutes, AuthRoutes
+from app.backend.api.v1 import V1
 from tests.helpers import make_user, make_admin
 
-ROUTE_ACCESS = AuthRoutes.ROUTE_ACCESS.versioned_path()
-PUBLIC = {member.versioned_path(version) for version in APIVersionRoutes for member in (AuthRoutes.LOGIN, AuthRoutes.REFRESH)}
+ROUTE_ACCESS = V1.path(AuthRoutes.ROUTE_ACCESS)
+PUBLIC = {V1.path(AuthRoutes.LOGIN), V1.path(AuthRoutes.REFRESH)}
 API_PREFIXES = tuple(version.value + "/" for version in APIVersionRoutes)
 
 
@@ -45,7 +46,7 @@ async def test_user_without_permissions_sees_only_authenticated_routes(client, d
     for route in routes:
         assert route["required"] == {"all": [], "any": [], "admin": False}, route
     paths = {r["path"] for r in routes}
-    assert AuthRoutes.ME.versioned_path() in paths
+    assert V1.path(AuthRoutes.ME) in paths
     assert ROUTE_ACCESS in paths
 
 
@@ -55,6 +56,6 @@ async def test_map_hides_forbidden_routes(client, db, headers):
     routes = (await client.get(ROUTE_ACCESS, headers=headers(user))).json()["routes"]
     listed = {(r["method"], r["path"]) for r in routes}
     from app.backend.enums.routes import TagRoutes, RoleRoutes
-    assert ("GET", TagRoutes.LIST_ALL.versioned_path()) in listed
-    assert ("POST", TagRoutes.CREATE.versioned_path()) not in listed
-    assert not any(path.startswith(RoleRoutes.BASE.versioned_path()) for _, path in listed)
+    assert ("GET", V1.path(TagRoutes.LIST_ALL)) in listed
+    assert ("POST", V1.path(TagRoutes.CREATE)) not in listed
+    assert not any(path.startswith(V1.path(RoleRoutes.BASE)) for _, path in listed)
