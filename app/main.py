@@ -13,7 +13,6 @@ sys.path.insert(0, str(project_root))
 from app.backend.config import settings
 from app.backend.utils.logging_config import setup_logging, get_logger, get_main_logger
 from app.backend.database import initialize_database_with_migrations
-from app.backend.services.route_access import build_route_access_map
 from app.backend.error_handlers import register_error_handlers
 from app.backend.openapi_problems import install_openapi
 from app.backend.api.v1 import V1
@@ -115,10 +114,6 @@ fastapi_app.include_router(problems.router)
 
 # OpenAPI lists, per route and status, every problem type the route can answer (openapi_problems.py)
 install_openapi(fastapi_app)
-
-# Route access map: generated from the require() dependencies of every router above.
-# Routers included after this line would be missing from /auth/route-access.
-fastapi_app.state.route_access_map = build_route_access_map(fastapi_app)
 
 
 if __name__ == "__main__":

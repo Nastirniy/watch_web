@@ -1,8 +1,7 @@
-import io
 from typing import List, Optional
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
@@ -414,7 +413,7 @@ async def get_report_types(
 
 @router.post(
     ObservationRoutes.REPORT.value,
-    response_class=StreamingResponse,
+    response_class=Response,
     responses=file_response("Excel report", ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
                             {"Content-Disposition": header('attachment; filename="<report>.xlsx"')}),
 )
@@ -458,8 +457,8 @@ async def generate_observation_report(
     excel_bytes = ObservationReportService.generate_excel(frequencies, params, tag_names=tag_names)
 
     filename = f"observations_report_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.xlsx"
-    return StreamingResponse(
-        io.BytesIO(excel_bytes),
+    return Response(
+        content=excel_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

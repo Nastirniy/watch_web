@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from app.backend.services.permissions import require
 from app.backend.services.auth_context import AuthContext, load_auth_context
 from app.backend.services.permissions import Require
-from app.backend.services.route_access import routes_allowed_for
+from app.backend.services.route_access import route_access_map, routes_allowed_for
 from app.backend.api.shared.helpers.auth_helper import build_user_info, build_login_response
 from app.backend.enums.errors import RequiredPermissions
 from app.backend.models.user import User, UserSession
@@ -81,7 +81,7 @@ async def login(
                     f"Certificate verification failed from IP: {client_ip}, "
                     f"status: {ssl_verify}"
                 )
-                raise ApiError(AuthErrorCode.CERTIFICATE_VERIFICATION_FAILED, headers={"WWW-Authenticate": "Bearer"})
+                raise ApiError(AuthErrorCode.CERTIFICATE_VERIFICATION_FAILED)
 
             # Parse CN from Distinguished Name
             cn = await parse_cn(ssl_dn)
@@ -92,7 +92,7 @@ async def login(
                     f"Missing certificate data from IP: {client_ip}, "
                     f"CN: {cn}, Serial: {ssl_serial}, Fingerprint: {ssl_fingerprint}"
                 )
-                raise ApiError(AuthErrorCode.CERTIFICATE_DATA_MISSING, headers={"WWW-Authenticate": "Bearer"})
+                raise ApiError(AuthErrorCode.CERTIFICATE_DATA_MISSING)
 
         # Authenticate with enhanced PKI method
         user, auth_error = await AuthService.authenticate_pki(
@@ -108,10 +108,7 @@ async def login(
                 f"CN: {cn}, Serial: {ssl_serial}, error: {auth_error}"
             )
 
-            raise ApiError(
-                AuthErrorCode(auth_error or AuthErrorCode.CERTIFICATE_NOT_RECOGNIZED),
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+            raise ApiError(AuthErrorCode(auth_error or AuthErrorCode.CERTIFICATE_NOT_RECOGNIZED))
 
         # Create session
         user_session = await AuthService.create_session(
@@ -402,7 +399,7 @@ async def get_route_access(
 ):
     """Routes of this API version the current user may call. Generated from route metadata; routes the user
     cannot call are not listed."""
-    entries = [entry for entry in routes_allowed_for(request.app.state.route_access_map, auth) if version.owns(entry.path)]
+    entries = [entry for entry in routes_allowed_for(route_access_map(request.app), auth) if version.owns(entry.path)]
     return RouteAccessResponse(routes=[
         RouteAccessEntryResponse(
             method=entry.method,

@@ -1,9 +1,9 @@
 """Route access map generated from route metadata.
 
-Every route guarded with Depends(require(...)) carries its Require spec on the
-dependency callable. The map is built once at import time in app/main.py and
-filtered per caller by the /auth/route-access endpoint. Routes without a
-require() dependency (login, refresh, health) are not part of the map.
+Every route guarded with Depends(require(...)) has a Require among its dependencies.
+The map is built on first use from the routes of the app (route_access_map) and
+filtered per caller by the /auth/route-access endpoint. Routes without a require()
+dependency (login, refresh, health) are not part of the map.
 """
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
@@ -51,6 +51,14 @@ def build_route_access_map(app: FastAPI) -> Tuple[RouteAccessEntry, ...]:
                 require=spec,
             ))
     return tuple(entries)
+
+
+def route_access_map(app: FastAPI) -> Tuple[RouteAccessEntry, ...]:
+    """Built on first use from the routes the app has by then, cached in app.state"""
+    entries = getattr(app.state, "route_access_map", None)
+    if entries is None:
+        entries = app.state.route_access_map = build_route_access_map(app)
+    return entries
 
 
 def routes_allowed_for(entries: Tuple[RouteAccessEntry, ...], auth: AuthContext) -> List[RouteAccessEntry]:

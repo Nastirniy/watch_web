@@ -3,6 +3,7 @@ import pytest
 from fastapi.routing import APIRoute
 
 from app.main import fastapi_app
+from app.backend.services.route_access import route_access_map
 from app.backend.enums.routes import APIVersionRoutes, AuthRoutes
 from app.backend.api.v1 import V1
 from tests.helpers import make_user, make_admin
@@ -13,7 +14,7 @@ API_PREFIXES = tuple(version.value + "/" for version in APIVersionRoutes)
 
 
 def test_every_api_route_is_guarded():
-    guarded = {(entry.method, entry.path) for entry in fastapi_app.state.route_access_map}
+    guarded = {(entry.method, entry.path) for entry in route_access_map(fastapi_app)}
     missing = []
     for route in fastapi_app.routes:
         if not isinstance(route, APIRoute) or not route.path.startswith(API_PREFIXES):
@@ -32,7 +33,7 @@ async def test_admin_sees_every_guarded_route(client, db, headers):
     response = await client.get(ROUTE_ACCESS, headers=headers(admin))
     assert response.status_code == 200, response.text
     routes = response.json()["routes"]
-    assert len(routes) == len(fastapi_app.state.route_access_map)
+    assert len(routes) == len(route_access_map(fastapi_app))
     sample = routes[0]
     assert set(sample) == {"method", "path", "name", "tags", "required"}
     assert set(sample["required"]) == {"all", "any", "admin"}

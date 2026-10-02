@@ -16,7 +16,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.backend.enums.errors import AuthErrorCode, ErrorCode, ProblemType
+from app.backend.enums.errors import ErrorCode, ProblemType
 from app.backend.services.api_errors import (
     PROBLEM_JSON, ApiError, about_blank_body, field_item, problem_body,
 )
@@ -28,13 +28,11 @@ _logger = get_api_logger()
 DROPPED_CONTEXT = frozenset({"error", "input"})
 _PLAIN = (str, int, float, bool, type(None))
 
-# Framework errors raised with a plain string detail
+# Errors Starlette / FastAPI raise themselves (routes raise ApiError): no route, wrong method, unparsable body
 _FRAMEWORK_PROBLEMS = {
-    (404, "Not Found"): ErrorCode.ROUTE_NOT_FOUND,
-    (405, "Method Not Allowed"): ErrorCode.METHOD_NOT_ALLOWED,
-    (400, "There was an error parsing the body"): ErrorCode.BODY_PARSE_ERROR,
-    (401, "Not authenticated"): AuthErrorCode.CREDENTIALS_REQUIRED,
-    (403, "Not authenticated"): AuthErrorCode.CREDENTIALS_REQUIRED,
+    404: ErrorCode.ROUTE_NOT_FOUND,
+    405: ErrorCode.METHOD_NOT_ALLOWED,
+    400: ErrorCode.BODY_PARSE_ERROR,
 }
 
 
@@ -75,7 +73,7 @@ async def http_error_handler(request: Request, exc: StarletteHTTPException) -> R
         return Response(status_code=exc.status_code, headers=headers)
     if isinstance(exc, ApiError):
         return problem_response(request, exc.code, exc.params, headers)
-    code = _FRAMEWORK_PROBLEMS.get((exc.status_code, exc.detail))
+    code = _FRAMEWORK_PROBLEMS.get(exc.status_code)
     if code is not None:
         return problem_response(request, code, {}, headers)
     # Only framework errors get here: routes raise ApiError (tests/test_error_contract.py)

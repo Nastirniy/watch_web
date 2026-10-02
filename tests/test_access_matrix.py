@@ -8,11 +8,12 @@ building every referenced resource inside the persona's own post.
 import pytest
 
 from app.main import fastapi_app
+from app.backend.services.route_access import route_access_map
 from app.backend.services.auth_context import AuthContext
 from app.backend.models.observation import ObservationFrequency
 from tests.helpers import make_post, make_user, make_dictionary, make_observation, make_media, make_role
 
-ENTRIES = list(fastapi_app.state.route_access_map)
+ENTRIES = list(route_access_map(fastapi_app))
 PERSONAS = ["no_perms", "granular", "granular_admin", "admin_only"]
 
 
