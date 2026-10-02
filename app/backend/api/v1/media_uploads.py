@@ -22,9 +22,9 @@ from app.backend.helpers.audit_helper import client_info, create_audit_log
 from app.backend.models.upload_session import UploadSession
 from app.backend.api.shared.helpers.media_helper import storage_root
 from app.backend.api.versioning import PublishedVersion, request_version
-from app.backend.api.v1.media import (
-    _check_declared_format, _finish_upload, _load_observation_for_upload,
-    _format_rejected, _store_rejected, _too_large, _validation_config_for,
+from app.backend.api.shared.helpers.upload_helper import (
+    check_declared_format, finish_upload, load_observation_for_upload,
+    format_rejected, store_rejected, too_large, validation_config_for,
 )
 from app.backend.api.shared.models.request.media_request import UploadSessionCreate
 from app.backend.api.shared.models.response.media_response import UploadResultResponse, UploadSessionResponse
@@ -155,11 +155,11 @@ async def create_upload_session(
     version: PublishedVersion = Depends(request_version),
 ):
     """Open a resumable upload. Format, declared Content-Type and size are checked here, before any byte is sent."""
-    observation = await _load_observation_for_upload(session, auth, body.observation_id)
+    observation = await load_observation_for_upload(session, auth, body.observation_id)
     registry = await formats.load_registry(session)
-    spec = _check_declared_format(registry, body.media_type, body.original_filename, body.content_type)
+    spec = check_declared_format(registry, body.media_type, body.original_filename, body.content_type)
     if body.expected_size > spec.max_file_size_bytes:
-        raise _too_large(spec, body.expected_size)
+        raise too_large(spec, body.expected_size)
 
     row = uploads.new_session(
         user_id=auth.user.id, observation_id=observation.id, post_id=observation.post_id,
@@ -299,7 +299,7 @@ async def complete_upload_session(
     """
     row = await _owned_session(session, auth, upload_id)
     if row.status == uploads.STATUS_COMPLETED and row.media_file_id:
-        return await _finish_upload(request, session, auth, row.media_file_id, row.observation_id, row.original_filename, background_tasks, "resumable, already completed", upload_id=row.id)
+        return await finish_upload(request, session, auth, row.media_file_id, row.observation_id, row.original_filename, background_tasks, "resumable, already completed", upload_id=row.id)
     row = await _require_open(session, row)
     root = storage_root()
 
@@ -326,33 +326,33 @@ async def complete_upload_session(
                            expected_sha256=row.expected_sha256, actual_sha256=actual)
 
     registry = await formats.load_registry(session)
-    spec = _check_declared_format(registry, row.media_type, row.original_filename, row.declared_content_type)
+    spec = check_declared_format(registry, row.media_type, row.original_filename, row.declared_content_type)
     try:
         media_file_id = await get_media_manager().store_file_from_path(
             session=session, observation_id=row.observation_id, source_path=str(part),
             original_filename=row.original_filename, media_type=spec.media_type, user_id=row.user_id,
-            validation_config=_validation_config_for(registry, spec),
+            validation_config=validation_config_for(registry, spec),
         )
     except FileTooLarge as e:
         await uploads.remove_part(row, root)
         await uploads.mark(session, row, uploads.STATUS_ABORTED, error=str(e))
-        raise _too_large(spec, e.actual_bytes)
+        raise too_large(spec, e.actual_bytes)
     except UnsupportedMediaFormat as e:
         await uploads.remove_part(row, root)
         await uploads.mark(session, row, uploads.STATUS_ABORTED, error=str(e))
-        raise _format_rejected(registry, e)
+        raise format_rejected(registry, e)
     except CodedError as e:
         # Busy is the server's state, not the file's: keep the bytes so complete can be retried
         if e.code != ErrorCode.MEDIA_UPLOADS_BUSY:
             await uploads.remove_part(row, root)
             await uploads.mark(session, row, uploads.STATUS_ABORTED, error=str(e))
-        raise _store_rejected(e, headers=_session_headers(row))
+        raise store_rejected(e, headers=_session_headers(row))
     except Exception as e:
         _logger.exception(f"upload session {upload_id}: completion failed: {e}")
         raise ApiError(ErrorCode.UPLOAD_COMPLETE_FAILED)
 
     await uploads.mark(session, row, uploads.STATUS_COMPLETED, media_file_id=media_file_id)
-    return await _finish_upload(request, session, auth, media_file_id, row.observation_id, row.original_filename, background_tasks, "resumable", upload_id=row.id)
+    return await finish_upload(request, session, auth, media_file_id, row.observation_id, row.original_filename, background_tasks, "resumable", upload_id=row.id)
 
 
 @router.post(MediaRoutes.UPLOAD_SESSION_ABORT.value, response_model=UploadSessionResponse)

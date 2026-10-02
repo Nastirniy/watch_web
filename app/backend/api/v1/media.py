@@ -5,8 +5,6 @@ are never generated here: imgproxy renders them on demand from the original
 (images) or from the poster the media worker extracted (videos), and nginx
 caches the result. This module only authorises, signs URLs and redirects.
 """
-import asyncio
-from pathlib import Path
 from typing import List, Optional
 
 import httpx
@@ -22,12 +20,10 @@ from app.backend.models.observation import Observation
 from app.backend.services.auth_context import AuthContext
 from app.backend.services.permissions import require
 from app.backend.services.access_control import AccessControlService
-from app.backend.services.media_manager import FileValidationConfig
 from app.backend.services.media.manager import get_media_manager
 from app.backend.services.media import formats, jobs, renderer, urls as thumb_urls
 from app.backend.services.media.formats import UnsupportedMediaFormat, FileTooLarge
-from app.backend.services.media.probe import metadata_for, resolve_tools
-from app.backend.enums.general import Permissions, MediaType, ThumbnailFormat, ThumbnailSize, ThumbnailStatus
+from app.backend.enums.general import Permissions, ThumbnailFormat, ThumbnailSize, ThumbnailStatus
 from app.backend.enums.routes import MediaRoutes
 from app.backend.helpers.audit_helper import client_info, create_audit_log
 from app.backend.utils.logging_config import get_api_logger
@@ -47,6 +43,10 @@ from app.backend.api.shared.models.response.media_response import (
 from app.backend.filters.params.media_params import MediaFilterParams
 from app.backend.filters.media_filter import MediaFilterService
 from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
+from app.backend.api.shared.helpers.upload_helper import (
+    check_declared_format, finish_upload, format_rejected, load_observation_for_upload, store_rejected,
+    too_large, validation_config_for,
+)
 from app.backend.api.shared.helpers.media_helper import (
     get_observation_from_media,
     get_media_or_404,
@@ -61,66 +61,6 @@ from app.backend.api.shared.models.response.openapi_docs import (
 
 router = APIRouter(prefix=MediaRoutes.BASE.value, tags=[MediaRoutes.tag()])
 _logger = get_api_logger()
-
-def _validation_config_for(registry: formats.FormatRegistry, spec: formats.FormatSpec) -> FileValidationConfig:
-    """Manager-side checks (size, extension, detected MIME) driven by the resolved format"""
-    return FileValidationConfig(
-        max_size=spec.max_file_size_bytes,
-        sanitize_filename=True,
-        validate_content_headers=True,
-        strict_mime_validation=True,
-        allowed_extensions=set(spec.extensions),
-        allowed_mime_types=set(spec.all_mimes),
-    )
-
-
-def _unsupported(registry: formats.FormatRegistry, code: ErrorCode, media_type: str = None, **params) -> ApiError:
-    """415 with an Accept-Post header naming the Content-Types the endpoint accepts"""
-    scope = media_type if media_type and media_type in registry.media_types() else None
-    return ApiError(
-        code,
-        headers={"Accept-Post": registry.accept_post_header(scope)},
-        media_type=media_type,
-        accepted_content_types=registry.content_types(scope),
-        accepted_extensions=registry.extensions(scope),
-        **params,
-    )
-
-
-def _format_rejected(registry: formats.FormatRegistry, exc: formats.UnsupportedMediaFormat) -> ApiError:
-    params = {k: v for k, v in exc.params.items() if k != "media_type"}
-    return _unsupported(registry, exc.code, exc.media_type, **params)
-
-
-def _store_rejected(exc: CodedError, headers: dict = None) -> ApiError:
-    """A file refused by MediaManager.store_file_from_path; the status comes with its problem type"""
-    return exc.to_api_error(headers=headers)
-
-
-def _too_large(spec: formats.FormatSpec, actual: int = None) -> ApiError:
-    return ApiError(
-        ErrorCode.MEDIA_FILE_TOO_LARGE,
-        content_type=spec.content_type,
-        max_file_size_bytes=spec.max_file_size_bytes,
-        file_size_bytes=actual,
-    )
-
-
-def _check_declared_format(registry: formats.FormatRegistry, media_type: str, filename: str, content_type: str = None) -> formats.FormatSpec:
-    """Reject before touching the body: unknown media_type, extension or declared Content-Type outside the registry"""
-    media_type = (media_type or "").lower()
-    if media_type not in registry.media_types():
-        raise _unsupported(registry, ErrorCode.MEDIA_TYPE_UNKNOWN, media_type)
-    spec = registry.resolve(media_type, filename)
-    if spec is None:
-        raise _unsupported(registry, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, media_type, extension=Path(filename or "").suffix.lower())
-    declared = formats.normalise_content_type(content_type)
-    if declared and declared not in formats.OPAQUE_CONTENT_TYPES and declared not in spec.all_mimes:
-        if declared in registry.mime_set(media_type):
-            raise _unsupported(registry, ErrorCode.MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH, media_type,
-                               content_type=declared, expected_content_type=spec.content_type)
-        raise _unsupported(registry, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED, media_type, content_type=declared)
-    return spec
 
 
 # ---------------------------------------------------------------------------
@@ -338,70 +278,6 @@ async def restore_media_file(
 # Upload
 # ---------------------------------------------------------------------------
 
-async def _load_observation_for_upload(session: AsyncSession, auth: AuthContext, observation_id: int) -> Observation:
-    observation = (await session.exec(
-        select(Observation).where(Observation.id == observation_id, Observation.is_deleted == False)
-    )).first()
-    if not observation:
-        raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
-    AccessControlService.check_post_write(auth, observation.post_id, "media")
-    return observation
-
-
-async def _probe_headers(media_file: MediaFile) -> dict:
-    """ffprobe on the stored file (headers only, bounded); empty on any failure so an upload never fails on metadata"""
-    source = media_file.resolve_path(storage_root())
-    try:
-        ffmpeg, ffprobe = resolve_tools()
-        return await asyncio.wait_for(asyncio.to_thread(metadata_for, source, media_file.mime_type, ffmpeg, ffprobe), timeout=30)
-    except Exception as exc:
-        _logger.warning(f"probe skipped for media {media_file.id}: {exc}")
-        return {}
-
-
-async def _finish_upload(
-    request: Request,
-    session: AsyncSession,
-    auth: AuthContext,
-    media_file_id: int,
-    observation_id: int,
-    original_filename: str,
-    background_tasks: BackgroundTasks,
-    transport: str,
-    upload_id: str = None,
-) -> dict:
-    """Probe video/audio headers, audit, commit, pre-warm the medium thumbnail and build the upload response"""
-    media_file = (await session.exec(select(MediaFile).where(MediaFile.id == media_file_id))).first()
-
-    if media_file is not None and media_file.media_type in (MediaType.VIDEO.value, MediaType.AUDIO.value):
-        metadata = await _probe_headers(media_file)
-        for field_name, value in metadata.items():
-            setattr(media_file, field_name, value)
-
-    await create_audit_log(
-        session=session, action="create", resource_type="media", resource_id=media_file_id,
-        user_id=auth.user.id, new_values=media_file.model_dump() if media_file else None,
-        details={"message": f"User {auth.user.username} uploaded media file '{original_filename}' ({transport}) for observation #{observation_id}"},
-        **client_info(request, auth),
-    )
-    await session.commit()
-
-    if media_file is not None and media_file.is_image and settings.storage.thumbnail.prewarm and settings.storage.enable_nginx:
-        warm = thumb_urls.prewarm_url(media_file, ThumbnailSize.MEDIUM.value, ThumbnailFormat.AUTO.value)
-        if warm:
-            background_tasks.add_task(renderer.prewarm, warm)
-
-    return {
-        "message": f"File uploaded successfully ({transport})",
-        "media_file_id": media_file_id,
-        "original_filename": media_file.original_filename if media_file else None,
-        "file_size": media_file.file_size if media_file else None,
-        "mime_type": media_file.mime_type if media_file else None,
-        "thumbnail_status": media_file.thumbnail_status if media_file else None,
-        "thumbnail_urls": thumb_urls.thumbnail_urls(media_file) if media_file else None,
-        "upload_id": upload_id,
-    }
-
 
 @router.post(MediaRoutes.UPLOAD.value, response_model=UploadResultResponse)
 async def upload_complete_file(
@@ -417,21 +293,21 @@ async def upload_complete_file(
     Multipart upload. The body is spooled to a temp file in 1 MB chunks and hashed
     while streaming; it is never held in memory. Users can only upload for observations of their post.
     """
-    await _load_observation_for_upload(session, auth, observation_id)
+    await load_observation_for_upload(session, auth, observation_id)
 
     original_filename = file.filename or "uploaded_file"
     registry = await formats.load_registry(session)
-    spec = _check_declared_format(registry, media_type, original_filename, file.content_type)
+    spec = check_declared_format(registry, media_type, original_filename, file.content_type)
     media_type = spec.media_type
     if file.size and file.size > spec.max_file_size_bytes:
-        raise _too_large(spec, file.size)
+        raise too_large(spec, file.size)
 
     media_manager = get_media_manager()
     temp_path = await media_manager.spool_upload(file)
     spooled = temp_path.stat().st_size
     if spooled > spec.max_file_size_bytes:
         temp_path.unlink(missing_ok=True)
-        raise _too_large(spec, spooled)
+        raise too_large(spec, spooled)
     _logger.info(f"Uploading file: '{original_filename}' ({spooled} bytes)")
 
     try:
@@ -442,23 +318,23 @@ async def upload_complete_file(
             original_filename=original_filename,
             media_type=media_type,
             user_id=auth.user.id,
-            validation_config=_validation_config_for(registry, spec),
+            validation_config=validation_config_for(registry, spec),
         )
     except FileTooLarge as e:
-        raise _too_large(spec, e.actual_bytes)
+        raise too_large(spec, e.actual_bytes)
     except UnsupportedMediaFormat as e:
         _logger.warning(f"Upload rejected (format): {e}")
-        raise _format_rejected(registry, e)
+        raise format_rejected(registry, e)
     except CodedError as e:
         _logger.warning(f"Upload rejected: {e}")
-        raise _store_rejected(e)
+        raise store_rejected(e)
     except Exception as e:
         _logger.exception(f"Upload failed: {e}")
         raise ApiError(ErrorCode.MEDIA_UPLOAD_FAILED)
     finally:
         temp_path.unlink(missing_ok=True)
 
-    return await _finish_upload(request, session, auth, media_file_id, observation_id, original_filename, background_tasks, "multipart")
+    return await finish_upload(request, session, auth, media_file_id, observation_id, original_filename, background_tasks, "multipart")
 
 
 @router.post(MediaRoutes.NGINX_UPLOAD.value, response_model=UploadResultResponse)
@@ -484,10 +360,10 @@ async def nginx_upload_file(
         raise ApiError(ErrorCode.NGINX_FILE_NAME_MISSING)
     original_filename = x_original_filename or "uploaded_file"
     registry = await formats.load_registry(session)
-    spec = _check_declared_format(registry, media_type, original_filename, request.headers.get("content-type"))
+    spec = check_declared_format(registry, media_type, original_filename, request.headers.get("content-type"))
     media_type = spec.media_type
 
-    await _load_observation_for_upload(session, auth, observation_id)
+    await load_observation_for_upload(session, auth, observation_id)
 
     try:
         media_file_id = await get_media_manager().store_file_from_path(
@@ -497,21 +373,21 @@ async def nginx_upload_file(
             original_filename=original_filename,
             media_type=media_type,
             user_id=auth.user.id,
-            validation_config=_validation_config_for(registry, spec),
+            validation_config=validation_config_for(registry, spec),
         )
     except FileTooLarge as e:
-        raise _too_large(spec, e.actual_bytes)
+        raise too_large(spec, e.actual_bytes)
     except UnsupportedMediaFormat as e:
         _logger.warning(f"Nginx upload rejected (format): {e}")
-        raise _format_rejected(registry, e)
+        raise format_rejected(registry, e)
     except CodedError as e:
         _logger.warning(f"Nginx upload rejected: {e}")
-        raise _store_rejected(e)
+        raise store_rejected(e)
     except Exception as e:
         _logger.exception(f"Nginx upload failed: {e}")
         raise ApiError(ErrorCode.MEDIA_UPLOAD_FAILED)
 
-    return await _finish_upload(request, session, auth, media_file_id, observation_id, original_filename, background_tasks, "nginx offload")
+    return await finish_upload(request, session, auth, media_file_id, observation_id, original_filename, background_tasks, "nginx offload")
 
 
 @router.post(MediaRoutes.LIST_ALL_ATTACHED_MEDIA.value, response_model=List[MediaFileInfo])
