@@ -1,6 +1,6 @@
 from typing import List, Optional
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status as fapi_status, Request
+from fastapi import APIRouter, Depends, status as fapi_status, Request
 from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -13,7 +13,6 @@ from app.backend.services.access_control import AccessControlService
 from app.backend.models.observation import Category, SignalType
 from app.backend.models.user import User
 from app.backend.services.auth_context import AuthContext
-from app.backend.routes.models.response.error_response import ACCESS_ERROR_RESPONSES
 from app.backend.services.permissions import require
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import CategoryRoutes
@@ -25,8 +24,10 @@ from app.backend.routes.models.response.observations_response import MessageResp
 from app.backend.filters.params.category_params import CategoryFilterParams
 from app.backend.filters.category_filter import CategoryFilterService
 from app.backend.routes.models.response.search_response import EntitySchemaInfo
+from app.backend.services.api_errors import ApiError
+from app.backend.enums.errors import ErrorCode
 
-router = APIRouter(responses=ACCESS_ERROR_RESPONSES)
+router = APIRouter(prefix=CategoryRoutes.BASE.value, tags=[CategoryRoutes.tag()])
 
 
 @router.get(CategoryRoutes.LIST_ALL.value, response_model=List[CategoryResponse])
@@ -35,7 +36,7 @@ async def list_categories(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW]))
 ):
-    AccessControlService.check_include_deleted(auth, filters, Permissions.CATEGORY_DELETE)
+    AccessControlService.check_include_deleted(auth, filters, Permissions.CATEGORY_ARCHIVE)
     query = select(Category)
     query = CategoryFilterService.apply_filters(query, filters)
     result = await session.exec(query)
@@ -70,12 +71,9 @@ async def create_category(
 
     if existing_category:
         if not existing_category.is_deleted:
-            raise HTTPException(
-                status_code=fapi_status.HTTP_400_BAD_REQUEST,
-                detail=f"Category with name '{category_data.name}' already exists"
-            )
+            raise ApiError(ErrorCode.CATEGORY_NAME_TAKEN, name=category_data.name)
         
-        # Restore soft-deleted category
+        # Restore archived category
         old_values = existing_category.model_dump()
         existing_category.is_deleted = False
         existing_category.alias = category_data.alias
@@ -116,10 +114,7 @@ async def create_category(
     except IntegrityError as e:
         await session.rollback()
         logger.exception(f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}")
-        raise HTTPException(
-            status_code=fapi_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unexpected database constraint violation"
-        )
+        raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
 
 
 @router.get(CategoryRoutes.CATEGORY_BY_ID.value, response_model=CategoryResponse)
@@ -137,10 +132,7 @@ async def get_category(
     category = result.first()
 
     if not category:
-        raise HTTPException(
-            status_code=fapi_status.HTTP_404_NOT_FOUND,
-            detail="Category not found"
-        )
+        raise ApiError(ErrorCode.CATEGORY_NOT_FOUND)
 
     return CategoryResponse.model_validate(category)
 
@@ -163,10 +155,7 @@ async def update_category(
     category = result.first()
 
     if not category:
-        raise HTTPException(
-            status_code=fapi_status.HTTP_404_NOT_FOUND,
-            detail="Category not found"
-        )
+        raise ApiError(ErrorCode.CATEGORY_NOT_FOUND)
 
     # Store old values for auditing
     old_values = category.model_dump()
@@ -181,11 +170,8 @@ async def update_category(
         existing_category = existing_result.first()
 
         if existing_category:
-            status_msg = "already exists" if not existing_category.is_deleted else "already exists as a deleted category"
-            raise HTTPException(
-                status_code=fapi_status.HTTP_400_BAD_REQUEST,
-                detail=f"Category with name '{category_data.name}' {status_msg}"
-            )
+            code = ErrorCode.CATEGORY_NAME_ARCHIVED if existing_category.is_deleted else ErrorCode.CATEGORY_NAME_TAKEN
+            raise ApiError(code, name=category_data.name)
 
     update_data = category_data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -218,59 +204,85 @@ async def update_category(
     except IntegrityError as e:
         await session.rollback()
         logger.exception(f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}")
-        raise HTTPException(
-            status_code=fapi_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unexpected database constraint violation"
-        )
+        raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
 
 
-@router.delete(CategoryRoutes.CATEGORY_BY_ID.value, response_model=MessageResponse)
-async def delete_category(
+def _audit_context(request: Request) -> dict:
+    return {
+        "session_id": getattr(request.state, "session_id", None),
+        "ip_address": request.client.host if request.client else None,
+        "user_agent": request.headers.get("user-agent"),
+        "request_url": str(request.url),
+    }
+
+
+@router.post(CategoryRoutes.CATEGORY_ARCHIVE.value, response_model=CategoryResponse)
+async def archive_category(
         request: Request,
         category_id: int,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW, Permissions.CATEGORY_DELETE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW, Permissions.CATEGORY_ARCHIVE], admin=True))
 ):
+    """Archive a category (is_deleted=true). Nothing is removed: the row is hidden from lists unless
+    include_deleted=true and cannot be used for new data. Undo with POST /{category_id}/restore. Already archived or unknown: 404."""
     current_user = auth.user
-    result = await session.exec(
-        select(Category).where(
-            Category.id == category_id,
-            Category.is_deleted == False
-        )
-    )
-    category = result.first()
+    result = await session.exec(select(Category).where(Category.id == category_id, Category.is_deleted == False))
+    row = result.first()
+    if not row:
+        raise ApiError(ErrorCode.CATEGORY_NOT_FOUND)
 
-    if not category:
-        raise HTTPException(
-            status_code=fapi_status.HTTP_404_NOT_FOUND,
-            detail="Category not found"
-        )
-
-    # Store old values for auditing
-    old_values = category.model_dump()
-
-    category.is_deleted = True
-    session.add(category)
-    
-    # Create audit log
+    old_values = row.model_dump()
+    row.is_deleted = True
+    session.add(row)
     await create_audit_log(
         session=session,
-        action="delete",
+        action="archive",
         resource_type="category",
-        resource_id=category.id,
+        resource_id=row.id,
         user_id=current_user.id,
-        session_id=getattr(request.state, "session_id", None),
         old_values=old_values,
-        new_values=category.model_dump(),
-        details={"message": f"User {current_user.username} deleted category '{category.name}'"},
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-        request_url=str(request.url)
+        new_values=row.model_dump(),
+        details={"message": f"User {current_user.username} archived category '{row.name}'"},
+        **_audit_context(request),
     )
-    
     await session.commit()
+    await session.refresh(row)
+    return CategoryResponse.model_validate(row)
 
-    return MessageResponse(message="Category deleted successfully")
+
+@router.post(CategoryRoutes.CATEGORY_RESTORE.value, response_model=CategoryResponse)
+async def restore_category(
+        request: Request,
+        category_id: int,
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW, Permissions.CATEGORY_ARCHIVE], admin=True))
+):
+    """Restore an archived category (is_deleted=false). Not archived: 409."""
+    current_user = auth.user
+    result = await session.exec(select(Category).where(Category.id == category_id))
+    row = result.first()
+    if not row:
+        raise ApiError(ErrorCode.CATEGORY_NOT_FOUND)
+    if not row.is_deleted:
+        raise ApiError(ErrorCode.CATEGORY_NOT_ARCHIVED)
+
+    old_values = row.model_dump()
+    row.is_deleted = False
+    session.add(row)
+    await create_audit_log(
+        session=session,
+        action="restore",
+        resource_type="category",
+        resource_id=row.id,
+        user_id=current_user.id,
+        old_values=old_values,
+        new_values=row.model_dump(),
+        details={"message": f"User {current_user.username} restored category '{row.name}'"},
+        **_audit_context(request),
+    )
+    await session.commit()
+    await session.refresh(row)
+    return CategoryResponse.model_validate(row)
 
 
 @router.get(CategoryRoutes.CATEGORY_SIGNAL_TYPES.value, response_model=List[SignalTypeResponse])
@@ -291,10 +303,7 @@ async def list_category_signal_types(
     category = category_result.first()
 
     if not category:
-        raise HTTPException(
-            status_code=fapi_status.HTTP_404_NOT_FOUND,
-            detail="Category not found"
-        )
+        raise ApiError(ErrorCode.CATEGORY_NOT_FOUND)
 
     query = select(SignalType).where(
         SignalType.category_id == category_id,

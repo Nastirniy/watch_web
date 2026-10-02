@@ -13,6 +13,9 @@ class AppConfig(BaseModel):
     version: str = "1.0.0"
     debug: bool = False
     environment: str = AppEnvironment.PRODUCTION.value
+    # Base of the RFC 9457 "type" URIs, e.g. "https://monitoring.example/problems". Empty: the origin of
+    # the request + /problems, so every deployment documents its own problem types.
+    problem_base_url: str = ""
 
 
 class DatabaseConfig(BaseModel):
@@ -77,53 +80,158 @@ class TimezoneConfig(BaseModel):
         return v
 
 
+def _parse_json_sequence(value):
+    """Accept a JSON list given as a string (environment overrides) next to real lists from TOML"""
+    if isinstance(value, str):
+        import json
+        return json.loads(value)
+    return value
+
+
 class ThumbnailSettings(BaseModel):
-    """Configuration for thumbnail generation"""
-    enabled: bool = True
+    """Thumbnail and preview sizes rendered on demand by imgproxy.
+
+    Nothing here is precomputed: every size is a bounding box that imgproxy
+    fits the original (or the video poster) into on request.
+    """
     small_size: tuple[int, int] = (150, 150)
     medium_size: tuple[int, int] = (300, 300)
     large_size: tuple[int, int] = (600, 600)
+    preview_size: tuple[int, int] = (1600, 1600)
     quality: int = 85
-    format: str = "JPEG"
-    video_frame_position: float = 0.1
-    max_concurrent: int = 3
+    # Lifetime of the signed URLs embedded in list responses
+    url_ttl_seconds: int = 3600
+    # Upper bound a share link may ask for
+    share_max_ttl_seconds: int = 7 * 24 * 3600
+    # Request the medium size once after an image upload so the first gallery view is a cache hit
+    prewarm: bool = True
+
+    @field_validator('small_size', 'medium_size', 'large_size', 'preview_size', mode='before')
+    @classmethod
+    def parse_size(cls, v):
+        # Environment overrides arrive as strings: MYSETTINGS_STORAGE__THUMBNAIL__SMALL_SIZE=[150, 150]
+        return _parse_json_sequence(v)
 
     @field_validator('quality')
     @classmethod
     def validate_quality(cls, v):
-        # Ensure quality is between 1 and 100
         return max(1, min(100, v))
 
-    @field_validator('video_frame_position')
+    @field_validator('url_ttl_seconds', 'share_max_ttl_seconds')
+    @classmethod
+    def validate_ttl(cls, v):
+        return max(60, int(v))
+
+    def size_for(self, name: str) -> tuple[int, int]:
+        sizes = {
+            "small": self.small_size,
+            "medium": self.medium_size,
+            "large": self.large_size,
+            "preview": self.preview_size,
+        }
+        return sizes.get(name, self.medium_size)
+
+
+class PosterSettings(BaseModel):
+    """Video poster extraction, done by the media worker with ffmpeg.
+
+    A poster is the only precomputed derived file in the system: one JPEG per
+    video, which imgproxy then resizes like any image.
+    """
+    max_attempts: int = 3
+    lease_seconds: int = 300
+    timeout_seconds: int = 60
+    poll_interval_seconds: float = 1.0
+    idle_poll_interval_seconds: float = 5.0
+    # Fraction of the duration to seek to, capped by max_seek_seconds
+    frame_position: float = 0.1
+    max_seek_seconds: int = 30
+    # Poster width cap; imgproxy makes every smaller size from it
+    max_width: int = 1920
+    # Parallel ffmpeg processes per worker
+    concurrency: int = 2
+    heartbeat_seconds: int = 30
+    stale_after_seconds: int = 120
+    # Retry delays after the 1st, 2nd, ... failure
+    backoff_seconds: list[int] = [30, 120, 480]
+
+    @field_validator('backoff_seconds', mode='before')
+    @classmethod
+    def parse_backoff(cls, v):
+        return _parse_json_sequence(v)
+
+    @field_validator('frame_position')
     @classmethod
     def validate_frame_position(cls, v):
-        # Ensure frame position is between 0 and 1
         return max(0.0, min(1.0, v))
 
-    @field_validator('max_concurrent')
+    @field_validator('max_attempts', 'concurrency')
     @classmethod
-    def validate_max_concurrent(cls, v):
-        # Ensure max_concurrent is between 1 and 10
-        return max(1, min(10, v))
+    def validate_positive(cls, v):
+        return max(1, int(v))
+
+
+class UploadSettings(BaseModel):
+    """Resumable uploads (POST /media/uploads)"""
+    # An open session that received nothing for this long is expired and its part file removed
+    session_ttl_hours: int = 24
+    # Largest single PATCH body; nginx client_max_body_size on the uploads location must allow it
+    max_chunk_bytes: int = 64 * 1024 * 1024
+    # Recommended chunk size sent to clients (they may go lower on bad links)
+    recommended_chunk_bytes: int = 8 * 1024 * 1024
+    # How often the media worker expires stale sessions
+    sweep_interval_seconds: int = 600
+
+    @field_validator('session_ttl_hours', 'max_chunk_bytes', 'recommended_chunk_bytes', 'sweep_interval_seconds')
+    @classmethod
+    def validate_positive(cls, v):
+        return max(1, int(v))
+
+
+class ImgproxySettings(BaseModel):
+    """imgproxy renderer. The API never talks to it directly in production:
+    nginx proxies the internal and public prefixes to it and caches the result.
+    """
+    # Base URL the API uses for pre-warm requests and for proxying when nginx is disabled
+    url: str = "http://127.0.0.1:8080"
+    # Hex-encoded key and salt; both empty means unsigned URLs (development only)
+    key: str = ""
+    salt: str = ""
+    # nginx internal location used through X-Accel-Redirect
+    nginx_internal_prefix: str = "/_thumb"
+    # nginx public location for signed, expiring URLs (list responses and share links)
+    public_prefix: str = "/t"
+    # Origin prepended to public URLs, e.g. https://monitoring.example; empty keeps them relative
+    public_base_url: str = ""
+    # Origin the API uses to pre-warm the nginx cache after an upload, e.g. http://nginx inside compose.
+    # Falls back to public_base_url; pre-warming is skipped when both are empty.
+    prewarm_base_url: str = ""
+
+    @property
+    def signing_enabled(self) -> bool:
+        return bool(self.key and self.salt)
 
 
 class StorageConfig(BaseModel):
     """Configuration for media file storage"""
     upload_path: str = "uploads"
+    temp_path: str = "temp"
     max_file_size_gb: int = 10
     thumbnail: ThumbnailSettings = Field(default_factory=ThumbnailSettings)
+    poster: PosterSettings = Field(default_factory=PosterSettings)
+    imgproxy: ImgproxySettings = Field(default_factory=ImgproxySettings)
+    upload: UploadSettings = Field(default_factory=UploadSettings)
     # Single nginx flag -- enables all nginx offloading:
-    # upload (client_body_in_file_only), download, stream (X-Accel-Redirect + symlinks), thumbnail
+    # upload (client_body_in_file_only), download and stream (X-Accel-Redirect), thumbnails (X-Accel-Redirect to imgproxy)
     enable_nginx: bool = False
 
-    nginx_symlink_path: str = "/protected_media"
     nginx_upload_temp_path: str = "/var/www/nginx_uploads"
     nginx_internal_uploads_prefix: str = "/protected_uploads"
 
-    # External thumbnail generation via systemd watcher (media-watcher.service)
-    # When true, FastAPI does NOT spawn background thumbnail tasks --
-    # thumbnails are generated by the external media-watcher + thumbnailgen@ services.
-    external_thumbnail_generation: bool = False
+    # ffmpeg binaries used by the media worker. A bare name is looked up on PATH;
+    # when not found the imageio-ffmpeg package (if installed) supplies a static binary.
+    ffmpeg_path: str = "ffmpeg"
+    ffprobe_path: str = "ffprobe"
 
     @field_validator('upload_path')
     @classmethod

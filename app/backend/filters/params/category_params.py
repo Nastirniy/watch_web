@@ -18,4 +18,4 @@ class CategoryFilterParams(BaseFilterParams):
     alias_contains: Optional[str] = Field(default=None, max_length=50, description="Alias contains text")
 
     # --- Soft Delete ---
-    include_deleted: bool = Field(default=False, description="Include soft-deleted records")
+    include_deleted: bool = Field(default=False, description="Include archived records (requires category.archive)")

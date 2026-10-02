@@ -1,4 +1,4 @@
-"""Soft-deleted tags stay attached to observations, are visible, and keep filtering and exports correct."""
+"""Archived tags stay attached to observations, are visible, and keep filtering and exports correct."""
 import pytest
 from sqlmodel import select
 
@@ -34,9 +34,10 @@ async def test_deleted_tag_stays_visible_and_keepable(client, db, headers):
     listed = (await client.get(LIST, headers=headers(user))).json()
     assert listed[0]["tags"] == [{"id": ids["tag_id"], "name": listed[0]["tags"][0]["name"], "is_deleted": False}]
 
-    deleted = await client.delete(TagRoutes.TAG_BY_ID.versioned_path().format(tag_id=ids["tag_id"]), headers=headers(admin))
+    deleted = await client.post(TagRoutes.TAG_ARCHIVE.versioned_path().format(tag_id=ids["tag_id"]), headers=headers(admin))
     assert deleted.status_code == 200, deleted.text
-    deleted_other = await client.delete(TagRoutes.TAG_BY_ID.versioned_path().format(tag_id=other["tag_id"]), headers=headers(admin))
+    assert deleted.json()["is_deleted"] is True
+    deleted_other = await client.post(TagRoutes.TAG_ARCHIVE.versioned_path().format(tag_id=other["tag_id"]), headers=headers(admin))
     assert deleted_other.status_code == 200
 
     listed = (await client.get(LIST, headers=headers(user))).json()

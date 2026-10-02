@@ -11,6 +11,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.models.observation import Observation, ObservationTag
+from app.backend.filters.observation_frequency_filter import ObservationFrequencyFilter
 from app.backend.filters.simple_engine import SimpleFilterEngine
 from app.backend.filters.params.observation_params import ObservationFilterParams
 
@@ -21,9 +22,39 @@ class ObservationFilterService(SimpleFilterEngine):
     MODEL = Observation
     PARAMS = ObservationFilterParams
     SORTABLE_FIELDS = [
-        "id", "observed_at", "created_at", "updated_at",
-        "frequency_center", "video_frequency_center", "status", "post_id"
+        "id", "observed_at", "created_at", "updated_at", "status", "post_id",
+        "frequency_center",
     ]
+    # frequency_center is not a column of observations: an observation is sorted by the lowest
+    # center among its active bands that match the band filters (frequency_kind, center and
+    # bandwidth ranges). This is a correlated subquery per observation and the sort cannot use
+    # an index, so it is expensive on a large table: combine it with narrowing filters and
+    # pagination. Prefer observed_at / created_at for plain listings.
+    EXPRESSION_SORTABLE = ["frequency_center"]
+
+    @classmethod
+    def _band_conditions(cls, params: ObservationFilterParams) -> list:
+        return ObservationFrequencyFilter.band_conditions(
+            kind=params.frequency_kind,
+            center_from=params.frequency_center_from,
+            center_to=params.frequency_center_to,
+            bandwidth_from=params.bandwidth_from,
+            bandwidth_to=params.bandwidth_to,
+        )
+
+    @classmethod
+    def _sort_expression(cls, name: str, params: ObservationFilterParams):
+        if name == "frequency_center":
+            return ObservationFrequencyFilter.lowest_center(cls._band_conditions(params))
+        return super()._sort_expression(name, params)
+
+    @classmethod
+    def _apply_frequency_filters(cls, query: Select, params: ObservationFilterParams) -> Select:
+        """Every band condition goes into one subquery, so they must hold for the same active band"""
+        conditions = cls._band_conditions(params)
+        if conditions:
+            query = query.where(ObservationFrequencyFilter.observation_has_band(conditions))
+        return query
 
     @classmethod
     def apply_filters(
@@ -55,14 +86,7 @@ class ObservationFilterService(SimpleFilterEngine):
         query = cls._apply_exact(query, Observation.confidence_level, params.confidence_level)
 
         # === Frequency Filters ===
-        query = cls._apply_range(query, Observation.frequency_center,
-                                  params.frequency_center_from, params.frequency_center_to)
-        query = cls._apply_range(query, Observation.bandwidth,
-                                  params.bandwidth_from, params.bandwidth_to)
-
-        # === Video Frequency Filters ===
-        query = cls._apply_range(query, Observation.video_frequency_center,
-                                  params.video_frequency_center_from, params.video_frequency_center_to)
+        query = cls._apply_frequency_filters(query, params)
 
         # === Date Filters ===
         if params.last_n_days is not None:
@@ -109,6 +133,7 @@ class ObservationFilterService(SimpleFilterEngine):
         query = query.options(selectinload(Observation.tags))
         query = query.options(selectinload(Observation.user))
         query = query.options(selectinload(Observation.disappeared_by_user))
+        query = query.options(selectinload(Observation.all_frequencies))
 
         return query
 
@@ -137,12 +162,7 @@ class ObservationFilterService(SimpleFilterEngine):
             query = cls._apply_in_list(query, Observation.status, status_list)
 
         query = cls._apply_exact(query, Observation.confidence_level, params.confidence_level)
-        query = cls._apply_range(query, Observation.frequency_center,
-                                  params.frequency_center_from, params.frequency_center_to)
-        query = cls._apply_range(query, Observation.bandwidth,
-                                  params.bandwidth_from, params.bandwidth_to)
-        query = cls._apply_range(query, Observation.video_frequency_center,
-                                  params.video_frequency_center_from, params.video_frequency_center_to)
+        query = cls._apply_frequency_filters(query, params)
 
         if params.last_n_days is not None:
             start_date = cls._get_last_n_days_start(params.last_n_days)

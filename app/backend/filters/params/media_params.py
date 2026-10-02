@@ -24,6 +24,6 @@ class MediaFilterParams(BaseFilterParams):
     width_to: Optional[int] = Field(default=None, ge=0, description="Width max (pixels)")
     height_from: Optional[int] = Field(default=None, ge=0, description="Height min (pixels)")
     height_to: Optional[int] = Field(default=None, ge=0, description="Height max (pixels)")
-    has_thumbnail: Optional[bool] = Field(default=None, description="Has thumbnail generated")
+    has_thumbnail: Optional[bool] = Field(default=None, description="Has a thumbnail available (images always, videos once the poster is ready)")
     uploaded_at_from: Optional[datetime] = Field(default=None, description="Uploaded after")
     uploaded_at_to: Optional[datetime] = Field(default=None, description="Uploaded before")

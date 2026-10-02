@@ -6,6 +6,8 @@ from typing import List, Optional, Any
 from pydantic import BaseModel, field_validator
 
 from app.backend.filters.base import FilterOperator, FilterCondition, SortOrder, BaseFilterParams
+from app.backend.services.api_errors import invalid
+from app.backend.enums.errors import FieldErrorCode
 
 
 class SearchRequest(BaseModel):
@@ -33,7 +35,7 @@ class SearchRequest(BaseModel):
     @classmethod
     def validate_logic(cls, v: str) -> str:
         if v not in ("and", "or"):
-            raise ValueError("logic must be 'and' or 'or'")
+            raise invalid(FieldErrorCode.SEARCH_LOGIC_INVALID)
         return v
 
     def to_filter_params(self) -> BaseFilterParams:

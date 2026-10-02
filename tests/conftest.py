@@ -17,6 +17,7 @@ from sqlmodel import SQLModel
 import app.backend.models  # noqa: F401  registers every table on the metadata
 from app.main import fastapi_app
 from app.backend.database import get_session, seed_roles_and_permissions, AuditedSession
+from app.backend.services.media.formats import seed_media_formats, invalidate_registry_cache
 from app.backend.services.auth import AuthService
 
 
@@ -40,10 +41,13 @@ async def session_maker(engine):
 
 @pytest_asyncio.fixture
 async def db(session_maker):
-    """Session with roles and permissions seeded (admin role holds everything)"""
+    """Session with roles, permissions and the default media formats seeded (admin role holds everything)"""
     async with session_maker() as session:
         await seed_roles_and_permissions(session)
+        await seed_media_formats(session)
+        invalidate_registry_cache()
         yield session
+    invalidate_registry_cache()
 
 
 @pytest_asyncio.fixture

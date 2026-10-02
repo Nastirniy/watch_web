@@ -3,10 +3,12 @@ MediaFilterService - Filter service for MediaFile entity
 """
 
 from typing import Optional, Iterable
+from sqlalchemy import and_, not_, or_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql.selectable import Select
 
 from app.backend.models.media import MediaFile
+from app.backend.enums.general import MediaType, PosterStatus
 from app.backend.models.observation import Observation
 from app.backend.filters.simple_engine import SimpleFilterEngine
 from app.backend.filters.params.media_params import MediaFilterParams
@@ -18,6 +20,17 @@ class MediaFilterService(SimpleFilterEngine):
     MODEL = MediaFile
     PARAMS = MediaFilterParams
     SORTABLE_FIELDS = ["id", "original_filename", "file_size", "media_type", "uploaded_at", "observation_id"]
+
+    @staticmethod
+    def _apply_has_thumbnail(query: Select, has_thumbnail: Optional[bool]) -> Select:
+        """Images always have a thumbnail (rendered on demand); videos once their poster is ready"""
+        if has_thumbnail is None:
+            return query
+        ready = or_(
+            MediaFile.media_type == MediaType.IMAGE.value,
+            and_(MediaFile.media_type == MediaType.VIDEO.value, MediaFile.poster_status == PosterStatus.READY.value),
+        )
+        return query.where(ready) if has_thumbnail else query.where(not_(ready))
 
     @classmethod
     def apply_filters(
@@ -47,11 +60,7 @@ class MediaFilterService(SimpleFilterEngine):
         query = cls._apply_range(query, MediaFile.height, params.height_from, params.height_to)
         query = cls._apply_range(query, MediaFile.uploaded_at, params.uploaded_at_from, params.uploaded_at_to)
 
-        # Has thumbnail filter
-        if params.has_thumbnail is True:
-            query = query.where(MediaFile.thumbnail_path.isnot(None))
-        elif params.has_thumbnail is False:
-            query = query.where(MediaFile.thumbnail_path.is_(None))
+        query = cls._apply_has_thumbnail(query, params.has_thumbnail)
 
         query = cls._apply_sorting(query, params)
         query = cls._apply_pagination(query, params)
@@ -81,9 +90,6 @@ class MediaFilterService(SimpleFilterEngine):
         query = cls._apply_range(query, MediaFile.height, params.height_from, params.height_to)
         query = cls._apply_range(query, MediaFile.uploaded_at, params.uploaded_at_from, params.uploaded_at_to)
 
-        if params.has_thumbnail is True:
-            query = query.where(MediaFile.thumbnail_path.isnot(None))
-        elif params.has_thumbnail is False:
-            query = query.where(MediaFile.thumbnail_path.is_(None))
+        query = cls._apply_has_thumbnail(query, params.has_thumbnail)
 
         return query

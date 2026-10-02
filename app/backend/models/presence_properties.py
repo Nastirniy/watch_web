@@ -47,6 +47,17 @@ def configure_presence_properties() -> None:
         ),
     )
 
+    # Post.user_count: active, not archived home users of the post
+    inspect(Post).add_property(
+        "user_count",
+        column_property(
+            sa_select(func.count(User.id))
+            .where(User.post_id == Post.id, User.is_active == True, User.is_deleted == False)
+            .correlate_except(User)
+            .scalar_subquery()
+        ),
+    )
+
     # Post.last_user_activity_at: latest activity of any home user of the post
     inspect(Post).add_property(
         "last_user_activity_at",

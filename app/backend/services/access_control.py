@@ -1,7 +1,8 @@
 from typing import Optional, FrozenSet
 from loguru import logger
 
-from app.backend.enums.general import Permissions, AccessErrorCode, ObservationStatus
+from app.backend.enums.general import Permissions, ObservationStatus
+from app.backend.enums.errors import AccessErrorCode
 from app.backend.models.user import User
 from app.backend.models.observation import Observation
 from app.backend.models.media import MediaFile
@@ -28,6 +29,29 @@ class AccessControlService:
         return auth.post_scope()
 
     @staticmethod
+    def post_record_scope(auth: AuthContext) -> Optional[FrozenSet[int]]:
+        """Scope for reading post records themselves (name, code, status), not the data of a post.
+        Administrators (admin.true, the route already requires post.view) see every post record;
+        everyone else sees the posts of their data scope. None means unrestricted."""
+        return None if auth.is_admin else auth.post_scope()
+
+    @staticmethod
+    def resolve_record_scope(auth: AuthContext, requested_post_id: Optional[int]) -> Optional[FrozenSet[int]]:
+        """Like resolve_post_scope, for lists of post and user records (not post data).
+        Administrators (admin.true, the route already requires the X.view permission) are not limited
+        to their data scope: the requested post, or every post when none is requested."""
+        if auth.is_admin:
+            return None if requested_post_id is None else frozenset({requested_post_id})
+        return AccessControlService.resolve_post_scope(auth, requested_post_id)
+
+    @staticmethod
+    def check_post_record_view(auth: AuthContext, post_id: int) -> None:
+        """Single post record: administrators see any, everyone else needs the post in their data scope"""
+        if auth.is_admin:
+            return
+        AccessControlService.check_post_view(auth, post_id, "post")
+
+    @staticmethod
     def resolve_post_scope(auth: AuthContext, requested_post_id: Optional[int]) -> Optional[FrozenSet[int]]:
         """Scope for list endpoints that accept a post_id filter.
 
@@ -46,15 +70,9 @@ class AccessControlService:
             return
         if not auth.readable_post_ids:
             logger.warning(f"User {auth.user.username} has no post assigned, tried to view {resource_type} of post {post_id}")
-            raise access_denied(
-                AccessErrorCode.NO_POST_ASSIGNED,
-                "You are not assigned to any post. Please contact an administrator."
-            )
+            raise access_denied(AccessErrorCode.NO_POST_ASSIGNED)
         logger.warning(f"User {auth.user.username} tried to view {resource_type} of post {post_id} outside of scope")
-        raise access_denied(
-            AccessErrorCode.POST_ACCESS_DENIED,
-            f"Access denied. You can only view {resource_type} data of your assigned posts"
-        )
+        raise access_denied(AccessErrorCode.POST_ACCESS_DENIED, resource_type=resource_type, post_id=post_id)
 
     @staticmethod
     def check_post_write(auth: AuthContext, post_id: int, resource_type: str = "post") -> None:
@@ -62,10 +80,7 @@ class AccessControlService:
         if auth.can_write_post(post_id):
             return
         logger.warning(f"User {auth.user.username} has read-only access to post {post_id}, tried to write {resource_type}")
-        raise access_denied(
-            AccessErrorCode.POST_WRITE_DENIED,
-            f"Access denied. You have read-only access to post {post_id}"
-        )
+        raise access_denied(AccessErrorCode.POST_WRITE_DENIED, post_id=post_id, resource_type=resource_type)
 
     # ------------------------------------------------------------ permissions
     @staticmethod
@@ -75,15 +90,16 @@ class AccessControlService:
             return
         logger.warning(f"User {auth.user.username} lacks {permission.value} for {action}")
         raise access_denied(
-            AccessErrorCode.PERMISSION_DENIED,
-            f"Permission {permission.value} is required for {action}",
+            AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION,
             required=Require.of(all=[permission]),
             missing=[permission.value],
+            permission=permission.value,
+            action=action,
         )
 
     @staticmethod
     def check_include_deleted(auth: AuthContext, params, permission: Permissions) -> None:
-        """include_deleted on a list or search requires the matching delete permission."""
+        """include_deleted (archived rows too) on a list or search requires the matching X.archive permission."""
         if getattr(params, "include_deleted", False):
             AccessControlService.check_permission(auth, permission, "include_deleted")
 
@@ -95,8 +111,7 @@ class AccessControlService:
             return
         logger.warning(f"User {auth.user.username} is not the owner of observation {observation.id}")
         raise access_denied(
-            AccessErrorCode.NOT_OWNER,
-            "You can only modify your own observations",
+            AccessErrorCode.OBSERVATION_NOT_OWNER,
             required=Require.of(all=[Permissions.OBSERVATION_MANAGE_ANY]),
             missing=[Permissions.OBSERVATION_MANAGE_ANY.value],
         )
@@ -108,31 +123,28 @@ class AccessControlService:
         if auth.has(Permissions.MEDIA_MANAGE_ANY):
             return
         if observation is not None and observation.status != ObservationStatus.ACTIVE.value:
-            logger.warning(f"User {auth.user.username} tried to delete media {media_file.id} of a non-active observation")
+            logger.warning(f"User {auth.user.username} tried to archive/restore media {media_file.id} of a non-active observation")
             raise access_denied(
                 AccessErrorCode.OBSERVATION_NOT_ACTIVE,
-                f"Cannot delete media from an observation that is no longer active (status: {observation.status})",
                 required=Require.of(all=[Permissions.MEDIA_MANAGE_ANY]),
                 missing=[Permissions.MEDIA_MANAGE_ANY.value],
+                observation_status=observation.status,
             )
         if media_file.user_id != auth.user.id:
             logger.warning(f"User {auth.user.username} is not the uploader of media {media_file.id}")
             raise access_denied(
-                AccessErrorCode.NOT_OWNER,
-                "You can only delete media files you uploaded",
+                AccessErrorCode.MEDIA_NOT_OWNER,
                 required=Require.of(all=[Permissions.MEDIA_MANAGE_ANY]),
                 missing=[Permissions.MEDIA_MANAGE_ANY.value],
             )
 
     @staticmethod
     def check_user_visibility(auth: AuthContext, target: User) -> None:
-        """A user record is visible to the user itself and to callers whose post scope covers the target's post"""
-        if target.id == auth.user.id:
+        """A user record is visible to the user itself, to administrators (admin.true with user.view on the route)
+        and to callers whose post scope covers the target's post"""
+        if target.id == auth.user.id or auth.is_admin:
             return
         if target.post_id is not None and auth.can_view_post(target.post_id):
             return
         logger.warning(f"User {auth.user.username} tried to view user {target.id} outside of scope")
-        raise access_denied(
-            AccessErrorCode.USER_SELF_ONLY,
-            "You can only view your own account or users of your assigned posts"
-        )
+        raise access_denied(AccessErrorCode.USER_SELF_ONLY)

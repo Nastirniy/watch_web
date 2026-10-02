@@ -12,7 +12,7 @@ from app.backend.models.user import User
 from app.backend.models.role import Role, Permission, RolePermission, UserRole
 from app.backend.models.post import Post
 from app.backend.models.user_post_access import UserPostAccess
-from app.backend.models.observation import Observation, Category, SignalType, Tag
+from app.backend.models.observation import Observation, ObservationFrequency, Category, SignalType, Tag
 from app.backend.models.media import MediaFile
 
 _counter = itertools.count(1)
@@ -104,37 +104,54 @@ async def make_dictionary(db: AsyncSession) -> Dict[str, int]:
     return {"category_id": category.id, "signal_type_id": signal_type.id, "tag_id": tag.id}
 
 
-async def make_observation(db: AsyncSession, user: User, post: Post, signal_type_id: int) -> Observation:
+async def make_observation(db: AsyncSession, user: User, post: Post, signal_type_id: int, bands: Iterable = None) -> Observation:
+    """Observation with bands given as (kind, min, max) tuples; one rc band 100-200 MHz by default"""
     observation = Observation(
         user_id=user.id,
         post_id=post.id,
         signal_type_id=signal_type_id,
-        frequency_min=Decimal("100.000"),
-        frequency_max=Decimal("200.000"),
-        frequency_center=Decimal("150.000"),
-        bandwidth=Decimal("100.000"),
         observed_at=datetime.now(timezone.utc),
     )
     db.add(observation)
+    await db.flush()
+    for kind, low, high in bands or [("rc", "100.000", "200.000")]:
+        low, high = Decimal(low), Decimal(high)
+        db.add(ObservationFrequency(
+            observation_id=observation.id, kind=kind,
+            frequency_min=low, frequency_max=high, frequency_center=(low + high) / 2,
+        ))
     await db.commit()
     await db.refresh(observation)
     return observation
 
 
-async def make_media(db: AsyncSession, observation: Observation, user: User) -> MediaFile:
+MEDIA_KINDS = {
+    "image": ("jpg", "image/jpeg"),
+    "video": ("mp4", "video/mp4"),
+    "audio": ("mp3", "audio/mpeg"),
+}
+
+
+async def make_media(db: AsyncSession, observation: Observation, user: User, media_type: str = "image", **fields) -> MediaFile:
+    """Media row. Videos start with poster_status = pending like a real upload; pass poster_status=... to override."""
     n = _next()
-    media = MediaFile(
+    ext, mime = MEDIA_KINDS[media_type]
+    values = dict(
         observation_id=observation.id,
         user_id=user.id,
-        original_filename=f"file{n}.jpg",
-        stored_filename=f"stored_{n}.jpg",
-        file_path=f"2026/09/02/obs_{observation.id}/stored_{n}.jpg",
-        mime_type="image/jpeg",
-        file_extension="jpg",
-        media_type="image",
+        original_filename=f"file{n}.{ext}",
+        stored_filename=f"stored_{n}.{ext}",
+        file_path=f"2026/09/02/obs_{observation.id}/stored_{n}.{ext}",
+        mime_type=mime,
+        file_extension=ext,
+        media_type=media_type,
         file_hash=f"{n:064d}",
         file_size=123,
     )
+    if media_type == "video":
+        values["poster_status"] = "pending"
+    values.update(fields)
+    media = MediaFile(**values)
     db.add(media)
     await db.commit()
     await db.refresh(media)
@@ -145,7 +162,6 @@ def observation_payload(post_id: int, signal_type_id: int) -> dict:
     return {
         "post_id": post_id,
         "signal_type_id": signal_type_id,
-        "frequency_min": "100.000",
-        "frequency_max": "200.000",
+        "frequencies": [{"kind": "rc", "frequency_min": "100.000", "frequency_max": "200.000"}],
         "observed_at": datetime.now(timezone.utc).isoformat(),
     }

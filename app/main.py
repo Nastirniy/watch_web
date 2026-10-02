@@ -14,8 +14,10 @@ from app.backend.config import settings
 from app.backend.utils.logging_config import setup_logging, get_logger, get_main_logger
 from app.backend.database import initialize_database_with_migrations
 from app.backend.services.route_access import build_route_access_map
-from app.backend.routes import auth, users, observations, posts, health, media, roles, categories, signal_types, tags, search, statistics
-from app.backend.enums.routes import AuthRoutes, UserRoutes, ObservationRoutes, PostRoutes, SystemRoutes, MediaRoutes, RoleRoutes, CategoryRoutes, SignalTypeRoutes, TagRoutes, SearchRoutes, StatisticsRoutes
+from app.backend.error_handlers import register_error_handlers
+from app.backend.openapi_problems import API_DESCRIPTION, install_openapi
+from app.backend.routes import health, problems, v1
+from app.backend.enums.routes import DocsRoutes
 
 # Initialize logging system
 setup_logging(
@@ -47,8 +49,19 @@ async def lifespan(app: FastAPI):
 fastapi_app = FastAPI(
     title=settings.app.name,
     version=settings.app.version,
-    lifespan=lifespan
+    description=API_DESCRIPTION,
+    lifespan=lifespan,
+    openapi_url=DocsRoutes.OPENAPI_JSON.path(),
+    docs_url=DocsRoutes.SWAGGER_UI.path(),
+    swagger_ui_oauth2_redirect_url=DocsRoutes.SWAGGER_UI_OAUTH2_REDIRECT.path(),
+    redoc_url=DocsRoutes.REDOC.path(),
+    # operationId = the endpoint function name (update_post), what client generators name their functions after;
+    # tests/test_openapi.py keeps them unique
+    generate_unique_id_function=lambda route: route.name,
 )
+
+# Every error is an RFC 9457 problem (application/problem+json), FastAPI's own 422/404/405/500 included
+register_error_handlers(fastapi_app)
 
 # Add CORS middleware (must be before other middleware)
 fastapi_app.add_middleware(
@@ -60,19 +73,14 @@ fastapi_app.add_middleware(
     max_age=600
 )
 
-# Include routers
-fastapi_app.include_router(health.router, tags=[SystemRoutes.tag()])
-fastapi_app.include_router(auth.router, prefix=AuthRoutes.BASE.versioned_path(), tags=[AuthRoutes.tag()])
-fastapi_app.include_router(users.router, prefix=UserRoutes.BASE.versioned_path(), tags=[UserRoutes.tag()])
-fastapi_app.include_router(roles.router, prefix=RoleRoutes.BASE.versioned_path(), tags=[RoleRoutes.tag()])
-fastapi_app.include_router(categories.router, prefix=CategoryRoutes.BASE.versioned_path(), tags=[CategoryRoutes.tag()])
-fastapi_app.include_router(signal_types.router, prefix=SignalTypeRoutes.BASE.versioned_path(), tags=[SignalTypeRoutes.tag()])
-fastapi_app.include_router(tags.router, prefix=TagRoutes.BASE.versioned_path(), tags=[TagRoutes.tag()])
-fastapi_app.include_router(observations.router, prefix=ObservationRoutes.BASE.versioned_path(), tags=[ObservationRoutes.tag()])
-fastapi_app.include_router(posts.router, prefix=PostRoutes.BASE.versioned_path(), tags=[PostRoutes.tag()])
-fastapi_app.include_router(media.router, prefix=MediaRoutes.BASE.versioned_path(), tags=[MediaRoutes.tag()])
-fastapi_app.include_router(search.router, prefix=SearchRoutes.BASE.versioned_path(), tags=[SearchRoutes.tag()])
-fastapi_app.include_router(statistics.router, prefix=StatisticsRoutes.BASE.versioned_path(), tags=[StatisticsRoutes.tag()])
+# Include routers: each one carries its prefix and tag, the version router adds /api/v1
+fastapi_app.include_router(health.router)
+fastapi_app.include_router(v1.router)
+# Documentation of the problem types (the "type" URI of every error); not part of the OpenAPI schema
+fastapi_app.include_router(problems.router)
+
+# OpenAPI lists, per route and status, every problem type the route can answer (openapi_problems.py)
+install_openapi(fastapi_app)
 
 # Route access map: generated from the require() dependencies of every router above.
 # Routers included after this line would be missing from /auth/route-access.

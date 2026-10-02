@@ -11,6 +11,9 @@ from sqlalchemy.sql.selectable import Select
 from sqlmodel import select
 from loguru import logger
 
+from app.backend.services.api_errors import invalid
+from app.backend.enums.errors import FieldErrorCode
+
 
 class FilterOperator(str, Enum):
     """Supported filter operators for query conditions"""
@@ -72,7 +75,7 @@ class BaseFilterParams(BaseModel):
     @classmethod
     def validate_logic(cls, v: str) -> str:
         if v not in ("and", "or"):
-            raise ValueError("logic must be 'and' or 'or'")
+            raise invalid(FieldErrorCode.SEARCH_LOGIC_INVALID)
         return v
 
 

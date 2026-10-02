@@ -13,7 +13,6 @@ from loguru import logger
 from app.backend.database import get_session
 from app.backend.services.auth_context import AuthContext
 from app.backend.services.access_control import AccessControlService
-from app.backend.routes.models.response.error_response import ACCESS_ERROR_RESPONSES
 from app.backend.enums.routes import SearchRoutes
 from app.backend.enums.general import Permissions
 from app.backend.services.permissions import require, require_spec, Require
@@ -21,6 +20,7 @@ from app.backend.models.user import User
 from app.backend.models.post import Post
 from app.backend.models.role import Role
 from app.backend.models.observation import Observation, Category, SignalType, Tag
+from app.backend.models.media_format import MediaFormat
 from app.backend.models.media import MediaFile
 from app.backend.models.audit import AuditLog
 from app.backend.helpers.audit_helper import create_audit_log
@@ -32,6 +32,7 @@ from app.backend.filters.params.user_params import UserFilterParams
 from app.backend.filters.params.post_params import PostFilterParams
 from app.backend.filters.params.role_params import RoleFilterParams
 from app.backend.filters.params.category_params import CategoryFilterParams
+from app.backend.filters.params.media_format_params import MediaFormatFilterParams
 from app.backend.filters.params.signal_type_params import SignalTypeFilterParams
 from app.backend.filters.params.tag_params import TagFilterParams
 from app.backend.filters.params.media_params import MediaFilterParams
@@ -42,6 +43,7 @@ from app.backend.filters.user_filter import UserFilterService
 from app.backend.filters.post_filter import PostFilterService
 from app.backend.filters.role_filter import RoleFilterService
 from app.backend.filters.category_filter import CategoryFilterService
+from app.backend.filters.media_format_filter import MediaFormatFilterService
 from app.backend.filters.signal_type_filter import SignalTypeFilterService
 from app.backend.filters.tag_filter import TagFilterService
 from app.backend.filters.media_filter import MediaFilterService
@@ -57,7 +59,7 @@ from app.backend.routes.models.response.search_response import (
 )
 
 
-router = APIRouter(responses=ACCESS_ERROR_RESPONSES)
+router = APIRouter(prefix=SearchRoutes.BASE.value, tags=[SearchRoutes.tag()])
 
 # Entity registry: name -> filter service and route requirement (shared by the search routes and the schema endpoint)
 ENTITY_REGISTRY: Dict[str, Dict] = {
@@ -69,6 +71,7 @@ ENTITY_REGISTRY: Dict[str, Dict] = {
     "signal_types": {"service": SignalTypeFilterService, "require": Require.of(all=[Permissions.SIGNAL_TYPE_VIEW])},
     "tags": {"service": TagFilterService, "require": Require.of(all=[Permissions.TAG_VIEW])},
     "media": {"service": MediaFilterService, "require": Require.of(all=[Permissions.MEDIA_VIEW])},
+    "media_formats": {"service": MediaFormatFilterService, "require": Require.of(all=[Permissions.MEDIA_FORMAT_VIEW])},
 }
 
 
@@ -114,7 +117,7 @@ async def log_search(
             new_values={"params": params, "results": results_count},
             details={"message": f"User {user.username} searched for {entity} with {results_count} results"},
             ip_address=ip,
-            request_url=f"/api/v1/search/{entity}",
+            request_url=request.url.path,
             success=True
         )
         await session.commit()
@@ -140,7 +143,7 @@ async def search_observations(
     current_user = auth.user
     access_post_ids = AccessControlService.resolve_post_scope(auth, params.post_id)
 
-    AccessControlService.check_include_deleted(auth, params, Permissions.OBSERVATION_DELETE)
+    AccessControlService.check_include_deleted(auth, params, Permissions.OBSERVATION_ARCHIVE)
     query = select(Observation)
     query = ObservationFilterService.apply_filters(query, params, access_post_ids)
     result = await session.exec(query)
@@ -174,9 +177,9 @@ async def search_users(
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
     current_user = auth.user
-    access_post_ids = AccessControlService.resolve_post_scope(auth, params.post_id)
+    access_post_ids = AccessControlService.resolve_record_scope(auth, params.post_id)
 
-    AccessControlService.check_include_deleted(auth, params, Permissions.USER_DELETE)
+    AccessControlService.check_include_deleted(auth, params, Permissions.USER_ARCHIVE)
     query = select(User)
     query = UserFilterService.apply_filters(query, params, access_post_ids)
     result = await session.exec(query)
@@ -207,7 +210,7 @@ async def search_posts(
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
     current_user = auth.user
-    access_post_ids = AccessControlService.post_scope(auth)
+    access_post_ids = AccessControlService.post_record_scope(auth)
 
     query = select(Post)
     query = PostFilterService.apply_filters(query, params, access_post_ids)
@@ -239,7 +242,7 @@ async def search_roles(
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
     current_user = auth.user
-    AccessControlService.check_include_deleted(auth, params, Permissions.ROLE_DELETE)
+    AccessControlService.check_include_deleted(auth, params, Permissions.ROLE_ARCHIVE)
     query = select(Role)
     query = RoleFilterService.apply_filters(query, params)
     result = await session.exec(query)
@@ -270,7 +273,7 @@ async def search_categories(
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
     current_user = auth.user
-    AccessControlService.check_include_deleted(auth, params, Permissions.CATEGORY_DELETE)
+    AccessControlService.check_include_deleted(auth, params, Permissions.CATEGORY_ARCHIVE)
     query = select(Category)
     query = CategoryFilterService.apply_filters(query, params)
     result = await session.exec(query)
@@ -301,7 +304,7 @@ async def search_signal_types(
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
     current_user = auth.user
-    AccessControlService.check_include_deleted(auth, params, Permissions.SIGNAL_TYPE_DELETE)
+    AccessControlService.check_include_deleted(auth, params, Permissions.SIGNAL_TYPE_ARCHIVE)
     query = select(SignalType)
     query = SignalTypeFilterService.apply_filters(query, params)
     result = await session.exec(query)
@@ -332,7 +335,7 @@ async def search_tags(
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
     current_user = auth.user
-    AccessControlService.check_include_deleted(auth, params, Permissions.TAG_DELETE)
+    AccessControlService.check_include_deleted(auth, params, Permissions.TAG_ARCHIVE)
     query = select(Tag)
     query = TagFilterService.apply_filters(query, params)
     result = await session.exec(query)
@@ -402,3 +405,35 @@ async def get_search_filter_schema(
     common_params = _build_param_info(BaseFilterParams, list(_BASE_COMMON_FIELDS))
 
     return SchemaResponse(entities=entities, common_params=common_params)
+
+
+# =============================================================================
+# MEDIA FORMATS (accepted upload formats)
+# =============================================================================
+
+@router.get(
+    SearchRoutes.MEDIA_FORMATS.value,
+    response_model=SearchResponse,
+    summary="Search media formats",
+    description="Search accepted upload formats with typed filters."
+)
+async def search_media_formats(
+    request: Request,
+    params: MediaFormatFilterParams = Depends(),
+    auth: AuthContext = Depends(require_spec(ENTITY_REGISTRY["media_formats"]["require"])),
+    session: AsyncSession = Depends(get_session)
+) -> SearchResponse:
+    current_user = auth.user
+    AccessControlService.check_include_deleted(auth, params, Permissions.MEDIA_FORMAT_ARCHIVE)
+    query = select(MediaFormat)
+    query = MediaFormatFilterService.apply_filters(query, params)
+    result = await session.exec(query)
+    items = result.all()
+
+    count_query = select(func.count()).select_from(MediaFormat)
+    count_query = MediaFormatFilterService.apply_filters_for_count(count_query, params)
+    total = (await session.exec(count_query)).one()
+
+    await log_search(request, session, current_user, "media_formats", params.model_dump(exclude_none=True), len(items))
+
+    return SearchResponse.create("media_formats", items, total, params.page, params.page_size)

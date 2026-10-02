@@ -1,0 +1,58 @@
+# ============================================================================
+# watch-web-media-worker.service
+# ============================================================================
+# Bare-metal unit for the media worker (video poster extraction with ffmpeg).
+# The API and this worker share the database and the uploads directory; nothing
+# else connects them. Thumbnails are rendered by imgproxy (see docker-compose.yml
+# or run the imgproxy container with podman on the same host).
+#
+# Install:
+#   sudo apt install ffmpeg
+#   sudo cp systemd/watch-web-media-worker.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now watch-web-media-worker
+#
+# Logs:
+#   journalctl -u watch-web-media-worker -f
+#
+# Status of the queue:
+#   /opt/watch_web/venv/bin/python -m app.backend.media_tools poster-status
+# ============================================================================
+
+[Unit]
+Description=watch_web media worker (video posters)
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+Type=simple
+# -- Adjust these to match your deployment --
+User=watchweb
+Group=watchweb
+WorkingDirectory=/opt/watch_web
+# Same .env as the API: database, MYSETTINGS_STORAGE__UPLOAD_PATH (absolute), ffmpeg paths
+EnvironmentFile=/opt/watch_web/.env
+ExecStart=/opt/watch_web/venv/bin/python -m app.backend.workers.media_worker
+
+# SIGTERM lets running ffmpeg jobs finish and releases unstarted claims
+KillSignal=SIGTERM
+TimeoutStopSec=90
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=watch-web-media-worker
+
+# Resource limits
+MemoryMax=1G
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+PrivateTmp=true
+# Must include the uploads directory (posters are written under <uploads>/_derived/posters)
+ReadWritePaths=/var/www/radio_monitoring/uploads
+
+[Install]
+WantedBy=multi-user.target

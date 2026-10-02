@@ -17,7 +17,8 @@ from typing import List, Dict, Union, Any, Awaitable, Callable, Iterable, Tuple
 from fastapi import Depends
 from loguru import logger
 
-from app.backend.enums.general import Permissions, AccessErrorCode
+from app.backend.enums.general import Permissions
+from app.backend.enums.errors import AccessErrorCode
 from app.backend.dependencies import get_auth_context
 from app.backend.services.auth_context import AuthContext
 from app.backend.services.access_errors import access_denied
@@ -81,7 +82,7 @@ def require_spec(spec: Require) -> Callable[..., Awaitable[AuthContext]]:
                 f"Access denied for user {auth.user.username}: code={code.value} "
                 f"missing={list(result.missing)} admin_required={spec.admin}"
             )
-            raise access_denied(code, "Insufficient permissions", required=spec, missing=result.missing)
+            raise access_denied(code, required=spec, missing=result.missing)
         return auth
 
     setattr(_require_dependency, REQUIRE_ATTR, spec)

@@ -6,7 +6,6 @@ from typing import Optional, Iterable
 from sqlalchemy.sql.selectable import Select
 
 from app.backend.models.post import Post
-from app.backend.enums.general import ConnectionStatus
 from app.backend.filters.simple_engine import SimpleFilterEngine
 from app.backend.filters.params.post_params import PostFilterParams
 
@@ -16,17 +15,14 @@ class PostFilterService(SimpleFilterEngine):
 
     MODEL = Post
     PARAMS = PostFilterParams
-    SORTABLE_FIELDS = ["id", "name", "code", "city", "created_at", "updated_at", "last_connection_at", "is_active", "online_user_count", "connection_status"]
+    SORTABLE_FIELDS = ["id", "name", "code", "city", "created_at", "updated_at", "last_user_activity_at", "is_active", "online_user_count", "user_count"]
 
     @classmethod
-    def _apply_connection_status(cls, query: Select, value: Optional[str]) -> Select:
-        """Effective status: online means at least one home user is online; other values
-        match the stored status of posts without online users."""
-        if not value:
+    def _apply_has_online_users(cls, query: Select, value: Optional[bool]) -> Select:
+        """Posts with (true) or without (false) a home user online now"""
+        if value is None:
             return query
-        if value == ConnectionStatus.ONLINE.value:
-            return query.where(Post.online_user_count > 0)
-        return query.where(Post.connection_status == value, Post.online_user_count == 0)
+        return query.where(Post.online_user_count > 0 if value else Post.online_user_count == 0)
 
     @classmethod
     def apply_filters(
@@ -67,11 +63,11 @@ class PostFilterService(SimpleFilterEngine):
 
         # Status filters
         query = cls._apply_exact(query, Post.is_active, params.is_active)
-        query = cls._apply_connection_status(query, params.connection_status)
+        query = cls._apply_has_online_users(query, params.has_online_users)
 
         # Date ranges
         query = cls._apply_range(query, Post.created_at, params.created_at_from, params.created_at_to)
-        query = cls._apply_range(query, Post.last_connection_at, params.last_connection_from, params.last_connection_to)
+        query = cls._apply_range(query, Post.last_user_activity_at, params.last_user_activity_from, params.last_user_activity_to)
 
         # Sorting & pagination
         query = cls._apply_sorting(query, params)
@@ -100,7 +96,7 @@ class PostFilterService(SimpleFilterEngine):
         query = cls._apply_contains(query, Post.city, params.city_contains)
         query = cls._apply_contains(query, Post.description, params.description_contains)
         query = cls._apply_exact(query, Post.is_active, params.is_active)
-        query = cls._apply_connection_status(query, params.connection_status)
+        query = cls._apply_has_online_users(query, params.has_online_users)
         query = cls._apply_range(query, Post.created_at, params.created_at_from, params.created_at_to)
-        query = cls._apply_range(query, Post.last_connection_at, params.last_connection_from, params.last_connection_to)
+        query = cls._apply_range(query, Post.last_user_activity_at, params.last_user_activity_from, params.last_user_activity_to)
         return query

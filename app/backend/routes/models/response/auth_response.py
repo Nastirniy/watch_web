@@ -2,15 +2,16 @@ from typing import Optional, List
 from pydantic import BaseModel, Field
 
 from app.backend.routes.models.response.error_response import RequiredPermissions
+from app.backend.utils.validators import PlainTextModel
 
 
-class RoleBriefResponse(BaseModel):
+class RoleBriefResponse(PlainTextModel):
     id: int
     name: str
     display_name: str
 
 
-class AuthorizationInfo(BaseModel):
+class AuthorizationInfo(PlainTextModel):
     """Authorization data the GUI needs to build its interface"""
     post_id: Optional[int] = Field(default=None, description="Home post of the user")
     is_admin: bool = Field(description="Holds admin.true: may open the administration area")

@@ -1,6 +1,9 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Form, Request, Response
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError, DataError
 from sqlmodel import select, desc
 from datetime import datetime, timezone
@@ -12,13 +15,12 @@ from app.backend.models.role import Role, UserRole
 from app.backend.models.post import Post
 from app.backend.models.user_post_access import UserPostAccess
 from app.backend.services.auth_context import AuthContext
-from app.backend.routes.models.response.error_response import ACCESS_ERROR_RESPONSES
 from app.backend.services.permissions import require
 from app.backend.services.access_control import AccessControlService
 from app.backend.services.auth import AuthService
 from app.backend.helpers.certeficates_helper import CertificateParser, hash_data, hash_pki_certificate_data
 from app.backend.enums.general import Permissions
-from app.backend.enums.routes import UserRoutes, SystemRoutes
+from app.backend.enums.routes import UserRoutes
 from app.backend.helpers.audit_helper import create_audit_log
 from app.backend.utils.validators import PaginationParams
 from app.backend.utils.logging_config import get_logger, get_api_logger
@@ -27,12 +29,48 @@ from app.backend.routes.models.response.user_response import UserResponse, UserR
 from app.backend.filters.params.user_params import UserFilterParams
 from app.backend.filters.user_filter import UserFilterService
 from app.backend.routes.models.response.search_response import EntitySchemaInfo
+from app.backend.services.api_errors import ApiError
+from app.backend.enums.errors import ErrorCode
 
-router = APIRouter(responses=ACCESS_ERROR_RESPONSES)
+router = APIRouter(prefix=UserRoutes.BASE.value, tags=[UserRoutes.tag()])
 _logger = get_api_logger()
 
+# PATCH /users/{id} reads form fields only; a JSON body would reach the route with every field unset
+FORM_CONTENT_TYPES = ("multipart/form-data", "application/x-www-form-urlencoded")
+MAX_CERTIFICATE_BYTES = 5 * 1024 * 1024
 
-@router.get(SystemRoutes.ROOT.value, response_model=List[UserResponse])
+
+def _validation_error(exc: ValidationError) -> RequestValidationError:
+    """Report a request model failure like the form field checks: a 422 with the fields under "body" """
+    return RequestValidationError([{**error, "loc": ("body", *error["loc"])} for error in exc.errors(include_url=False)])
+
+
+def _parse_role_ids(raw: str) -> list:
+    """role_ids arrives as a JSON array in a form field"""
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        value = None
+    if not isinstance(value, list):
+        _logger.info(f"role_ids is not a JSON array: {raw[:100]!r}")
+        raise ApiError(ErrorCode.ROLE_IDS_NOT_JSON_ARRAY)
+    return value
+
+
+def _username_taken(username: str, exclude_user_id: Optional[int] = None):
+    """Case-insensitive lookup: "Ivan" and "ivan" are the same username"""
+    query = select(User).where(func.lower(User.username) == username.lower())
+    if exclude_user_id is not None:
+        query = query.where(User.id != exclude_user_id)
+    return query
+
+
+def _is_unique_violation(error_msg: str) -> bool:
+    # MySQL: "Duplicate entry ... for key ...", sqlite: "UNIQUE constraint failed: ..."
+    return "Duplicate entry" in error_msg or "UNIQUE constraint failed" in error_msg or "already exists" in error_msg
+
+
+@router.get(UserRoutes.ROOT.value, response_model=List[UserResponse])
 async def list_users(
         filters: UserFilterParams = Depends(),
         session: AsyncSession = Depends(get_session),
@@ -41,12 +79,13 @@ async def list_users(
     """
     List users with filters.
 
-    Users are limited to the caller's post scope (home post, extra post access, or every post with post.access_all).
+    Administrators (admin.true) see users of every post. Everyone else is limited to their post scope
+    (home post, extra post access, or every post with post.access_all).
     """
     current_user = auth.user
     try:
-        AccessControlService.check_include_deleted(auth, filters, Permissions.USER_DELETE)
-        scope = AccessControlService.resolve_post_scope(auth, filters.post_id)
+        AccessControlService.check_include_deleted(auth, filters, Permissions.USER_ARCHIVE)
+        scope = AccessControlService.resolve_record_scope(auth, filters.post_id)
 
         query = select(User)
         query = UserFilterService.apply_filters(query, filters, scope)
@@ -61,13 +100,10 @@ async def list_users(
         raise
     except Exception as e:
         _logger.error(f"Error listing users: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve users"
-        )
+        raise ApiError(ErrorCode.USERS_LIST_FAILED)
 
 
-@router.post(SystemRoutes.ROOT.value, response_model=UserResponse)
+@router.post(UserRoutes.ROOT.value, response_model=UserResponse)
 async def create_user(
         request: Request,
         certificate: UploadFile = File(..., description="PKI certificate file (PEM or DER format)"),
@@ -96,20 +132,7 @@ async def create_user(
     - post_id: Optional post/position ID
     """
     current_user = auth.user
-    # Parse role_ids from JSON string
-    try:
-        _logger.debug(f"Received role_ids string: {role_ids}")
-        role_ids_list = json.loads(role_ids)
-
-        if not isinstance(role_ids_list, list):
-            raise ValueError("role_ids must be a JSON array")
-
-    except json.JSONDecodeError as e:
-        _logger.error(f"JSON decode error for role_ids: {str(e)}, received: {role_ids}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid role_ids format. Must be a JSON array like [1, 2, 3]. Received: {role_ids}"
-        )
+    role_ids_list = _parse_role_ids(role_ids)
 
     # Validate all input data using Pydantic model
     try:
@@ -119,12 +142,9 @@ async def create_user(
             post_id=post_id,
             role_ids=role_ids_list
         )
-    except Exception as e:
-        _logger.error(f"Validation error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Server side error"  # TODO swap to real error message
-        )
+    except ValidationError as e:
+        _logger.info(f"User create rejected by validation: {e.errors(include_url=False, include_input=False)}")
+        raise _validation_error(e)
 
     # Validate post_id exists if provided
     if user_data.post_id is not None:
@@ -132,37 +152,21 @@ async def create_user(
             select(Post).where(Post.id == user_data.post_id)
         )
         if not post_result.first():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Post with ID {user_data.post_id} not found"
-            )
+            raise ApiError(ErrorCode.POST_NOT_FOUND, post_id=user_data.post_id)
 
     # Check if user already exists
-    result = await session.exec(
-        select(User).where(User.username == user_data.username)
-    )
+    result = await session.exec(_username_taken(user_data.username))
     if result.first():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User with this username already exists"
-        )
+        raise ApiError(ErrorCode.USERNAME_TAKEN)
 
     # Read and parse certificate
     try:
         cert_data = await certificate.read()
         if len(cert_data) == 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Certificate file is empty"
-            )
+            raise ApiError(ErrorCode.CERTIFICATE_FILE_EMPTY)
 
-        # Limit certificate file size (5MB)
-        max_cert_size = 5 * 1024 * 1024
-        if len(cert_data) > max_cert_size:
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail="Certificate file too large (max 5MB)"
-            )
+        if len(cert_data) > MAX_CERTIFICATE_BYTES:
+            raise ApiError(ErrorCode.CERTIFICATE_FILE_TOO_LARGE, max_bytes=MAX_CERTIFICATE_BYTES)
 
         # Parse certificate and extract PKI fields
         cert_info = CertificateParser.parse_certificate(cert_data)
@@ -172,18 +176,15 @@ async def create_user(
 
         _logger.info(f"Certificate parsed successfully for user {username}: CN={pki_cn}, Serial={pki_serial[:16]}...")
 
+    except ApiError:
+        # Empty or oversized file: already the right answer, not a 500
+        raise
     except ValueError as e:
         _logger.error(f"Certificate parsing error for user {username}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid certificate"
-        )
+        raise ApiError(ErrorCode.CERTIFICATE_INVALID)
     except Exception as e:
         _logger.error(f"Unexpected error reading certificate: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to process certificate file"
-        )
+        raise ApiError(ErrorCode.CERTIFICATE_PROCESSING_FAILED)
 
     # Validate all roles exist
     roles_to_assign = []
@@ -193,15 +194,9 @@ async def create_user(
         )
         role = role_result.first()
         if not role:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Role with ID {role_id} not found"
-            )
+            raise ApiError(ErrorCode.ROLE_NOT_FOUND, role_id=role_id)
         if role.is_deleted:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Role with ID {role_id} is deleted and cannot be assigned"
-            )
+            raise ApiError(ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, role_id=role_id)
         roles_to_assign.append(role)
 
     # Hash PKI certificate data before storing
@@ -218,10 +213,7 @@ async def create_user(
         )
     )
     if duplicate_check.first():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Certificate already exists for another user"
-        )
+        raise ApiError(ErrorCode.CERTIFICATE_TAKEN)
 
     # Create user with validated data and hashed PKI data
     user = User(
@@ -277,21 +269,12 @@ async def create_user(
         await session.rollback()
         error_msg = str(e)
         if "Data too long" in error_msg:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Data too long for one or more fields"
-            )
-        elif "Duplicate entry" in error_msg or "already exists" in error_msg:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User with this username or certificate already exists"
-            )
+            raise ApiError(ErrorCode.DATA_TOO_LONG)
+        elif _is_unique_violation(error_msg):
+            raise ApiError(ErrorCode.USERNAME_OR_CERTIFICATE_TAKEN)
         else:
             _logger.error(f"Error creating user: {error_msg}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Database error occurred"
-            )
+            raise ApiError(ErrorCode.DATABASE_ERROR)
 
 
 @router.get(UserRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo)
@@ -311,13 +294,10 @@ async def get_user(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW]))
 ):
-    """Get user by ID - visible to the user itself and to callers whose post scope covers the user's post"""
+    """Get user by ID - visible to the user itself, to administrators and to callers whose post scope covers the user's post"""
     current_user = auth.user
     if user_id <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User ID must be a positive integer"
-        )
+        raise ApiError(ErrorCode.USER_ID_INVALID)
 
     result = await session.exec(
         select(User).where(User.id == user_id)
@@ -326,10 +306,7 @@ async def get_user(
     user = result.first()
 
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
+        raise ApiError(ErrorCode.USER_NOT_FOUND)
 
     AccessControlService.check_user_visibility(auth, user)
 
@@ -345,7 +322,6 @@ async def update_user(
         username_alias: Optional[str] = Form(None, min_length=1, max_length=255),
         post_id: Optional[int] = Form(None),
         is_active: Optional[bool] = Form(None),
-        is_deleted: Optional[bool] = Form(None, description="false restores a soft-deleted user, true soft-deletes it (requires user.delete)"),
         role_ids: Optional[str] = Form(None, description="Optional JSON array of role IDs, e.g. [1, 2, 3]"),
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE], admin=True))
@@ -361,14 +337,19 @@ async def update_user(
     - role_ids: Replace all user roles with provided role IDs (JSON array string, e.g. "[1, 2, 3]")
     - certificate: Update PKI certificate authentication data (file upload)
 
-    Only provided fields will be updated.
+    Only provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).
+    The fields are form fields: any other body (JSON included) answers 415 instead of being ignored.
     """
     current_user = auth.user
-    if user_id <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User ID must be a positive integer"
+    content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    if content_type and content_type not in FORM_CONTENT_TYPES:
+        raise ApiError(
+            ErrorCode.FORM_CONTENT_TYPE_REQUIRED,
+            headers={"Accept-Patch": ", ".join(FORM_CONTENT_TYPES)},
+            content_type=content_type,
         )
+    if user_id <= 0:
+        raise ApiError(ErrorCode.USER_ID_INVALID)
 
     # Find user
     result = await session.exec(
@@ -377,32 +358,15 @@ async def update_user(
     user = result.first()
 
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    if user.is_deleted and is_deleted is not False:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise ApiError(ErrorCode.USER_NOT_FOUND)
+    if user.is_deleted:
+        raise ApiError(ErrorCode.USER_NOT_FOUND)
 
     # Store old values for auditing
     old_values = user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"})
 
     # Parse role_ids from JSON string if provided
-    role_ids_list = None
-    if role_ids is not None:
-        try:
-            _logger.debug(f"Received role_ids string for update: {role_ids}")
-            role_ids_list = json.loads(role_ids)
-
-            if not isinstance(role_ids_list, list):
-                raise ValueError("role_ids must be a JSON array")
-
-        except json.JSONDecodeError as e:
-            _logger.error(f"JSON decode error for role_ids: {str(e)}, received: {role_ids}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid role_ids format. Must be a JSON array like [1, 2, 3]. Received: {role_ids}"
-            )
+    role_ids_list = _parse_role_ids(role_ids) if role_ids is not None else None
 
     # Validate input data using Pydantic model
     try:
@@ -411,25 +375,16 @@ async def update_user(
             username_alias=username_alias,
             post_id=post_id,
             is_active=is_active,
-            is_deleted=is_deleted,
             role_ids=role_ids_list
         )
-    except Exception as e:
-        _logger.error(f"Validation error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Server side error"  # TODO swap to real error message
-        )
+    except ValidationError as e:
+        _logger.info(f"User update rejected by validation: {e.errors(include_url=False, include_input=False)}")
+        raise _validation_error(e)
 
     if update_data.username is not None:
-        existing_username = await session.exec(
-            select(User).where(User.username == update_data.username, User.id != user_id)
-        )
+        existing_username = await session.exec(_username_taken(update_data.username, exclude_user_id=user_id))
         if existing_username.first():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User with this username already exists"
-            )
+            raise ApiError(ErrorCode.USERNAME_TAKEN)
         user.username = update_data.username
 
     if update_data.post_id is not None:
@@ -437,68 +392,28 @@ async def update_user(
             select(Post).where(Post.id == update_data.post_id)
         )
         if not post_result.first():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Post with ID {update_data.post_id} not found"
-            )
+            raise ApiError(ErrorCode.POST_NOT_FOUND, post_id=update_data.post_id)
         user.post_id = update_data.post_id
 
     if update_data.username_alias is not None:
         user.username_alias = update_data.username_alias
 
-    if update_data.is_deleted is not None:
-        AccessControlService.check_permission(auth, Permissions.USER_DELETE, "changing is_deleted")
-        if update_data.is_deleted and user.id == current_user.id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot delete your own account")
-        user.is_deleted = update_data.is_deleted
-        if update_data.is_deleted:
-            user.is_active = False
-            await AuthService.invalidate_all_user_sessions(
-                session=session,
-                user_id=user_id,
-                reason="account_deleted",
-                actor_user_id=current_user.id,
-                ip_address=request.client.host if request.client else None,
-                user_agent=request.headers.get("user-agent")
-            )
-        else:
-            user.is_active = True
-
+    deactivating = False
     if update_data.is_active is not None:
+        if update_data.is_active is False and user.id == current_user.id:
+            raise ApiError(ErrorCode.CANNOT_DEACTIVATE_SELF)
+        deactivating = user.is_active and not update_data.is_active
         user.is_active = update_data.is_active
-
-        # Immediately invalidate all sessions when deactivating a user
-        if not update_data.is_active:
-            invalidated_count = await AuthService.invalidate_all_user_sessions(
-                session=session,
-                user_id=user_id,
-                reason="account_deactivated",
-                actor_user_id=current_user.id,
-                ip_address=request.client.host if request.client else None,
-                user_agent=request.headers.get("user-agent")
-            )
-            _logger.info(
-                f"User {current_user.username} deactivated user {user.username}, "
-                f"invalidated {invalidated_count} active sessions"
-            )
 
     # Handle certificate update if provided
     if certificate is not None:
         try:
             cert_data = await certificate.read()
             if len(cert_data) == 0:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Certificate file is empty"
-                )
+                raise ApiError(ErrorCode.CERTIFICATE_FILE_EMPTY)
 
-            # Limit certificate file size (5MB)
-            max_cert_size = 5 * 1024 * 1024
-            if len(cert_data) > max_cert_size:
-                raise HTTPException(
-                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                    detail="Certificate file too large (max 5MB)"
-                )
+            if len(cert_data) > MAX_CERTIFICATE_BYTES:
+                raise ApiError(ErrorCode.CERTIFICATE_FILE_TOO_LARGE, max_bytes=MAX_CERTIFICATE_BYTES)
 
             # Parse certificate and extract PKI fields
             cert_info = CertificateParser.parse_certificate(cert_data)
@@ -525,10 +440,7 @@ async def update_user(
                 )
             )
             if duplicate_check.first():
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Certificate already exists for another user"
-                )
+                raise ApiError(ErrorCode.CERTIFICATE_TAKEN)
 
             user.pki_certificate_cn_hash = pki_cn_hash
             user.pki_certificate_serial_hash = pki_serial_hash
@@ -536,22 +448,36 @@ async def update_user(
 
             _logger.info(f"User {current_user.username} updated certificate for user {user.username}")
 
+        except ApiError:
+            # Empty, oversized or already used certificate: already the right answer, not a 500
+            raise
         except ValueError as e:
             _logger.error(f"Certificate parsing error for user {user.username}: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid certificate"
-            )
+            raise ApiError(ErrorCode.CERTIFICATE_INVALID)
         except Exception as e:
             _logger.error(f"Unexpected error reading certificate: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to process certificate file"
-            )
+            raise ApiError(ErrorCode.CERTIFICATE_PROCESSING_FAILED)
 
     # Update timestamp
     user.updated_at = datetime.now(timezone.utc)
     session.add(user)
+
+    # Deactivation ends every live session in the same transaction as the flag change, so the user's
+    # tokens stop working the moment the update is committed (the request dependency rejects them).
+    if deactivating:
+        invalidated_count = await AuthService.invalidate_all_user_sessions(
+            session=session,
+            user_id=user_id,
+            reason="account_deactivated",
+            actor_user_id=current_user.id,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+            commit=False
+        )
+        _logger.info(
+            f"User {current_user.username} deactivated user {user.username}, "
+            f"invalidated {invalidated_count} active sessions"
+        )
 
     try:
         await session.commit()
@@ -567,16 +493,10 @@ async def update_user(
                 role = role_result.first()
                 if not role:
                     await session.rollback()
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"Role with ID {role_id} not found"
-                    )
+                    raise ApiError(ErrorCode.ROLE_NOT_FOUND, role_id=role_id)
                 if role.is_deleted:
                     await session.rollback()
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Role with ID {role_id} is deleted and cannot be assigned"
-                    )
+                    raise ApiError(ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, role_id=role_id)
                 roles_to_assign.append(role)
 
             # Delete existing role assignments
@@ -622,17 +542,14 @@ async def update_user(
     except (IntegrityError, DataError) as e:
         await session.rollback()
         error_msg = str(e)
-        if "Duplicate entry" in error_msg or "already exists" in error_msg:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Certificate already exists for another user"
-            )
+        if _is_unique_violation(error_msg):
+            # A concurrent request took the username or the certificate after the checks above
+            # e.orig holds only the database message; str(e) also carries the SQL, which names every column
+            code = ErrorCode.USERNAME_TAKEN if "username" in str(getattr(e, "orig", e)) else ErrorCode.CERTIFICATE_TAKEN
+            raise ApiError(code)
         else:
             _logger.error(f"Error updating user: {error_msg}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Database error occurred"
-            )
+            raise ApiError(ErrorCode.DATABASE_ERROR)
 
 
 # UserRole Management Routes
@@ -646,10 +563,7 @@ async def list_user_roles(
     """List all roles assigned to a user - requires both USER_VIEW and ROLE_VIEW permissions"""
     current_user = auth.user
     if user_id <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User ID must be a positive integer"
-        )
+        raise ApiError(ErrorCode.USER_ID_INVALID)
 
     # Check if user exists
     user_result = await session.exec(
@@ -658,10 +572,7 @@ async def list_user_roles(
     user = user_result.first()
 
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
+        raise ApiError(ErrorCode.USER_NOT_FOUND)
 
     # Get all roles for this user
     result = await session.exec(
@@ -689,7 +600,7 @@ async def _get_active_user_or_404(session: AsyncSession, user_id: int) -> User:
     result = await session.exec(select(User).where(User.id == user_id, User.is_deleted == False))
     user = result.first()
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise ApiError(ErrorCode.USER_NOT_FOUND)
     return user
 
 
@@ -722,13 +633,10 @@ async def upsert_user_post_access(
 
     post = await session.get(Post, post_id)
     if not post:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+        raise ApiError(ErrorCode.POST_NOT_FOUND)
 
     if user.post_id == post_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This post is the home post of the user and already grants full access"
-        )
+        raise ApiError(ErrorCode.POST_ACCESS_HOME_POST)
 
     result = await session.exec(
         select(UserPostAccess).where(UserPostAccess.user_id == user_id, UserPostAccess.post_id == post_id)
@@ -784,7 +692,7 @@ async def delete_user_post_access(
     )
     row = result.first()
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post access not found")
+        raise ApiError(ErrorCode.POST_ACCESS_NOT_FOUND)
 
     old_values = row.model_dump()
     row_id = row.id
@@ -810,19 +718,22 @@ async def delete_user_post_access(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.delete(UserRoutes.USER_BY_ID.value, status_code=status.HTTP_204_NO_CONTENT)
-async def delete_user(
+@router.post(UserRoutes.USER_ARCHIVE.value, response_model=UserResponse)
+async def archive_user(
         request: Request,
         user_id: int,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_DELETE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_ARCHIVE], admin=True))
 ):
-    """Soft-delete a user: marks it deleted, deactivates it and invalidates its sessions.
-    Observations and media of the user stay. Restore with PATCH is_deleted=false."""
+    """Archive a user (is_deleted=true): deactivates the account and invalidates its sessions.
+
+    Nothing is removed: observations, media and role assignments of the user stay. The user is hidden from
+    lists unless include_deleted=true. Undo with POST /{user_id}/restore. Already archived or unknown: 404.
+    """
     current_user = auth.user
     user = await _get_active_user_or_404(session, user_id)
     if user.id == current_user.id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot delete your own account")
+        raise ApiError(ErrorCode.CANNOT_ARCHIVE_SELF)
 
     old_values = user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"})
     user.is_deleted = True
@@ -841,17 +752,58 @@ async def delete_user(
     )
     await create_audit_log(
         session=session,
-        action="delete",
+        action="archive",
         resource_type="user",
         resource_id=user.id,
         user_id=current_user.id,
         session_id=getattr(request.state, "session_id", None),
         old_values=old_values,
-        details={"message": f"User {current_user.username} soft-deleted user {user.username} ({invalidated} sessions invalidated)"},
+        details={"message": f"User {current_user.username} archived user {user.username} ({invalidated} sessions invalidated)"},
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
         request_url=str(request.url)
     )
     await session.commit()
-    _logger.info(f"User {current_user.username} soft-deleted user {user.username}")
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    await session.refresh(user)
+    _logger.info(f"User {current_user.username} archived user {user.username}")
+    return UserResponse.model_validate(user)
+
+
+@router.post(UserRoutes.USER_RESTORE.value, response_model=UserResponse)
+async def restore_user(
+        request: Request,
+        user_id: int,
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_ARCHIVE], admin=True))
+):
+    """Restore an archived user (is_deleted=false, is_active=true): the account can log in again. Not archived: 409."""
+    current_user = auth.user
+    result = await session.exec(select(User).where(User.id == user_id))
+    user = result.first()
+    if not user:
+        raise ApiError(ErrorCode.USER_NOT_FOUND)
+    if not user.is_deleted:
+        raise ApiError(ErrorCode.USER_NOT_ARCHIVED)
+
+    old_values = user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"})
+    user.is_deleted = False
+    user.is_active = True
+    user.updated_at = datetime.now(timezone.utc)
+    session.add(user)
+    await create_audit_log(
+        session=session,
+        action="restore",
+        resource_type="user",
+        resource_id=user.id,
+        user_id=current_user.id,
+        session_id=getattr(request.state, "session_id", None),
+        old_values=old_values,
+        details={"message": f"User {current_user.username} restored user {user.username}"},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_url=str(request.url)
+    )
+    await session.commit()
+    await session.refresh(user)
+    _logger.info(f"User {current_user.username} restored user {user.username}")
+    return UserResponse.model_validate(user)

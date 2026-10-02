@@ -1,5 +1,5 @@
 from typing import Optional
-from fastapi import Depends, HTTPException, status, Request
+from fastapi import Depends, status, Request
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 from jose import JWTError, jwt
@@ -9,10 +9,12 @@ from loguru import logger
 from app.backend.config import settings
 from app.backend.database import get_session
 from app.backend.models.user import User, UserSession
-from app.backend.enums.general import AuthErrorCode
+from app.backend.enums.errors import AuthErrorCode
+from app.backend.services.auth import AuthService
 from app.backend.services.auth_context import AuthContext, load_auth_context
 from app.backend.services.presence import should_touch, is_expired
 from datetime import datetime, timezone
+from app.backend.services.api_errors import ApiError
 
 security = HTTPBearer(auto_error=False)
 
@@ -27,10 +29,7 @@ async def get_current_user(
 
     if not credentials:
         logger.warning("Authentication failed: No credentials provided")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": AuthErrorCode.CREDENTIALS_REQUIRED, "message": "Authentication credentials required"}
-        )
+        raise ApiError(AuthErrorCode.CREDENTIALS_REQUIRED)
 
     token = credentials.credentials
 
@@ -42,10 +41,7 @@ async def get_current_user(
         )
         if payload.get("type") != "access":
             logger.warning("Authentication failed: token is not an access token")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"code": AuthErrorCode.INVALID_TOKEN, "message": "Access token required"}
-            )
+            raise ApiError(AuthErrorCode.INVALID_TOKEN)
         user_id: int = payload.get("sub")
         # Explicitly get sid or default to None
         session_id = payload.get("sid", None)
@@ -55,16 +51,28 @@ async def get_current_user(
 
         if user_id is None:
             logger.warning("Authentication failed: Missing user_id in JWT payload")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"code": AuthErrorCode.INVALID_TOKEN, "message": "Invalid authentication token"}
-            )
+            raise ApiError(AuthErrorCode.INVALID_TOKEN)
     except JWTError as e:
         logger.warning(f"JWT decode error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": AuthErrorCode.INVALID_TOKEN, "message": "Invalid authentication token"}
-        )
+        raise ApiError(AuthErrorCode.INVALID_TOKEN)
+
+    # Account status first: a deactivated or archived account is rejected whatever the state of its sessions,
+    # and any session still live is ended here so the token stops working even when the flag was changed
+    # outside the API.
+    result = await session.exec(select(User).where(User.id == int(user_id)))
+    user = result.first()
+
+    if not user:
+        logger.warning(f"User not found in database: user_id={user_id}")
+        raise ApiError(AuthErrorCode.ACCOUNT_NOT_FOUND)
+
+    if user.is_deleted or not user.is_active:
+        ended = await AuthService.expire_sessions_of_inactive_user(session, user)
+        if user.is_deleted:
+            logger.warning(f"Deleted user attempted to authenticate: user_id={user_id}, username={user.username}, sessions ended={ended}")
+            raise ApiError(AuthErrorCode.ACCOUNT_DELETED)
+        logger.warning(f"Deactivated user attempted to authenticate: user_id={user_id}, username={user.username}, sessions ended={ended}")
+        raise ApiError(AuthErrorCode.ACCOUNT_DEACTIVATED)
 
     # Validate session is still active in DB (ensures invalidated sessions are rejected immediately)
     if session_id:
@@ -91,34 +99,7 @@ async def get_current_user(
             await session.commit()
         if not user_session:
             logger.warning(f"Session invalidated or not found: session_id={session_id}, user_id={user_id}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"code": AuthErrorCode.SESSION_EXPIRED, "message": "Session expired or invalidated"}
-            )
-
-    result = await session.exec(select(User).where(User.id == user_id))
-    user = result.first()
-
-    if not user:
-        logger.warning(f"User not found in database: user_id={user_id}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": AuthErrorCode.ACCOUNT_NOT_FOUND, "message": "Account not found"}
-        )
-
-    if user.is_deleted:
-        logger.warning(f"Deleted user attempted to authenticate: user_id={user_id}, username={user.username}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": AuthErrorCode.ACCOUNT_DELETED, "message": "Account deleted"}
-        )
-
-    if not user.is_active:
-        logger.warning(f"Deactivated user attempted to authenticate: user_id={user_id}, username={user.username}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": AuthErrorCode.ACCOUNT_DEACTIVATED, "message": "Account deactivated"}
-        )
+            raise ApiError(AuthErrorCode.SESSION_EXPIRED)
 
     logger.info(f"User authenticated successfully: user_id={user_id}, username={user.username}")
     return user

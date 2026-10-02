@@ -14,9 +14,10 @@ class ObservationReportType(str, Enum):
     """
     Selects report layout.
 
-    RC_FREQ_PART    - RC frequencies only: frequency_min, frequency_max
-    VIDEO_FREQ_PART - video frequencies only: video_frequency_min, video_frequency_max
-    ALL_FIELDS      - all fields: user, post, all frequency/bandwidth columns, duration, tags
+    One row per frequency band.
+    RC_FREQ_PART    - rc bands only: frequency_min, frequency_max
+    VIDEO_FREQ_PART - video bands only: frequency_min, frequency_max
+    ALL_FIELDS      - every band with all fields: user, post, kind, emitter group, frequencies, bandwidth, duration, tags
     """
     RC_FREQ_PART    = "rc_freq_part"
     VIDEO_FREQ_PART = "video_freq_part"
@@ -36,7 +37,7 @@ class ObservationReportType(str, Enum):
         _desc = {
             "rc_freq_part":    "Частота мiн/макс, тип сигналу, коментар",
             "video_freq_part": "Вiдео частота мiн/макс, тип сигналу, коментар",
-            "all_fields":      "Всi поля: користувач, пост, всi частоти та смуги, тривалiсть, теги",
+            "all_fields":      "Всi поля: користувач, пост, тип частоти, група, частоти та смуга, тривалiсть, теги",
         }
         return _desc[self.value]
 
@@ -100,15 +101,11 @@ class ObservationReportParams(BaseModel):
         description="Filter by confidence level: low, medium, high"
     )
 
-    # --- RC frequency range ---
-    frequency_center_from: Optional[Decimal] = Field(default=None, description="Frequency center >= (MHz)")
-    frequency_center_to: Optional[Decimal] = Field(default=None, description="Frequency center <= (MHz)")
+    # --- Band range (applies to the bands of the report's kind; every kind for all_fields) ---
+    frequency_center_from: Optional[Decimal] = Field(default=None, description="Band center frequency >= (MHz)")
+    frequency_center_to: Optional[Decimal] = Field(default=None, description="Band center frequency <= (MHz)")
     bandwidth_from: Optional[Decimal] = Field(default=None, description="Bandwidth >= (MHz)")
     bandwidth_to: Optional[Decimal] = Field(default=None, description="Bandwidth <= (MHz)")
-
-    # --- Video frequency range ---
-    video_frequency_center_from: Optional[Decimal] = Field(default=None, description="Video frequency center >= (MHz)")
-    video_frequency_center_to: Optional[Decimal] = Field(default=None, description="Video frequency center <= (MHz)")
 
     # --- Duration range ---
     duration_from: Optional[int] = Field(default=None, ge=0, description="Duration >= (seconds)")
@@ -139,11 +136,11 @@ class ObservationReportParams(BaseModel):
 
     # --- Report type (required) ---
     report_type: ObservationReportType = Field(
-        description="'rc_freq_part' - RC frequencies; 'video_freq_part' - video frequencies; 'all_fields' - all fields"
+        description="'rc_freq_part' - rc bands; 'video_freq_part' - video bands; 'all_fields' - every band, all fields"
     )
 
     # --- Soft delete ---
     include_deleted: bool = Field(
         default=False,
-        description="Include soft-deleted records in the report"
+        description="Include archived observations and archived bands in the report (requires observation.archive)"
     )

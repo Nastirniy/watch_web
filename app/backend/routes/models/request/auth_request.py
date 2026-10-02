@@ -3,6 +3,8 @@ from pydantic import BaseModel, Field, field_validator
 import re
 
 from app.backend.enums.general import Permissions
+from app.backend.services.api_errors import invalid
+from app.backend.enums.errors import FieldErrorCode
 
 
 class LoginRequest(BaseModel):
@@ -15,7 +17,7 @@ class LoginRequest(BaseModel):
     def validate_cn(cls, v: str) -> str:
         # Allow alphanumeric, spaces, dots, dashes, underscores, equals, and @ symbols for email-like CNs
         if not re.match(r'^[a-zA-Z0-9\s\-_.=@]+$', v):
-            raise ValueError('Invalid certificate CN format')
+            raise invalid(FieldErrorCode.CERTIFICATE_CN_INVALID)
         return v.strip()
 
     @field_validator('certificate_serial')
@@ -23,7 +25,7 @@ class LoginRequest(BaseModel):
     def validate_serial(cls, v: str) -> str:
         # Allow alphanumeric characters, dashes and underscores for serials
         if not re.match(r'^[a-fA-F0-9\-_]+$', v):
-            raise ValueError('Invalid certificate serial format')
+            raise invalid(FieldErrorCode.CERTIFICATE_SERIAL_INVALID)
         return v.strip()
 
     @field_validator('certificate_fingerprint')
@@ -31,7 +33,7 @@ class LoginRequest(BaseModel):
     def validate_fingerprint(cls, v: str) -> str:
         # Allow hex characters, colons, and dashes for fingerprints
         if not re.match(r'^[a-fA-F0-9:\-]+$', v):
-            raise ValueError('Invalid certificate fingerprint format')
+            raise invalid(FieldErrorCode.CERTIFICATE_FINGERPRINT_INVALID)
         return v.strip()
 
 
@@ -55,5 +57,5 @@ class PermissionCheckRequest(BaseModel):
         known = {p.value for p in Permissions}
         unknown = [name for name in v if name not in known]
         if unknown:
-            raise ValueError(f"Unknown permissions: {unknown}")
+            raise invalid(FieldErrorCode.PERMISSIONS_UNKNOWN, permissions=sorted(unknown))
         return v

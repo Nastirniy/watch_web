@@ -1,8 +1,9 @@
-from typing import Iterable, Optional, TYPE_CHECKING
-from fastapi import HTTPException, status
+from typing import Any, Iterable, Optional, TYPE_CHECKING
+from fastapi import status
 
-from app.backend.enums.general import AccessErrorCode
-from app.backend.routes.models.response.error_response import ErrorDetail, RequiredPermissions
+from app.backend.enums.errors import AccessErrorCode
+from app.backend.routes.models.response.error_response import RequiredPermissions
+from app.backend.services.api_errors import ApiError
 
 if TYPE_CHECKING:
     from app.backend.services.permissions import Require
@@ -10,18 +11,17 @@ if TYPE_CHECKING:
 
 def access_denied(
         code: AccessErrorCode,
-        message: str,
         required: Optional["Require"] = None,
         missing: Iterable[str] = (),
-) -> HTTPException:
-    """Build a 403 with the structured body {"detail": {code, message, required, missing}}.
+        **params: Any,
+) -> ApiError:
+    """A 403 problem that also says what the route requires and what the caller lacks.
 
-    Usage: raise access_denied(AccessErrorCode.NOT_OWNER, "You can only modify your own observations")
+    Usage: raise access_denied(AccessErrorCode.OBSERVATION_NOT_OWNER, required=..., missing=[...])
     """
-    detail = ErrorDetail(
-        code=code.value,
-        message=message,
-        required=RequiredPermissions(**required.as_dict()) if required is not None else None,
+    return ApiError(
+        code,
+        required=RequiredPermissions(**required.as_dict()).model_dump() if required is not None else None,
         missing=list(missing),
+        **params,
     )
-    return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail.model_dump())

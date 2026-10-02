@@ -23,8 +23,9 @@ class PostFilterParams(BaseFilterParams):
     city_contains: Optional[str] = Field(default=None, max_length=50, description="City contains text")
     description_contains: Optional[str] = Field(default=None, max_length=100, description="Description contains text")
     is_active: Optional[bool] = Field(default=None, description="Filter by active status")
-    connection_status: Optional[str] = Field(default=None, description="Connection status (online, offline, maintenance, error)")
+    has_online_users: Optional[bool] = Field(default=None, description="true: posts with at least one home user online now; false: posts without")
     created_at_from: Optional[datetime] = Field(default=None, description="Created after")
     created_at_to: Optional[datetime] = Field(default=None, description="Created before")
-    last_connection_from: Optional[datetime] = Field(default=None, description="Last connection after")
-    last_connection_to: Optional[datetime] = Field(default=None, description="Last connection before")
+    last_user_activity_from: Optional[datetime] = Field(default=None, description="Latest home user activity after")
+    last_user_activity_to: Optional[datetime] = Field(default=None, description="Latest home user activity before")
+

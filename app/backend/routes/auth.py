@@ -11,10 +11,11 @@ from app.backend.services.auth_context import AuthContext, load_auth_context
 from app.backend.services.permissions import Require
 from app.backend.services.route_access import routes_allowed_for
 from app.backend.routes.helpers.auth_helper import build_user_info, build_login_response
-from app.backend.routes.models.response.error_response import ACCESS_ERROR_RESPONSES, RequiredPermissions
+from app.backend.routes.models.response.error_response import RequiredPermissions
 from app.backend.models.user import User, UserSession
 from app.backend.enums.routes import AuthRoutes
-from app.backend.enums.general import Permissions, AppEnvironment, AuthErrorCode
+from app.backend.enums.general import Permissions, AppEnvironment
+from app.backend.enums.errors import AuthErrorCode
 from app.backend.utils.logging_config import get_auth_logger
 from app.backend.config import settings
 from app.backend.helpers.certeficates_helper import parse_cn
@@ -34,8 +35,10 @@ from app.backend.routes.models.response.auth_response import (
     RouteAccessResponse,
     RouteAccessEntryResponse
 )
+from app.backend.services.api_errors import ApiError
+from app.backend.enums.errors import ErrorCode
 
-router = APIRouter(responses=ACCESS_ERROR_RESPONSES)
+router = APIRouter(prefix=AuthRoutes.BASE.value, tags=[AuthRoutes.tag()])
 _logger = get_auth_logger()
 
 
@@ -61,10 +64,7 @@ async def login(
                 _logger.info(f"Development mode: Using JSON authentication data from IP: {client_ip}")
             else:
                 _logger.warning(f"Development mode: No authentication data provided from IP: {client_ip}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="JSON authentication data required in development mode"
-                )
+                raise ApiError(ErrorCode.LOGIN_DATA_REQUIRED)
 
         else:
             # Production mode: extract SSL certificate data from headers
@@ -80,11 +80,7 @@ async def login(
                     f"Certificate verification failed from IP: {client_ip}, "
                     f"status: {ssl_verify}"
                 )
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail={"code": AuthErrorCode.CERTIFICATE_VERIFICATION_FAILED, "message": "Certificate verification failed"},
-                    headers={"WWW-Authenticate": "Bearer"}
-                )
+                raise ApiError(AuthErrorCode.CERTIFICATE_VERIFICATION_FAILED, headers={"WWW-Authenticate": "Bearer"})
 
             # Parse CN from Distinguished Name
             cn = await parse_cn(ssl_dn)
@@ -95,11 +91,7 @@ async def login(
                     f"Missing certificate data from IP: {client_ip}, "
                     f"CN: {cn}, Serial: {ssl_serial}, Fingerprint: {ssl_fingerprint}"
                 )
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail={"code": AuthErrorCode.CERTIFICATE_DATA_MISSING, "message": "Invalid certificate data"},
-                    headers={"WWW-Authenticate": "Bearer"}
-                )
+                raise ApiError(AuthErrorCode.CERTIFICATE_DATA_MISSING, headers={"WWW-Authenticate": "Bearer"})
 
         # Authenticate with enhanced PKI method
         user, auth_error = await AuthService.authenticate_pki(
@@ -115,19 +107,9 @@ async def login(
                 f"CN: {cn}, Serial: {ssl_serial}, error: {auth_error}"
             )
 
-            error_messages = {
-                AuthErrorCode.CERTIFICATE_NOT_RECOGNIZED: "Certificate not recognized",
-                AuthErrorCode.CERTIFICATE_DATA_MISSING: "Invalid certificate data",
-                AuthErrorCode.ACCOUNT_DEACTIVATED: "Account deactivated",
-                AuthErrorCode.ACCOUNT_DELETED: "Account deleted",
-            }
-            error_code = auth_error or AuthErrorCode.CERTIFICATE_NOT_RECOGNIZED
-            message = error_messages.get(error_code, "Authentication failed")
-
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"code": error_code, "message": message},
-                headers={"WWW-Authenticate": "Bearer"}
+            raise ApiError(
+                AuthErrorCode(auth_error or AuthErrorCode.CERTIFICATE_NOT_RECOGNIZED),
+                headers={"WWW-Authenticate": "Bearer"},
             )
 
         # Create session
@@ -155,10 +137,7 @@ async def login(
         raise
     except Exception as e:
         _logger.error(f"Login error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Authentication service unavailable"
-        )
+        raise ApiError(ErrorCode.AUTHENTICATION_UNAVAILABLE)
 
 #
 # @router.post(AuthRoutes.LOGIN.value, response_model=LoginResponse)
@@ -232,10 +211,7 @@ async def refresh_token(
         # Verify refresh token
         payload = AuthService.verify_token(refresh_request.refresh_token, "refresh")
         if not payload:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"code": AuthErrorCode.INVALID_REFRESH_TOKEN, "message": "Invalid refresh token"}
-            )
+            raise ApiError(AuthErrorCode.INVALID_REFRESH_TOKEN)
 
         user_id = int(payload.get("sub"))
         session_id = payload.get("sid", None)
@@ -248,22 +224,15 @@ async def refresh_token(
         user = user_result.first()
 
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"code": AuthErrorCode.ACCOUNT_NOT_FOUND, "message": "Account not found"}
-            )
+            raise ApiError(AuthErrorCode.ACCOUNT_NOT_FOUND)
 
-        if user.is_deleted:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"code": AuthErrorCode.ACCOUNT_DELETED, "message": "Account deleted"}
-            )
-
-        if not user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"code": AuthErrorCode.ACCOUNT_DEACTIVATED, "message": "Account deactivated"}
-            )
+        if user.is_deleted or not user.is_active:
+            # The refresh token of a deactivated or archived account is dead; end any session still live
+            ended = await AuthService.expire_sessions_of_inactive_user(session, user)
+            _logger.warning(f"Refresh attempt for inactive account: user_id={user_id}, sessions ended={ended}")
+            if user.is_deleted:
+                raise ApiError(AuthErrorCode.ACCOUNT_DELETED)
+            raise ApiError(AuthErrorCode.ACCOUNT_DEACTIVATED)
 
         # Verify the session is still active (reject if sessions were invalidated)
         if session_id:
@@ -283,10 +252,7 @@ async def refresh_token(
                 refresh_session = None
             if not refresh_session:
                 _logger.warning(f"Refresh attempt with invalidated or expired session: user_id={user_id}, session_id={session_id}")
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail={"code": AuthErrorCode.SESSION_EXPIRED, "message": "Session expired or invalidated"}
-                )
+                raise ApiError(AuthErrorCode.SESSION_EXPIRED)
 
         # Create new tokens bound to the same session
         access_token = AuthService.create_access_token(user.id, session_id=session_id)
@@ -301,10 +267,7 @@ async def refresh_token(
         raise
     except Exception as e:
         _logger.error(f"Token refresh error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Token refresh failed"
-        )
+        raise ApiError(ErrorCode.TOKEN_REFRESH_FAILED)
 
 
 @router.post(AuthRoutes.LOGOUT.value, response_model=LogoutResponse)
@@ -321,10 +284,7 @@ async def logout(
 
         if not session_id:
             _logger.warning(f"No active session found for user {current_user.username}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No active session found"
-            )
+            raise ApiError(ErrorCode.NO_ACTIVE_SESSION)
 
         success = await AuthService.invalidate_session(
             session,
@@ -336,10 +296,7 @@ async def logout(
 
         if not success:
             _logger.warning(f"Session already invalidated for user {current_user.username}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Session already invalidated"
-            )
+            raise ApiError(ErrorCode.SESSION_ALREADY_INVALIDATED)
 
         _logger.info(f"User {current_user.username} logged out successfully")
         return LogoutResponse(message="Logged out successfully")
@@ -348,10 +305,7 @@ async def logout(
         raise
     except Exception as e:
         _logger.error(f"Logout error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Logout failed"
-        )
+        raise ApiError(ErrorCode.LOGOUT_FAILED)
 
 
 @router.get(AuthRoutes.ME.value, response_model=UserInfoResponse)
@@ -397,10 +351,7 @@ async def get_user_sessions(
 
     except Exception as e:
         _logger.error(f"Get sessions error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve sessions"
-        )
+        raise ApiError(ErrorCode.SESSIONS_LIST_FAILED)
 
 
 # @router.get("/test-cert")

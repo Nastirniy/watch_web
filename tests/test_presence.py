@@ -12,8 +12,8 @@ from app.backend.services.auth import AuthService
 from tests.helpers import make_post, make_user, make_admin, make_dictionary, make_observation
 
 ME = AuthRoutes.ME.versioned_path()
-USERS = UserRoutes.BASE.versioned_path() + "/"
-POSTS = PostRoutes.BASE.versioned_path() + "/"
+USERS = UserRoutes.ROOT.versioned_path()
+POSTS = PostRoutes.ROOT.versioned_path()
 POST = PostRoutes.POST_BY_ID.versioned_path()
 
 
@@ -121,39 +121,40 @@ async def test_creator_projection_has_presence(client, db, headers):
 
 
 @pytest.mark.asyncio
-async def test_post_status_is_derived_from_home_users(client, db, headers):
+async def test_post_presence_is_derived_from_home_users(client, db, headers):
     post = await make_post(db)
     other = await make_post(db)
     admin = await make_admin(db)
     user = await make_user(db, perms=["post.view"], post_id=post.id)
 
     body = (await client.get(POST.format(post_id=post.id), headers=headers(user))).json()
-    assert body["connection_status"] == "offline"
     assert body["online_user_count"] == 0
-    assert body["stored_connection_status"] == "offline"
+    assert body["user_count"] == 1
+    for removed in ("connection_status", "stored_connection_status", "last_connection_at"):
+        assert removed not in body
 
     await make_session(db, user, datetime.now(timezone.utc))
     body = (await client.get(POST.format(post_id=post.id), headers=headers(user))).json()
-    assert body["connection_status"] == "online"
     assert body["online_user_count"] == 1
-    assert body["last_connection_at"] is not None
+    assert body["last_user_activity_at"] is not None
 
-    online_posts = (await client.get(POSTS, params={"connection_status": "online"}, headers=headers(admin))).json()
+    online_posts = (await client.get(POSTS, params={"has_online_users": "true"}, headers=headers(admin))).json()
     assert {p["id"] for p in online_posts} == {post.id}
-    offline_posts = (await client.get(POSTS, params={"connection_status": "offline"}, headers=headers(admin))).json()
+    offline_posts = (await client.get(POSTS, params={"has_online_users": "false"}, headers=headers(admin))).json()
     assert other.id in {p["id"] for p in offline_posts} and post.id not in {p["id"] for p in offline_posts}
 
-    # manual override is stored but online presence wins while a user is active
-    update = await client.put(POST.format(post_id=post.id), json={"connection_status": "maintenance"}, headers=headers(admin))
-    assert update.status_code == 200, update.text
-    assert update.json()["stored_connection_status"] == "maintenance"
-    assert update.json()["connection_status"] == "online"
+    since = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    active_posts = (await client.get(POSTS, params={"last_user_activity_from": since}, headers=headers(admin))).json()
+    assert {p["id"] for p in active_posts} == {post.id}
 
-    rejected = await client.put(POST.format(post_id=post.id), json={"connection_status": "online"}, headers=headers(admin))
-    assert rejected.status_code == 422
-
-    maintenance_posts = (await client.get(POSTS, params={"connection_status": "maintenance"}, headers=headers(admin))).json()
-    assert post.id not in {p["id"] for p in maintenance_posts}
+    by_activity = await client.get(POSTS, params={"sort_by": "last_user_activity_at", "sort_order": "descending_nulls_last"}, headers=headers(admin))
+    assert by_activity.status_code == 200, by_activity.text
+    assert by_activity.json()[0]["id"] == post.id
 
     sorted_posts = await client.get(POSTS, params={"sort_by": "online_user_count", "sort_order": "descending"}, headers=headers(admin))
     assert sorted_posts.status_code == 200, sorted_posts.text
+
+    by_members = await client.get(POSTS, params={"sort_by": "user_count", "sort_order": "descending"}, headers=headers(admin))
+    assert by_members.status_code == 200, by_members.text
+    counts = {p["id"]: p["user_count"] for p in by_members.json()}
+    assert counts[post.id] == 1 and counts[other.id] == 0

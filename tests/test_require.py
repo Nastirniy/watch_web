@@ -32,18 +32,18 @@ def test_any_requires_one_permission():
 
 
 def test_admin_true_is_a_gate_not_a_wildcard():
-    spec = Require.of(all=[Permissions.TAG_DELETE], admin=True)
+    spec = Require.of(all=[Permissions.TAG_ARCHIVE], admin=True)
     admin_only = spec.evaluate(ctx("admin.true"))
     assert not admin_only.allowed
-    assert admin_only.missing == ("tag.delete",)
+    assert admin_only.missing == ("tag.archive",)
     assert not admin_only.admin_missing
 
-    granular_only = spec.evaluate(ctx("tag.delete"))
+    granular_only = spec.evaluate(ctx("tag.archive"))
     assert not granular_only.allowed
     assert granular_only.missing == ()
     assert granular_only.admin_missing
 
-    assert spec.evaluate(ctx("tag.delete", "admin.true")).allowed
+    assert spec.evaluate(ctx("tag.archive", "admin.true")).allowed
 
 
 def test_admin_does_not_satisfy_plain_permission():

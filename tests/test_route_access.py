@@ -3,18 +3,19 @@ import pytest
 from fastapi.routing import APIRoute
 
 from app.main import fastapi_app
-from app.backend.enums.routes import AuthRoutes
+from app.backend.enums.routes import APIVersionRoutes, AuthRoutes
 from tests.helpers import make_user, make_admin
 
 ROUTE_ACCESS = AuthRoutes.ROUTE_ACCESS.versioned_path()
-PUBLIC = {AuthRoutes.LOGIN.versioned_path(), AuthRoutes.REFRESH.versioned_path()}
+PUBLIC = {member.versioned_path(version) for version in APIVersionRoutes for member in (AuthRoutes.LOGIN, AuthRoutes.REFRESH)}
+API_PREFIXES = tuple(version.value + "/" for version in APIVersionRoutes)
 
 
 def test_every_api_route_is_guarded():
     guarded = {(entry.method, entry.path) for entry in fastapi_app.state.route_access_map}
     missing = []
     for route in fastapi_app.routes:
-        if not isinstance(route, APIRoute) or not route.path.startswith("/api/v1"):
+        if not isinstance(route, APIRoute) or not route.path.startswith(API_PREFIXES):
             continue
         if route.path in PUBLIC:
             continue

@@ -1,9 +1,18 @@
 from typing import Optional
 
-from app.backend.enums.general import ConnectionStatus
 from pydantic import BaseModel, Field, field_validator
 
 from app.backend.utils.validators import SecurityValidators
+from app.backend.services.api_errors import invalid
+from app.backend.enums.errors import FieldErrorCode
+
+
+def _required_text(value: str, max_length: int) -> str:
+    """Sanitize a required string; spaces alone would store an empty value, so they are rejected"""
+    value = SecurityValidators.sanitize_string(value.strip(), max_length=max_length)
+    if not value:
+        raise invalid(FieldErrorCode.VALUE_EMPTY)
+    return value
 
 
 class PostCreate(BaseModel):
@@ -19,7 +28,7 @@ class PostCreate(BaseModel):
     @classmethod
     def validate_required_fields(cls, v: str) -> str:
         """Validate and sanitize required string fields"""
-        return SecurityValidators.sanitize_string(v.strip(), max_length=255)
+        return _required_text(v, max_length=255)
 
     @field_validator('description', 'region', 'city')
     @classmethod
@@ -39,24 +48,21 @@ class PostUpdate(BaseModel):
     region: Optional[str] = Field(None, max_length=255, description="Post region")
     city: Optional[str] = Field(None, max_length=255, description="Post city")
     is_active: Optional[bool] = None
-    connection_status: Optional[str] = Field(None, description="Manual status: offline, maintenance or error. 'online' is derived from user presence and cannot be stored.")
 
-    @field_validator('connection_status')
-    @classmethod
-    def validate_connection_status(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return v
-        allowed = {ConnectionStatus.OFFLINE.value, ConnectionStatus.MAINTENANCE.value, ConnectionStatus.ERROR.value}
-        if v not in allowed:
-            raise ValueError(f"connection_status must be one of {sorted(allowed)}")
-        return v
-
+    # Validators do not run on the default, so None here is an explicit null for a NOT NULL column
     @field_validator('name', 'code')
     @classmethod
-    def validate_name(cls, v: Optional[str]) -> Optional[str]:
-        """Validate and sanitize name and code fields"""
-        if v is not None:
-            return SecurityValidators.sanitize_string(v.strip(), max_length=255)
+    def validate_name(cls, v: Optional[str]) -> str:
+        """Validate and sanitize name and code fields; omit the field to keep the current value"""
+        if v is None:
+            raise invalid(FieldErrorCode.VALUE_NULL)
+        return _required_text(v, max_length=255)
+
+    @field_validator('is_active')
+    @classmethod
+    def validate_is_active(cls, v: Optional[bool]) -> bool:
+        if v is None:
+            raise invalid(FieldErrorCode.VALUE_NULL)
         return v
 
     @field_validator('description', 'region', 'city')

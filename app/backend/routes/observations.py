@@ -1,7 +1,7 @@
 import io
 from typing import List, Optional
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status as fapi_status, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
@@ -15,7 +15,6 @@ from app.backend.models.observation import Observation, SignalType, Tag
 from app.backend.models.user import User
 from app.backend.models.post import Post
 from app.backend.services.auth_context import AuthContext
-from app.backend.routes.models.response.error_response import ACCESS_ERROR_RESPONSES
 from app.backend.services.permissions import require
 from app.backend.services.access_control import AccessControlService
 from app.backend.enums.general import Permissions, ObservationStatus
@@ -25,16 +24,37 @@ from app.backend.routes.models.request.observations_request import (
     ObservationCreate,
     ObservationUpdate,
     ObservationDisappeared,
+    ObservationFrequencyCreate,
+    ObservationFrequencyUpdate,
+    ObservationFrequencyListParams,
+    default_frequency_center,
 )
-from app.backend.routes.models.response.observations_response import MessageResponse, ObservationWithMedia
+from app.backend.routes.models.response.observations_response import (
+    MessageResponse,
+    ReportTypeChoice,
+    ObservationWithMedia,
+    ObservationFrequencyResponse,
+)
+from app.backend.routes.helpers.observation_helper import (
+    get_observation_for_write,
+    get_frequency_or_404,
+    ensure_other_active_frequency,
+    frequency_audit_values,
+    observation_audit_values,
+    frequency_rows,
+)
+from app.backend.filters.observation_frequency_filter import ObservationFrequencyFilter
 from app.backend.filters.params.observation_params import ObservationFilterParams
 from app.backend.filters.observation_filter import ObservationFilterService
 from app.backend.filters.params.observation_report_params import ObservationReportParams, ObservationReportType
 from app.backend.filters.observation_report_filter import ObservationReportFilter
 from app.backend.services.observation_report_service import ObservationReportService
 from app.backend.routes.models.response.search_response import EntitySchemaInfo
+from app.backend.services.api_errors import ApiError, field_problem
+from app.backend.enums.errors import ErrorCode, FieldErrorCode
+from app.backend.routes.models.response.openapi_docs import file_response, header
 
-router = APIRouter(responses=ACCESS_ERROR_RESPONSES)
+router = APIRouter(prefix=ObservationRoutes.BASE.value, tags=[ObservationRoutes.tag()])
 
 
 OBSERVATION_LOAD_OPTIONS = (
@@ -42,15 +62,20 @@ OBSERVATION_LOAD_OPTIONS = (
     selectinload(Observation.tags),
     selectinload(Observation.user),
     selectinload(Observation.disappeared_by_user),
+    selectinload(Observation.all_frequencies),
 )
 
 
-async def _load_observation_response(session: AsyncSession, observation_id: int) -> ObservationWithMedia:
+async def _load_observation(session: AsyncSession, observation_id: int) -> Observation:
     """Re-select with every relationship the response needs (refresh() does not load relationships)"""
     result = await session.exec(
         select(Observation).where(Observation.id == observation_id).options(*OBSERVATION_LOAD_OPTIONS)
     )
-    return ObservationWithMedia.model_validate(result.one())
+    return result.one()
+
+
+async def _load_observation_response(session: AsyncSession, observation_id: int) -> ObservationWithMedia:
+    return ObservationWithMedia.model_validate(await _load_observation(session, observation_id))
 
 
 async def _validate_and_get_tags(session: AsyncSession, tag_ids: List[int], keep_ids: Optional[List[int]] = None) -> List[Tag]:
@@ -71,10 +96,7 @@ async def _validate_and_get_tags(session: AsyncSession, tag_ids: List[int], keep
     found_ids = {t.id for t in tags}
     missing_ids = [tid for tid in tag_ids if tid not in found_ids]
     if missing_ids:
-        raise HTTPException(
-            status_code=fapi_status.HTTP_404_NOT_FOUND,
-            detail=f"Tags not found: {missing_ids}"
-        )
+        raise ApiError(ErrorCode.TAGS_NOT_FOUND, tag_ids=missing_ids)
 
     return tags
 
@@ -111,7 +133,7 @@ async def list_observations(
     current_user = auth.user
 
     # Apply post access filter (enforced for regular users, optional for admins)
-    AccessControlService.check_include_deleted(auth, filters, Permissions.OBSERVATION_DELETE)
+    AccessControlService.check_include_deleted(auth, filters, Permissions.OBSERVATION_ARCHIVE)
     filtered_post_ids = AccessControlService.resolve_post_scope(auth, filters.post_id)
 
     # Build base query and apply filters
@@ -156,10 +178,7 @@ async def create_observation(
     )
     post = post_result.first()
     if not post:
-        raise HTTPException(
-            status_code=fapi_status.HTTP_404_NOT_FOUND,
-            detail=f"Post with id {observation_data.post_id} does not exist"
-        )
+        raise ApiError(ErrorCode.POST_NOT_FOUND, post_id=observation_data.post_id)
 
     # Check if user has access to the post
     AccessControlService.check_post_write(auth, observation_data.post_id, "observation")
@@ -173,56 +192,25 @@ async def create_observation(
     )
     signal_type = signal_type_result.first()
     if not signal_type:
-        raise HTTPException(
-            status_code=fapi_status.HTTP_404_NOT_FOUND,
-            detail=f"SignalType with id {observation_data.signal_type_id} does not exist"
-        )
+        raise ApiError(ErrorCode.SIGNAL_TYPE_NOT_FOUND, signal_type_id=observation_data.signal_type_id)
     if not signal_type.is_active:
-        raise HTTPException(
-            status_code=fapi_status.HTTP_400_BAD_REQUEST,
-            detail=f"SignalType '{signal_type.name}' is inactive and cannot be used"
-        )
-
-    has_default_freq = observation_data.frequency_min is not None and observation_data.frequency_max is not None
-    has_video_freq = observation_data.video_frequency_min is not None and observation_data.video_frequency_max is not None
+        raise ApiError(ErrorCode.SIGNAL_TYPE_INACTIVE, signal_type_name=signal_type.name)
 
     # Validate and get tags if provided
     tags = []
     if observation_data.tag_ids:
         tags = await _validate_and_get_tags(session, observation_data.tag_ids)
 
-    # Calculate derived frequency fields if not explicitly provided
-    freq_center = observation_data.frequency_center
-    bandwidth = None
-    if has_default_freq:
-        if freq_center is None:
-            freq_center = (observation_data.frequency_min + observation_data.frequency_max) / 2
-        bandwidth = observation_data.frequency_max - observation_data.frequency_min
-
-    video_freq_center = observation_data.video_frequency_center
-    video_bandwidth = None
-    if has_video_freq:
-        if video_freq_center is None:
-            video_freq_center = (observation_data.video_frequency_min + observation_data.video_frequency_max) / 2
-        video_bandwidth = observation_data.video_frequency_max - observation_data.video_frequency_min
-
     observation = Observation(
         post_id=observation_data.post_id,
         signal_type_id=observation_data.signal_type_id,
-        frequency_min=observation_data.frequency_min,
-        frequency_max=observation_data.frequency_max,
-        frequency_center=freq_center,
-        bandwidth=bandwidth,
-        video_frequency_min=observation_data.video_frequency_min,
-        video_frequency_max=observation_data.video_frequency_max,
-        video_frequency_center=video_freq_center,
-        video_bandwidth=video_bandwidth,
         observed_at=observation_data.observed_at,
         duration_seconds=observation_data.duration_seconds,
         comment=observation_data.comment,
         confidence_level=observation_data.confidence_level,
         user_id=current_user.id,
-        tags=tags
+        tags=tags,
+        all_frequencies=frequency_rows(observation_data.frequencies),
     )
 
     session.add(observation)
@@ -233,7 +221,7 @@ async def create_observation(
 
     try:
         await session.commit()
-        await session.refresh(observation)
+        observation = await _load_observation(session, observation.id)
 
         # Create audit log
         await create_audit_log(
@@ -243,7 +231,7 @@ async def create_observation(
             resource_id=observation.id,
             user_id=current_user.id,
             session_id=getattr(request.state, "session_id", None),
-            new_values=observation.model_dump(),
+            new_values=observation_audit_values(observation),
             details={"message": f"User {current_user.username} created new observation #{observation.id}"},
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
@@ -257,10 +245,7 @@ async def create_observation(
         # This should rarely happen since we pre-validate foreign keys
         # but kept as safety net for unexpected constraints
         logger.exception(f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}")  #TODO: make it as loggers config
-        raise HTTPException(
-            status_code=fapi_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Unexpected database constraint violation"
-        )
+        raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
 
 
 @router.put(ObservationRoutes.OBSERVATION_BY_ID.value, response_model=ObservationWithMedia)
@@ -274,34 +259,29 @@ async def update_observation(
     """
     Update existing observation.
     Users can only update observations from their assigned post.
+    Archived observations answer 404 until restored (POST /{observation_id}/restore).
     """
     current_user = auth.user
-    # Get observation by ID with tags pre-loaded
+    # Get observation by ID with tags and bands pre-loaded
     query = select(Observation).where(
         Observation.id == observation_id
-    ).options(selectinload(Observation.tags))
+    ).options(selectinload(Observation.tags), selectinload(Observation.all_frequencies))
     
     result = await session.exec(query)
     observation = result.first()
 
     if not observation:
-        raise HTTPException(
-            status_code=fapi_status.HTTP_404_NOT_FOUND,
-            detail="Observation not found"
-        )
+        raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
 
     # Store old values for auditing
-    old_values = observation.model_dump()
+    old_values = observation_audit_values(observation)
 
     # Check if user has access to this observation's post
     AccessControlService.check_post_write(auth, observation.post_id, "observation")
     AccessControlService.check_observation_ownership(auth, observation)
 
-    # Soft delete / restore through the update require observation.delete
-    if observation_data.is_deleted is not None:
-        AccessControlService.check_permission(auth, Permissions.OBSERVATION_DELETE, "changing is_deleted")
-    if observation.is_deleted and observation_data.is_deleted is not False:
-        raise HTTPException(status_code=fapi_status.HTTP_404_NOT_FOUND, detail="Observation not found")
+    if observation.is_deleted:
+        raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
 
     if observation_data.signal_type_id is not None:
         signal_type_result = await session.exec(
@@ -312,48 +292,13 @@ async def update_observation(
         )
         signal_type = signal_type_result.first()
         if not signal_type:
-            raise HTTPException(
-                status_code=fapi_status.HTTP_404_NOT_FOUND,
-                detail=f"SignalType with id {observation_data.signal_type_id} does not exist"
-            )
+            raise ApiError(ErrorCode.SIGNAL_TYPE_NOT_FOUND, signal_type_id=observation_data.signal_type_id)
         if not signal_type.is_active:
-            raise HTTPException(
-                status_code=fapi_status.HTTP_400_BAD_REQUEST,
-                detail=f"SignalType '{signal_type.name}' is inactive and cannot be used"
-            )
+            raise ApiError(ErrorCode.SIGNAL_TYPE_INACTIVE, signal_type_name=signal_type.name)
 
     update_data = observation_data.model_dump(exclude_unset=True, exclude={"tag_ids"})
     for field, value in update_data.items():
         setattr(observation, field, value)
-
-    # Validate that after update, at least one set of frequencies exists
-    has_default_freq = observation.frequency_min is not None and observation.frequency_max is not None
-    has_video_freq = observation.video_frequency_min is not None and observation.video_frequency_max is not None
-
-    if not has_default_freq and not has_video_freq:
-        raise HTTPException(
-            status_code=fapi_status.HTTP_400_BAD_REQUEST,
-            detail="At least one set of frequencies must exist: either (frequency_min, frequency_max) or (video_frequency_min, video_frequency_max)"
-        )
-
-    # Recalculate or cleanup derived frequency fields
-    if observation.frequency_min is not None and observation.frequency_max is not None:
-        observation.bandwidth = observation.frequency_max - observation.frequency_min
-        if "frequency_center" not in update_data:
-            observation.frequency_center = (observation.frequency_min + observation.frequency_max) / 2
-    else:
-        observation.bandwidth = None
-        if "frequency_center" not in update_data:
-            observation.frequency_center = None
-
-    if observation.video_frequency_min is not None and observation.video_frequency_max is not None:
-        observation.video_bandwidth = observation.video_frequency_max - observation.video_frequency_min
-        if "video_frequency_center" not in update_data:
-            observation.video_frequency_center = (observation.video_frequency_min + observation.video_frequency_max) / 2
-    else:
-        observation.video_bandwidth = None
-        if "video_frequency_center" not in update_data:
-            observation.video_frequency_center = None
 
     observation.updated_at = datetime.now(timezone.utc)
 
@@ -381,7 +326,7 @@ async def update_observation(
             user_id=current_user.id,
             session_id=getattr(request.state, "session_id", None),
             old_values=old_values,
-            new_values=observation.model_dump(),
+            new_values=observation_audit_values(observation),
             details={"message": f"User {current_user.username} updated observation #{observation.id}"},
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
@@ -396,10 +341,7 @@ async def update_observation(
         # but kept as safety net for unexpected constraints
         logger.exception(
             f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}")  # TODO: make it as loggers config
-        raise HTTPException(
-            status_code=fapi_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Unexpected database constraint violation"
-        )
+        raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
 
 
 @router.post(ObservationRoutes.MARK_DISAPPEARED.value, response_model=MessageResponse)
@@ -424,10 +366,7 @@ async def mark_observation_disappeared(
     observation = result.first()
 
     if not observation:
-        raise HTTPException(
-            status_code=fapi_status.HTTP_404_NOT_FOUND,
-            detail="Observation not found"
-        )
+        raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
 
     # Store old values for auditing
     old_values = observation.model_dump()
@@ -469,7 +408,7 @@ async def mark_observation_disappeared(
     return MessageResponse(message="Observation marked as disappeared")
 
 
-@router.get(ObservationRoutes.REPORT_TYPES.value)
+@router.get(ObservationRoutes.REPORT_TYPES.value, response_model=List[ReportTypeChoice])
 async def get_report_types(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW]))
@@ -481,7 +420,12 @@ async def get_report_types(
     return ObservationReportType.choices()
 
 
-@router.post(ObservationRoutes.REPORT.value)
+@router.post(
+    ObservationRoutes.REPORT.value,
+    response_class=StreamingResponse,
+    responses=file_response("Excel report", ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+                            {"Content-Disposition": header('attachment; filename="<report>.xlsx"')}),
+)
 async def generate_observation_report(
         params: ObservationReportParams,
         session: AsyncSession = Depends(get_session),
@@ -491,8 +435,11 @@ async def generate_observation_report(
     Generate an Excel (.xlsx) report for observations. Admin only.
 
     The report header contains the filter criteria used (in Ukrainian).
-    Data columns: user, post, signal type, all frequency/bandwidth fields,
-    observed time, disappeared time, duration, comment, creation date, tags.
+    One row per frequency band (rc_freq_part: rc bands, video_freq_part: video bands, all_fields: every band);
+    the observation columns repeat for each of its bands. Bands of archived observations and archived bands
+    appear only with include_deleted. Posts outside the caller's scope are never included.
+    all_fields columns: user, post, signal type, band kind, emitter group, frequency min/max/center, bandwidth,
+    observed time, disappeared time, duration (minutes, one decimal), comment, creation date, tags.
     All datetimes are displayed in Kyiv local time (EET/EEST).
 
     Filter combinations supported:
@@ -504,18 +451,19 @@ async def generate_observation_report(
     - By statuses
     - Any combination of the above
     """
-    query = select(Observation)
-    AccessControlService.check_include_deleted(auth, params, Permissions.OBSERVATION_DELETE)
-    query = ObservationReportFilter.apply_filters(query, params)
+    AccessControlService.check_include_deleted(auth, params, Permissions.OBSERVATION_ARCHIVE)
+    for post_id in params.post_ids or []:
+        AccessControlService.check_post_view(auth, post_id)
+    query = ObservationReportFilter.build_query(params, AccessControlService.post_scope(auth))
 
     result = await session.exec(query)
-    observations = list(result.all())
+    frequencies = list(result.all())
 
     tag_names = None
     if params.tag_ids:
         tag_rows = await session.exec(select(Tag.id, Tag.name).where(Tag.id.in_(params.tag_ids)))
         tag_names = {tag_id: name for tag_id, name in tag_rows.all()}
-    excel_bytes = ObservationReportService.generate_excel(observations, params, tag_names=tag_names)
+    excel_bytes = ObservationReportService.generate_excel(frequencies, params, tag_names=tag_names)
 
     filename = f"observations_report_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.xlsx"
     return StreamingResponse(
@@ -525,46 +473,244 @@ async def generate_observation_report(
     )
 
 
-@router.delete(ObservationRoutes.OBSERVATION_BY_ID.value, response_model=MessageResponse)
-async def delete_observation(
+async def _set_observation_archived(
         request: Request,
+        session: AsyncSession,
+        auth: AuthContext,
         observation_id: int,
-        session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW, Permissions.OBSERVATION_DELETE]))
-):
-    """Soft-delete an observation (owner or observation.manage_any, write access to its post).
-    Media files stay attached. Restore with PUT is_deleted=false."""
+        archived: bool,
+) -> ObservationWithMedia:
+    """Shared body of archive / restore: ownership rules, flag flip, audit row."""
     current_user = auth.user
-    result = await session.exec(
-        select(Observation).where(Observation.id == observation_id, Observation.is_deleted == False)
-    )
+    result = await session.exec(select(Observation).where(Observation.id == observation_id))
     observation = result.first()
-    if not observation:
-        raise HTTPException(status_code=fapi_status.HTTP_404_NOT_FOUND, detail="Observation not found")
+    if not observation or (archived and observation.is_deleted):
+        raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
+    if not archived and not observation.is_deleted:
+        raise ApiError(ErrorCode.OBSERVATION_NOT_ARCHIVED)
 
     AccessControlService.check_post_write(auth, observation.post_id, "observation")
     AccessControlService.check_observation_ownership(auth, observation)
 
+    action = "archive" if archived else "restore"
     old_values = observation.model_dump()
-    observation.is_deleted = True
+    observation.is_deleted = archived
     observation.updated_at = datetime.now(timezone.utc)
     session.add(observation)
     await session.commit()
 
     await create_audit_log(
         session=session,
-        action="delete",
+        action=action,
         resource_type="observation",
         resource_id=observation.id,
         user_id=current_user.id,
         session_id=getattr(request.state, "session_id", None),
         old_values=old_values,
         new_values=observation.model_dump(),
-        details={"message": f"User {current_user.username} soft-deleted observation #{observation.id}"},
+        details={"message": f"User {current_user.username} {action}d observation #{observation.id}"},
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
         request_url=str(request.url)
     )
     await session.commit()
-    logger.info(f"User {current_user.username} soft-deleted observation {observation.id}")
-    return MessageResponse(message="Observation deleted")
+    logger.info(f"User {current_user.username} {action}d observation {observation.id}")
+    return await _load_observation_response(session, observation.id)
+
+
+@router.post(ObservationRoutes.OBSERVATION_ARCHIVE.value, response_model=ObservationWithMedia)
+async def archive_observation(
+        request: Request,
+        observation_id: int,
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW, Permissions.OBSERVATION_ARCHIVE]))
+):
+    """Archive an observation (is_deleted=true). Owner or observation.manage_any, write access to its post.
+
+    Nothing is removed: media files stay attached, the row is hidden from lists unless include_deleted=true.
+    Undo with POST /{observation_id}/restore. Already archived or unknown: 404.
+    """
+    return await _set_observation_archived(request, session, auth, observation_id, archived=True)
+
+
+@router.post(ObservationRoutes.OBSERVATION_RESTORE.value, response_model=ObservationWithMedia)
+async def restore_observation(
+        request: Request,
+        observation_id: int,
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW, Permissions.OBSERVATION_ARCHIVE]))
+):
+    """Restore an archived observation (is_deleted=false). Same rules as archive. Not archived: 409."""
+    return await _set_observation_archived(request, session, auth, observation_id, archived=False)
+
+
+# =============================================================================
+# FREQUENCY BANDS
+# =============================================================================
+async def _audit_frequency(
+        request: Request,
+        session: AsyncSession,
+        auth: AuthContext,
+        action: str,
+        frequency,
+        old_values: Optional[dict] = None,
+) -> None:
+    await create_audit_log(
+        session=session,
+        action=action,
+        resource_type="observation_frequency",
+        resource_id=frequency.id,
+        user_id=auth.user.id,
+        session_id=getattr(request.state, "session_id", None),
+        old_values=old_values,
+        new_values=frequency_audit_values(frequency),
+        details={
+            "observation_id": frequency.observation_id,
+            "message": f"User {auth.user.username} {action}d frequency #{frequency.id} of observation #{frequency.observation_id}",
+        },
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_url=str(request.url)
+    )
+
+
+@router.get(ObservationRoutes.OBSERVATION_FREQUENCIES.value, response_model=List[ObservationFrequencyResponse])
+async def list_observation_frequencies(
+        observation_id: int,
+        params: ObservationFrequencyListParams = Depends(),
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW]))
+):
+    """Bands of one observation. Archived bands and bands of an archived observation need include_deleted=true."""
+    AccessControlService.check_include_deleted(auth, params, Permissions.OBSERVATION_ARCHIVE)
+    observation = (await session.exec(select(Observation).where(Observation.id == observation_id))).first()
+    if not observation:
+        raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
+    AccessControlService.check_post_view(auth, observation.post_id, "observation")
+    if observation.is_deleted and not params.include_deleted:
+        raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
+
+    result = await session.exec(ObservationFrequencyFilter.of_observation(observation_id, params.include_deleted))
+    return [ObservationFrequencyResponse.model_validate(f) for f in result.all()]
+
+
+@router.post(ObservationRoutes.OBSERVATION_FREQUENCIES.value, response_model=ObservationFrequencyResponse)
+async def add_observation_frequency(
+        request: Request,
+        observation_id: int,
+        frequency_data: ObservationFrequencyCreate,
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW, Permissions.OBSERVATION_UPDATE]))
+):
+    """Add a band to an observation. Owner or observation.manage_any, write access to its post.
+    Archived or unknown observation: 404."""
+    observation = await get_observation_for_write(session, auth, observation_id, lock=True)
+
+    frequency = frequency_rows([frequency_data])[0]
+    observation.all_frequencies.append(frequency)
+    observation.updated_at = datetime.now(timezone.utc)
+    session.add(observation)
+    await session.commit()
+
+    await _audit_frequency(request, session, auth, "create", frequency)
+    await session.commit()
+    return ObservationFrequencyResponse.model_validate(frequency)
+
+
+@router.put(ObservationRoutes.OBSERVATION_FREQUENCY_BY_ID.value, response_model=ObservationFrequencyResponse)
+async def update_observation_frequency(
+        request: Request,
+        observation_id: int,
+        frequency_id: int,
+        frequency_data: ObservationFrequencyUpdate,
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW, Permissions.OBSERVATION_UPDATE]))
+):
+    """Change fields of one band. Same access rules as adding one. Archived band or observation: 404.
+    When frequency_min or frequency_max changes and frequency_center is not sent, the center is recalculated."""
+    observation = await get_observation_for_write(session, auth, observation_id, lock=True)
+    frequency = get_frequency_or_404(observation, frequency_id)
+    if frequency.is_deleted:
+        raise ApiError(ErrorCode.FREQUENCY_NOT_FOUND)
+
+    changes = frequency_data.model_dump(exclude_unset=True)
+    frequency_min = changes.get("frequency_min", frequency.frequency_min)
+    frequency_max = changes.get("frequency_max", frequency.frequency_max)
+    if frequency_min >= frequency_max:
+        raise field_problem(FieldErrorCode.FREQUENCY_RANGE_INVALID, ("body", "frequency_max"))
+    if "kind" in changes:
+        changes["kind"] = changes["kind"].value
+    if ("frequency_min" in changes or "frequency_max" in changes) and "frequency_center" not in changes:
+        changes["frequency_center"] = default_frequency_center(frequency_min, frequency_max)
+
+    old_values = frequency_audit_values(frequency)
+    now = datetime.now(timezone.utc)
+    for field, value in changes.items():
+        setattr(frequency, field, value)
+    frequency.updated_at = now
+    observation.updated_at = now
+    session.add(observation)
+    await session.commit()
+
+    await _audit_frequency(request, session, auth, "update", frequency, old_values=old_values)
+    await session.commit()
+    return ObservationFrequencyResponse.model_validate(frequency)
+
+
+async def _set_frequency_archived(
+        request: Request,
+        session: AsyncSession,
+        auth: AuthContext,
+        observation_id: int,
+        frequency_id: int,
+        archived: bool,
+) -> ObservationFrequencyResponse:
+    """Shared body of band archive / restore"""
+    observation = await get_observation_for_write(session, auth, observation_id, lock=True)
+    frequency = get_frequency_or_404(observation, frequency_id)
+    if archived and frequency.is_deleted:
+        raise ApiError(ErrorCode.FREQUENCY_NOT_FOUND)
+    if not archived and not frequency.is_deleted:
+        raise ApiError(ErrorCode.FREQUENCY_NOT_ARCHIVED)
+    if archived:
+        ensure_other_active_frequency(observation, frequency.id)
+
+    action = "archive" if archived else "restore"
+    old_values = frequency_audit_values(frequency)
+    now = datetime.now(timezone.utc)
+    frequency.is_deleted = archived
+    frequency.updated_at = now
+    observation.updated_at = now
+    session.add(observation)
+    await session.commit()
+
+    await _audit_frequency(request, session, auth, action, frequency, old_values=old_values)
+    await session.commit()
+    logger.info(f"User {auth.user.username} {action}d frequency {frequency.id} of observation {observation.id}")
+    return ObservationFrequencyResponse.model_validate(frequency)
+
+
+@router.post(ObservationRoutes.OBSERVATION_FREQUENCY_ARCHIVE.value, response_model=ObservationFrequencyResponse)
+async def archive_observation_frequency(
+        request: Request,
+        observation_id: int,
+        frequency_id: int,
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW, Permissions.OBSERVATION_ARCHIVE]))
+):
+    """Archive a band (is_deleted=true): it leaves the observation response, lists, filters and reports.
+    Owner or observation.manage_any, write access to the post. Already archived, unknown, or archived
+    observation: 404. The last active band of an observation: 409."""
+    return await _set_frequency_archived(request, session, auth, observation_id, frequency_id, archived=True)
+
+
+@router.post(ObservationRoutes.OBSERVATION_FREQUENCY_RESTORE.value, response_model=ObservationFrequencyResponse)
+async def restore_observation_frequency(
+        request: Request,
+        observation_id: int,
+        frequency_id: int,
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW, Permissions.OBSERVATION_ARCHIVE]))
+):
+    """Restore an archived band. Same rules as archive. Not archived: 409."""
+    return await _set_frequency_archived(request, session, auth, observation_id, frequency_id, archived=False)

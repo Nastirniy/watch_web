@@ -1,0 +1,164 @@
+# End-to-end test stack. NOT the production layout (see ../../docker-compose.yml and DEPLOYMENT.md):
+# here MySQL and nginx also run as containers on a bridge network so the whole pipeline can be
+# exercised on a developer machine, including Docker Desktop on Windows.
+#
+#   docker build -t watch-web .
+#   docker compose -f tests/docker/compose.test.yml up -d
+#   venv/Scripts/python tests/docker/e2e.py
+#   docker compose -f tests/docker/compose.test.yml down -v
+#
+# Everything that matters in production is kept identical: the media directory is mounted at the
+# same absolute path in every container, the real nginx.conf server block is used unchanged, the
+# app containers run as the nginx worker uid (101) so files cross between nginx and the API.
+
+name: watch-web-e2e
+
+x-app-env: &app-env
+  MYSETTINGS_APP__ENVIRONMENT: development
+  MYSETTINGS_DATABASE__HOST: mysql
+  MYSETTINGS_DATABASE__PORT: "3306"
+  MYSETTINGS_DATABASE__NAME: radio_monitoring
+  MYSETTINGS_DATABASE__USER: radio_user
+  MYSETTINGS_DATABASE__PASSWORD: e2e_password
+  MYSETTINGS_SECURITY__SECRET_KEY: e2e-secret-key-0123456789abcdef0123456789abcdef
+  MYSETTINGS_STORAGE__UPLOAD_PATH: /var/www/radio_monitoring/uploads
+  MYSETTINGS_STORAGE__TEMP_PATH: /var/www/radio_monitoring/uploads/_tmp
+  MYSETTINGS_STORAGE__IMGPROXY__KEY: 943b421c9eb07c830af81030552c86009268de4e532ba2ee2eab8247c6da0881
+  MYSETTINGS_STORAGE__IMGPROXY__SALT: 520f986b998545b4785e0defbc4f3c1203f22de2374a3d53cb7a7fe9fea309c5
+  MYSETTINGS_STORAGE__POSTER__POLL_INTERVAL_SECONDS: "0.5"
+  MYSETTINGS_STORAGE__POSTER__IDLE_POLL_INTERVAL_SECONDS: "1"
+  MYSETTINGS_HEALTH__ENABLE_HOST_CHECK: "false"
+  MYSETTINGS_HEALTH__ENABLE_RATE_LIMIT: "false"
+  MYSETTINGS_LOGGING__LEVEL: INFO
+
+x-app: &app
+  image: watch-web
+  user: "101:101"          # nginx worker uid in the nginx image; files must cross between nginx and the API
+
+services:
+  init:
+    image: alpine:3.20
+    user: root
+    command: ["sh", "-c", "mkdir -p /var/www/radio_monitoring/uploads /var/www/nginx_uploads && chown -R 101:101 /var/www/radio_monitoring/uploads /var/www/nginx_uploads"]
+    volumes:
+      - media:/var/www/radio_monitoring/uploads
+      - nginx_uploads:/var/www/nginx_uploads
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: radio_monitoring
+      MYSQL_USER: radio_user
+      MYSQL_PASSWORD: e2e_password
+      MYSQL_ROOT_PASSWORD: e2e_root
+    command: --default-time-zone=+00:00
+    volumes:
+      - mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-pe2e_root"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  api:
+    <<: *app
+    environment:
+      <<: *app-env
+      MYSETTINGS_SERVER__HOST: 0.0.0.0
+      MYSETTINGS_SERVER__PORT: "8000"
+      MYSETTINGS_SERVER__WORKERS: "2"
+      MYSETTINGS_STORAGE__ENABLE_NGINX: "true"
+      MYSETTINGS_STORAGE__NGINX_UPLOAD_TEMP_PATH: /var/www/nginx_uploads
+      MYSETTINGS_STORAGE__IMGPROXY__URL: http://imgproxy:8080
+      MYSETTINGS_STORAGE__IMGPROXY__PREWARM_BASE_URL: http://nginx
+    volumes:
+      - media:/var/www/radio_monitoring/uploads
+      - nginx_uploads:/var/www/nginx_uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).status == 200 else 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  # Same API without nginx: exercises the httpx proxy path to imgproxy and FileResponse downloads
+  api-direct:
+    <<: *app
+    environment:
+      <<: *app-env
+      MYSETTINGS_SERVER__HOST: 0.0.0.0
+      MYSETTINGS_SERVER__PORT: "8000"
+      MYSETTINGS_SERVER__WORKERS: "1"
+      MYSETTINGS_STORAGE__ENABLE_NGINX: "false"
+      MYSETTINGS_STORAGE__IMGPROXY__URL: http://imgproxy:8080
+    ports:
+      - "127.0.0.1:${E2E_DIRECT_PORT:-18090}:8000"
+    volumes:
+      - media:/var/www/radio_monitoring/uploads
+    depends_on:
+      api:
+        condition: service_healthy
+
+  media-worker:
+    <<: *app
+    command: ["python", "-m", "app.backend.workers.media_worker"]
+    environment:
+      <<: *app-env
+    volumes:
+      - media:/var/www/radio_monitoring/uploads
+    depends_on:
+      api:
+        condition: service_healthy
+    stop_grace_period: 30s
+
+  imgproxy:
+    image: ghcr.io/imgproxy/imgproxy:v3
+    user: "101:101"
+    environment:
+      IMGPROXY_BIND: ":8080"
+      IMGPROXY_KEY: 943b421c9eb07c830af81030552c86009268de4e532ba2ee2eab8247c6da0881
+      IMGPROXY_SALT: 520f986b998545b4785e0defbc4f3c1203f22de2374a3d53cb7a7fe9fea309c5
+      IMGPROXY_LOCAL_FILESYSTEM_ROOT: /var/www/radio_monitoring/uploads
+      IMGPROXY_MAX_SRC_RESOLUTION: "60"
+      IMGPROXY_TIMEOUT: "10"
+      IMGPROXY_AUTO_ROTATE: "true"
+      IMGPROXY_AUTO_WEBP: "true"
+      IMGPROXY_QUALITY: "85"
+      IMGPROXY_USE_ETAG: "true"
+    volumes:
+      - media:/var/www/radio_monitoring/uploads:ro
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "imgproxy", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  nginx:
+    image: nginx:1.27
+    ports:
+      - "127.0.0.1:${E2E_NGINX_PORT:-18089}:80"
+    volumes:
+      - ./nginx-http.test.conf:/etc/nginx/conf.d/00-watch-web-http.conf:ro
+      - ../../nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - media:/var/www/radio_monitoring/uploads:ro
+      - nginx_uploads:/var/www/nginx_uploads
+      - thumbcache:/var/cache/nginx/thumbs
+    depends_on:
+      api:
+        condition: service_healthy
+      imgproxy:
+        condition: service_healthy
+
+volumes:
+  mysql: {}
+  media: {}
+  nginx_uploads: {}
+  thumbcache: {}

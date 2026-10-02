@@ -29,6 +29,10 @@ revision = "002_sync_schema"
 # create_table with an inspector check, otherwise fresh installs fail.
 TABLES_OWNED_BY_LATER_REVISIONS = {
     "user_post_access",  # 003_add_user_post_access
+    "worker_heartbeats",  # 005_video_posters
+    "media_formats",  # 008_media_formats
+    "upload_sessions",  # 011_upload_sessions
+    "observation_frequencies",  # 012_observation_frequencies
 }
 down_revision = "001_relativize_media_paths"
 branch_labels = None

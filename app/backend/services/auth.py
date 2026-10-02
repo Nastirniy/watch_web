@@ -9,7 +9,7 @@ import secrets
 from app.backend.config import settings
 from app.backend.utils.logging_config import get_auth_logger
 from app.backend.models.user import User, UserSession
-from app.backend.enums.general import AuthErrorCode
+from app.backend.enums.errors import AuthErrorCode
 from app.backend.helpers.certeficates_helper import (
     validate_pki_certificate_data,
     hash_pki_certificate_data,
@@ -277,9 +277,14 @@ class AuthService:
             reason: str = "account_deactivated",
             actor_user_id: Optional[int] = None,
             ip_address: Optional[str] = None,
-            user_agent: Optional[str] = None
+            user_agent: Optional[str] = None,
+            commit: bool = True
     ) -> int:
-        """Invalidate all active sessions for a user (e.g. on deactivation or soft-delete)"""
+        """Invalidate all active sessions for a user (e.g. on deactivation or soft-delete).
+
+        commit=False leaves the changes in the caller's transaction so that they land together with
+        the change that caused them (the caller commits); errors are then raised instead of swallowed.
+        """
         try:
             result = await session.exec(
                 select(UserSession).where(
@@ -312,15 +317,31 @@ class AuthService:
                     },
                     success=True
                 )
-                await session.commit()
+                if commit:
+                    await session.commit()
                 _logger.info(f"Invalidated {count} active sessions for user_id={user_id}, reason={reason}")
 
             return count
 
         except Exception as e:
             _logger.error(f"Error invalidating all sessions for user_id={user_id}: {str(e)}")
+            if not commit:
+                raise
             await session.rollback()
             return 0
+
+    @staticmethod
+    async def expire_sessions_of_inactive_user(session: AsyncSession, user: User) -> int:
+        """End every live session of a user whose account is deactivated or archived.
+
+        Called from the request path when such a user presents a token: the sessions were normally ended
+        when the flag changed, but a flag flipped outside the API (direct database change, restore of a
+        backup) would leave them live and count towards presence. Returns the number of sessions ended.
+        """
+        if user.is_active and not user.is_deleted:
+            return 0
+        reason = "account_deleted" if user.is_deleted else "account_deactivated"
+        return await AuthService.invalidate_all_user_sessions(session, user_id=user.id, reason=reason)
 
     @staticmethod
     async def cleanup_expired_sessions(session: AsyncSession) -> int:

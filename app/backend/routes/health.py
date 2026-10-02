@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request, HTTPException, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlmodel.ext.asyncio.session import AsyncSession
 import asyncio
 from loguru import logger
@@ -19,8 +19,11 @@ from app.backend.routes.helpers.health_helper import (
     ServiceStatusModel
 )
 from app.backend.helpers.ip_request_helper import get_real_client_ip
+from app.backend.services.api_errors import ApiError
+from app.backend.enums.errors import ErrorCode
+from app.backend.enums.errors import AccessErrorCode
 
-router = APIRouter()
+router = APIRouter(tags=[SystemRoutes.tag()])
 
 
 @router.get(SystemRoutes.HEALTH.value, response_model=HealthResponse)
@@ -42,17 +45,15 @@ async def health_check(
 
     # Check host restrictions
     if not is_host_allowed(client_host):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Access denied: Host {client_host} is not allowed to access health endpoint"
-        )
+        raise ApiError(AccessErrorCode.HEALTH_HOST_NOT_ALLOWED)
 
     # Check rate limiting
     if not health_rate_limiter.is_allowed(client_ip):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Rate limit exceeded. Maximum {settings.health.rate_limit_requests} requests per {settings.health.rate_limit_window_seconds} seconds",
-            headers={"Retry-After": str(settings.health.rate_limit_window_seconds)}
+        raise ApiError(
+            ErrorCode.HEALTH_RATE_LIMITED,
+            headers={"Retry-After": str(settings.health.rate_limit_window_seconds)},
+            max_requests=settings.health.rate_limit_requests,
+            window_seconds=settings.health.rate_limit_window_seconds,
         )
 
     try:

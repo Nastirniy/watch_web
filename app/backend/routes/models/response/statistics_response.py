@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Optional
 from datetime import datetime
 from pydantic import BaseModel, Field
 
@@ -28,7 +28,7 @@ class ObservationsByPost(BaseModel):
 
 
 class ObservationStatistics(BaseModel):
-    total_in_period: int = Field(description="Observed inside the period, not deleted")
+    total_in_period: int = Field(description="Created inside the period (created_at), not deleted")
     deleted_in_period: int
     by_status: Dict[str, int]
     by_post: List[ObservationsByPost]
@@ -37,11 +37,17 @@ class ObservationStatistics(BaseModel):
 class MediaStatistics(BaseModel):
     count: int
     total_size_bytes: int
+    # Video poster queue by status: pending, processing, ready, failed, untracked
+    posters: Dict[str, int] = {}
 
 
 class StatisticsResponse(BaseModel):
     generated_at: datetime
     period: StatisticsPeriod
+    post_ids: Optional[List[int]] = Field(
+        default=None,
+        description="Posts the figures are limited to; null means every post (administrators and post.access_all)"
+    )
     posts: PostStatistics
     users: UserStatistics
     observations: ObservationStatistics

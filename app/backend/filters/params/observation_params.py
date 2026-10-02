@@ -8,6 +8,7 @@ from datetime import datetime
 from decimal import Decimal
 from pydantic import Field
 
+from app.backend.enums.general import FrequencyKind
 from app.backend.filters.params.base_params import BaseFilterParams
 
 
@@ -25,15 +26,12 @@ class ObservationFilterParams(BaseFilterParams):
     status_in: Optional[str] = Field(default=None, description="Comma-separated statuses: active,confirmed")
     confidence_level: Optional[str] = Field(default=None, description="Confidence level (low, medium, high)")
 
-    # --- Frequency Range ---
-    frequency_center_from: Optional[Decimal] = Field(default=None, description="Frequency center min (MHz)")
-    frequency_center_to: Optional[Decimal] = Field(default=None, description="Frequency center max (MHz)")
+    # --- Frequency bands (all conditions must hold for the same active band) ---
+    frequency_kind: Optional[FrequencyKind] = Field(default=None, description="Band kind: rc or video")
+    frequency_center_from: Optional[Decimal] = Field(default=None, description="Band center frequency min (MHz)")
+    frequency_center_to: Optional[Decimal] = Field(default=None, description="Band center frequency max (MHz)")
     bandwidth_from: Optional[Decimal] = Field(default=None, description="Bandwidth min (MHz)")
     bandwidth_to: Optional[Decimal] = Field(default=None, description="Bandwidth max (MHz)")
-
-    # --- Video Frequency Range ---
-    video_frequency_center_from: Optional[Decimal] = Field(default=None, description="Video frequency center min (MHz)")
-    video_frequency_center_to: Optional[Decimal] = Field(default=None, description="Video frequency center max (MHz)")
 
     # --- Date Range (observed_at) ---
     observed_at_from: Optional[datetime] = Field(default=None, description="Observed after (ISO datetime)")
@@ -61,7 +59,7 @@ class ObservationFilterParams(BaseFilterParams):
     tag_ids: Optional[str] = Field(default=None, description="Comma-separated tag IDs (must have ALL)")
 
     # --- Soft Delete ---
-    include_deleted: bool = Field(default=False, description="Include soft-deleted records")
+    include_deleted: bool = Field(default=False, description="Include archived records (requires observation.archive)")
 
     def get_status_list(self) -> Optional[List[str]]:
         """Parse comma-separated status_in to list"""

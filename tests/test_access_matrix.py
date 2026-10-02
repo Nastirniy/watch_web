@@ -9,6 +9,7 @@ import pytest
 
 from app.main import fastapi_app
 from app.backend.services.auth_context import AuthContext
+from app.backend.models.observation import ObservationFrequency
 from tests.helpers import make_post, make_user, make_dictionary, make_observation, make_media, make_role
 
 ENTRIES = list(fastapi_app.state.route_access_map)
@@ -48,8 +49,12 @@ async def test_route_gate(client, db, headers, entry, persona):
         "post_id": post.id,
         "observation_id": observation.id,
         "media_id": media.id,
+        "frequency_id": (await db.exec(__import__("sqlmodel").select(ObservationFrequency.id).where(
+            ObservationFrequency.observation_id == observation.id))).first(),
         "role_id": role_id,
         "permission_id": 1,
+        "format_id": 1,
+        "upload_id": "0" * 32,
     })
 
     path = entry.path.format(**ids)
@@ -63,7 +68,9 @@ async def test_route_gate(client, db, headers, entry, persona):
         assert response.status_code not in (401, 403), f"{persona} should pass the gate: {response.text}"
     else:
         assert response.status_code == 403, f"{persona} should be rejected: {response.status_code} {response.text}"
-        detail = response.json()["detail"]
+        if entry.method == "HEAD":
+            return  # HEAD answers carry no body (HTTP semantics); the status code is the whole contract
+        detail = response.json()
         assert detail["code"] == ("admin_required" if result.admin_missing else "permission_denied")
         assert detail["missing"] == list(result.missing)
         assert detail["required"] == entry.require.as_dict()

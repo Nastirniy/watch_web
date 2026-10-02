@@ -1,44 +1,49 @@
 """
 ObservationReportFilter - Query filter for observation Excel reports.
-No pagination - fetches all matching records for export.
+One report row per frequency band; the query selects bands joined with their
+observation (ObservationFrequencyFilter.rows_query), so archive flags and the
+post scope always apply. No pagination - fetches all matching rows for export.
 """
 
-from sqlalchemy.orm import selectinload
+from typing import Iterable, Optional
+
+from sqlalchemy.orm import contains_eager
 from sqlalchemy.sql.selectable import Select
 from sqlmodel import select as sa_select
 
-from app.backend.models.observation import Observation, ObservationTag
+from app.backend.enums.general import FrequencyKind
+from app.backend.models.observation import Observation, ObservationFrequency, ObservationTag
+from app.backend.filters.observation_frequency_filter import ObservationFrequencyFilter
 from app.backend.filters.params.observation_report_params import ObservationReportParams, ObservationReportType
+
+REPORT_TYPE_KIND = {
+    ObservationReportType.RC_FREQ_PART: FrequencyKind.RC,
+    ObservationReportType.VIDEO_FREQ_PART: FrequencyKind.VIDEO,
+}
 
 
 class ObservationReportFilter:
     """
     Filter engine for observation report generation.
     Supports list-based filters (IDs, users, posts) and date ranges.
-    No pagination - returns all matched records for the report.
+    No pagination - returns all matched bands for the report.
     """
 
-    MODEL = Observation
+    MODEL = ObservationFrequency
 
     @classmethod
-    def apply_filters(cls, query: Select, params: ObservationReportParams) -> Select:
-        """Apply report filters to the base query. Eager-loads all report relations."""
+    def build_query(cls, params: ObservationReportParams, access_post_ids: Optional[Iterable[int]] = None) -> Select:
+        """Bands matching the report filters, their observation and its report relations eager-loaded."""
+        query = ObservationFrequencyFilter.rows_query(access_post_ids, include_deleted=params.include_deleted)
 
-        # Soft delete
-        if not params.include_deleted:
-            query = query.where(Observation.is_deleted == False)
-
-        # Report type row filter: only include rows that have the relevant frequency data
-        if params.report_type == ObservationReportType.RC_FREQ_PART:
-            query = query.where(
-                Observation.frequency_min.is_not(None),
-                Observation.frequency_max.is_not(None),
-            )
-        elif params.report_type == ObservationReportType.VIDEO_FREQ_PART:
-            query = query.where(
-                Observation.video_frequency_min.is_not(None),
-                Observation.video_frequency_max.is_not(None),
-            )
+        # Band filters: the report type selects the kind
+        query = query.where(*ObservationFrequencyFilter.band_conditions(
+            kind=REPORT_TYPE_KIND.get(params.report_type),
+            center_from=params.frequency_center_from,
+            center_to=params.frequency_center_to,
+            bandwidth_from=params.bandwidth_from,
+            bandwidth_to=params.bandwidth_to,
+        ))
 
         # Observation ID filter
         if params.observation_ids:
@@ -63,22 +68,6 @@ class ObservationReportFilter:
         # Confidence level filter
         if params.confidence_level:
             query = query.where(Observation.confidence_level == params.confidence_level)
-
-        # RC frequency range
-        if params.frequency_center_from is not None:
-            query = query.where(Observation.frequency_center >= params.frequency_center_from)
-        if params.frequency_center_to is not None:
-            query = query.where(Observation.frequency_center <= params.frequency_center_to)
-        if params.bandwidth_from is not None:
-            query = query.where(Observation.bandwidth >= params.bandwidth_from)
-        if params.bandwidth_to is not None:
-            query = query.where(Observation.bandwidth <= params.bandwidth_to)
-
-        # Video frequency range
-        if params.video_frequency_center_from is not None:
-            query = query.where(Observation.video_frequency_center >= params.video_frequency_center_from)
-        if params.video_frequency_center_to is not None:
-            query = query.where(Observation.video_frequency_center <= params.video_frequency_center_to)
 
         # Duration range
         if params.duration_from is not None:
@@ -106,15 +95,16 @@ class ObservationReportFilter:
         if params.created_at_to is not None:
             query = query.where(Observation.created_at <= params.created_at_to)
 
-        # Default sort: by observation time ascending
-        query = query.order_by(Observation.observed_at.asc())
+        # Default sort: by observation time ascending, bands of one observation together
+        query = query.order_by(Observation.observed_at.asc(), Observation.id.asc(), ObservationFrequency.id.asc())
 
-        # Eager-load all relations used in the report to avoid N+1 queries
+        # The joined observation fills ObservationFrequency.observation; its relations load in one query each
+        observation = contains_eager(ObservationFrequency.observation)
         query = query.options(
-            selectinload(Observation.user),
-            selectinload(Observation.post),
-            selectinload(Observation.signal_type),
-            selectinload(Observation.tags),
+            observation.selectinload(Observation.user),
+            observation.selectinload(Observation.post),
+            observation.selectinload(Observation.signal_type),
+            observation.selectinload(Observation.tags),
         )
 
         return query

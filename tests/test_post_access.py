@@ -1,7 +1,7 @@
 """Data scope: home post, user_post_access rows, post.access_all, foreign filters."""
 import pytest
 
-from app.backend.enums.routes import ObservationRoutes, PostRoutes, UserRoutes
+from app.backend.enums.routes import AuthRoutes, ObservationRoutes, PostRoutes, SearchRoutes, UserRoutes
 from tests.helpers import make_post, make_user, make_admin, make_dictionary, make_observation, observation_payload
 
 LIST = ObservationRoutes.LIST_ALL.versioned_path()
@@ -34,18 +34,18 @@ async def test_home_post_scope(client, db, headers):
 
     foreign = await client.get(LIST, params={"post_id": post_b.id}, headers=headers(user))
     assert foreign.status_code == 403
-    assert foreign.json()["detail"]["code"] == "post_access_denied"
+    assert foreign.json()["code"] == "post_access_denied"
 
     own_filter = await client.get(LIST, params={"post_id": post_a.id}, headers=headers(user))
     assert own_filter.status_code == 200
 
     post_b_view = await client.get(PostRoutes.POST_BY_ID.versioned_path().format(post_id=post_b.id), headers=headers(user))
     assert post_b_view.status_code == 403
-    assert post_b_view.json()["detail"]["code"] == "post_access_denied"
+    assert post_b_view.json()["code"] == "post_access_denied"
 
     create_b = await client.post(CREATE, json=observation_payload(post_b.id, ids["signal_type_id"]), headers=headers(user))
     assert create_b.status_code == 403
-    assert create_b.json()["detail"]["code"] == "post_access_denied"
+    assert create_b.json()["code"] == "post_access_denied"
 
 
 @pytest.mark.asyncio
@@ -54,7 +54,7 @@ async def test_no_post_assigned(client, db, headers):
     homeless = await make_user(db, perms=OPERATOR)
     response = await client.get(PostRoutes.POST_BY_ID.versioned_path().format(post_id=post_a.id), headers=headers(homeless))
     assert response.status_code == 403
-    assert response.json()["detail"]["code"] == "no_post_assigned"
+    assert response.json()["code"] == "no_post_assigned"
     assert (await client.get(LIST, headers=headers(homeless))).json() == []
 
 
@@ -70,12 +70,12 @@ async def test_extra_post_access_read_then_write(client, db, headers):
     listed = (await client.get(LIST, headers=headers(user))).json()
     assert {o["id"] for o in listed} == {obs_a.id, obs_b.id}
 
-    me = (await client.get("/api/v1/auth/me", headers=headers(user))).json()
+    me = (await client.get(AuthRoutes.ME.versioned_path(), headers=headers(user))).json()
     assert me["accessible_post_ids"] == sorted([post_a.id, post_b.id])
 
     read_only = await client.post(CREATE, json=observation_payload(post_b.id, ids["signal_type_id"]), headers=headers(user))
     assert read_only.status_code == 403
-    assert read_only.json()["detail"]["code"] == "post_write_denied"
+    assert read_only.json()["code"] == "post_write_denied"
 
     upgrade = await client.put(url, json={"can_write": True}, headers=headers(admin))
     assert upgrade.status_code == 200 and upgrade.json()["can_write"] is True
@@ -108,7 +108,7 @@ async def test_post_access_management_validation(client, db, headers):
     assert missing_post.status_code == 404
     not_admin = await client.put(post_access_url(user.id, post_b.id), json={}, headers=headers(user))
     assert not_admin.status_code == 403
-    assert not_admin.json()["detail"]["code"] == "admin_required"
+    assert not_admin.json()["code"] == "admin_required"
 
 
 @pytest.mark.asyncio
@@ -119,7 +119,7 @@ async def test_post_access_all_sees_everything(client, db, headers):
     assert {o["id"] for o in listed} == {obs_a.id, obs_b.id}
     filtered = await client.get(LIST, params={"post_id": post_b.id}, headers=headers(supervisor))
     assert {o["id"] for o in filtered.json()} == {obs_b.id}
-    me = (await client.get("/api/v1/auth/me", headers=headers(supervisor))).json()
+    me = (await client.get(AuthRoutes.ME.versioned_path(), headers=headers(supervisor))).json()
     assert me["accessible_post_ids"] is None and me["is_admin"] is False
 
 
@@ -134,6 +134,54 @@ async def test_user_visibility(client, db, headers):
     assert (await client.get(url.format(user_id=same_post.id), headers=headers(viewer))).status_code == 200
     denied = await client.get(url.format(user_id=other_post.id), headers=headers(viewer))
     assert denied.status_code == 403
-    assert denied.json()["detail"]["code"] == "user_self_only"
-    listed = (await client.get(UserRoutes.BASE.versioned_path() + "/", headers=headers(viewer))).json()
+    assert denied.json()["code"] == "user_self_only"
+    listed = (await client.get(UserRoutes.ROOT.versioned_path(), headers=headers(viewer))).json()
     assert other_post.id not in {u["id"] for u in listed}
+
+
+@pytest.mark.asyncio
+async def test_administrators_see_every_post_record_but_not_its_data(client, db, headers):
+    """admin.true + post.view: every post record; observations stay limited to the data scope"""
+    post_a, post_b, ids, admin, user, obs_a, obs_b = await world(db)
+    manager = await make_user(db, perms=["admin.true", "post.view", "post.update", "observation.view"], post_id=post_a.id)
+    posts_url = PostRoutes.ROOT.versioned_path()
+
+    listed = await client.get(posts_url, headers=headers(manager))
+    assert listed.status_code == 200, listed.text
+    assert {post_a.id, post_b.id} <= {p["id"] for p in listed.json()}
+    one = await client.get(PostRoutes.POST_BY_ID.versioned_path().format(post_id=post_b.id), headers=headers(manager))
+    assert one.status_code == 200, one.text
+    searched = await client.get(SearchRoutes.POSTS.versioned_path(), headers=headers(manager))
+    assert searched.status_code == 200 and post_b.id in {p["id"] for p in searched.json()["items"]}
+    updated = await client.put(PostRoutes.POST_BY_ID.versioned_path().format(post_id=post_b.id), json={"description": "x"}, headers=headers(manager))
+    assert updated.status_code == 200, updated.text
+
+    observations = (await client.get(LIST, headers=headers(manager))).json()
+    assert {o["id"] for o in observations} == {obs_a.id}, "post records only; observation data keeps the data scope"
+
+    regular = (await client.get(posts_url, headers=headers(user))).json()
+    assert {p["id"] for p in regular} == {post_a.id}
+    denied = await client.get(PostRoutes.POST_BY_ID.versioned_path().format(post_id=post_b.id), headers=headers(user))
+    assert denied.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_administrators_see_every_user_record(client, db, headers):
+    """admin.true + user.view: users of every post; others keep their post scope"""
+    post_a, post_b, ids, admin, user, obs_a, obs_b = await world(db)
+    stranger = await make_user(db, perms=["observation.view"], post_id=post_b.id)
+    manager = await make_user(db, perms=["admin.true", "user.view"], post_id=post_a.id)
+    reader = await make_user(db, perms=["user.view"], post_id=post_a.id)
+    users_url = UserRoutes.ROOT.versioned_path()
+    user_url = UserRoutes.USER_BY_ID.versioned_path().format(user_id=stranger.id)
+
+    assert stranger.id in {u["id"] for u in (await client.get(users_url, headers=headers(manager))).json()}
+    filtered = await client.get(users_url, params={"post_id": post_b.id}, headers=headers(manager))
+    assert filtered.status_code == 200 and {u["id"] for u in filtered.json()} == {stranger.id}
+    assert (await client.get(user_url, headers=headers(manager))).status_code == 200
+    searched = await client.get(SearchRoutes.USERS.versioned_path(), headers=headers(manager))
+    assert searched.status_code == 200 and stranger.id in {u["id"] for u in searched.json()["items"]}
+
+    assert stranger.id not in {u["id"] for u in (await client.get(users_url, headers=headers(reader))).json()}
+    assert (await client.get(users_url, params={"post_id": post_b.id}, headers=headers(reader))).status_code == 403
+    assert (await client.get(user_url, headers=headers(reader))).status_code == 403

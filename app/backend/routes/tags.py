@@ -1,6 +1,6 @@
 from typing import List
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status as fapi_status, Request
+from fastapi import APIRouter, Depends, status as fapi_status, Request
 from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -12,7 +12,6 @@ from app.backend.services.access_control import AccessControlService
 from app.backend.models.observation import Tag
 from app.backend.models.user import User
 from app.backend.services.auth_context import AuthContext
-from app.backend.routes.models.response.error_response import ACCESS_ERROR_RESPONSES
 from app.backend.services.permissions import require
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import TagRoutes
@@ -23,8 +22,10 @@ from app.backend.routes.models.response.observations_response import MessageResp
 from app.backend.filters.params.tag_params import TagFilterParams
 from app.backend.filters.tag_filter import TagFilterService
 from app.backend.routes.models.response.search_response import EntitySchemaInfo
+from app.backend.services.api_errors import ApiError
+from app.backend.enums.errors import ErrorCode
 
-router = APIRouter(responses=ACCESS_ERROR_RESPONSES)
+router = APIRouter(prefix=TagRoutes.BASE.value, tags=[TagRoutes.tag()])
 
 
 @router.get(TagRoutes.LIST_ALL.value, response_model=List[TagResponse])
@@ -33,7 +34,7 @@ async def list_tags(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW]))
 ):
-    AccessControlService.check_include_deleted(auth, filters, Permissions.TAG_DELETE)
+    AccessControlService.check_include_deleted(auth, filters, Permissions.TAG_ARCHIVE)
     query = select(Tag)
     query = TagFilterService.apply_filters(query, filters)
     result = await session.exec(query)
@@ -68,12 +69,9 @@ async def create_tag(
 
     if existing_tag:
         if not existing_tag.is_deleted:
-            raise HTTPException(
-                status_code=fapi_status.HTTP_400_BAD_REQUEST,
-                detail=f"Tag with name '{tag_data.name}' already exists"
-            )
+            raise ApiError(ErrorCode.TAG_NAME_TAKEN, name=tag_data.name)
         
-        # Restore soft-deleted tag
+        # Restore archived tag
         old_values = existing_tag.model_dump()
         existing_tag.is_deleted = False
         existing_tag.created_at = datetime.now(timezone.utc)
@@ -111,10 +109,7 @@ async def create_tag(
     except IntegrityError as e:
         await session.rollback()
         logger.exception(f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}")
-        raise HTTPException(
-            status_code=fapi_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unexpected database constraint violation"
-        )
+        raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
 
 
 @router.get(TagRoutes.TAG_BY_ID.value, response_model=TagResponse)
@@ -132,10 +127,7 @@ async def get_tag(
     tag = result.first()
 
     if not tag:
-        raise HTTPException(
-            status_code=fapi_status.HTTP_404_NOT_FOUND,
-            detail="Tag not found"
-        )
+        raise ApiError(ErrorCode.TAG_NOT_FOUND)
 
     return TagResponse.model_validate(tag)
 
@@ -158,10 +150,7 @@ async def update_tag(
     tag = result.first()
 
     if not tag:
-        raise HTTPException(
-            status_code=fapi_status.HTTP_404_NOT_FOUND,
-            detail="Tag not found"
-        )
+        raise ApiError(ErrorCode.TAG_NOT_FOUND)
 
     # Store old values for auditing
     old_values = tag.model_dump()
@@ -176,11 +165,8 @@ async def update_tag(
         existing_tag = existing_result.first()
 
         if existing_tag:
-            status_msg = "already exists" if not existing_tag.is_deleted else "already exists as a deleted tag"
-            raise HTTPException(
-                status_code=fapi_status.HTTP_400_BAD_REQUEST,
-                detail=f"Tag with name '{tag_data.name}' {status_msg}"
-            )
+            code = ErrorCode.TAG_NAME_ARCHIVED if existing_tag.is_deleted else ErrorCode.TAG_NAME_TAKEN
+            raise ApiError(code, name=tag_data.name)
 
     update_data = tag_data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -213,56 +199,82 @@ async def update_tag(
     except IntegrityError as e:
         await session.rollback()
         logger.exception(f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}")
-        raise HTTPException(
-            status_code=fapi_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unexpected database constraint violation"
-        )
+        raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
 
 
-@router.delete(TagRoutes.TAG_BY_ID.value, response_model=MessageResponse)
-async def delete_tag(
+def _audit_context(request: Request) -> dict:
+    return {
+        "session_id": getattr(request.state, "session_id", None),
+        "ip_address": request.client.host if request.client else None,
+        "user_agent": request.headers.get("user-agent"),
+        "request_url": str(request.url),
+    }
+
+
+@router.post(TagRoutes.TAG_ARCHIVE.value, response_model=TagResponse)
+async def archive_tag(
         request: Request,
         tag_id: int,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW, Permissions.TAG_DELETE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW, Permissions.TAG_ARCHIVE], admin=True))
 ):
+    """Archive a tag (is_deleted=true). Nothing is removed: the row is hidden from lists unless
+    include_deleted=true and cannot be used for new data. Undo with POST /{tag_id}/restore. Already archived or unknown: 404."""
     current_user = auth.user
-    result = await session.exec(
-        select(Tag).where(
-            Tag.id == tag_id,
-            Tag.is_deleted == False
-        )
-    )
-    tag = result.first()
+    result = await session.exec(select(Tag).where(Tag.id == tag_id, Tag.is_deleted == False))
+    row = result.first()
+    if not row:
+        raise ApiError(ErrorCode.TAG_NOT_FOUND)
 
-    if not tag:
-        raise HTTPException(
-            status_code=fapi_status.HTTP_404_NOT_FOUND,
-            detail="Tag not found"
-        )
-
-    # Store old values for auditing
-    old_values = tag.model_dump()
-
-    tag.is_deleted = True
-    session.add(tag)
-    
-    # Create audit log
+    old_values = row.model_dump()
+    row.is_deleted = True
+    session.add(row)
     await create_audit_log(
         session=session,
-        action="delete",
+        action="archive",
         resource_type="tag",
-        resource_id=tag.id,
+        resource_id=row.id,
         user_id=current_user.id,
-        session_id=getattr(request.state, "session_id", None),
         old_values=old_values,
-        new_values=tag.model_dump(),
-        details={"message": f"User {current_user.username} deleted tag '{tag.name}'"},
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-        request_url=str(request.url)
+        new_values=row.model_dump(),
+        details={"message": f"User {current_user.username} archived tag '{row.name}'"},
+        **_audit_context(request),
     )
-    
     await session.commit()
+    await session.refresh(row)
+    return TagResponse.model_validate(row)
 
-    return MessageResponse(message="Tag deleted successfully")
+
+@router.post(TagRoutes.TAG_RESTORE.value, response_model=TagResponse)
+async def restore_tag(
+        request: Request,
+        tag_id: int,
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW, Permissions.TAG_ARCHIVE], admin=True))
+):
+    """Restore an archived tag (is_deleted=false). Not archived: 409."""
+    current_user = auth.user
+    result = await session.exec(select(Tag).where(Tag.id == tag_id))
+    row = result.first()
+    if not row:
+        raise ApiError(ErrorCode.TAG_NOT_FOUND)
+    if not row.is_deleted:
+        raise ApiError(ErrorCode.TAG_NOT_ARCHIVED)
+
+    old_values = row.model_dump()
+    row.is_deleted = False
+    session.add(row)
+    await create_audit_log(
+        session=session,
+        action="restore",
+        resource_type="tag",
+        resource_id=row.id,
+        user_id=current_user.id,
+        old_values=old_values,
+        new_values=row.model_dump(),
+        details={"message": f"User {current_user.username} restored tag '{row.name}'"},
+        **_audit_context(request),
+    )
+    await session.commit()
+    await session.refresh(row)
+    return TagResponse.model_validate(row)

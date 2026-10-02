@@ -1,18 +1,18 @@
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, status, Request
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
+from sqlalchemy import delete as sa_delete
 from datetime import datetime, timezone
 
-from app.backend.database import get_session
-from app.backend.models.role import Role, Permission, RolePermission
+from app.backend.database import get_session, ADMIN_ROLE_NAME
+from app.backend.models.role import Role, Permission, RolePermission, UserRole
 from app.backend.models.user import User
 from app.backend.services.auth_context import AuthContext
-from app.backend.routes.models.response.error_response import ACCESS_ERROR_RESPONSES
 from app.backend.services.permissions import require
 from app.backend.services.access_control import AccessControlService
 from app.backend.enums.general import Permissions
-from app.backend.enums.routes import RoleRoutes, SystemRoutes
+from app.backend.enums.routes import RoleRoutes
 from app.backend.helpers.audit_helper import create_audit_log
 from app.backend.utils.validators import PaginationParams
 from app.backend.utils.logging_config import get_logger, get_api_logger
@@ -26,21 +26,23 @@ from app.backend.routes.helpers.roles_helper import (
 )
 from app.backend.routes.models.request.roles_request import RoleCreate, RoleUpdate
 from app.backend.routes.models.response.roles_response import RoleResponse, PermissionResponse
+from app.backend.services.api_errors import ApiError
+from app.backend.enums.errors import ErrorCode
 
-router = APIRouter(responses=ACCESS_ERROR_RESPONSES)
+router = APIRouter(prefix=RoleRoutes.BASE.value, tags=[RoleRoutes.tag()])
 _logger = get_api_logger()
 
 
-@router.get(SystemRoutes.ROOT.value, response_model=List[RoleResponse])
+@router.get(RoleRoutes.ROOT.value, response_model=List[RoleResponse])
 async def list_roles(
         filters: RoleFilterParams = Depends(),
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW], admin=True))
 ):
-    """List all roles with filters"""
+    """List roles with filters. include_deleted=true (archived roles too) requires role.archive."""
     current_user = auth.user
     try:
-        AccessControlService.check_include_deleted(auth, filters, Permissions.ROLE_DELETE)
+        AccessControlService.check_include_deleted(auth, filters, Permissions.ROLE_ARCHIVE)
         query = select(Role)
         query = RoleFilterService.apply_filters(query, filters)
         result = await session.exec(query)
@@ -52,10 +54,7 @@ async def list_roles(
 
     except Exception as e:
         _logger.error(f"Error listing roles: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve roles"
-        )
+        raise ApiError(ErrorCode.ROLES_LIST_FAILED)
 
 
 @router.get(RoleRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo)
@@ -67,7 +66,7 @@ async def get_role_filter_schema(
     return EntitySchemaInfo(**RoleFilterService.get_schema(is_admin=auth.is_admin))
 
 
-@router.post(SystemRoutes.ROOT.value, response_model=RoleResponse, status_code=status.HTTP_201_CREATED)
+@router.post(RoleRoutes.ROOT.value, response_model=RoleResponse, status_code=status.HTTP_201_CREATED)
 async def create_role(
         request: Request,
         role_data: RoleCreate,
@@ -136,10 +135,7 @@ async def list_all_permissions(
 
     except Exception as e:
         _logger.error(f"Error listing all permissions: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve permissions"
-        )
+        raise ApiError(ErrorCode.PERMISSIONS_LIST_FAILED)
 
 
 @router.get(RoleRoutes.ROLE_BY_ID.value, response_model=RoleResponse)
@@ -163,9 +159,9 @@ async def update_role(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW, Permissions.ROLE_UPDATE], admin=True))
 ):
-    """Update role and optionally replace all permissions"""
+    """Update role and optionally replace all permissions. Archived roles answer 404 until restored (POST /{role_id}/restore)."""
     current_user = auth.user
-    role = await get_role_or_404(session, role_id, include_deleted=True)
+    role = await get_role_or_404(session, role_id)
 
     # Store old values for auditing
     old_values = role.model_dump()
@@ -178,8 +174,6 @@ async def update_role(
         role.display_name = role_update.display_name
     if role_update.description is not None:
         role.description = role_update.description
-    if role_update.is_deleted is not None:
-        role.is_deleted = role_update.is_deleted
 
     role.updated_at = datetime.now(timezone.utc)
     session.add(role)
@@ -230,6 +224,87 @@ async def update_role(
     return RoleResponse.model_validate(role)
 
 
+def _audit_context(request: Request) -> dict:
+    return {
+        "session_id": getattr(request.state, "session_id", None),
+        "ip_address": request.client.host if request.client else None,
+        "user_agent": request.headers.get("user-agent"),
+        "request_url": str(request.url),
+    }
+
+
+@router.post(RoleRoutes.ROLE_ARCHIVE.value, response_model=RoleResponse)
+async def archive_role(
+        request: Request,
+        role_id: int,
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW, Permissions.ROLE_ARCHIVE], admin=True))
+):
+    """Archive a role (is_deleted=true). Nothing is removed: user assignments and permissions stay in the database.
+
+    An archived role stops granting permissions immediately, cannot be assigned and is hidden from lists
+    unless include_deleted=true. Undo with POST /{role_id}/restore. Already archived or unknown: 404.
+    """
+    current_user = auth.user
+    role = await get_role_or_404(session, role_id)
+    if role.name == ADMIN_ROLE_NAME:
+        raise ApiError(ErrorCode.ADMIN_ROLE_NOT_ARCHIVABLE)
+
+    old_values = role.model_dump()
+    role.is_deleted = True
+    role.updated_at = datetime.now(timezone.utc)
+    session.add(role)
+    await create_audit_log(
+        session=session,
+        action="archive",
+        resource_type="role",
+        resource_id=role.id,
+        user_id=current_user.id,
+        old_values=old_values,
+        new_values=role.model_dump(),
+        details={"message": f"User {current_user.username} archived role '{role.name}'"},
+        **_audit_context(request),
+    )
+    await session.commit()
+    await session.refresh(role)
+    _logger.info(f"User {current_user.username} archived role {role.name}")
+    return RoleResponse.model_validate(role)
+
+
+@router.post(RoleRoutes.ROLE_RESTORE.value, response_model=RoleResponse)
+async def restore_role(
+        request: Request,
+        role_id: int,
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW, Permissions.ROLE_ARCHIVE], admin=True))
+):
+    """Restore an archived role (is_deleted=false): it grants its permissions again and can be assigned. Not archived: 409."""
+    current_user = auth.user
+    role = await get_role_or_404(session, role_id, include_deleted=True)
+    if not role.is_deleted:
+        raise ApiError(ErrorCode.ROLE_NOT_ARCHIVED)
+
+    old_values = role.model_dump()
+    role.is_deleted = False
+    role.updated_at = datetime.now(timezone.utc)
+    session.add(role)
+    await create_audit_log(
+        session=session,
+        action="restore",
+        resource_type="role",
+        resource_id=role.id,
+        user_id=current_user.id,
+        old_values=old_values,
+        new_values=role.model_dump(),
+        details={"message": f"User {current_user.username} restored role '{role.name}'"},
+        **_audit_context(request),
+    )
+    await session.commit()
+    await session.refresh(role)
+    _logger.info(f"User {current_user.username} restored role {role.name}")
+    return RoleResponse.model_validate(role)
+
+
 @router.delete(RoleRoutes.ROLE_BY_ID.value, status_code=status.HTTP_204_NO_CONTENT)
 async def delete_role(
         request: Request,
@@ -237,35 +312,64 @@ async def delete_role(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW, Permissions.ROLE_DELETE], admin=True))
 ):
-    """Soft-delete role. Deleted roles stop granting permissions, cannot be assigned and are hidden from lists unless include_deleted=true. Restore with PATCH is_deleted=false."""
+    """PERMANENTLY delete a role. This is the only hard delete in the API and cannot be undone.
+
+    Requires role.delete (distinct from role.archive). The role row, its permission grants and its
+    assignments to archived users are removed from the database. Preconditions, each answered with 409:
+    the role must be archived first (POST /{role_id}/archive), no active user may still hold it
+    (the response lists them), and the built-in admin role can never be deleted.
+    The audit log keeps a full copy of the role, its permissions and its assignments.
+    """
     current_user = auth.user
-    role = await get_role_or_404(session, role_id)
+    role = await get_role_or_404(session, role_id, include_deleted=True)
+    if role.name == ADMIN_ROLE_NAME:
+        raise ApiError(ErrorCode.ADMIN_ROLE_NOT_DELETABLE)
+    if not role.is_deleted:
+        raise ApiError(ErrorCode.ROLE_DELETE_REQUIRES_ARCHIVE)
 
-    # Store old values for auditing
-    old_values = role.model_dump()
+    assigned = await session.exec(
+        select(User.id, User.username, User.is_deleted)
+        .join(UserRole, UserRole.user_id == User.id)
+        .where(UserRole.role_id == role_id)
+        .order_by(User.id)
+    )
+    assigned_rows = assigned.all()
+    active_users = [{"id": uid, "username": name} for uid, name, deleted in assigned_rows if not deleted]
+    if active_users:
+        raise ApiError(ErrorCode.ROLE_HAS_ACTIVE_USERS, assigned_users=active_users)
+    archived_users = [{"id": uid, "username": name} for uid, name, deleted in assigned_rows if deleted]
 
-    # Soft delete: assignments stay for history, but the role stops applying immediately
-    role.is_deleted = True
-    role.updated_at = datetime.now(timezone.utc)
-    session.add(role)
-    
-    # Create audit log
+    permissions = await session.exec(
+        select(Permission.name)
+        .join(RolePermission, RolePermission.permission_id == Permission.id)
+        .where(RolePermission.role_id == role_id)
+        .order_by(Permission.name)
+    )
+    permission_names = list(permissions.all())
+    old_values = {**role.model_dump(), "permissions": permission_names, "assigned_archived_users": archived_users}
+
+    # Core statements on purpose: no ORM cascade (no lazy loads in an async session), every row is removed explicitly
+    await session.execute(sa_delete(RolePermission).where(RolePermission.role_id == role_id))
+    await session.execute(sa_delete(UserRole).where(UserRole.role_id == role_id))
+    await session.execute(sa_delete(Role).where(Role.id == role_id))
     await create_audit_log(
         session=session,
         action="delete",
         resource_type="role",
-        resource_id=role.id,
+        resource_id=role_id,
         user_id=current_user.id,
-        session_id=getattr(request.state, "session_id", None),
         old_values=old_values,
-        details={"message": f"User {current_user.username} deleted role '{role.name}'"},
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-        request_url=str(request.url)
+        details={
+            "message": (
+                f"User {current_user.username} permanently deleted role '{old_values['name']}' "
+                f"({len(permission_names)} permissions, {len(archived_users)} assignments to archived users)"
+            ),
+            "permanent": True,
+        },
+        **_audit_context(request),
     )
-    
     await session.commit()
-    _logger.info(f"User {current_user.username} deleted role {role.name}")
+    _logger.warning(f"User {current_user.username} permanently deleted role {old_values['name']} (id {role_id})")
 
 
 # RolePermission Management Routes
@@ -357,7 +461,7 @@ async def remove_role_permission(
     )
     row = existing.first()
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Permission is not assigned to this role")
+        raise ApiError(ErrorCode.ROLE_PERMISSION_NOT_ASSIGNED)
 
     await session.delete(row)
     role.updated_at = datetime.now(timezone.utc)

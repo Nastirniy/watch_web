@@ -1,20 +1,26 @@
-import asyncio
+"""Helpers shared by the media routes: lookups, access checks and file responses."""
 from pathlib import Path
-from fastapi import HTTPException, status as fapi_status
-from fastapi.responses import StreamingResponse
+from typing import Optional
+
+from fastapi import Response, status as fapi_status
+from fastapi.responses import FileResponse
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.models.media import MediaFile
 from app.backend.models.observation import Observation
-from app.backend.utils.logging_config import get_api_logger
 from app.backend.config import settings
+from app.backend.services.api_errors import ApiError
+from app.backend.enums.errors import ErrorCode
 
-_logger = get_api_logger()
+
+def storage_root() -> Path:
+    root = Path(settings.storage.upload_path)
+    return root if root.is_absolute() else root.resolve()
 
 
 async def get_observation_from_media(session: AsyncSession, media_file: MediaFile) -> Observation:
-    """Helper to get observation and check if it exists"""
+    """Observation the media belongs to; 404 when it is missing or deleted"""
     obs_query = select(Observation).where(
         Observation.id == media_file.observation_id,
         Observation.is_deleted == False
@@ -23,90 +29,51 @@ async def get_observation_from_media(session: AsyncSession, media_file: MediaFil
     observation = result.first()
 
     if not observation:
-        raise HTTPException(
-            status_code=fapi_status.HTTP_404_NOT_FOUND,
-            detail="Associated observation not found"
-        )
+        raise ApiError(ErrorCode.MEDIA_OBSERVATION_NOT_FOUND)
 
     return observation
 
 
-def get_x_accel_redirect_path(media_file: MediaFile, media_manager) -> str:
-    """Get the path for Nginx X-Accel-Redirect header"""
-    symlink_path = media_manager.get_nginx_symlink_path(media_file)
-
-    if not symlink_path:
-        raise HTTPException(
-            status_code=fapi_status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Nginx streaming not available for this file type"
-        )
-
-    return f"{settings.storage.nginx_symlink_path}{symlink_path}"
+async def get_media_or_404(session: AsyncSession, media_id: int, include_deleted: bool = False) -> MediaFile:
+    query = select(MediaFile).where(MediaFile.id == media_id)
+    if not include_deleted:
+        query = query.where(MediaFile.is_deleted == False)
+    media_file = (await session.exec(query)).first()
+    if not media_file:
+        raise ApiError(ErrorCode.MEDIA_NOT_FOUND)
+    return media_file
 
 
-def get_download_accel_redirect_path(media_file: MediaFile, media_manager) -> str:
-    """
-    Build the Nginx internal path for X-Accel-Redirect file downloads.
-    Constructs: {nginx_internal_uploads_prefix}/{relative_path_from_uploads_dir}
-    e.g. /protected_uploads/2025/06/15/obs_001/42_abc123.mp4
-    """
-    try:
-        abs_path = media_file.resolve_path(Path(media_manager.storage_path))
-        storage_root = Path(media_manager.storage_path).resolve()
-        relative = abs_path.resolve().relative_to(storage_root)
-    except (ValueError, TypeError):
-        raise HTTPException(
-            status_code=fapi_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Cannot resolve file path relative to storage root"
-        )
-
+def accel_redirect_path(relative_path: str) -> str:
+    """nginx internal path for a file under the uploads root: {nginx_internal_uploads_prefix}/{relative}"""
     prefix = settings.storage.nginx_internal_uploads_prefix.rstrip("/")
-    return f"{prefix}/{relative.as_posix()}"
+    return f"{prefix}/{relative_path.replace(chr(92), '/').lstrip('/')}"
 
 
-async def stream_media_file(session: AsyncSession, media_file: MediaFile, media_manager, validate_integrity: bool = True):
-    """Stream large media files chunk by chunk"""
-
-    async def generate_chunks():
+def original_file_response(media_file: MediaFile, disposition: str) -> Response:
+    """Serve the original file: X-Accel-Redirect behind nginx, FileResponse (Range, sendfile) otherwise"""
+    filename = media_file.original_filename.replace('"', "")
+    headers = {
+        "Content-Disposition": f'{disposition}; filename="{filename}"',
+        "Cache-Control": "private, max-age=3600",
+        "ETag": f'"{media_file.file_hash}"',
+        "X-File-Hash": media_file.file_hash,
+    }
+    if settings.storage.enable_nginx:
+        root = storage_root()
         try:
-            # Use the media manager for reliable retrieval
-            file_data = await media_manager.retrieve_file(
-                session=session,
-                media_file_id=media_file.id,
-                validate_integrity=validate_integrity
-            )
-
-            if not file_data:
-                raise HTTPException(
-                    status_code=fapi_status.HTTP_404_NOT_FOUND,
-                    detail="File data not available"
-                )
-
-            # Stream in 64KB chunks for optimal performance
-            chunk_size = 64 * 1024
-            for i in range(0, len(file_data), chunk_size):
-                chunk = file_data[i:i + chunk_size]
-                yield chunk
-
-                # Small delay to prevent overwhelming the client
-                await asyncio.sleep(0.001)
-
-        except Exception as e:
-            _logger.error(f"Error streaming media file {media_file.id}: {e}")
-            raise HTTPException(
-                status_code=fapi_status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to stream file"
-            )
-
-    return StreamingResponse(
-        generate_chunks(),
-        media_type=media_file.mime_type,
-        headers={
-            "Content-Disposition": f"attachment; filename={media_file.original_filename}",
-            "Content-Length": str(media_file.file_size),
-            "X-File-Hash": media_file.file_hash,
+            relative = media_file.resolve_path(root).resolve().relative_to(root).as_posix()
+        except ValueError:
+            raise ApiError(ErrorCode.MEDIA_PATH_UNRESOLVED)
+        headers.update({
+            "X-Accel-Redirect": accel_redirect_path(relative),
+            "Content-Type": media_file.mime_type,
             "Accept-Ranges": "bytes",
-            "Cache-Control": "private, max-age=3600",
-            "ETag": f'"{media_file.file_hash}"'
-        }
-    )
+            "X-Accel-Buffering": "yes",
+        })
+        return Response(content=b"", status_code=200, headers=headers)
+
+    path = media_file.resolve_path(storage_root())
+    if not path.exists() or not path.is_file():
+        raise ApiError(ErrorCode.MEDIA_FILE_MISSING)
+    return FileResponse(path=str(path), media_type=media_file.mime_type, headers=headers)

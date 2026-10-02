@@ -5,8 +5,10 @@ Search response models for the unified search API
 from typing import List, Any, Dict
 from pydantic import BaseModel
 
+from app.backend.utils.validators import PlainTextModel
 
-class SearchResponse(BaseModel):
+
+class SearchResponse(PlainTextModel):
     """Response model for search endpoint"""
     entity: str
     items: List[Dict[str, Any]]

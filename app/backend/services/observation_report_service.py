@@ -3,12 +3,16 @@ ObservationReportService - Generates Excel (.xlsx) reports for observations.
 Report language: Ukrainian. Frequency values in MHz.
 Datetimes are displayed in Kyiv local time (EET UTC+2 / EEST UTC+3).
 
+One row per frequency band (ObservationFrequency); observation columns repeat
+for every band of the observation.
+
 Three report types:
-  RC_FREQ_PART    - date of creation, start time, disappear time, signal type,
-                    frequency_min, frequency_max, [spacer], comment
-  VIDEO_FREQ_PART - same layout but with video_frequency_min / video_frequency_max
-  ALL_FIELDS      - all fields: user, post, signal type, all frequency/bandwidth
-                    columns, observed/disappeared time, duration, comment,
+  RC_FREQ_PART    - rc bands: date of creation, start time, disappear time,
+                    signal type, frequency_min, frequency_max, [spacer], comment
+  VIDEO_FREQ_PART - same layout for video bands
+  ALL_FIELDS      - every band: user, post, signal type, band kind, emitter
+                    group, frequency min/max/center, bandwidth,
+                    observed/disappeared time, duration, comment,
                     creation date, tags
 """
 
@@ -22,7 +26,8 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-from app.backend.models.observation import Observation
+from app.backend.enums.general import FrequencyKind
+from app.backend.models.observation import ObservationFrequency
 from app.backend.filters.params.observation_report_params import (
     ObservationReportParams,
     ObservationReportType,
@@ -56,24 +61,31 @@ _HEADERS_ALL_FIELDS = [
     "Користувач",
     "Пост",
     "Тип сигналу",
+    "Тип частоти",
+    "Група",
     "Частота мін (МГц)",
     "Частота макс (МГц)",
     "Частота центр (МГц)",
     "Смуга (МГц)",
-    "Відео частота мін (МГц)",
-    "Відео частота макс (МГц)",
-    "Відео частота центр (МГц)",
-    "Відео смуга (МГц)",
     "Час спостереження",
     "Час зникнення",
-    "Тривалість (сек)",
+    "Тривалість (хв)",
     "Коментар",
     "Дата створення",
     "Теги",
 ]
 
 _COLUMN_WIDTHS_PARTIAL = [16, 12, 12, 28, 22, 22, 4, 40]
-_COLUMN_WIDTHS_ALL     = [20, 20, 28, 20, 20, 20, 14, 22, 22, 22, 16, 18, 18, 16, 40, 16, 30]
+_COLUMN_WIDTHS_ALL     = [20, 20, 28, 12, 8, 20, 20, 20, 14, 18, 18, 16, 40, 16, 30]
+
+_KIND_LABELS = {
+    FrequencyKind.RC.value: "RC",
+    FrequencyKind.VIDEO.value: "Відео",
+}
+
+
+def _kind_label(kind: str) -> str:
+    return _KIND_LABELS.get(kind, kind)
 
 
 def _to_kyiv(value: Optional[datetime]) -> Optional[datetime]:
@@ -106,6 +118,13 @@ def _fmt_decimal(value: Optional[Decimal]) -> Optional[float]:
     if value is None:
         return None
     return round(float(value), 3)
+
+
+def _fmt_minutes(seconds: Optional[int]) -> Optional[float]:
+    """Duration stored in seconds, shown in the report as minutes with one decimal (45 s -> 0.8, 150 s -> 2.5)."""
+    if seconds is None:
+        return None
+    return round(seconds / 60, 1)
 
 
 DELETED_TAG_SUFFIX = " (видалено)"
@@ -145,14 +164,10 @@ def _build_filter_rows(params: ObservationReportParams, tag_names: Optional[Dict
         rows.append(("Смуга від (МГц):", str(params.bandwidth_from)))
     if params.bandwidth_to is not None:
         rows.append(("Смуга до (МГц):", str(params.bandwidth_to)))
-    if params.video_frequency_center_from is not None:
-        rows.append(("Відео частота центр від (МГц):", str(params.video_frequency_center_from)))
-    if params.video_frequency_center_to is not None:
-        rows.append(("Відео частота центр до (МГц):", str(params.video_frequency_center_to)))
     if params.duration_from is not None:
-        rows.append(("Тривалість від (сек):", str(params.duration_from)))
+        rows.append(("Тривалість від (хв):", str(_fmt_minutes(params.duration_from))))
     if params.duration_to is not None:
-        rows.append(("Тривалість до (сек):", str(params.duration_to)))
+        rows.append(("Тривалість до (хв):", str(_fmt_minutes(params.duration_to))))
     if params.observed_at_from:
         rows.append(("Час спостереження від:", _fmt_dt(params.observed_at_from)))
     if params.observed_at_to:
@@ -181,7 +196,7 @@ class ObservationReportService:
     @classmethod
     def generate_excel(
         cls,
-        observations: List[Observation],
+        frequencies: List[ObservationFrequency],
         params: ObservationReportParams,
         tag_names: Optional[Dict[int, str]] = None,
     ) -> bytes:
@@ -242,7 +257,9 @@ class ObservationReportService:
 
         # --- Record count ---
         _merge(row)
-        c = ws.cell(row=row, column=1, value=f"Загальна кiлькiсть записiв: {len(observations)}")
+        observation_count = len({f.observation_id for f in frequencies})
+        c = ws.cell(row=row, column=1,
+                    value=f"Загальна кiлькiсть записiв: {len(frequencies)} (спостережень: {observation_count})")
         c.font = _font(bold=True, size=10)
         c.fill = _fill(cls._COLOR_META_BG)
         c.alignment = left
@@ -291,8 +308,9 @@ class ObservationReportService:
         # --- Data rows ---
         spacer_col = 7 if rtype != ObservationReportType.ALL_FIELDS else None
 
-        for i, obs in enumerate(observations):
+        for i, band in enumerate(frequencies):
             use_alt = i % 2 == 1
+            obs = band.observation
 
             signal_name = obs.signal_type.name if obs.signal_type else str(obs.signal_type_id)
 
@@ -308,40 +326,27 @@ class ObservationReportService:
                     user_name,
                     post_name,
                     signal_name,
-                    _fmt_decimal(obs.frequency_min),
-                    _fmt_decimal(obs.frequency_max),
-                    _fmt_decimal(obs.frequency_center),
-                    _fmt_decimal(obs.bandwidth),
-                    _fmt_decimal(obs.video_frequency_min),
-                    _fmt_decimal(obs.video_frequency_max),
-                    _fmt_decimal(obs.video_frequency_center),
-                    _fmt_decimal(obs.video_bandwidth),
+                    _kind_label(band.kind),
+                    band.link_group,
+                    _fmt_decimal(band.frequency_min),
+                    _fmt_decimal(band.frequency_max),
+                    _fmt_decimal(band.frequency_center),
+                    _fmt_decimal(band.bandwidth),
                     _fmt_time(obs.observed_at),
                     _fmt_time(obs.disappeared_at),
-                    str(obs.duration_seconds) if obs.duration_seconds is not None else "",
+                    _fmt_minutes(obs.duration_seconds),
                     obs.comment or "",
                     _fmt_date(obs.created_at),
                     tags_str,
                 ]
-            elif rtype == ObservationReportType.VIDEO_FREQ_PART:
+            else:  # RC_FREQ_PART / VIDEO_FREQ_PART: the query already selected the kind
                 row_data = [
                     _fmt_date(obs.created_at),
                     _fmt_time(obs.observed_at),
                     _fmt_time(obs.disappeared_at),
                     signal_name,
-                    _fmt_decimal(obs.video_frequency_min),
-                    _fmt_decimal(obs.video_frequency_max),
-                    "",
-                    obs.comment or "",
-                ]
-            else:  # RC_FREQ_PART
-                row_data = [
-                    _fmt_date(obs.created_at),
-                    _fmt_time(obs.observed_at),
-                    _fmt_time(obs.disappeared_at),
-                    signal_name,
-                    _fmt_decimal(obs.frequency_min),
-                    _fmt_decimal(obs.frequency_max),
+                    _fmt_decimal(band.frequency_min),
+                    _fmt_decimal(band.frequency_max),
                     "",
                     obs.comment or "",
                 ]

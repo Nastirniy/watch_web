@@ -26,4 +26,4 @@ class UserFilterParams(BaseFilterParams):
     last_login_to: Optional[datetime] = Field(default=None, description="Last login before")
 
     # --- Soft Delete ---
-    include_deleted: bool = Field(default=False, description="Include soft-deleted records")
+    include_deleted: bool = Field(default=False, description="Include archived records (requires user.archive)")

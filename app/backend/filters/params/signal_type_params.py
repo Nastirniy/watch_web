@@ -26,4 +26,4 @@ class SignalTypeFilterParams(BaseFilterParams):
     created_at_to: Optional[datetime] = Field(default=None, description="Created before")
 
     # --- Soft Delete ---
-    include_deleted: bool = Field(default=False, description="Include soft-deleted records")
+    include_deleted: bool = Field(default=False, description="Include archived records (requires signal_type.archive)")

@@ -45,14 +45,14 @@ async def test_refresh_token_is_rejected_as_bearer(client, db):
     refresh = AuthService.create_refresh_token(user.id)
     response = await client.get(ME, headers={"Authorization": f"Bearer {refresh}"})
     assert response.status_code == 401
-    assert response.json()["detail"]["code"] == "invalid_token"
+    assert response.json()["code"] == "invalid_token"
 
 
 @pytest.mark.asyncio
 async def test_missing_credentials(client, db):
     response = await client.get(ME)
     assert response.status_code == 401
-    assert response.json()["detail"]["code"] == "credentials_required"
+    assert response.json()["code"] == "credentials_required"
 
 
 @pytest.mark.asyncio
@@ -62,8 +62,8 @@ async def test_check_permission(client, db, headers):
     assert ok.status_code == 200, ok.text
     assert ok.json() == {"allowed": True, "missing": [], "admin_required": False}
 
-    denied = await client.post(CHECK, json={"all": ["tag.view", "tag.delete"], "admin": True}, headers=headers(user))
-    assert denied.json() == {"allowed": False, "missing": ["tag.delete"], "admin_required": True}
+    denied = await client.post(CHECK, json={"all": ["tag.view", "tag.archive"], "admin": True}, headers=headers(user))
+    assert denied.json() == {"allowed": False, "missing": ["tag.archive"], "admin_required": True}
 
     unknown = await client.post(CHECK, json={"all": ["does.not.exist"]}, headers=headers(user))
     assert unknown.status_code == 422
@@ -75,8 +75,8 @@ async def test_403_body_is_structured(client, db, headers):
     user = await make_user(db, perms=["tag.view"])
     response = await client.post(TagRoutes.CREATE.versioned_path(), json={"name": "x"}, headers=headers(user))
     assert response.status_code == 403
-    detail = response.json()["detail"]
+    detail = response.json()
     assert detail["code"] == "admin_required"
     assert detail["required"] == {"all": ["tag.view", "tag.create"], "any": [], "admin": True}
     assert detail["missing"] == ["tag.create"]
-    assert detail["message"]
+    assert detail["title"] == "Administrator access required" and detail["status"] == 403

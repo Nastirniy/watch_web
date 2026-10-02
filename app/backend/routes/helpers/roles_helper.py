@@ -1,27 +1,23 @@
 from typing import Optional
-from fastapi import HTTPException, status
+from fastapi import status
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 
 from app.backend.models.role import Role, Permission
+from app.backend.services.api_errors import ApiError
+from app.backend.enums.errors import ErrorCode
 
 
 async def validate_role_id(role_id: int) -> None:
     """Validate role ID is positive"""
     if role_id <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Role ID must be a positive integer"
-        )
+        raise ApiError(ErrorCode.ROLE_ID_INVALID)
 
 
 async def validate_permission_id(permission_id: int) -> None:
     """Validate permission ID is positive"""
     if permission_id <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Permission ID must be a positive integer"
-        )
+        raise ApiError(ErrorCode.PERMISSION_ID_INVALID)
 
 
 async def get_role_or_404(session: AsyncSession, role_id: int, include_deleted: bool = False) -> Role:
@@ -32,10 +28,7 @@ async def get_role_or_404(session: AsyncSession, role_id: int, include_deleted: 
     if role and role.is_deleted and not include_deleted:
         role = None
     if not role:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Role not found"
-        )
+        raise ApiError(ErrorCode.ROLE_NOT_FOUND)
     return role
 
 
@@ -45,10 +38,7 @@ async def get_permission_or_404(session: AsyncSession, permission_id: int) -> Pe
     result = await session.exec(select(Permission).where(Permission.id == permission_id))
     permission = result.first()
     if not permission:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Permission not found"
-        )
+        raise ApiError(ErrorCode.PERMISSION_NOT_FOUND)
     return permission
 
 
@@ -61,11 +51,5 @@ async def check_role_name_exists(session: AsyncSession, name: str, exclude_id: O
     existing = result.first()
     if existing:
         if existing.is_deleted:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Role with this name exists as a soft-deleted role (id {existing.id}). Restore it with PATCH is_deleted=false or choose another name"
-            )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Role with this name already exists"
-        )
+            raise ApiError(ErrorCode.ROLE_NAME_ARCHIVED, role_id=existing.id)
+        raise ApiError(ErrorCode.ROLE_NAME_TAKEN)

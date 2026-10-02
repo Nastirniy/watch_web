@@ -71,6 +71,8 @@ class SimpleFilterEngine:
     ADMIN_ONLY_SORTABLE - sortable fields hidden from non-admin users in schema.
     ADMIN_ONLY_PARAMS - filter params hidden from non-admin users in schema.
     PARAMS - the FilterParams class used by this service (for schema introspection).
+    EXPRESSION_SORTABLE - entries of SORTABLE_FIELDS that are not MODEL columns; the
+    subclass builds their ORDER BY expression in _sort_expression().
     """
 
     MODEL: Type = None
@@ -78,6 +80,7 @@ class SimpleFilterEngine:
     SORTABLE_FIELDS: List[str] = []
     ADMIN_ONLY_SORTABLE: List[str] = []
     ADMIN_ONLY_PARAMS: List[str] = []
+    EXPRESSION_SORTABLE: List[str] = []
 
     def __init_subclass__(cls, **kwargs):
         """Validate SORTABLE_FIELDS and ADMIN_ONLY_* against MODEL/PARAMS when subclass is defined"""
@@ -85,7 +88,7 @@ class SimpleFilterEngine:
         if cls.MODEL is not None and cls.SORTABLE_FIELDS:
             model_columns = _get_model_columns(cls.MODEL)
             if model_columns:
-                invalid = [f for f in cls.SORTABLE_FIELDS if f not in model_columns]
+                invalid = [f for f in cls.SORTABLE_FIELDS if f not in model_columns and f not in cls.EXPRESSION_SORTABLE]
                 if invalid:
                     raise AttributeError(
                         f"{cls.__name__}.SORTABLE_FIELDS contains fields "
@@ -200,10 +203,15 @@ class SimpleFilterEngine:
         return query.offset(params.offset).limit(params.page_size)
 
     @classmethod
+    def _sort_expression(cls, name: str, params: BaseFilterParams):
+        """ORDER BY target for a sortable field: a MODEL column; override for EXPRESSION_SORTABLE entries"""
+        return getattr(cls.MODEL, name, None)
+
+    @classmethod
     def _apply_sorting(cls, query: Select, params: BaseFilterParams) -> Select:
         """Apply sorting using SortOrder enum"""
         if params.sort_by and params.sort_by in cls.SORTABLE_FIELDS:
-            column = getattr(cls.MODEL, params.sort_by, None)
+            column = cls._sort_expression(params.sort_by, params)
             if column is not None:
                 order = params.sort_order
                 if order == SortOrder.ASCENDING:

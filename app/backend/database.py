@@ -166,63 +166,72 @@ def _is_admin_pki_data_valid(admin_config) -> bool:
     return True
 
 
+ADMIN_ROLE_NAME = "admin"  # built-in role: seeded, cannot be archived or deleted
+
 PERMISSION_META = {
     "user.view": ("Перегляд користувачів", "Дозволяє переглядати інформацію та профілі користувачів"),
     "user.create": ("Створення користувачів", "Дозволяє створювати нові облікові записи користувачів"),
     "user.update": ("Оновлення користувачів", "Дозволяє змінювати інформацію та налаштування користувачів"),
-    "user.delete": ("Видалення користувачів", "Дозволяє видаляти облікові записи користувачів із системи"),
+    "user.archive": ("Архівування користувачів", "Дозволяє архівувати та відновлювати облікові записи користувачів. Архівований користувач втрачає доступ і зникає зі списків, але його дані та спостереження зберігаються; також дозволяє бачити архівованих у списках (include_deleted)"),
     "post.view": ("Перегляд посту", "Дозволяє переглядати пости та їх деталі"),
     "post.create": ("Створення посту", "Дозволяє створювати нові пости"),
     "post.update": ("Оновлення посту", "Дозволяє редагувати існуючі пости"),
-    "post.delete": ("Видалення посту", "Дозволяє видаляти пости із системи"),
+    "post.archive": ("Архівування постів", "Дозволяє архівувати та відновлювати пости. Дані не видаляються"),
     "observation.view": ("Перегляд спостережень", "Дозволяє переглядати сигнальні спостереження та їх дані"),
     "observation.create": ("Створення спостережень", "Дозволяє створювати нові сигнальні спостереження"),
     "observation.update": ("Оновлення спостережень", "Дозволяє змінювати існуючі сигнальні спостереження"),
-    "observation.delete": ("Видалення спостережень", "Дозволяє видаляти сигнальні спостереження із системи"),
+    "observation.archive": ("Архівування спостережень", "Дозволяє архівувати та відновлювати власні спостереження (чужі - разом з observation.manage_any). Архівоване спостереження приховується зі списків, медіафайли залишаються прикріпленими; також дозволяє бачити архівовані у списках (include_deleted)"),
     "role.view": ("Перегляд ролей", "Дозволяє переглядати інформацію про ролі та дозволи"),
     "role.create": ("Створення ролей", "Дозволяє створювати нові ролі та призначати дозволи"),
     "role.update": ("Оновлення ролей", "Дозволяє змінювати існуючі ролі та їх дозволи"),
-    "role.delete": ("Видалення ролей", "Дозволяє видаляти ролі із системи"),
+    "role.archive": ("Архівування ролей", "Дозволяє архівувати та відновлювати ролі. Архівована роль одразу перестає надавати дозволи, її не можна призначати, але призначення користувачам зберігаються; також дозволяє бачити архівовані ролі у списках (include_deleted)"),
+    "role.delete": ("Остаточне видалення ролей", "НЕБЕЗПЕЧНО: безповоротно видаляє архівовану роль без призначених користувачів разом з усіма її дозволами. Це єдина операція в системі, яка фізично видаляє дані; відновлення неможливе"),
     "admin.true": ("Адміністратор", "Повний доступ до системи з усіма адміністративними привілеями"),
     "audit.view": ("Перегляд аудиту", "Дозволяє переглядати системні журнали аудиту та історію активності"),
     "export.create": ("Створення експортів", "Дозволяє створювати та завантажувати експорти даних"),
     "category.view": ("Перегляд категорій", "Дозволяє переглядати інформацію про категорії"),
     "category.create": ("Створення категорій", "Дозволяє створювати нові категорії"),
     "category.update": ("Оновлення категорій", "Дозволяє змінювати існуючі категорії"),
-    "category.delete": ("Видалення категорій", "Дозволяє видаляти категорії із системи"),
+    "category.archive": ("Архівування категорій", "Дозволяє архівувати та відновлювати категорії. Архівована категорія приховується зі списків, дані зберігаються; також дозволяє бачити архівовані у списках (include_deleted)"),
     "signal_type.view": ("Перегляд типів сигналів", "Дозволяє переглядати інформацію про типи сигналів"),
     "signal_type.create": ("Створення типів сигналів", "Дозволяє створювати нові типи сигналів"),
     "signal_type.update": ("Оновлення типів сигналів", "Дозволяє змінювати існуючі типи сигналів"),
-    "signal_type.delete": ("Видалення типів сигналів", "Дозволяє видаляти типи сигналів із системи"),
+    "signal_type.archive": ("Архівування типів сигналів", "Дозволяє архівувати та відновлювати типи сигналів. Тип з активними спостереженнями архівувати не можна; також дозволяє бачити архівовані у списках (include_deleted)"),
     "tag.view": ("Перегляд тегів", "Дозволяє переглядати інформацію про теги"),
     "tag.create": ("Створення тегів", "Дозволяє створювати нові теги"),
     "tag.update": ("Оновлення тегів", "Дозволяє змінювати існуючі теги"),
-    "tag.delete": ("Видалення тегів", "Дозволяє видаляти теги із системи"),
+    "tag.archive": ("Архівування тегів", "Дозволяє архівувати та відновлювати теги. Архівований тег залишається прикріпленим до спостережень, але його не можна додавати до нових; також дозволяє бачити архівовані у списках (include_deleted)"),
     "media.view": ("Перегляд медіафайлів", "Дозволяє переглядати прикріплені медіафайли"),
     "media.create": ("Завантаження медіафайлів", "Дозволяє завантажувати нові медіафайли"),
     "media.update": ("Оновлення медіафайлів", "Дозволяє змінювати інформацію про медіафайли"),
-    "media.delete": ("Видалення медіафайлів", "Дозволяє видаляти медіафайли"),
+    "media.archive": ("Архівування медіафайлів", "Дозволяє архівувати та відновлювати власні медіафайли (чужі - разом з media.manage_any). Архівований файл приховується зі спостереження, але залишається на диску"),
     "post.access_all": ("Доступ до всіх постів", "Дозволяє переглядати та працювати з даними всіх постів, а не лише призначених"),
-    "observation.manage_any": ("Керування чужими спостереженнями", "Дозволяє змінювати та закривати спостереження, створені іншими користувачами"),
-    "media.manage_any": ("Керування чужими медіафайлами", "Дозволяє видаляти медіафайли, завантажені іншими користувачами"),
-    "statistics.view": ("Перегляд статистики", "Дозволяє переглядати зведену статистику системи на панелі адміністратора"),
+    "observation.manage_any": ("Керування чужими спостереженнями", "Дозволяє змінювати, закривати, архівувати та відновлювати спостереження, створені іншими користувачами"),
+    "media.manage_any": ("Керування чужими медіафайлами", "Дозволяє архівувати та відновлювати медіафайли, завантажені іншими користувачами"),
+    "media_format.view": ("Перегляд форматів медіа", "Дозволяє переглядати перелік прийнятних форматів завантаження"),
+    "media_format.create": ("Створення форматів медіа", "Дозволяє додавати прийнятні формати завантаження"),
+    "media_format.update": ("Оновлення форматів медіа", "Дозволяє змінювати прийнятні формати та обмеження розміру файлів"),
+    "media_format.archive": ("Архівування форматів медіа", "Дозволяє архівувати та відновлювати формати завантаження. Архівований формат одразу перестає прийматися, завантажені файли не змінюються; також дозволяє бачити архівовані у списках (include_deleted)"),
+    "statistics.view": ("Перегляд статистики", "Дозволяє переглядати зведену статистику: адміністратор бачить усі пости, інші користувачі - лише доступні їм пости"),
 }
 
 
 async def seed_roles_and_permissions(session: AsyncSession):
-    """Idempotent: ensure the admin role, every Permission row from the enum,
-    and that the admin role holds every permission (re-granted on every run).
+    """Idempotent: ensure the admin role, every Permission row from the enum
+    (display texts refreshed from PERMISSION_META), and that the admin role holds
+    every permission (re-granted on every run). Renamed permissions are handled by
+    migrations (010_archive_permissions), never here.
 
     Returns the admin Role.
     """
     from app.backend.models.role import Role, Permission, RolePermission
     from app.backend.enums.general import Permissions
 
-    result = await session.exec(select(Role).where(Role.name == "admin"))
+    result = await session.exec(select(Role).where(Role.name == ADMIN_ROLE_NAME))
     admin_role = result.first()
     if not admin_role:
         admin_role = Role(
-            name="admin",
+            name=ADMIN_ROLE_NAME,
             display_name="Administrator",
             description="Full system access"
         )
@@ -236,17 +245,25 @@ async def seed_roles_and_permissions(session: AsyncSession):
         _logger.warning("Admin role was soft-deleted; restored by seeding")
 
     result = await session.exec(select(Permission))
-    existing_permissions = {p.name for p in result.all()}
+    existing_permissions = {p.name: p for p in result.all()}
 
     permissions_added = 0
+    permissions_refreshed = 0
     for perm in Permissions:
-        if perm.value not in existing_permissions:
-            display_name, description = PERMISSION_META.get(perm.value, (perm.value, ""))
+        display_name, description = PERMISSION_META.get(perm.value, (perm.value, ""))
+        row = existing_permissions.get(perm.value)
+        if row is None:
             session.add(Permission(name=perm.value, display_name=display_name, description=description))
             permissions_added += 1
-    if permissions_added:
+        elif row.display_name != display_name or row.description != description:
+            # Display texts are code-owned (there is no API to edit them), keep the database in sync
+            row.display_name = display_name
+            row.description = description
+            session.add(row)
+            permissions_refreshed += 1
+    if permissions_added or permissions_refreshed:
         await session.flush()
-        _logger.info(f"Seeded {permissions_added} new permissions")
+        _logger.info(f"Seeded {permissions_added} new permissions, refreshed {permissions_refreshed} descriptions")
 
     # Re-grant: the admin role must hold every permission after every startup
     result = await session.exec(select(Permission.id))
@@ -282,6 +299,12 @@ async def seed_database():
 
         # 1. Seed roles and permissions (required in all modes)
         admin_role = await seed_roles_and_permissions(session)
+
+        # 1b. Accepted upload formats (adds missing defaults, never edits existing rows)
+        from app.backend.services.media.formats import seed_media_formats
+        added_formats = await seed_media_formats(session)
+        if added_formats:
+            _logger.info(f"Seeded {added_formats} media format(s)")
 
         # 2. Seed Admin User (Development mode only)
         if settings.app.environment == AppEnvironment.DEVELOPMENT.value:
@@ -356,19 +379,65 @@ async def seed_database():
 
 
 
+SCHEMA_LOCK_NAME = "watch_web_schema_init"
+SCHEMA_LOCK_TIMEOUT_SECONDS = 300
+
+
+class _SchemaLock:
+    """MySQL advisory lock held while one process migrates and seeds.
+
+    Every uvicorn worker runs the lifespan, so without this two workers run
+    Alembic at the same time and MySQL rejects one with a concurrent DDL
+    error. GET_LOCK is connection-scoped: the connection stays open until
+    release. Other dialects (sqlite in tests) have no such lock and skip it.
+    """
+
+    def __init__(self):
+        self._conn = None
+
+    async def __aenter__(self):
+        engine = await get_engine()
+        if engine.dialect.name != "mysql":
+            return self
+        self._conn = await engine.connect()
+        acquired = (await self._conn.execute(
+            text("SELECT GET_LOCK(:name, :timeout)"),
+            {"name": SCHEMA_LOCK_NAME, "timeout": SCHEMA_LOCK_TIMEOUT_SECONDS},
+        )).scalar()
+        if acquired != 1:
+            await self._conn.close()
+            self._conn = None
+            raise RuntimeError(f"could not acquire schema lock {SCHEMA_LOCK_NAME} within {SCHEMA_LOCK_TIMEOUT_SECONDS}s")
+        _logger.info("Schema lock acquired; running migrations and seeding")
+        return self
+
+    async def __aexit__(self, *exc):
+        if self._conn is not None:
+            try:
+                await self._conn.execute(text("SELECT RELEASE_LOCK(:name)"), {"name": SCHEMA_LOCK_NAME})
+            finally:
+                await self._conn.close()
+                self._conn = None
+            _logger.info("Schema lock released")
+
+
 async def initialize_database_with_migrations():
-    """Initialize database using migrations and then seed data"""
+    """Initialize database using migrations and then seed data, serialised across processes"""
+    await create_database_if_not_exists()
+    async with _SchemaLock():
+        await _migrate_and_seed()
+
+
+async def _migrate_and_seed():
     import asyncio
     from concurrent.futures import ThreadPoolExecutor
     from alembic.config import Config
     from alembic import command
-    
+
     _logger.info("Initializing database with migrations...")
-    
+
     try:
-        # Ensure database exists
-        await create_database_if_not_exists()
-        
+
         # Check if we need to run migrations
         def check_and_run_migrations():
             try:

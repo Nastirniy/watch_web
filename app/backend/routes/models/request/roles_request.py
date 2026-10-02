@@ -2,6 +2,8 @@ from typing import List, Optional
 from pydantic import Field, field_validator
 
 from app.backend.utils.validators import SecureBaseModel, SecurityValidators
+from app.backend.services.api_errors import invalid
+from app.backend.enums.errors import FieldErrorCode
 
 
 class RoleCreate(SecureBaseModel):
@@ -32,9 +34,9 @@ class RoleCreate(SecureBaseModel):
     def validate_permission_ids(cls, v):
         if v is not None:
             if not isinstance(v, list):
-                raise ValueError("permission_ids must be a list")
+                raise invalid(FieldErrorCode.PERMISSION_IDS_NOT_LIST)
             if any(pid <= 0 for pid in v):
-                raise ValueError("All permission IDs must be positive integers")
+                raise invalid(FieldErrorCode.PERMISSION_IDS_INVALID)
         return v
 
 
@@ -43,7 +45,6 @@ class RoleUpdate(SecureBaseModel):
     display_name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     description: Optional[str] = Field(default=None, max_length=500)
     permission_ids: Optional[List[int]] = Field(default=None)
-    is_deleted: Optional[bool] = Field(default=None, description="false restores a soft-deleted role, true soft-deletes it")
 
     @field_validator('name')
     @classmethod
@@ -71,7 +72,7 @@ class RoleUpdate(SecureBaseModel):
     def validate_permission_ids(cls, v):
         if v is not None:
             if not isinstance(v, list):
-                raise ValueError("permission_ids must be a list")
+                raise invalid(FieldErrorCode.PERMISSION_IDS_NOT_LIST)
             if any(pid <= 0 for pid in v):
-                raise ValueError("All permission IDs must be positive integers")
+                raise invalid(FieldErrorCode.PERMISSION_IDS_INVALID)
         return v

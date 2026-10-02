@@ -2,29 +2,36 @@ from enum import Enum
 
 
 class Permissions(Enum):
+    """Permission names as stored in the permissions table.
+
+    X.archive hides a record (is_deleted=true) and restores it; nothing is ever removed.
+    role.delete is the single permanent delete: it removes an archived role row and
+    its assignments for good. Human-readable names live in PERMISSION_META (database.py).
+    """
     # User permissions
     USER_VIEW = "user.view"
     USER_CREATE = "user.create"
     USER_UPDATE = "user.update"
-    USER_DELETE = "user.delete"
+    USER_ARCHIVE = "user.archive"
 
     # Post permissions
     POST_VIEW = "post.view"
     POST_CREATE = "post.create"
     POST_UPDATE = "post.update"
-    POST_DELETE = "post.delete"
+    POST_ARCHIVE = "post.archive"
 
     # Observation permissions
     OBSERVATION_VIEW = "observation.view"
     OBSERVATION_CREATE = "observation.create"
     OBSERVATION_UPDATE = "observation.update"
-    OBSERVATION_DELETE = "observation.delete"
+    OBSERVATION_ARCHIVE = "observation.archive"
 
     # Role permissions
     ROLE_VIEW = "role.view"
     ROLE_CREATE = "role.create"
     ROLE_UPDATE = "role.update"
-    ROLE_DELETE = "role.delete"
+    ROLE_ARCHIVE = "role.archive"
+    ROLE_DELETE = "role.delete"  # permanent removal, the only hard delete in the API
 
     # Admin permissions
     IS_ADMIN = "admin.true"
@@ -35,73 +42,39 @@ class Permissions(Enum):
     CATEGORY_VIEW = "category.view"
     CATEGORY_CREATE = "category.create"
     CATEGORY_UPDATE = "category.update"
-    CATEGORY_DELETE = "category.delete"
+    CATEGORY_ARCHIVE = "category.archive"
 
     # SignalType permissions
     SIGNAL_TYPE_VIEW = "signal_type.view"
     SIGNAL_TYPE_CREATE = "signal_type.create"
     SIGNAL_TYPE_UPDATE = "signal_type.update"
-    SIGNAL_TYPE_DELETE = "signal_type.delete"
+    SIGNAL_TYPE_ARCHIVE = "signal_type.archive"
 
     # Tag permissions
     TAG_VIEW = "tag.view"
     TAG_CREATE = "tag.create"
     TAG_UPDATE = "tag.update"
-    TAG_DELETE = "tag.delete"
+    TAG_ARCHIVE = "tag.archive"
 
     # Media permissions
     MEDIA_VIEW = "media.view"
     MEDIA_CREATE = "media.create"
     MEDIA_UPDATE = "media.update"
-    MEDIA_DELETE = "media.delete"
+    MEDIA_ARCHIVE = "media.archive"
 
     # Data scope and ownership permissions
     POST_ACCESS_ALL = "post.access_all"
     OBSERVATION_MANAGE_ANY = "observation.manage_any"
     MEDIA_MANAGE_ANY = "media.manage_any"
 
+    # Accepted upload formats (administration dictionary)
+    MEDIA_FORMAT_VIEW = "media_format.view"
+    MEDIA_FORMAT_CREATE = "media_format.create"
+    MEDIA_FORMAT_UPDATE = "media_format.update"
+    MEDIA_FORMAT_ARCHIVE = "media_format.archive"
+
     # Administration dashboard
     STATISTICS_VIEW = "statistics.view"
-
-
-class AuthErrorCode(str, Enum):
-    """Error codes returned in HTTP 401 detail for frontend to distinguish error types."""
-    # Token / credentials errors
-    CREDENTIALS_REQUIRED = "credentials_required"
-    INVALID_TOKEN = "invalid_token"
-    INVALID_REFRESH_TOKEN = "invalid_refresh_token"
-
-    # Certificate errors (login only)
-    CERTIFICATE_VERIFICATION_FAILED = "certificate_verification_failed"
-    CERTIFICATE_DATA_MISSING = "certificate_data_missing"
-    CERTIFICATE_NOT_RECOGNIZED = "certificate_not_recognized"
-
-    # Session errors
-    SESSION_EXPIRED = "session_expired"
-    SESSION_NOT_FOUND = "session_not_found"
-
-    # Account status errors
-    ACCOUNT_NOT_FOUND = "account_not_found"
-    ACCOUNT_DEACTIVATED = "account_deactivated"
-    ACCOUNT_DELETED = "account_deleted"
-
-
-class AccessErrorCode(str, Enum):
-    """Error codes returned in HTTP 403 detail so the frontend can distinguish authorization failures."""
-    # Granular permission checks (Require)
-    PERMISSION_DENIED = "permission_denied"
-    ADMIN_REQUIRED = "admin_required"
-
-    # Post data scope
-    POST_ACCESS_DENIED = "post_access_denied"
-    POST_WRITE_DENIED = "post_write_denied"
-    NO_POST_ASSIGNED = "no_post_assigned"
-
-    # Ownership
-    NOT_OWNER = "not_owner"
-    USER_SELF_ONLY = "user_self_only"
-    OBSERVATION_NOT_ACTIVE = "observation_not_active"
-
 
 class ObservationStatus(Enum):
     ACTIVE = "active"
@@ -117,11 +90,11 @@ class ConfidenceLevel(Enum):
     HIGH = "high"
 
 
-class ConnectionStatus(Enum):
-    ONLINE = "online"
-    OFFLINE = "offline"
-    MAINTENANCE = "maintenance"
-    ERROR = "error"
+class FrequencyKind(Enum):
+    """Kind of a frequency band of an observation (observation_frequencies.kind).
+    A new kind is a new value here; the database column has no CHECK on it."""
+    RC = "rc"
+    VIDEO = "video"
 
 
 class ServiceHealthStatus(Enum):
@@ -146,6 +119,44 @@ class MediaType(Enum):
     VIDEO = "video"
     AUDIO = "audio"
     DOCUMENT = "document"
+
+
+class ThumbnailSize(str, Enum):
+    """Bounding boxes rendered on demand by imgproxy (see ThumbnailSettings)"""
+    SMALL = "small"
+    MEDIUM = "medium"
+    LARGE = "large"
+    PREVIEW = "preview"
+
+
+class ThumbnailFormat(str, Enum):
+    """Output format; AUTO lets imgproxy pick WebP when the client accepts it"""
+    AUTO = "auto"
+    JPEG = "jpeg"
+    WEBP = "webp"
+
+
+class StatsGroupBy(str, Enum):
+    """Bucket size of time series statistics"""
+    HOUR = "hour"
+    DAY = "day"
+
+
+class PosterStatus(str, Enum):
+    """Lifecycle of the poster frame extracted from a video by the media worker"""
+    PENDING = "pending"
+    PROCESSING = "processing"
+    READY = "ready"
+    FAILED = "failed"
+
+
+class ThumbnailStatus(str, Enum):
+    """What a client can expect from GET /media/{id}/thumbnail"""
+    READY = "ready"
+    PENDING = "pending"
+    PROCESSING = "processing"
+    FAILED = "failed"
+    UNSUPPORTED = "unsupported"
 
 
 class ExportJobType(Enum):
