@@ -14,6 +14,7 @@ from app.backend.api.shared.helpers.auth_helper import build_user_info, build_lo
 from app.backend.enums.errors import RequiredPermissions
 from app.backend.models.user import User, UserSession
 from app.backend.enums.routes import AuthRoutes
+from app.backend.api.versioning import PublishedVersion, request_version
 from app.backend.enums.general import Permissions, AppEnvironment
 from app.backend.enums.errors import AuthErrorCode
 from app.backend.utils.logging_config import get_auth_logger
@@ -395,10 +396,12 @@ async def check_permission(
 @router.get(AuthRoutes.ROUTE_ACCESS.value, response_model=RouteAccessResponse)
 async def get_route_access(
         request: Request,
-        auth: AuthContext = Depends(require())
+        auth: AuthContext = Depends(require()),
+        version: PublishedVersion = Depends(request_version),
 ):
-    """Routes the current user may call. Generated from route metadata; routes the user cannot call are not listed."""
-    entries = routes_allowed_for(request.app.state.route_access_map, auth)
+    """Routes of this API version the current user may call. Generated from route metadata; routes the user
+    cannot call are not listed."""
+    entries = [entry for entry in routes_allowed_for(request.app.state.route_access_map, auth) if version.owns(entry.path)]
     return RouteAccessResponse(routes=[
         RouteAccessEntryResponse(
             method=entry.method,

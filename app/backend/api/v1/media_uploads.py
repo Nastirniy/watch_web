@@ -21,6 +21,7 @@ from app.backend.enums.routes import MediaRoutes
 from app.backend.helpers.audit_helper import create_audit_log
 from app.backend.models.upload_session import UploadSession
 from app.backend.api.shared.helpers.media_helper import storage_root
+from app.backend.api.versioning import PublishedVersion, request_version
 from app.backend.api.v1.media import (
     _check_declared_format, _client_info, _finish_upload, _load_observation_for_upload,
     _format_rejected, _store_rejected, _too_large, _validation_config_for,
@@ -56,12 +57,9 @@ def _session_headers(row: UploadSession) -> dict:
     }
 
 
-def _session_url(row: UploadSession) -> str:
-    return MediaRoutes.UPLOAD_SESSION.versioned_path().format(upload_id=row.id)
-
-
-def _to_response(row: UploadSession) -> UploadSessionResponse:
-    base = _session_url(row)
+def _to_response(row: UploadSession, version: PublishedVersion) -> UploadSessionResponse:
+    """The URLs point to the API version the client called"""
+    session_url = version.path(MediaRoutes.UPLOAD_SESSION, upload_id=row.id)
     return UploadSessionResponse(
         id=row.id,
         status=row.status,
@@ -78,7 +76,9 @@ def _to_response(row: UploadSession) -> UploadSessionResponse:
         last_activity_at=row.last_activity_at,
         expires_at=row.expires_at,
         completed_at=row.completed_at,
-        urls={"status": base, "chunk": base, "complete": f"{base}/complete", "abort": f"{base}/abort"},
+        urls={"status": session_url, "chunk": session_url,
+              "complete": version.path(MediaRoutes.UPLOAD_SESSION_COMPLETE, upload_id=row.id),
+              "abort": version.path(MediaRoutes.UPLOAD_SESSION_ABORT, upload_id=row.id)},
     )
 
 
@@ -124,6 +124,7 @@ async def list_upload_sessions(
     observation_id: Optional[int] = Query(None),
     session: AsyncSession = Depends(get_session),
     auth: AuthContext = Depends(UPLOAD_REQUIRE),
+    version: PublishedVersion = Depends(request_version),
 ):
     """Your upload sessions. Use it after a page reload to find what to resume.
 
@@ -136,7 +137,7 @@ async def list_upload_sessions(
         owner = auth.user.id
         post_ids = None
     rows = await uploads.list_sessions(session, owner, status, observation_id, post_ids)
-    return [_to_response(row) for row in rows]
+    return [_to_response(row, version) for row in rows]
 
 
 @router.post(
@@ -151,6 +152,7 @@ async def create_upload_session(
     body: UploadSessionCreate,
     session: AsyncSession = Depends(get_session),
     auth: AuthContext = Depends(UPLOAD_REQUIRE),
+    version: PublishedVersion = Depends(request_version),
 ):
     """Open a resumable upload. Format, declared Content-Type and size are checked here, before any byte is sent."""
     observation = await _load_observation_for_upload(session, auth, body.observation_id)
@@ -177,8 +179,8 @@ async def create_upload_session(
     await session.commit()
 
     response.headers.update(_session_headers(row))
-    response.headers["Location"] = _session_url(row)
-    return _to_response(row)
+    response.headers["Location"] = version.path(MediaRoutes.UPLOAD_SESSION, upload_id=row.id)
+    return _to_response(row, version)
 
 
 @router.get(
@@ -191,6 +193,7 @@ async def get_upload_session(
     response: Response,
     session: AsyncSession = Depends(get_session),
     auth: AuthContext = Depends(UPLOAD_REQUIRE),
+    version: PublishedVersion = Depends(request_version),
 ):
     """Current offset and status. Ask this after every failed chunk and continue from received_bytes."""
     row = await _owned_session(session, auth, upload_id)
@@ -198,7 +201,7 @@ async def get_upload_session(
         await uploads.remove_part(row, storage_root())
         await uploads.mark(session, row, uploads.STATUS_EXPIRED, error="session expired before completion")
     response.headers.update(_session_headers(row))
-    return _to_response(row)
+    return _to_response(row, version)
 
 
 @router.head(MediaRoutes.UPLOAD_SESSION.value, include_in_schema=False)
@@ -357,6 +360,7 @@ async def abort_upload_session(
     upload_id: str,
     session: AsyncSession = Depends(get_session),
     auth: AuthContext = Depends(UPLOAD_REQUIRE),
+    version: PublishedVersion = Depends(request_version),
 ):
     """Give up on an open session and delete the received bytes. Completed sessions cannot be aborted (409)."""
     row = await _owned_session(session, auth, upload_id)
@@ -371,4 +375,4 @@ async def abort_upload_session(
             **_client_info(request),
         )
         await session.commit()
-    return _to_response(row)
+    return _to_response(row, version)

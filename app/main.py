@@ -16,7 +16,7 @@ from app.backend.database import initialize_database_with_migrations
 from app.backend.services.route_access import build_route_access_map
 from app.backend.error_handlers import register_error_handlers
 from app.backend.openapi_problems import install_openapi
-from app.backend.api import v1
+from app.backend.api.v1 import V1
 from app.backend.api.system import health, problems
 from app.backend.enums.routes import AuthRoutes, DocsRoutes, SystemRoutes
 
@@ -107,9 +107,9 @@ fastapi_app.add_middleware(
     max_age=600
 )
 
-# Include routers: each one carries its prefix and tag, the version router adds /api/v1
+# Include routers: each module carries its prefix and tag; a published version adds its prefix (api/vN)
 fastapi_app.include_router(health.router)
-fastapi_app.include_router(v1.router)
+fastapi_app.include_router(V1.router)
 # Documentation of the problem types (the "type" URI of every error); not part of the OpenAPI schema
 fastapi_app.include_router(problems.router)
 
