@@ -35,7 +35,7 @@ async def create_user(client, headers, role_id: int, username: str):
     return await client.post(
         CREATE, headers=headers,
         files={"certificate": ("cert.pem", make_certificate(f"cn-{username}"), "application/x-pem-file")},
-        data={"username": username, "username_alias": "Alias", "role_ids": f"[{role_id}]"},
+        data={"username": username, "username_alias": "Alias", "role_ids": [role_id]},
     )
 
 
@@ -83,7 +83,7 @@ async def test_rule_violations_are_not_hidden(client, db, headers, username, cod
 async def test_invalid_role_ids_answer_the_field_error(client, db, headers):
     admin = await make_admin(db)
     target = await make_user(db)
-    response = await client.patch(USER.format(user_id=target.id), headers=headers(admin), data={"role_ids": "[1, 1]"})
+    response = await client.patch(USER.format(user_id=target.id), headers=headers(admin), data={"role_ids": [1, 1]})
     assert response.status_code == 422
     error = response.json()["errors"][0]
     assert error["pointer"] == "#/role_ids"

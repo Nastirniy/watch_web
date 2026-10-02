@@ -1159,7 +1159,7 @@
           "USERS"
         ],
         "summary": "Create User",
-        "description": "Create new user with PKI certificate authentication\n\nThe certificate file will be parsed to extract:\n- Common Name (CN)\n- Serial Number\n- SHA256 Fingerprint\n\nThese fields are hashed before storage for security.\n\nParameters:\n- certificate: PKI certificate file (PEM or DER format)\n- username: Unique username (3-50 characters)\n- username_alias: Display name (1-255 characters)\n- role_ids: JSON array string of role IDs, e.g. \"[1, 2, 3]\"\n- post_id: Optional post/position ID",
+        "description": "Create new user with PKI certificate authentication\n\nThe certificate file will be parsed to extract:\n- Common Name (CN)\n- Serial Number\n- SHA256 Fingerprint\n\nThese fields are hashed before storage for security.\n\nThe form fields are described by UserCreateForm; role_ids is repeated once per role.",
         "operationId": "create_user",
         "security": [
           {
@@ -1169,9 +1169,9 @@
         "requestBody": {
           "required": true,
           "content": {
-            "multipart/form-data": {
+            "application/x-www-form-urlencoded": {
               "schema": {
-                "$ref": "#/components/schemas/Body_create_user"
+                "$ref": "#/components/schemas/UserCreateForm"
               }
             }
           }
@@ -1280,7 +1280,7 @@
             }
           },
           "400": {
-            "description": "`certificate_file_empty`: Certificate file is empty; `certificate_invalid`: Invalid certificate; `certificate_taken`: Certificate already exists for another user; `role_archived_not_assignable`: Archived role cannot be assigned; `role_ids_not_json_array`: role_ids must be a JSON array like [1, 2, 3]; `username_or_certificate_taken`: User with this username or certificate already exists; `username_taken`: User with this username already exists",
+            "description": "`certificate_file_empty`: Certificate file is empty; `certificate_invalid`: Invalid certificate; `certificate_taken`: Certificate already exists for another user; `role_archived_not_assignable`: Archived role cannot be assigned; `username_or_certificate_taken`: User with this username or certificate already exists; `username_taken`: User with this username already exists",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1298,9 +1298,6 @@
                       "$ref": "#/components/schemas/RoleArchivedNotAssignableProblem"
                     },
                     {
-                      "$ref": "#/components/schemas/RoleIdsNotJsonArrayProblem"
-                    },
-                    {
                       "$ref": "#/components/schemas/UsernameOrCertificateTakenProblem"
                     },
                     {
@@ -1314,7 +1311,6 @@
                       "certificate_invalid": "#/components/schemas/CertificateInvalidProblem",
                       "certificate_taken": "#/components/schemas/CertificateTakenProblem",
                       "role_archived_not_assignable": "#/components/schemas/RoleArchivedNotAssignableProblem",
-                      "role_ids_not_json_array": "#/components/schemas/RoleIdsNotJsonArrayProblem",
                       "username_or_certificate_taken": "#/components/schemas/UsernameOrCertificateTakenProblem",
                       "username_taken": "#/components/schemas/UsernameTakenProblem"
                     }
@@ -1521,7 +1517,7 @@
           "USERS"
         ],
         "summary": "Update User",
-        "description": "Update user fields - all fields are optional\n\nSupports updating:\n- username: Unique username (3-50 characters)\n- username_alias: User's display name (1-255 characters)\n- post_id: User's post/position ID\n- is_active: User's active status (boolean)\n- role_ids: Replace all user roles with provided role IDs (JSON array string, e.g. \"[1, 2, 3]\")\n- certificate: Update PKI certificate authentication data (file upload)\n\nOnly provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).\nThe fields are form fields: any other body (JSON included) answers 415 instead of being ignored.",
+        "description": "Update user fields - all fields are optional\n\nSupports updating:\n- username: Unique username (3-50 characters)\n- username_alias: User's display name (1-255 characters)\n- post_id: User's post/position ID\n- is_active: User's active status (boolean)\n- role_ids: Replace all user roles, one form field per role (role_ids=1&role_ids=2)\n- certificate: Update PKI certificate authentication data (file upload)\n\nOnly provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).\nThe fields are form fields: any other body (JSON included) answers 415 instead of being ignored.",
         "operationId": "update_user",
         "security": [
           {
@@ -1541,10 +1537,11 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
-            "multipart/form-data": {
+            "application/x-www-form-urlencoded": {
               "schema": {
-                "$ref": "#/components/schemas/Body_update_user"
+                "$ref": "#/components/schemas/UserUpdateForm"
               }
             }
           }
@@ -1639,7 +1636,7 @@
             }
           },
           "400": {
-            "description": "`cannot_deactivate_self`: You cannot deactivate your own account; `certificate_file_empty`: Certificate file is empty; `certificate_invalid`: Invalid certificate; `certificate_taken`: Certificate already exists for another user; `role_archived_not_assignable`: Archived role cannot be assigned; `role_ids_not_json_array`: role_ids must be a JSON array like [1, 2, 3]; `username_taken`: User with this username already exists",
+            "description": "`cannot_deactivate_self`: You cannot deactivate your own account; `certificate_file_empty`: Certificate file is empty; `certificate_invalid`: Invalid certificate; `certificate_taken`: Certificate already exists for another user; `role_archived_not_assignable`: Archived role cannot be assigned; `username_taken`: User with this username already exists",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1660,9 +1657,6 @@
                       "$ref": "#/components/schemas/RoleArchivedNotAssignableProblem"
                     },
                     {
-                      "$ref": "#/components/schemas/RoleIdsNotJsonArrayProblem"
-                    },
-                    {
                       "$ref": "#/components/schemas/UsernameTakenProblem"
                     }
                   ],
@@ -1674,7 +1668,6 @@
                       "certificate_invalid": "#/components/schemas/CertificateInvalidProblem",
                       "certificate_taken": "#/components/schemas/CertificateTakenProblem",
                       "role_archived_not_assignable": "#/components/schemas/RoleArchivedNotAssignableProblem",
-                      "role_ids_not_json_array": "#/components/schemas/RoleIdsNotJsonArrayProblem",
                       "username_taken": "#/components/schemas/UsernameTakenProblem"
                     }
                   }
@@ -21011,131 +21004,6 @@
           }
         ]
       },
-      "Body_create_user": {
-        "properties": {
-          "certificate": {
-            "type": "string",
-            "format": "binary",
-            "title": "Certificate",
-            "description": "PKI certificate file (PEM or DER format)"
-          },
-          "username": {
-            "type": "string",
-            "maxLength": 50,
-            "minLength": 3,
-            "title": "Username"
-          },
-          "username_alias": {
-            "type": "string",
-            "maxLength": 255,
-            "minLength": 1,
-            "title": "Username Alias"
-          },
-          "role_ids": {
-            "type": "string",
-            "title": "Role Ids",
-            "description": "JSON array of role IDs, e.g. [1, 2, 3]"
-          },
-          "post_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Post Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "certificate",
-          "username",
-          "username_alias",
-          "role_ids"
-        ],
-        "title": "Body_create_user"
-      },
-      "Body_update_user": {
-        "properties": {
-          "certificate": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "binary"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Certificate",
-            "description": "Optional PKI certificate file to update (PEM or DER format)"
-          },
-          "username": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 50,
-                "minLength": 3
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Username"
-          },
-          "username_alias": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 255,
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Username Alias"
-          },
-          "post_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Post Id"
-          },
-          "is_active": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Active"
-          },
-          "role_ids": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Role Ids",
-            "description": "Optional JSON array of role IDs, e.g. [1, 2, 3]"
-          }
-        },
-        "type": "object",
-        "title": "Body_update_user"
-      },
       "Body_upload_complete_file": {
         "properties": {
           "observation_id": {
@@ -29199,69 +29067,6 @@
           }
         ]
       },
-      "RoleIdsNotJsonArrayProblem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "title": "Type",
-            "description": "URI of the problem type; dereference it for its documentation"
-          },
-          "title": {
-            "type": "string",
-            "const": "role_ids must be a JSON array like [1, 2, 3]",
-            "title": "Title",
-            "description": "Summary of the problem type"
-          },
-          "status": {
-            "type": "integer",
-            "const": 400,
-            "title": "Status",
-            "description": "HTTP status code"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "Explanation of this occurrence",
-            "examples": [
-              "role_ids must be a JSON array like [1, 2, 3]"
-            ]
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "description": "Path of the request that failed"
-          },
-          "code": {
-            "type": "string",
-            "const": "role_ids_not_json_array",
-            "title": "Code",
-            "description": "Key of exactly this problem in the localization package"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "code"
-        ],
-        "title": "RoleIdsNotJsonArrayProblem",
-        "description": "role_ids must be a JSON array like [1, 2, 3] (HTTP 400). Problem type role_ids_not_json_array.",
-        "examples": [
-          {
-            "code": "role_ids_not_json_array",
-            "detail": "role_ids must be a JSON array like [1, 2, 3]",
-            "instance": "/api/v1/...",
-            "status": 400,
-            "title": "role_ids must be a JSON array like [1, 2, 3]",
-            "type": "https://example.org/problems/role_ids_not_json_array"
-          }
-        ]
-      },
       "RoleNameArchivedProblem": {
         "properties": {
           "type": {
@@ -33394,6 +33199,59 @@
           }
         ]
       },
+      "UserCreateForm": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "maxLength": 50,
+            "minLength": 3,
+            "title": "Username"
+          },
+          "username_alias": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Username Alias"
+          },
+          "post_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Post Id"
+          },
+          "role_ids": {
+            "items": {
+              "type": "integer",
+              "exclusiveMinimum": 0.0
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Role Ids",
+            "description": "Role ids, one form field per role: role_ids=1&role_ids=2"
+          },
+          "certificate": {
+            "type": "string",
+            "format": "binary",
+            "title": "Certificate",
+            "description": "PKI certificate file (PEM or DER format)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "username_alias",
+          "role_ids",
+          "certificate"
+        ],
+        "title": "UserCreateForm",
+        "description": "Form of POST /users/ (multipart/form-data). Unknown form fields are ignored, as with plain Form() params."
+      },
       "UserInfoResponse": {
         "properties": {
           "post_id": {
@@ -33986,6 +33844,92 @@
           "deleted"
         ],
         "title": "UserStatistics"
+      },
+      "UserUpdateForm": {
+        "properties": {
+          "username": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 50,
+                "minLength": 3
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username"
+          },
+          "username_alias": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username Alias"
+          },
+          "post_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Post Id"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          },
+          "role_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0.0
+                },
+                "type": "array",
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Ids",
+            "description": "Replaces every role of the user, one form field per role: role_ids=1&role_ids=2"
+          },
+          "certificate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "binary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Certificate",
+            "description": "New PKI certificate file (PEM or DER format)"
+          }
+        },
+        "type": "object",
+        "title": "UserUpdateForm",
+        "description": "Form of PATCH /users/{user_id} (multipart/form-data or urlencoded): only the fields sent are changed.\nUnknown form fields (is_deleted included) are ignored, as with plain Form() params."
       },
       "UsernameOrCertificateTakenProblem": {
         "properties": {

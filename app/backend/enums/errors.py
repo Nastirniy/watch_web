@@ -182,7 +182,6 @@ class ErrorCode(ProblemType):
         413, "Certificate file is too large", "Certificate file is too large (at most {max_bytes} bytes)", max_bytes=int))
     CERTIFICATE_INVALID = ("certificate_invalid", problem(400, "Invalid certificate"))
     CERTIFICATE_PROCESSING_FAILED = ("certificate_processing_failed", problem(500, "Failed to process certificate file"))
-    ROLE_IDS_NOT_JSON_ARRAY = ("role_ids_not_json_array", problem(400, "role_ids must be a JSON array like [1, 2, 3]"))
     CANNOT_DEACTIVATE_SELF = ("cannot_deactivate_self", problem(400, "You cannot deactivate your own account"))
     CANNOT_ARCHIVE_SELF = ("cannot_archive_self", problem(400, "You cannot archive your own account"))
     POST_ACCESS_HOME_POST = ("post_access_home_post", problem(400, "This post is the home post of the user and already grants full access"))

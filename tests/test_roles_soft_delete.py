@@ -53,7 +53,7 @@ async def test_archive_lifecycle(client, db, headers):
     # cannot be archived twice, cannot be assigned, name cannot be reused
     assert (await client.post(ARCHIVE.format(role_id=role.id), headers=headers(admin))).status_code == 404
     assign = await client.patch(V1.path(UserRoutes.USER_BY_ID, user_id=user.id),
-                                data={"role_ids": f"[{role.id}]"}, headers=headers(admin))
+                                data={"role_ids": [role.id]}, headers=headers(admin))
     assert assign.status_code == 400, assign.text
     reuse = await client.post(ROLES, json={"name": "viewer", "display_name": "Viewer"}, headers=headers(admin))
     assert reuse.status_code == 409

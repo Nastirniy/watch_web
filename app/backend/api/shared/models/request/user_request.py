@@ -1,5 +1,6 @@
 from typing import List, Optional
-from pydantic import BaseModel, Field, PositiveInt, field_validator
+from fastapi import UploadFile
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt, field_validator
 
 from app.backend.utils.validators import SecureBaseModel, SecurityValidators
 from app.backend.services.api_errors import invalid
@@ -11,7 +12,7 @@ class UserCreateData(SecureBaseModel):
     username: str = Field(..., min_length=3, max_length=50)
     username_alias: str = Field(..., min_length=1, max_length=255)
     post_id: Optional[int] = Field(default=None, gt=0)
-    role_ids: List[PositiveInt] = Field(..., min_length=1, description="List of role IDs to assign to the user")
+    role_ids: List[PositiveInt] = Field(..., min_length=1, description="Role ids, one form field per role: role_ids=1&role_ids=2")
 
     @field_validator('username')
     @classmethod
@@ -37,7 +38,7 @@ class UserUpdateData(SecureBaseModel):
     username_alias: Optional[str] = Field(default=None, min_length=1, max_length=255)
     post_id: Optional[int] = Field(default=None, gt=0)
     is_active: Optional[bool] = Field(default=None)
-    role_ids: Optional[List[PositiveInt]] = Field(default=None, min_length=1, description="List of role IDs to replace current roles")
+    role_ids: Optional[List[PositiveInt]] = Field(default=None, min_length=1, description="Replaces every role of the user, one form field per role: role_ids=1&role_ids=2")
 
     @field_validator('username')
     @classmethod
@@ -60,6 +61,21 @@ class UserUpdateData(SecureBaseModel):
             if len(v) != len(set(v)):
                 raise invalid(FieldErrorCode.ROLE_IDS_DUPLICATE)
         return v
+
+
+class UserCreateForm(UserCreateData):
+    """Form of POST /users/ (multipart/form-data). Unknown form fields are ignored, as with plain Form() params."""
+    model_config = ConfigDict(extra="ignore")
+
+    certificate: UploadFile = Field(description="PKI certificate file (PEM or DER format)")
+
+
+class UserUpdateForm(UserUpdateData):
+    """Form of PATCH /users/{user_id} (multipart/form-data or urlencoded): only the fields sent are changed.
+    Unknown form fields (is_deleted included) are ignored, as with plain Form() params."""
+    model_config = ConfigDict(extra="ignore")
+
+    certificate: Optional[UploadFile] = Field(default=None, description="New PKI certificate file (PEM or DER format)")
 
 
 class UserPostAccessUpsert(BaseModel):

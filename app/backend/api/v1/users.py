@@ -1,13 +1,10 @@
 from typing import List, Optional, Annotated
-from fastapi import APIRouter, Depends, status, File, UploadFile, Form, Request, Response, Query, Path
-from fastapi.exceptions import RequestValidationError
-from pydantic import ValidationError
+from fastapi import APIRouter, Depends, status, Form, Request, Response, Query, Path
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError, DataError
 from sqlmodel import select, desc
 from datetime import datetime, timezone
-import json
 
 from app.backend.database import get_session
 from app.backend.models.user import User
@@ -23,7 +20,7 @@ from app.backend.enums.general import Permissions
 from app.backend.enums.routes import UserRoutes
 from app.backend.helpers.audit_helper import client_info, create_audit_log
 from app.backend.utils.logging_config import get_api_logger
-from app.backend.api.shared.models.request.user_request import UserCreateData, UserUpdateData, UserPostAccessUpsert
+from app.backend.api.shared.models.request.user_request import UserCreateForm, UserUpdateForm, UserPostAccessUpsert
 from app.backend.api.shared.models.response.user_response import UserResponse, UserRoleResponse, UserPostAccessResponse
 from app.backend.filters.params.user_params import UserFilterParams
 from app.backend.filters.user_filter import UserFilterService
@@ -37,23 +34,6 @@ _logger = get_api_logger()
 # PATCH /users/{id} reads form fields only; a JSON body would reach the route with every field unset
 FORM_CONTENT_TYPES = ("multipart/form-data", "application/x-www-form-urlencoded")
 MAX_CERTIFICATE_BYTES = 5 * 1024 * 1024
-
-
-def _validation_error(exc: ValidationError) -> RequestValidationError:
-    """Report a request model failure like the form field checks: a 422 with the fields under "body" """
-    return RequestValidationError([{**error, "loc": ("body", *error["loc"])} for error in exc.errors(include_url=False)])
-
-
-def _parse_role_ids(raw: str) -> list:
-    """role_ids arrives as a JSON array in a form field"""
-    try:
-        value = json.loads(raw)
-    except ValueError:
-        value = None
-    if not isinstance(value, list):
-        _logger.info(f"role_ids is not a JSON array: {raw[:100]!r}")
-        raise ApiError(ErrorCode.ROLE_IDS_NOT_JSON_ARRAY)
-    return value
 
 
 def _username_taken(username: str, exclude_user_id: Optional[int] = None):
@@ -107,19 +87,14 @@ async def list_users(
     response_model=UserResponse,
     responses=problems(
         ErrorCode.CERTIFICATE_FILE_EMPTY, ErrorCode.CERTIFICATE_INVALID, ErrorCode.CERTIFICATE_TAKEN,
-        ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, ErrorCode.ROLE_IDS_NOT_JSON_ARRAY,
-        ErrorCode.USERNAME_OR_CERTIFICATE_TAKEN, ErrorCode.USERNAME_TAKEN, ErrorCode.POST_NOT_FOUND,
-        ErrorCode.ROLE_NOT_FOUND, ErrorCode.CERTIFICATE_FILE_TOO_LARGE, ErrorCode.DATA_TOO_LONG,
-        ErrorCode.CERTIFICATE_PROCESSING_FAILED, ErrorCode.DATABASE_ERROR, *ADMIN,
+        ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, ErrorCode.USERNAME_OR_CERTIFICATE_TAKEN, ErrorCode.USERNAME_TAKEN,
+        ErrorCode.POST_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.CERTIFICATE_FILE_TOO_LARGE,
+        ErrorCode.DATA_TOO_LONG, ErrorCode.CERTIFICATE_PROCESSING_FAILED, ErrorCode.DATABASE_ERROR, *ADMIN,
     ),
 )
 async def create_user(
         request: Request,
-        certificate: UploadFile = File(..., description="PKI certificate file (PEM or DER format)"),
-        username: str = Form(..., min_length=3, max_length=50),
-        username_alias: str = Form(..., min_length=1, max_length=255),
-        role_ids: str = Form(..., description="JSON array of role IDs, e.g. [1, 2, 3]"),
-        post_id: Optional[int] = Form(default=None),
+        user_data: Annotated[UserCreateForm, Form()],
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_CREATE], admin=True))
 ):
@@ -133,27 +108,11 @@ async def create_user(
 
     These fields are hashed before storage for security.
 
-    Parameters:
-    - certificate: PKI certificate file (PEM or DER format)
-    - username: Unique username (3-50 characters)
-    - username_alias: Display name (1-255 characters)
-    - role_ids: JSON array string of role IDs, e.g. "[1, 2, 3]"
-    - post_id: Optional post/position ID
+    The form fields are described by UserCreateForm; role_ids is repeated once per role.
     """
     current_user = auth.user
-    role_ids_list = _parse_role_ids(role_ids)
-
-    # Validate all input data using Pydantic model
-    try:
-        user_data = UserCreateData(
-            username=username,
-            username_alias=username_alias,
-            post_id=post_id,
-            role_ids=role_ids_list
-        )
-    except ValidationError as e:
-        _logger.info(f"User create rejected by validation: {e.errors(include_url=False, include_input=False)}")
-        raise _validation_error(e)
+    certificate = user_data.certificate
+    username = user_data.username
 
     # Validate post_id exists if provided
     if user_data.post_id is not None:
@@ -314,8 +273,8 @@ async def get_user(
     response_model=UserResponse,
     responses=problems(
         ErrorCode.CANNOT_DEACTIVATE_SELF, ErrorCode.CERTIFICATE_FILE_EMPTY, ErrorCode.CERTIFICATE_INVALID,
-        ErrorCode.CERTIFICATE_TAKEN, ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, ErrorCode.ROLE_IDS_NOT_JSON_ARRAY,
-        ErrorCode.USERNAME_TAKEN, ErrorCode.POST_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.USER_NOT_FOUND,
+        ErrorCode.CERTIFICATE_TAKEN, ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, ErrorCode.USERNAME_TAKEN,
+        ErrorCode.POST_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.USER_NOT_FOUND,
         ErrorCode.CERTIFICATE_FILE_TOO_LARGE, ErrorCode.FORM_CONTENT_TYPE_REQUIRED,
         ErrorCode.CERTIFICATE_PROCESSING_FAILED, ErrorCode.DATABASE_ERROR, *ADMIN,
     ),
@@ -323,12 +282,7 @@ async def get_user(
 async def update_user(
         request: Request,
         user_id: Annotated[int, Path(ge=1)],
-        certificate: Optional[UploadFile] = File(None, description="Optional PKI certificate file to update (PEM or DER format)"),
-        username: Optional[str] = Form(None, min_length=3, max_length=50),
-        username_alias: Optional[str] = Form(None, min_length=1, max_length=255),
-        post_id: Optional[int] = Form(None),
-        is_active: Optional[bool] = Form(None),
-        role_ids: Optional[str] = Form(None, description="Optional JSON array of role IDs, e.g. [1, 2, 3]"),
+        update_data: Annotated[UserUpdateForm, Form()],
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE], admin=True))
 ):
@@ -340,7 +294,7 @@ async def update_user(
     - username_alias: User's display name (1-255 characters)
     - post_id: User's post/position ID
     - is_active: User's active status (boolean)
-    - role_ids: Replace all user roles with provided role IDs (JSON array string, e.g. "[1, 2, 3]")
+    - role_ids: Replace all user roles, one form field per role (role_ids=1&role_ids=2)
     - certificate: Update PKI certificate authentication data (file upload)
 
     Only provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).
@@ -369,21 +323,7 @@ async def update_user(
     # Store old values for auditing
     old_values = user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"})
 
-    # Parse role_ids from JSON string if provided
-    role_ids_list = _parse_role_ids(role_ids) if role_ids is not None else None
-
-    # Validate input data using Pydantic model
-    try:
-        update_data = UserUpdateData(
-            username=username,
-            username_alias=username_alias,
-            post_id=post_id,
-            is_active=is_active,
-            role_ids=role_ids_list
-        )
-    except ValidationError as e:
-        _logger.info(f"User update rejected by validation: {e.errors(include_url=False, include_input=False)}")
-        raise _validation_error(e)
+    certificate = update_data.certificate
 
     if update_data.username is not None:
         existing_username = await session.exec(_username_taken(update_data.username, exclude_user_id=user_id))

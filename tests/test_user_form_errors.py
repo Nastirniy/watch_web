@@ -45,7 +45,7 @@ async def test_create_certificate_file_errors(client, db, headers, content, code
     response = await client.post(
         CREATE, headers=headers(admin),
         files={"certificate": ("cert.pem", content, "application/x-pem-file")},
-        data={"username": "cert_case", "username_alias": "Alias", "role_ids": f"[{await admin_role_id(db)}]"},
+        data={"username": "cert_case", "username_alias": "Alias", "role_ids": [await admin_role_id(db)]},
     )
     assert response.status_code == code, response.text
 
@@ -70,7 +70,7 @@ async def test_update_with_certificate_of_another_user_answers_400(client, db, h
     created = await client.post(
         CREATE, headers=headers(admin),
         files={"certificate": ("cert.pem", certificate, "application/x-pem-file")},
-        data={"username": "cert_owner", "username_alias": "Alias", "role_ids": f"[{role_id}]"},
+        data={"username": "cert_owner", "username_alias": "Alias", "role_ids": [role_id]},
     )
     assert created.status_code == 200, created.text
 
