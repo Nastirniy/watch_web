@@ -14,6 +14,8 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - The 10 `GET .../filter-schema` routes are gone (users, posts, roles, observations, media, media-formats, categories, signal-types, tags, search). OpenAPI describes every filter: each list and search route now documents its query parameters with descriptions and types (they are FastAPI query models), and `sort_by` is an enum of the sortable fields of the entity.
 - `sort_by` with a field that is not sortable answers 422 `validation_error` (it was silently ignored).
 - `status_in` and `tag_ids` (observations list and search) are repeated query parameters: `?tag_ids=1&tag_ids=2` instead of `?tag_ids=1,2`. A non-numeric tag id answers 422 instead of 500.
+- An id below 1 in a path (`/users/{user_id}`, `/users/{user_id}/roles`, every `/roles/{role_id}...` and `.../permissions/{permission_id}`) answers 422 `validation_error` (item code `greater_than_equal`, `parameter` + `location: path`) instead of 400 `user_id_invalid` / `role_id_invalid` / `permission_id_invalid`; those three codes are gone.
+- Ids in bodies (`role_ids`, `permission_ids`, observation `tag_ids`) are positive integers in the schema; a value below 1 is the pydantic item code `greater_than` instead of `role_ids_invalid`, `permission_ids_invalid`, `tag_id_invalid`. Field codes gone with them: `role_ids_required` and `permission_ids_not_list` (never reachable: `min_length` and the list type are checked first) and the unused `end_before_start`.
 
 ### Changed for API clients
 

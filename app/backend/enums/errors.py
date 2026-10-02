@@ -178,7 +178,6 @@ class ErrorCode(ProblemType):
     # ---------------------------------------------------------------- users
     USER_NOT_FOUND = ("user_not_found", problem(404, "User not found"))
     USER_NOT_ARCHIVED = ("user_not_archived", problem(409, "User is not archived"))
-    USER_ID_INVALID = ("user_id_invalid", problem(400, "User ID must be a positive integer"))
     USERS_LIST_FAILED = ("users_list_failed", problem(500, "Failed to retrieve users"))
     USERNAME_TAKEN = ("username_taken", problem(400, "User with this username already exists"))
     USERNAME_OR_CERTIFICATE_TAKEN = ("username_or_certificate_taken", problem(400, "User with this username or certificate already exists"))
@@ -197,7 +196,6 @@ class ErrorCode(ProblemType):
     # ---------------------------------------------------------------- roles and permissions
     ROLE_NOT_FOUND = ("role_not_found", problem(404, "Role not found", role_id=Optional[int]))
     ROLE_NOT_ARCHIVED = ("role_not_archived", problem(409, "Role is not archived"))
-    ROLE_ID_INVALID = ("role_id_invalid", problem(400, "Role ID must be a positive integer"))
     ROLE_ARCHIVED_NOT_ASSIGNABLE = ("role_archived_not_assignable", problem(
         400, "Archived role cannot be assigned", "Role {role_id} is archived and cannot be assigned", role_id=int))
     ROLE_NAME_TAKEN = ("role_name_taken", problem(400, "Role with this name already exists"))
@@ -212,7 +210,6 @@ class ErrorCode(ProblemType):
     ROLE_PERMISSION_NOT_ASSIGNED = ("role_permission_not_assigned", problem(404, "Permission is not assigned to this role"))
     ROLES_LIST_FAILED = ("roles_list_failed", problem(500, "Failed to retrieve roles"))
     PERMISSION_NOT_FOUND = ("permission_not_found", problem(404, "Permission not found"))
-    PERMISSION_ID_INVALID = ("permission_id_invalid", problem(400, "Permission ID must be a positive integer"))
     PERMISSIONS_LIST_FAILED = ("permissions_list_failed", problem(500, "Failed to retrieve permissions"))
 
     # ---------------------------------------------------------------- posts
@@ -369,12 +366,7 @@ class FieldErrorCode(FieldCode):
     COORDINATES_NOT_NUMERIC = ("coordinates_not_numeric", field("Coordinates must be numeric"))
     LATITUDE_OUT_OF_RANGE = ("latitude_out_of_range", field("Latitude must be between -90 and 90"))
     LONGITUDE_OUT_OF_RANGE = ("longitude_out_of_range", field("Longitude must be between -180 and 180"))
-    END_BEFORE_START = ("end_before_start", field("End date must be after start date"))
-    ROLE_IDS_REQUIRED = ("role_ids_required", field("At least one role must be assigned"))
     ROLE_IDS_DUPLICATE = ("role_ids_duplicate", field("Duplicate role IDs are not allowed"))
-    ROLE_IDS_INVALID = ("role_ids_invalid", field("Role IDs must be positive integers"))
-    PERMISSION_IDS_NOT_LIST = ("permission_ids_not_list", field("permission_ids must be a list"))
-    PERMISSION_IDS_INVALID = ("permission_ids_invalid", field("All permission IDs must be positive integers"))
     PERMISSIONS_UNKNOWN = ("permissions_unknown", field("Unknown permissions: {permissions}", permissions=List[str]))
     CERTIFICATE_CN_INVALID = ("certificate_cn_invalid", field("Invalid certificate CN format"))
     CERTIFICATE_SERIAL_INVALID = ("certificate_serial_invalid", field("Invalid certificate serial format"))
@@ -387,7 +379,6 @@ class FieldErrorCode(FieldCode):
     CONTENT_TYPE_OUTSIDE_MEDIA_TYPE = ("content_type_outside_media_type", field(
         "content_type must start with '{media_type}/' (put other spellings into aliases)", media_type=str))
     CONFIDENCE_LEVEL_INVALID = ("confidence_level_invalid", field("confidence_level must be one of: {accepted}", accepted=List[str]))
-    TAG_ID_INVALID = ("tag_id_invalid", field("Tag ID must be positive"))
     PAGINATION_NEGATIVE = ("pagination_negative", field("Pagination values must be non-negative"))
     DATE_FILTERS_CONFLICT = ("date_filters_conflict", field(
         "Cannot use both absolute date filters (observed_at_from/to) and relative date filters (last_n_days/day_offset)"))

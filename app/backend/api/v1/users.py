@@ -1,5 +1,5 @@
 from typing import List, Optional, Annotated
-from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Form, Request, Response, Query
+from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Form, Request, Response, Query, Path
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -293,16 +293,14 @@ async def create_user(
 @router.get(
     UserRoutes.USER_BY_ID.value,
     response_model=UserResponse,
-    responses=problems(ErrorCode.USER_ID_INVALID, AccessErrorCode.USER_SELF_ONLY, ErrorCode.USER_NOT_FOUND, *GUARDED),
+    responses=problems(AccessErrorCode.USER_SELF_ONLY, ErrorCode.USER_NOT_FOUND, *GUARDED),
 )
 async def get_user(
-        user_id: int,
+        user_id: Annotated[int, Path(ge=1)],
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW]))
 ):
     """Get user by ID - visible to the user itself, to administrators and to callers whose post scope covers the user's post"""
-    if user_id <= 0:
-        raise ApiError(ErrorCode.USER_ID_INVALID)
 
     result = await session.exec(
         select(User).where(User.id == user_id)
@@ -324,14 +322,14 @@ async def get_user(
     responses=problems(
         ErrorCode.CANNOT_DEACTIVATE_SELF, ErrorCode.CERTIFICATE_FILE_EMPTY, ErrorCode.CERTIFICATE_INVALID,
         ErrorCode.CERTIFICATE_TAKEN, ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, ErrorCode.ROLE_IDS_NOT_JSON_ARRAY,
-        ErrorCode.USER_ID_INVALID, ErrorCode.USERNAME_TAKEN, ErrorCode.POST_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND,
-        ErrorCode.USER_NOT_FOUND, ErrorCode.CERTIFICATE_FILE_TOO_LARGE, ErrorCode.FORM_CONTENT_TYPE_REQUIRED,
+        ErrorCode.USERNAME_TAKEN, ErrorCode.POST_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.USER_NOT_FOUND,
+        ErrorCode.CERTIFICATE_FILE_TOO_LARGE, ErrorCode.FORM_CONTENT_TYPE_REQUIRED,
         ErrorCode.CERTIFICATE_PROCESSING_FAILED, ErrorCode.DATABASE_ERROR, *ADMIN,
     ),
 )
 async def update_user(
         request: Request,
-        user_id: int,
+        user_id: Annotated[int, Path(ge=1)],
         certificate: Optional[UploadFile] = File(None, description="Optional PKI certificate file to update (PEM or DER format)"),
         username: Optional[str] = Form(None, min_length=3, max_length=50),
         username_alias: Optional[str] = Form(None, min_length=1, max_length=255),
@@ -363,8 +361,6 @@ async def update_user(
             headers={"Accept-Patch": ", ".join(FORM_CONTENT_TYPES)},
             content_type=content_type,
         )
-    if user_id <= 0:
-        raise ApiError(ErrorCode.USER_ID_INVALID)
 
     # Find user
     result = await session.exec(
@@ -569,17 +565,15 @@ async def update_user(
 @router.get(
     UserRoutes.USER_ROLES.value,
     response_model=List[UserRoleResponse],
-    responses=problems(ErrorCode.USER_ID_INVALID, ErrorCode.USER_NOT_FOUND, *ADMIN),
+    responses=problems(ErrorCode.USER_NOT_FOUND, *ADMIN),
 )
 async def list_user_roles(
-        user_id: int,
+        user_id: Annotated[int, Path(ge=1)],
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.ROLE_VIEW], admin=True))
 ):
     """List all roles assigned to a user - requires both USER_VIEW and ROLE_VIEW permissions"""
     current_user = auth.user
-    if user_id <= 0:
-        raise ApiError(ErrorCode.USER_ID_INVALID)
 
     # Check if user exists
     user_result = await session.exec(

@@ -1,5 +1,5 @@
 from typing import List, Optional
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, PositiveInt, field_validator
 
 from app.backend.utils.validators import SecureBaseModel, SecurityValidators
 from app.backend.services.api_errors import invalid
@@ -11,7 +11,7 @@ class UserCreateData(SecureBaseModel):
     username: str = Field(..., min_length=3, max_length=50)
     username_alias: str = Field(..., min_length=1, max_length=255)
     post_id: Optional[int] = Field(default=None, gt=0)
-    role_ids: List[int] = Field(..., min_length=1, description="List of role IDs to assign to the user")
+    role_ids: List[PositiveInt] = Field(..., min_length=1, description="List of role IDs to assign to the user")
 
     @field_validator('username')
     @classmethod
@@ -26,13 +26,8 @@ class UserCreateData(SecureBaseModel):
     @field_validator('role_ids')
     @classmethod
     def validate_role_ids(cls, v: List[int]) -> List[int]:
-        if len(v) == 0:
-            raise invalid(FieldErrorCode.ROLE_IDS_REQUIRED)
         if len(v) != len(set(v)):
             raise invalid(FieldErrorCode.ROLE_IDS_DUPLICATE)
-        for role_id in v:
-            if role_id <= 0:
-                raise invalid(FieldErrorCode.ROLE_IDS_INVALID)
         return v
 
 
@@ -42,7 +37,7 @@ class UserUpdateData(SecureBaseModel):
     username_alias: Optional[str] = Field(default=None, min_length=1, max_length=255)
     post_id: Optional[int] = Field(default=None, gt=0)
     is_active: Optional[bool] = Field(default=None)
-    role_ids: Optional[List[int]] = Field(default=None, min_length=1, description="List of role IDs to replace current roles")
+    role_ids: Optional[List[PositiveInt]] = Field(default=None, min_length=1, description="List of role IDs to replace current roles")
 
     @field_validator('username')
     @classmethod
@@ -62,13 +57,8 @@ class UserUpdateData(SecureBaseModel):
     @classmethod
     def validate_role_ids(cls, v: Optional[List[int]]) -> Optional[List[int]]:
         if v is not None:
-            if len(v) == 0:
-                raise invalid(FieldErrorCode.ROLE_IDS_REQUIRED)
             if len(v) != len(set(v)):
                 raise invalid(FieldErrorCode.ROLE_IDS_DUPLICATE)
-            for role_id in v:
-                if role_id <= 0:
-                    raise invalid(FieldErrorCode.ROLE_IDS_INVALID)
         return v
 
 

@@ -1,7 +1,7 @@
 from typing import Optional, List
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator, PositiveInt
 
 from app.backend.enums.general import ConfidenceLevel, FrequencyKind
 from app.backend.services.api_errors import invalid
@@ -91,7 +91,7 @@ class ObservationCreate(BaseModel):
         max_length=10,
         description="Confidence level: low, medium, or high"
     )
-    tag_ids: Optional[List[int]] = Field(
+    tag_ids: Optional[List[PositiveInt]] = Field(
         None,
         description="List of tag IDs to associate with the observation (duplicates removed automatically)"
     )
@@ -101,9 +101,6 @@ class ObservationCreate(BaseModel):
     def validate_tag_ids(cls, v: Optional[List[int]]) -> Optional[List[int]]:
         """Validate and deduplicate tag IDs"""
         if v is not None:
-            for tag_id in v:
-                if tag_id <= 0:
-                    raise invalid(FieldErrorCode.TAG_ID_INVALID)
             return list(dict.fromkeys(v))
         return v
 
@@ -141,7 +138,7 @@ class ObservationUpdate(BaseModel):
         max_length=10,
         description="Confidence level: low, medium, or high"
     )
-    tag_ids: Optional[List[int]] = Field(
+    tag_ids: Optional[List[PositiveInt]] = Field(
         None,
         description="List of tag IDs to set on the observation (replaces existing tags, duplicates removed automatically)"
     )
@@ -151,9 +148,6 @@ class ObservationUpdate(BaseModel):
     def validate_tag_ids(cls, v: Optional[List[int]]) -> Optional[List[int]]:
         """Validate and deduplicate tag IDs"""
         if v is not None:
-            for tag_id in v:
-                if tag_id <= 0:
-                    raise invalid(FieldErrorCode.TAG_ID_INVALID)
             return list(dict.fromkeys(v))
         return v
 
