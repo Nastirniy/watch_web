@@ -30,6 +30,7 @@ from app.backend.services.media.probe import metadata_for, resolve_tools
 from app.backend.enums.general import Permissions, MediaType, ThumbnailFormat, ThumbnailSize, ThumbnailStatus
 from app.backend.enums.routes import MediaRoutes
 from app.backend.helpers.audit_helper import create_audit_log
+from app.backend.helpers.audit_helper import client_info
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.config import settings
 from app.backend.api.shared.models.request.media_request import ListAttachedMediaRequest, ShareLinkRequest, PosterReconcileRequest
@@ -123,15 +124,6 @@ def _check_declared_format(registry: formats.FormatRegistry, media_type: str, fi
     return spec
 
 
-def _client_info(request: Request) -> dict:
-    return {
-        "session_id": getattr(request.state, "session_id", None),
-        "ip_address": request.client.host if request.client else None,
-        "user_agent": request.headers.get("user-agent"),
-        "request_url": str(request.url),
-    }
-
-
 # ---------------------------------------------------------------------------
 # Listing and metadata
 # ---------------------------------------------------------------------------
@@ -218,7 +210,7 @@ async def reconcile_posters(
     await create_audit_log(
         session=session, action="reconcile", resource_type="media_posters",
         user_id=auth.user.id, details={"message": f"User {auth.user.username} reconciled posters", **counts},
-        **_client_info(request),
+        **client_info(request, auth),
     )
     await session.commit()
     return PosterReconcileResponse(**counts)
@@ -311,7 +303,7 @@ async def _set_media_archived(request: Request, session: AsyncSession, auth: Aut
         session=session, action=action, resource_type="media", resource_id=media_id,
         user_id=current_user.id, old_values=old_values, new_values=media_file.model_dump(),
         details={"message": f"User {current_user.username} {action}d media file '{old_values.get('original_filename')}'"},
-        **_client_info(request),
+        **client_info(request, auth),
     )
     await session.commit()
     await session.refresh(media_file)
@@ -391,7 +383,7 @@ async def _finish_upload(
         session=session, action="create", resource_type="media", resource_id=media_file_id,
         user_id=auth.user.id, new_values=media_file.model_dump() if media_file else None,
         details={"message": f"User {auth.user.username} uploaded media file '{original_filename}' ({transport}) for observation #{observation_id}"},
-        **_client_info(request),
+        **client_info(request, auth),
     )
     await session.commit()
 
@@ -650,7 +642,7 @@ async def share_media_thumbnail(
         session=session, action="share", resource_type="media", resource_id=media_id,
         user_id=auth.user.id,
         details={"message": f"User {auth.user.username} shared a {body.size.value} thumbnail of media #{media_id}", "ttl_seconds": ttl},
-        **_client_info(request),
+        **client_info(request, auth),
     )
     await session.commit()
     return ShareLinkResponse(media_id=media_id, size=body.size.value, format=body.format.value, url=url, expires_at=expires_at)

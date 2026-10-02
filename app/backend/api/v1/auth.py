@@ -281,7 +281,8 @@ async def logout(
     """Logout user and invalidate session"""
     current_user = auth.user
     try:
-        session_id = getattr(request.state, 'session_id', logout_request.session_id)
+        # The session of the access token; the body names one only for a token without a session
+        session_id = auth.session_id or logout_request.session_id
 
         if not session_id:
             _logger.warning(f"No active session found for user {current_user.username}")

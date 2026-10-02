@@ -18,7 +18,6 @@ from app.backend.api.shared.helpers.health_helper import (
     ServicesHealthModel,
     ServiceStatusModel
 )
-from app.backend.helpers.ip_request_helper import get_real_client_ip
 from app.backend.services.api_errors import ApiError
 from app.backend.enums.errors import ErrorCode
 from app.backend.enums.errors import AccessErrorCode
@@ -40,7 +39,7 @@ async def health_check(
     - Host restrictions: Only allowed hosts can access (configurable)
     """
     # Get client information
-    client_ip = get_real_client_ip(request)
+    # uvicorn runs with --proxy-headers behind nginx: request.client is the real client
     client_host = request.client.host if request.client else "unknown"
 
     # Check host restrictions
@@ -48,7 +47,7 @@ async def health_check(
         raise ApiError(AccessErrorCode.HEALTH_HOST_NOT_ALLOWED)
 
     # Check rate limiting
-    if not health_rate_limiter.is_allowed(client_ip):
+    if not health_rate_limiter.is_allowed(client_host):
         raise ApiError(
             ErrorCode.HEALTH_RATE_LIMITED,
             headers={"Retry-After": str(settings.health.rate_limit_window_seconds)},
@@ -80,7 +79,7 @@ async def health_check(
 
     except Exception as e:
         # Log the actual error for debugging (server-side only)
-        logger.error(f"Health check failed for client {client_ip}: {type(e).__name__}: {str(e)}")
+        logger.error(f"Health check failed for client {client_host}: {type(e).__name__}: {str(e)}")
         logger.exception("Health check exception details:")
 
         return HealthResponse(

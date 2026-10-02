@@ -23,7 +23,7 @@ from app.backend.models.observation import Observation, Category, SignalType, Ta
 from app.backend.models.media_format import MediaFormat
 from app.backend.models.media import MediaFile
 from app.backend.models.audit import AuditLog
-from app.backend.helpers.audit_helper import create_audit_log
+from app.backend.helpers.audit_helper import client_info, create_audit_log
 
 # Filter params
 from app.backend.filters.params.base_params import BaseFilterParams
@@ -89,36 +89,25 @@ def _build_param_info(params_class, field_names: List[str]) -> List[FilterParamI
     return result
 
 
-def get_client_ip(request: Request) -> str:
-    """Extract client IP from request"""
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.headers.get("X-Real-IP") or (request.client.host if request.client else "unknown")
-
-
 async def log_search(
     request: Request,
     session: AsyncSession,
-    user: User,
+    auth: AuthContext,
     entity: str,
     params: Dict,
     results_count: int
 ) -> None:
     """Log search to audit"""
     try:
-        ip = get_client_ip(request)
         await create_audit_log(
             session=session,
-            user_id=user.id,
-            session_id=getattr(request.state, "session_id", None),
+            user_id=auth.user.id,
             action="search",
             resource_type=entity,
             new_values={"params": params, "results": results_count},
-            details={"message": f"User {user.username} searched for {entity} with {results_count} results"},
-            ip_address=ip,
-            request_url=request.url.path,
-            success=True
+            details={"message": f"User {auth.user.username} searched for {entity} with {results_count} results"},
+            success=True,
+            **client_info(request, auth),
         )
         await session.commit()
     except Exception as e:
@@ -140,7 +129,6 @@ async def search_observations(
     auth: AuthContext = Depends(ENTITY_REGISTRY["observations"]["require"]),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
-    current_user = auth.user
     access_post_ids = AccessControlService.resolve_post_scope(auth, params.post_id)
 
     AccessControlService.check_include_deleted(auth, params, Permissions.OBSERVATION_ARCHIVE)
@@ -156,7 +144,7 @@ async def search_observations(
     count_query = ObservationFilterService.apply_filters_for_count(count_query, params, access_post_ids)
     total = (await session.exec(count_query)).one()
 
-    await log_search(request, session, current_user, "observations", params.model_dump(exclude_none=True), len(items))
+    await log_search(request, session, auth, "observations", params.model_dump(exclude_none=True), len(items))
 
     return SearchResponse.create("observations", processed_items, total, params.page, params.page_size)
 
@@ -176,7 +164,6 @@ async def search_users(
     auth: AuthContext = Depends(ENTITY_REGISTRY["users"]["require"]),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
-    current_user = auth.user
     access_post_ids = AccessControlService.resolve_record_scope(auth, params.post_id)
 
     AccessControlService.check_include_deleted(auth, params, Permissions.USER_ARCHIVE)
@@ -189,7 +176,7 @@ async def search_users(
     count_query = UserFilterService.apply_filters_for_count(count_query, params, access_post_ids)
     total = (await session.exec(count_query)).one()
 
-    await log_search(request, session, current_user, "users", params.model_dump(exclude_none=True), len(items))
+    await log_search(request, session, auth, "users", params.model_dump(exclude_none=True), len(items))
 
     return SearchResponse.create("users", items, total, params.page, params.page_size)
 
@@ -209,7 +196,6 @@ async def search_posts(
     auth: AuthContext = Depends(ENTITY_REGISTRY["posts"]["require"]),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
-    current_user = auth.user
     access_post_ids = AccessControlService.post_record_scope(auth)
 
     query = select(Post)
@@ -221,7 +207,7 @@ async def search_posts(
     count_query = PostFilterService.apply_filters_for_count(count_query, params, access_post_ids)
     total = (await session.exec(count_query)).one()
 
-    await log_search(request, session, current_user, "posts", params.model_dump(exclude_none=True), len(items))
+    await log_search(request, session, auth, "posts", params.model_dump(exclude_none=True), len(items))
 
     return SearchResponse.create("posts", [post_to_response(post) for post in items], total, params.page, params.page_size)
 
@@ -241,7 +227,6 @@ async def search_roles(
     auth: AuthContext = Depends(ENTITY_REGISTRY["roles"]["require"]),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
-    current_user = auth.user
     AccessControlService.check_include_deleted(auth, params, Permissions.ROLE_ARCHIVE)
     query = select(Role)
     query = RoleFilterService.apply_filters(query, params)
@@ -252,7 +237,7 @@ async def search_roles(
     count_query = RoleFilterService.apply_filters_for_count(count_query, params)
     total = (await session.exec(count_query)).one()
 
-    await log_search(request, session, current_user, "roles", params.model_dump(exclude_none=True), len(items))
+    await log_search(request, session, auth, "roles", params.model_dump(exclude_none=True), len(items))
 
     return SearchResponse.create("roles", items, total, params.page, params.page_size)
 
@@ -272,7 +257,6 @@ async def search_categories(
     auth: AuthContext = Depends(ENTITY_REGISTRY["categories"]["require"]),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
-    current_user = auth.user
     AccessControlService.check_include_deleted(auth, params, Permissions.CATEGORY_ARCHIVE)
     query = select(Category)
     query = CategoryFilterService.apply_filters(query, params)
@@ -283,7 +267,7 @@ async def search_categories(
     count_query = CategoryFilterService.apply_filters_for_count(count_query, params)
     total = (await session.exec(count_query)).one()
 
-    await log_search(request, session, current_user, "categories", params.model_dump(exclude_none=True), len(items))
+    await log_search(request, session, auth, "categories", params.model_dump(exclude_none=True), len(items))
 
     return SearchResponse.create("categories", items, total, params.page, params.page_size)
 
@@ -303,7 +287,6 @@ async def search_signal_types(
     auth: AuthContext = Depends(ENTITY_REGISTRY["signal_types"]["require"]),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
-    current_user = auth.user
     AccessControlService.check_include_deleted(auth, params, Permissions.SIGNAL_TYPE_ARCHIVE)
     query = select(SignalType)
     query = SignalTypeFilterService.apply_filters(query, params)
@@ -314,7 +297,7 @@ async def search_signal_types(
     count_query = SignalTypeFilterService.apply_filters_for_count(count_query, params)
     total = (await session.exec(count_query)).one()
 
-    await log_search(request, session, current_user, "signal_types", params.model_dump(exclude_none=True), len(items))
+    await log_search(request, session, auth, "signal_types", params.model_dump(exclude_none=True), len(items))
 
     return SearchResponse.create("signal_types", items, total, params.page, params.page_size)
 
@@ -334,7 +317,6 @@ async def search_tags(
     auth: AuthContext = Depends(ENTITY_REGISTRY["tags"]["require"]),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
-    current_user = auth.user
     AccessControlService.check_include_deleted(auth, params, Permissions.TAG_ARCHIVE)
     query = select(Tag)
     query = TagFilterService.apply_filters(query, params)
@@ -345,7 +327,7 @@ async def search_tags(
     count_query = TagFilterService.apply_filters_for_count(count_query, params)
     total = (await session.exec(count_query)).one()
 
-    await log_search(request, session, current_user, "tags", params.model_dump(exclude_none=True), len(items))
+    await log_search(request, session, auth, "tags", params.model_dump(exclude_none=True), len(items))
 
     return SearchResponse.create("tags", items, total, params.page, params.page_size)
 
@@ -365,7 +347,6 @@ async def search_media(
     auth: AuthContext = Depends(ENTITY_REGISTRY["media"]["require"]),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
-    current_user = auth.user
     access_post_ids = AccessControlService.post_scope(auth)
 
     query = select(MediaFile)
@@ -377,7 +358,7 @@ async def search_media(
     count_query = MediaFilterService.apply_filters_for_count(count_query, params, access_post_ids)
     total = (await session.exec(count_query)).one()
 
-    await log_search(request, session, current_user, "media", params.model_dump(exclude_none=True), len(items))
+    await log_search(request, session, auth, "media", params.model_dump(exclude_none=True), len(items))
 
     return SearchResponse.create("media", items, total, params.page, params.page_size)
 
@@ -423,7 +404,6 @@ async def search_media_formats(
     auth: AuthContext = Depends(ENTITY_REGISTRY["media_formats"]["require"]),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse:
-    current_user = auth.user
     AccessControlService.check_include_deleted(auth, params, Permissions.MEDIA_FORMAT_ARCHIVE)
     query = select(MediaFormat)
     query = MediaFormatFilterService.apply_filters(query, params)
@@ -434,6 +414,6 @@ async def search_media_formats(
     count_query = MediaFormatFilterService.apply_filters_for_count(count_query, params)
     total = (await session.exec(count_query)).one()
 
-    await log_search(request, session, current_user, "media_formats", params.model_dump(exclude_none=True), len(items))
+    await log_search(request, session, auth, "media_formats", params.model_dump(exclude_none=True), len(items))
 
     return SearchResponse.create("media_formats", items, total, params.page, params.page_size)

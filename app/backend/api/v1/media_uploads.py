@@ -19,11 +19,12 @@ from app.backend.database import get_session
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import MediaRoutes
 from app.backend.helpers.audit_helper import create_audit_log
+from app.backend.helpers.audit_helper import client_info
 from app.backend.models.upload_session import UploadSession
 from app.backend.api.shared.helpers.media_helper import storage_root
 from app.backend.api.versioning import PublishedVersion, request_version
 from app.backend.api.v1.media import (
-    _check_declared_format, _client_info, _finish_upload, _load_observation_for_upload,
+    _check_declared_format, _finish_upload, _load_observation_for_upload,
     _format_rejected, _store_rejected, _too_large, _validation_config_for,
 )
 from app.backend.api.shared.models.request.media_request import UploadSessionCreate
@@ -174,7 +175,7 @@ async def create_upload_session(
         session=session, action="create", resource_type="upload_session", resource_id=None,
         user_id=auth.user.id, new_values={"upload_id": row.id, "expected_size": row.expected_size, "media_type": row.media_type},
         details={"message": f"User {auth.user.username} opened upload session {row.id} for observation #{observation.id} ({body.original_filename}, {body.expected_size} bytes)"},
-        **_client_info(request),
+        **client_info(request, auth),
     )
     await session.commit()
 
@@ -372,7 +373,7 @@ async def abort_upload_session(
         await create_audit_log(
             session=session, action="abort", resource_type="upload_session", resource_id=None,
             user_id=auth.user.id, details={"message": f"User {auth.user.username} aborted upload session {row.id} at {row.received_bytes}/{row.expected_size} bytes", "upload_id": row.id},
-            **_client_info(request),
+            **client_info(request, auth),
         )
         await session.commit()
     return _to_response(row, version)

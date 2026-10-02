@@ -17,6 +17,7 @@ from app.backend.enums.general import Permissions, StatsGroupBy
 from app.backend.config import settings
 from app.backend.enums.routes import PostRoutes
 from app.backend.helpers.audit_helper import create_audit_log
+from app.backend.helpers.audit_helper import client_info
 from app.backend.filters.params.post_params import PostFilterParams
 from app.backend.filters.post_filter import PostFilterService
 from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
@@ -90,12 +91,9 @@ async def create_post(
         resource_type="post",
         resource_id=post.id,
         user_id=current_user.id,
-        session_id=getattr(request.state, "session_id", None),
         new_values=post.model_dump(),
         details={"message": f"User {current_user.username} created new post '{post.name}' ({post.code})"},
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-        request_url=str(request.url)
+        **client_info(request, auth)
     )
     await session.commit()
 
@@ -210,13 +208,10 @@ async def update_post(
         resource_type="post",
         resource_id=post.id,
         user_id=current_user.id,
-        session_id=getattr(request.state, "session_id", None),
         old_values=old_values,
         new_values=post.model_dump(),
         details={"message": f"User {current_user.username} updated post '{post.name}'"},
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-        request_url=request.url.path if hasattr(request, "url") else None
+        **client_info(request, auth)
     )
     await session.commit()
 

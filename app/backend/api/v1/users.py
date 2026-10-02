@@ -22,6 +22,7 @@ from app.backend.helpers.certeficates_helper import CertificateParser, hash_data
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import UserRoutes
 from app.backend.helpers.audit_helper import create_audit_log
+from app.backend.helpers.audit_helper import client_info
 from app.backend.utils.validators import PaginationParams
 from app.backend.utils.logging_config import get_logger, get_api_logger
 from app.backend.api.shared.models.request.user_request import UserCreateData, UserUpdateData, UserPostAccessUpsert
@@ -244,12 +245,9 @@ async def create_user(
             resource_type="user",
             resource_id=user.id,
             user_id=current_user.id,
-            session_id=getattr(request.state, "session_id", None),
             new_values=user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"}),
             details={"message": f"User {current_user.username} created new user {user.username} with {len(roles_to_assign)} roles"},
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
-            request_url=str(request.url)
+            **client_info(request, auth)
         )
         await session.commit()
         
@@ -525,13 +523,10 @@ async def update_user(
             resource_type="user",
             resource_id=user.id,
             user_id=current_user.id,
-            session_id=getattr(request.state, "session_id", None),
             old_values=old_values,
             new_values=user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"}),
             details={"message": f"User {current_user.username} updated user {user.username}"},
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
-            request_url=str(request.url)
+            **client_info(request, auth)
         )
         await session.commit()
         
@@ -661,13 +656,10 @@ async def upsert_user_post_access(
         resource_type="user_post_access",
         resource_id=row.id,
         user_id=current_user.id,
-        session_id=getattr(request.state, "session_id", None),
         old_values=old_values,
         new_values=row.model_dump(),
         details={"message": f"User {current_user.username} granted post {post_id} access to user {user.username} (can_write={row.can_write})"},
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-        request_url=str(request.url)
+        **client_info(request, auth)
     )
     await session.commit()
 
@@ -705,12 +697,9 @@ async def delete_user_post_access(
         resource_type="user_post_access",
         resource_id=row_id,
         user_id=current_user.id,
-        session_id=getattr(request.state, "session_id", None),
         old_values=old_values,
         details={"message": f"User {current_user.username} revoked post {post_id} access from user {user.username}"},
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-        request_url=str(request.url)
+        **client_info(request, auth)
     )
     await session.commit()
 
@@ -756,12 +745,9 @@ async def archive_user(
         resource_type="user",
         resource_id=user.id,
         user_id=current_user.id,
-        session_id=getattr(request.state, "session_id", None),
         old_values=old_values,
         details={"message": f"User {current_user.username} archived user {user.username} ({invalidated} sessions invalidated)"},
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-        request_url=str(request.url)
+        **client_info(request, auth)
     )
     await session.commit()
     await session.refresh(user)
@@ -796,12 +782,9 @@ async def restore_user(
         resource_type="user",
         resource_id=user.id,
         user_id=current_user.id,
-        session_id=getattr(request.state, "session_id", None),
         old_values=old_values,
         details={"message": f"User {current_user.username} restored user {user.username}"},
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-        request_url=str(request.url)
+        **client_info(request, auth)
     )
     await session.commit()
     await session.refresh(user)

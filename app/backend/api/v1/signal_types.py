@@ -17,6 +17,7 @@ from app.backend.services.permissions import require
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import SignalTypeRoutes
 from app.backend.helpers.audit_helper import create_audit_log
+from app.backend.helpers.audit_helper import client_info
 from app.backend.api.shared.models.request.signal_type_request import SignalTypeCreate, SignalTypeUpdate
 from app.backend.api.shared.models.response.signal_type_response import SignalTypeResponse, SignalTypeWithCategoryResponse
 from app.backend.api.shared.models.response.observations_response import MessageResponse
@@ -127,13 +128,10 @@ async def create_signal_type(
             resource_type="signal_type",
             resource_id=signal_type.id,
             user_id=current_user.id,
-            session_id=getattr(request.state, "session_id", None),
             old_values=old_values,
             new_values=signal_type.model_dump(),
             details={"message": f"User {current_user.username} {action}d signal type '{signal_type.name}' ({signal_type.code})"},
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
-            request_url=str(request.url)
+            **client_info(request, auth)
         )
         await session.commit()
 
@@ -231,13 +229,10 @@ async def update_signal_type(
             resource_type="signal_type",
             resource_id=signal_type.id,
             user_id=current_user.id,
-            session_id=getattr(request.state, "session_id", None),
             old_values=old_values,
             new_values=signal_type.model_dump(),
             details={"message": f"User {current_user.username} updated signal type '{signal_type.name}'"},
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
-            request_url=str(request.url)
+            **client_info(request, auth)
         )
         await session.commit()
 
@@ -246,15 +241,6 @@ async def update_signal_type(
         await session.rollback()
         logger.exception(f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}")
         raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
-
-
-def _audit_context(request: Request) -> dict:
-    return {
-        "session_id": getattr(request.state, "session_id", None),
-        "ip_address": request.client.host if request.client else None,
-        "user_agent": request.headers.get("user-agent"),
-        "request_url": str(request.url),
-    }
 
 
 @router.post(SignalTypeRoutes.SIGNAL_TYPE_ARCHIVE.value, response_model=SignalTypeResponse)
@@ -290,7 +276,7 @@ async def archive_signal_type(
         old_values=old_values,
         new_values=row.model_dump(),
         details={"message": f"User {current_user.username} archived signal type '{row.name}'"},
-        **_audit_context(request),
+        **client_info(request, auth),
     )
     await session.commit()
     await session.refresh(row)
@@ -325,7 +311,7 @@ async def restore_signal_type(
         old_values=old_values,
         new_values=row.model_dump(),
         details={"message": f"User {current_user.username} restored signal type '{row.name}'"},
-        **_audit_context(request),
+        **client_info(request, auth),
     )
     await session.commit()
     await session.refresh(row)

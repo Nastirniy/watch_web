@@ -20,6 +20,7 @@ from app.backend.services.access_control import AccessControlService
 from app.backend.enums.general import Permissions, ObservationStatus
 from app.backend.enums.routes import ObservationRoutes
 from app.backend.helpers.audit_helper import create_audit_log
+from app.backend.helpers.audit_helper import client_info
 from app.backend.api.shared.models.request.observations_request import (
     ObservationCreate,
     ObservationUpdate,
@@ -230,12 +231,9 @@ async def create_observation(
             resource_type="observation",
             resource_id=observation.id,
             user_id=current_user.id,
-            session_id=getattr(request.state, "session_id", None),
             new_values=observation_audit_values(observation),
             details={"message": f"User {current_user.username} created new observation #{observation.id}"},
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
-            request_url=str(request.url)
+            **client_info(request, auth)
         )
         await session.commit()
 
@@ -324,13 +322,10 @@ async def update_observation(
             resource_type="observation",
             resource_id=observation.id,
             user_id=current_user.id,
-            session_id=getattr(request.state, "session_id", None),
             old_values=old_values,
             new_values=observation_audit_values(observation),
             details={"message": f"User {current_user.username} updated observation #{observation.id}"},
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
-            request_url=str(request.url)
+            **client_info(request, auth)
         )
         await session.commit()
 
@@ -394,13 +389,10 @@ async def mark_observation_disappeared(
         resource_type="observation",
         resource_id=observation.id,
         user_id=current_user.id,
-        session_id=getattr(request.state, "session_id", None),
         old_values=old_values,
         new_values=observation.model_dump(),
         details={"message": f"User {current_user.username} marked observation #{observation.id} as disappeared"},
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-        request_url=str(request.url)
+        **client_info(request, auth)
     )
     
     await session.commit()
@@ -505,13 +497,10 @@ async def _set_observation_archived(
         resource_type="observation",
         resource_id=observation.id,
         user_id=current_user.id,
-        session_id=getattr(request.state, "session_id", None),
         old_values=old_values,
         new_values=observation.model_dump(),
         details={"message": f"User {current_user.username} {action}d observation #{observation.id}"},
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-        request_url=str(request.url)
+        **client_info(request, auth)
     )
     await session.commit()
     logger.info(f"User {current_user.username} {action}d observation {observation.id}")
@@ -561,16 +550,13 @@ async def _audit_frequency(
         resource_type="observation_frequency",
         resource_id=frequency.id,
         user_id=auth.user.id,
-        session_id=getattr(request.state, "session_id", None),
         old_values=old_values,
         new_values=frequency_audit_values(frequency),
         details={
             "observation_id": frequency.observation_id,
             "message": f"User {auth.user.username} {action}d frequency #{frequency.id} of observation #{frequency.observation_id}",
         },
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-        request_url=str(request.url)
+        **client_info(request, auth)
     )
 
 

@@ -14,6 +14,7 @@ from app.backend.services.access_control import AccessControlService
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import RoleRoutes
 from app.backend.helpers.audit_helper import create_audit_log
+from app.backend.helpers.audit_helper import client_info
 from app.backend.utils.validators import PaginationParams
 from app.backend.utils.logging_config import get_logger, get_api_logger
 from app.backend.filters.params.role_params import RoleFilterParams
@@ -104,12 +105,9 @@ async def create_role(
         resource_type="role",
         resource_id=role.id,
         user_id=current_user.id,
-        session_id=getattr(request.state, "session_id", None),
         new_values=role.model_dump(),
         details={"message": f"User {current_user.username} created new role '{role.name}'"},
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-        request_url=str(request.url)
+        **client_info(request, auth)
     )
     await session.commit()
 
@@ -211,26 +209,14 @@ async def update_role(
         resource_type="role",
         resource_id=role.id,
         user_id=current_user.id,
-        session_id=getattr(request.state, "session_id", None),
         old_values=old_values,
         new_values=role.model_dump(),
         details={"message": f"User {current_user.username} updated role '{role.name}'"},
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-        request_url=str(request.url)
+        **client_info(request, auth)
     )
     await session.commit()
 
     return RoleResponse.model_validate(role)
-
-
-def _audit_context(request: Request) -> dict:
-    return {
-        "session_id": getattr(request.state, "session_id", None),
-        "ip_address": request.client.host if request.client else None,
-        "user_agent": request.headers.get("user-agent"),
-        "request_url": str(request.url),
-    }
 
 
 @router.post(RoleRoutes.ROLE_ARCHIVE.value, response_model=RoleResponse)
@@ -263,7 +249,7 @@ async def archive_role(
         old_values=old_values,
         new_values=role.model_dump(),
         details={"message": f"User {current_user.username} archived role '{role.name}'"},
-        **_audit_context(request),
+        **client_info(request, auth),
     )
     await session.commit()
     await session.refresh(role)
@@ -297,7 +283,7 @@ async def restore_role(
         old_values=old_values,
         new_values=role.model_dump(),
         details={"message": f"User {current_user.username} restored role '{role.name}'"},
-        **_audit_context(request),
+        **client_info(request, auth),
     )
     await session.commit()
     await session.refresh(role)
@@ -366,7 +352,7 @@ async def delete_role(
             ),
             "permanent": True,
         },
-        **_audit_context(request),
+        **client_info(request, auth),
     )
     await session.commit()
     _logger.warning(f"User {current_user.username} permanently deleted role {old_values['name']} (id {role_id})")
@@ -430,12 +416,9 @@ async def add_role_permission(
             resource_type="role",
             resource_id=role.id,
             user_id=current_user.id,
-            session_id=getattr(request.state, "session_id", None),
             new_values={"permission_added": permission.name},
             details={"message": f"User {current_user.username} granted '{permission.name}' to role '{role.name}'"},
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
-            request_url=str(request.url)
+            **client_info(request, auth)
         )
         await session.commit()
         _logger.info(f"User {current_user.username} granted {permission.name} to role {role.name}")
@@ -473,12 +456,9 @@ async def remove_role_permission(
         resource_type="role",
         resource_id=role.id,
         user_id=current_user.id,
-        session_id=getattr(request.state, "session_id", None),
         old_values={"permission_removed": permission.name},
         details={"message": f"User {current_user.username} revoked '{permission.name}' from role '{role.name}'"},
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-        request_url=str(request.url)
+        **client_info(request, auth)
     )
     await session.commit()
     _logger.info(f"User {current_user.username} revoked {permission.name} from role {role.name}")

@@ -26,6 +26,7 @@ from app.backend.services.media.formats import hard_limit_bytes, invalidate_regi
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import MediaFormatRoutes
 from app.backend.helpers.audit_helper import create_audit_log
+from app.backend.helpers.audit_helper import client_info
 from app.backend.utils.datetime_utils import get_default_timezone_datetime
 from app.backend.api.shared.models.request.media_format_request import MediaFormatCreate, MediaFormatUpdate
 from app.backend.api.shared.models.response.media_format_response import MediaFormatResponse
@@ -37,15 +38,6 @@ from app.backend.services.api_errors import ApiError
 from app.backend.enums.errors import ErrorCode
 
 router = APIRouter(prefix=MediaFormatRoutes.BASE.value, tags=[MediaFormatRoutes.tag()])
-
-
-def _client_info(request: Request) -> dict:
-    return {
-        "session_id": getattr(request.state, "session_id", None),
-        "ip_address": request.client.host if request.client else None,
-        "user_agent": request.headers.get("user-agent"),
-        "request_url": str(request.url),
-    }
 
 
 async def _check_conflicts(session: AsyncSession, media_type: str, extensions: List[str], aliases: List[str],
@@ -149,7 +141,7 @@ async def create_media_format(
         session=session, action=action, resource_type="media_format", resource_id=row.id,
         user_id=current_user.id, old_values=old_values, new_values=row.model_dump(),
         details={"message": f"User {current_user.username} {action}d media format '{row.content_type}'"},
-        **_client_info(request),
+        **client_info(request, auth),
     )
     await session.commit()
     return MediaFormatResponse.model_validate(row)
@@ -216,7 +208,7 @@ async def update_media_format(
         session=session, action="update", resource_type="media_format", resource_id=row.id,
         user_id=current_user.id, old_values=old_values, new_values=row.model_dump(),
         details={"message": f"User {current_user.username} updated media format '{row.content_type}'"},
-        **_client_info(request),
+        **client_info(request, auth),
     )
     await session.commit()
     return MediaFormatResponse.model_validate(row)
@@ -241,7 +233,7 @@ async def archive_media_format(
         session=session, action="archive", resource_type="media_format", resource_id=row.id,
         user_id=current_user.id, old_values=old_values, new_values=row.model_dump(),
         details={"message": f"User {current_user.username} archived media format '{row.content_type}'"},
-        **_client_info(request),
+        **client_info(request, auth),
     )
     await session.commit()
     await session.refresh(row)
@@ -272,7 +264,7 @@ async def restore_media_format(
         session=session, action="restore", resource_type="media_format", resource_id=row.id,
         user_id=current_user.id, old_values=old_values, new_values=row.model_dump(),
         details={"message": f"User {current_user.username} restored media format '{row.content_type}'"},
-        **_client_info(request),
+        **client_info(request, auth),
     )
     await session.commit()
     await session.refresh(row)

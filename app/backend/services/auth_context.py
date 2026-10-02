@@ -30,6 +30,7 @@ class AuthContext:
     roles: Tuple[RoleBrief, ...]
     readable_post_ids: FrozenSet[int]   # home post + every user_post_access row
     writable_post_ids: FrozenSet[int]   # home post + user_post_access rows with can_write
+    session_id: Optional[str] = None    # user_sessions.id of the access token (audit, logout)
 
     @property
     def is_admin(self) -> bool:
@@ -63,7 +64,7 @@ class AuthContext:
         return None if self.has_post_access_all else sorted(self.readable_post_ids)
 
 
-async def load_auth_context(session: AsyncSession, user: User) -> AuthContext:
+async def load_auth_context(session: AsyncSession, user: User, session_id: Optional[str] = None) -> AuthContext:
     """Two queries: roles with their permissions, and extra post access rows."""
     role_rows = (await session.exec(
         select(Role.id, Role.name, Role.display_name, Permission.name)
@@ -102,4 +103,5 @@ async def load_auth_context(session: AsyncSession, user: User) -> AuthContext:
         roles=tuple(sorted(roles.values(), key=lambda role: role.id)),
         readable_post_ids=frozenset(readable),
         writable_post_ids=frozenset(writable),
+        session_id=session_id,
     )

@@ -1,12 +1,11 @@
+from dataclasses import dataclass
 from typing import Optional
-from fastapi import Depends, status, Request
+from fastapi import Depends
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
-from jose import JWTError, jwt
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from loguru import logger
 
-from app.backend.config import settings
 from app.backend.database import get_session
 from app.backend.models.user import User, UserSession
 from app.backend.enums.errors import AuthErrorCode
@@ -19,42 +18,35 @@ from app.backend.services.api_errors import ApiError
 security = HTTPBearer(auto_error=False)
 
 
-async def get_current_user(
-        request: Request,
-        credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
-        session: AsyncSession = Depends(get_session)
-) -> User:
-    """Get current authenticated user"""
-    logger.debug("Attempting to authenticate user")
+@dataclass(frozen=True)
+class TokenClaims:
+    user_id: int
+    session_id: Optional[str]
 
+
+async def get_token_claims(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> TokenClaims:
+    """The verified access token of the request (FastAPI caches it per request)"""
     if not credentials:
         logger.warning("Authentication failed: No credentials provided")
         raise ApiError(AuthErrorCode.CREDENTIALS_REQUIRED)
-
-    token = credentials.credentials
-
-    try:
-        payload = jwt.decode(
-            token,
-            settings.security.secret_key,
-            algorithms=[settings.security.algorithm]
-        )
-        if payload.get("type") != "access":
-            logger.warning("Authentication failed: token is not an access token")
-            raise ApiError(AuthErrorCode.INVALID_TOKEN)
-        user_id: int = payload.get("sub")
-        # Explicitly get sid or default to None
-        session_id = payload.get("sid", None)
-
-        # Store in request state for auditing
-        request.state.session_id = session_id
-
-        if user_id is None:
-            logger.warning("Authentication failed: Missing user_id in JWT payload")
-            raise ApiError(AuthErrorCode.INVALID_TOKEN)
-    except JWTError as e:
-        logger.warning(f"JWT decode error: {str(e)}")
+    payload = AuthService.verify_token(credentials.credentials, token_type="access")
+    if payload is None:
         raise ApiError(AuthErrorCode.INVALID_TOKEN)
+    try:
+        user_id = int(payload["sub"])
+    except (KeyError, TypeError, ValueError):
+        logger.warning("Authentication failed: no valid user id in the token")
+        raise ApiError(AuthErrorCode.INVALID_TOKEN)
+    return TokenClaims(user_id=user_id, session_id=payload.get("sid"))
+
+
+async def get_current_user(
+        claims: TokenClaims = Depends(get_token_claims),
+        session: AsyncSession = Depends(get_session)
+) -> User:
+    """Get current authenticated user"""
+    user_id = claims.user_id
+    session_id = claims.session_id
 
     # Account status first: a deactivated or archived account is rejected whatever the state of its sessions,
     # and any session still live is ended here so the token stops working even when the flag was changed
@@ -106,8 +98,9 @@ async def get_current_user(
 
 
 async def get_auth_context(
+        claims: TokenClaims = Depends(get_token_claims),
         current_user: User = Depends(get_current_user),
         session: AsyncSession = Depends(get_session)
 ) -> AuthContext:
-    """Authenticated user plus permissions, roles and post scope, loaded once per request"""
-    return await load_auth_context(session, current_user)
+    """Authenticated user plus permissions, roles, post scope and the session of the token, loaded once per request"""
+    return await load_auth_context(session, current_user, session_id=claims.session_id)

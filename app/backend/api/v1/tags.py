@@ -16,6 +16,7 @@ from app.backend.services.permissions import require
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import TagRoutes
 from app.backend.helpers.audit_helper import create_audit_log
+from app.backend.helpers.audit_helper import client_info
 from app.backend.api.shared.models.request.tag_request import TagCreate, TagUpdate
 from app.backend.api.shared.models.response.tag_response import TagResponse
 from app.backend.api.shared.models.response.observations_response import MessageResponse
@@ -95,13 +96,10 @@ async def create_tag(
             resource_type="tag",
             resource_id=tag.id,
             user_id=current_user.id,
-            session_id=getattr(request.state, "session_id", None),
             old_values=old_values,
             new_values=tag.model_dump(),
             details={"message": f"User {current_user.username} {action}d tag '{tag.name}'"},
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
-            request_url=str(request.url)
+            **client_info(request, auth)
         )
         await session.commit()
 
@@ -185,13 +183,10 @@ async def update_tag(
             resource_type="tag",
             resource_id=tag.id,
             user_id=current_user.id,
-            session_id=getattr(request.state, "session_id", None),
             old_values=old_values,
             new_values=tag.model_dump(),
             details={"message": f"User {current_user.username} updated tag '{tag.name}'"},
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
-            request_url=str(request.url)
+            **client_info(request, auth)
         )
         await session.commit()
 
@@ -200,15 +195,6 @@ async def update_tag(
         await session.rollback()
         logger.exception(f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}")
         raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
-
-
-def _audit_context(request: Request) -> dict:
-    return {
-        "session_id": getattr(request.state, "session_id", None),
-        "ip_address": request.client.host if request.client else None,
-        "user_agent": request.headers.get("user-agent"),
-        "request_url": str(request.url),
-    }
 
 
 @router.post(TagRoutes.TAG_ARCHIVE.value, response_model=TagResponse)
@@ -238,7 +224,7 @@ async def archive_tag(
         old_values=old_values,
         new_values=row.model_dump(),
         details={"message": f"User {current_user.username} archived tag '{row.name}'"},
-        **_audit_context(request),
+        **client_info(request, auth),
     )
     await session.commit()
     await session.refresh(row)
@@ -273,7 +259,7 @@ async def restore_tag(
         old_values=old_values,
         new_values=row.model_dump(),
         details={"message": f"User {current_user.username} restored tag '{row.name}'"},
-        **_audit_context(request),
+        **client_info(request, auth),
     )
     await session.commit()
     await session.refresh(row)

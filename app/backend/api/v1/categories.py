@@ -17,6 +17,7 @@ from app.backend.services.permissions import require
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import CategoryRoutes
 from app.backend.helpers.audit_helper import create_audit_log
+from app.backend.helpers.audit_helper import client_info
 from app.backend.api.shared.models.request.category_request import CategoryCreate, CategoryUpdate
 from app.backend.api.shared.models.response.category_response import CategoryResponse, CategoryWithSignalTypesResponse
 from app.backend.api.shared.models.response.signal_type_response import SignalTypeResponse
@@ -100,13 +101,10 @@ async def create_category(
             resource_type="category",
             resource_id=category.id,
             user_id=current_user.id,
-            session_id=getattr(request.state, "session_id", None),
             old_values=old_values,
             new_values=category.model_dump(),
             details={"message": f"User {current_user.username} {action}d category '{category.name}'"},
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
-            request_url=str(request.url)
+            **client_info(request, auth)
         )
         await session.commit()
 
@@ -190,13 +188,10 @@ async def update_category(
             resource_type="category",
             resource_id=category.id,
             user_id=current_user.id,
-            session_id=getattr(request.state, "session_id", None),
             old_values=old_values,
             new_values=category.model_dump(),
             details={"message": f"User {current_user.username} updated category '{category.name}'"},
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
-            request_url=str(request.url)
+            **client_info(request, auth)
         )
         await session.commit()
 
@@ -205,15 +200,6 @@ async def update_category(
         await session.rollback()
         logger.exception(f"Unexpected database constraint violation: {str(e.orig) if hasattr(e, 'orig') else str(e)}")
         raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
-
-
-def _audit_context(request: Request) -> dict:
-    return {
-        "session_id": getattr(request.state, "session_id", None),
-        "ip_address": request.client.host if request.client else None,
-        "user_agent": request.headers.get("user-agent"),
-        "request_url": str(request.url),
-    }
 
 
 @router.post(CategoryRoutes.CATEGORY_ARCHIVE.value, response_model=CategoryResponse)
@@ -243,7 +229,7 @@ async def archive_category(
         old_values=old_values,
         new_values=row.model_dump(),
         details={"message": f"User {current_user.username} archived category '{row.name}'"},
-        **_audit_context(request),
+        **client_info(request, auth),
     )
     await session.commit()
     await session.refresh(row)
@@ -278,7 +264,7 @@ async def restore_category(
         old_values=old_values,
         new_values=row.model_dump(),
         details={"message": f"User {current_user.username} restored category '{row.name}'"},
-        **_audit_context(request),
+        **client_info(request, auth),
     )
     await session.commit()
     await session.refresh(row)
