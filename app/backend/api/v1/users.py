@@ -1,5 +1,5 @@
 from typing import List, Optional, Annotated
-from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Form, Request, Response, Query, Path
+from fastapi import APIRouter, Depends, status, File, UploadFile, Form, Request, Response, Query, Path
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -74,7 +74,7 @@ def _is_unique_violation(error_msg: str) -> bool:
     response_model=List[UserResponse],
     responses=problems(
         AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION,
-        AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.USERS_LIST_FAILED, *GUARDED,
+        AccessErrorCode.POST_ACCESS_DENIED, *GUARDED,
     ),
 )
 async def list_users(
@@ -89,24 +89,17 @@ async def list_users(
     (home post, extra post access, or every post with post.access_all).
     """
     current_user = auth.user
-    try:
-        AccessControlService.check_include_deleted(auth, filters, Permissions.USER_ARCHIVE)
-        scope = AccessControlService.resolve_record_scope(auth, filters.post_id)
+    AccessControlService.check_include_deleted(auth, filters, Permissions.USER_ARCHIVE)
+    scope = AccessControlService.resolve_record_scope(auth, filters.post_id)
 
-        query = select(User)
-        query = UserFilterService.apply_filters(query, filters, scope)
-        result = await session.exec(query)
-        users = result.all()
+    query = select(User)
+    query = UserFilterService.apply_filters(query, filters, scope)
+    result = await session.exec(query)
+    users = result.all()
 
-        _logger.info(f"User {current_user.username} listed {len(users)} users (scope={sorted(scope) if scope is not None else 'all'})")
+    _logger.info(f"User {current_user.username} listed {len(users)} users (scope={sorted(scope) if scope is not None else 'all'})")
 
-        return [UserResponse.model_validate(user) for user in users]
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        _logger.error(f"Error listing users: {str(e)}")
-        raise ApiError(ErrorCode.USERS_LIST_FAILED)
+    return [UserResponse.model_validate(user) for user in users]
 
 
 @router.post(

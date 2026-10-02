@@ -168,17 +168,12 @@ class ErrorCode(ProblemType):
 
     # ---------------------------------------------------------------- auth and sessions
     LOGIN_DATA_REQUIRED = ("login_data_required", problem(400, "JSON authentication data required in development mode"))
-    AUTHENTICATION_UNAVAILABLE = ("authentication_unavailable", problem(500, "Authentication service unavailable"))
-    TOKEN_REFRESH_FAILED = ("token_refresh_failed", problem(500, "Token refresh failed"))
     NO_ACTIVE_SESSION = ("no_active_session", problem(400, "No active session found"))
     SESSION_ALREADY_INVALIDATED = ("session_already_invalidated", problem(400, "Session already invalidated"))
-    LOGOUT_FAILED = ("logout_failed", problem(500, "Logout failed"))
-    SESSIONS_LIST_FAILED = ("sessions_list_failed", problem(500, "Failed to retrieve sessions"))
 
     # ---------------------------------------------------------------- users
     USER_NOT_FOUND = ("user_not_found", problem(404, "User not found"))
     USER_NOT_ARCHIVED = ("user_not_archived", problem(409, "User is not archived"))
-    USERS_LIST_FAILED = ("users_list_failed", problem(500, "Failed to retrieve users"))
     USERNAME_TAKEN = ("username_taken", problem(400, "User with this username already exists"))
     USERNAME_OR_CERTIFICATE_TAKEN = ("username_or_certificate_taken", problem(400, "User with this username or certificate already exists"))
     CERTIFICATE_TAKEN = ("certificate_taken", problem(400, "Certificate already exists for another user"))
@@ -208,9 +203,7 @@ class ErrorCode(ProblemType):
     ROLE_HAS_ACTIVE_USERS = ("role_has_active_users", problem(
         409, "Role is still assigned to active users; unassign it before deleting permanently", assigned_users=List[UserRef]))
     ROLE_PERMISSION_NOT_ASSIGNED = ("role_permission_not_assigned", problem(404, "Permission is not assigned to this role"))
-    ROLES_LIST_FAILED = ("roles_list_failed", problem(500, "Failed to retrieve roles"))
     PERMISSION_NOT_FOUND = ("permission_not_found", problem(404, "Permission not found"))
-    PERMISSIONS_LIST_FAILED = ("permissions_list_failed", problem(500, "Failed to retrieve permissions"))
 
     # ---------------------------------------------------------------- posts
     POST_NOT_FOUND = ("post_not_found", problem(404, "Post not found", post_id=Optional[int]))

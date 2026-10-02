@@ -35,7 +35,7 @@ _logger = get_api_logger()
 @router.get(
     RoleRoutes.ROOT.value,
     response_model=List[RoleResponse],
-    responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, ErrorCode.ROLES_LIST_FAILED, *ADMIN),
+    responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *ADMIN),
 )
 async def list_roles(
         filters: Annotated[RoleFilterParams, Query()],
@@ -44,20 +44,15 @@ async def list_roles(
 ):
     """List roles with filters. include_deleted=true (archived roles too) requires role.archive."""
     current_user = auth.user
-    try:
-        AccessControlService.check_include_deleted(auth, filters, Permissions.ROLE_ARCHIVE)
-        query = select(Role)
-        query = RoleFilterService.apply_filters(query, filters)
-        result = await session.exec(query)
+    AccessControlService.check_include_deleted(auth, filters, Permissions.ROLE_ARCHIVE)
+    query = select(Role)
+    query = RoleFilterService.apply_filters(query, filters)
+    result = await session.exec(query)
 
-        roles = result.all()
-        _logger.info(f"User {current_user.username} listed {len(roles)} roles")
+    roles = result.all()
+    _logger.info(f"User {current_user.username} listed {len(roles)} roles")
 
-        return [RoleResponse.model_validate(role) for role in roles]
-
-    except Exception as e:
-        _logger.error(f"Error listing roles: {str(e)}")
-        raise ApiError(ErrorCode.ROLES_LIST_FAILED)
+    return [RoleResponse.model_validate(role) for role in roles]
 
 
 @router.post(
@@ -115,7 +110,7 @@ async def create_role(
 @router.get(
     RoleRoutes.ALL_PERMISSIONS.value,
     response_model=List[PermissionResponse],
-    responses=problems(ErrorCode.PERMISSIONS_LIST_FAILED, *ADMIN),
+    responses=problems(*ADMIN),
 )
 async def list_all_permissions(
         session: AsyncSession = Depends(get_session),
@@ -123,19 +118,14 @@ async def list_all_permissions(
 ):
     """List all available permissions in the system - admin only"""
     current_user = auth.user
-    try:
-        result = await session.exec(
-            select(Permission).order_by(Permission.name)
-        )
+    result = await session.exec(
+        select(Permission).order_by(Permission.name)
+    )
 
-        permissions = result.all()
-        _logger.info(f"Admin {current_user.username} listed all {len(permissions)} permissions")
+    permissions = result.all()
+    _logger.info(f"Admin {current_user.username} listed all {len(permissions)} permissions")
 
-        return [PermissionResponse.model_validate(perm) for perm in permissions]
-
-    except Exception as e:
-        _logger.error(f"Error listing all permissions: {str(e)}")
-        raise ApiError(ErrorCode.PERMISSIONS_LIST_FAILED)
+    return [PermissionResponse.model_validate(perm) for perm in permissions]
 
 
 @router.get(

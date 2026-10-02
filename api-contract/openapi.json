@@ -95,25 +95,11 @@
             }
           },
           "500": {
-            "description": "`authentication_unavailable`: Authentication service unavailable; `internal_error`: Internal server error",
+            "description": "`internal_error`: Internal server error",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AuthenticationUnavailableProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InternalErrorProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "authentication_unavailable": "#/components/schemas/AuthenticationUnavailableProblem",
-                      "internal_error": "#/components/schemas/InternalErrorProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/InternalErrorProblem"
                 }
               }
             }
@@ -207,25 +193,11 @@
             }
           },
           "500": {
-            "description": "`internal_error`: Internal server error; `token_refresh_failed`: Token refresh failed",
+            "description": "`internal_error`: Internal server error",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/InternalErrorProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/TokenRefreshFailedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "internal_error": "#/components/schemas/InternalErrorProblem",
-                      "token_refresh_failed": "#/components/schemas/TokenRefreshFailedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/InternalErrorProblem"
                 }
               }
             }
@@ -309,25 +281,11 @@
             }
           },
           "500": {
-            "description": "`internal_error`: Internal server error; `logout_failed`: Logout failed",
+            "description": "`internal_error`: Internal server error",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/InternalErrorProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/LogoutFailedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "internal_error": "#/components/schemas/InternalErrorProblem",
-                      "logout_failed": "#/components/schemas/LogoutFailedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/InternalErrorProblem"
                 }
               }
             }
@@ -521,25 +479,11 @@
             }
           },
           "500": {
-            "description": "`internal_error`: Internal server error; `sessions_list_failed`: Failed to retrieve sessions",
+            "description": "`internal_error`: Internal server error",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/InternalErrorProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SessionsListFailedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "internal_error": "#/components/schemas/InternalErrorProblem",
-                      "sessions_list_failed": "#/components/schemas/SessionsListFailedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/InternalErrorProblem"
                 }
               }
             }
@@ -1117,25 +1061,11 @@
             }
           },
           "500": {
-            "description": "`internal_error`: Internal server error; `users_list_failed`: Failed to retrieve users",
+            "description": "`internal_error`: Internal server error",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/InternalErrorProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/UsersListFailedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "internal_error": "#/components/schemas/InternalErrorProblem",
-                      "users_list_failed": "#/components/schemas/UsersListFailedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/InternalErrorProblem"
                 }
               }
             }
@@ -2960,25 +2890,11 @@
             }
           },
           "500": {
-            "description": "`internal_error`: Internal server error; `roles_list_failed`: Failed to retrieve roles",
+            "description": "`internal_error`: Internal server error",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/InternalErrorProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/RolesListFailedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "internal_error": "#/components/schemas/InternalErrorProblem",
-                      "roles_list_failed": "#/components/schemas/RolesListFailedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/InternalErrorProblem"
                 }
               }
             }
@@ -3237,25 +3153,11 @@
             }
           },
           "500": {
-            "description": "`internal_error`: Internal server error; `permissions_list_failed`: Failed to retrieve permissions",
+            "description": "`internal_error`: Internal server error",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/InternalErrorProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionsListFailedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "internal_error": "#/components/schemas/InternalErrorProblem",
-                      "permissions_list_failed": "#/components/schemas/PermissionsListFailedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/InternalErrorProblem"
                 }
               }
             }
@@ -21109,69 +21011,6 @@
           }
         ]
       },
-      "AuthenticationUnavailableProblem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "title": "Type",
-            "description": "URI of the problem type; dereference it for its documentation"
-          },
-          "title": {
-            "type": "string",
-            "const": "Authentication service unavailable",
-            "title": "Title",
-            "description": "Summary of the problem type"
-          },
-          "status": {
-            "type": "integer",
-            "const": 500,
-            "title": "Status",
-            "description": "HTTP status code"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "Explanation of this occurrence",
-            "examples": [
-              "Authentication service unavailable"
-            ]
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "description": "Path of the request that failed"
-          },
-          "code": {
-            "type": "string",
-            "const": "authentication_unavailable",
-            "title": "Code",
-            "description": "Key of exactly this problem in the localization package"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "code"
-        ],
-        "title": "AuthenticationUnavailableProblem",
-        "description": "Authentication service unavailable (HTTP 500). Problem type authentication_unavailable.",
-        "examples": [
-          {
-            "code": "authentication_unavailable",
-            "detail": "Authentication service unavailable",
-            "instance": "/api/v1/...",
-            "status": 500,
-            "title": "Authentication service unavailable",
-            "type": "https://example.org/problems/authentication_unavailable"
-          }
-        ]
-      },
       "Body_create_user": {
         "properties": {
           "certificate": {
@@ -23588,69 +23427,6 @@
           "username"
         ],
         "title": "LoginResponse"
-      },
-      "LogoutFailedProblem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "title": "Type",
-            "description": "URI of the problem type; dereference it for its documentation"
-          },
-          "title": {
-            "type": "string",
-            "const": "Logout failed",
-            "title": "Title",
-            "description": "Summary of the problem type"
-          },
-          "status": {
-            "type": "integer",
-            "const": 500,
-            "title": "Status",
-            "description": "HTTP status code"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "Explanation of this occurrence",
-            "examples": [
-              "Logout failed"
-            ]
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "description": "Path of the request that failed"
-          },
-          "code": {
-            "type": "string",
-            "const": "logout_failed",
-            "title": "Code",
-            "description": "Key of exactly this problem in the localization package"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "code"
-        ],
-        "title": "LogoutFailedProblem",
-        "description": "Logout failed (HTTP 500). Problem type logout_failed.",
-        "examples": [
-          {
-            "code": "logout_failed",
-            "detail": "Logout failed",
-            "instance": "/api/v1/...",
-            "status": 500,
-            "title": "Logout failed",
-            "type": "https://example.org/problems/logout_failed"
-          }
-        ]
       },
       "LogoutRequest": {
         "properties": {
@@ -28176,69 +27952,6 @@
         ],
         "title": "PermissionResponse"
       },
-      "PermissionsListFailedProblem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "title": "Type",
-            "description": "URI of the problem type; dereference it for its documentation"
-          },
-          "title": {
-            "type": "string",
-            "const": "Failed to retrieve permissions",
-            "title": "Title",
-            "description": "Summary of the problem type"
-          },
-          "status": {
-            "type": "integer",
-            "const": 500,
-            "title": "Status",
-            "description": "HTTP status code"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "Explanation of this occurrence",
-            "examples": [
-              "Failed to retrieve permissions"
-            ]
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "description": "Path of the request that failed"
-          },
-          "code": {
-            "type": "string",
-            "const": "permissions_list_failed",
-            "title": "Code",
-            "description": "Key of exactly this problem in the localization package"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "code"
-        ],
-        "title": "PermissionsListFailedProblem",
-        "description": "Failed to retrieve permissions (HTTP 500). Problem type permissions_list_failed.",
-        "examples": [
-          {
-            "code": "permissions_list_failed",
-            "detail": "Failed to retrieve permissions",
-            "instance": "/api/v1/...",
-            "status": 500,
-            "title": "Failed to retrieve permissions",
-            "type": "https://example.org/problems/permissions_list_failed"
-          }
-        ]
-      },
       "PostAccessDeniedProblem": {
         "properties": {
           "type": {
@@ -29987,69 +29700,6 @@
         "type": "object",
         "title": "RoleUpdate"
       },
-      "RolesListFailedProblem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "title": "Type",
-            "description": "URI of the problem type; dereference it for its documentation"
-          },
-          "title": {
-            "type": "string",
-            "const": "Failed to retrieve roles",
-            "title": "Title",
-            "description": "Summary of the problem type"
-          },
-          "status": {
-            "type": "integer",
-            "const": 500,
-            "title": "Status",
-            "description": "HTTP status code"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "Explanation of this occurrence",
-            "examples": [
-              "Failed to retrieve roles"
-            ]
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "description": "Path of the request that failed"
-          },
-          "code": {
-            "type": "string",
-            "const": "roles_list_failed",
-            "title": "Code",
-            "description": "Key of exactly this problem in the localization package"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "code"
-        ],
-        "title": "RolesListFailedProblem",
-        "description": "Failed to retrieve roles (HTTP 500). Problem type roles_list_failed.",
-        "examples": [
-          {
-            "code": "roles_list_failed",
-            "detail": "Failed to retrieve roles",
-            "instance": "/api/v1/...",
-            "status": 500,
-            "title": "Failed to retrieve roles",
-            "type": "https://example.org/problems/roles_list_failed"
-          }
-        ]
-      },
       "RouteAccessEntryResponse": {
         "properties": {
           "method": {
@@ -30694,69 +30344,6 @@
           "expires_at"
         ],
         "title": "SessionInfoResponse"
-      },
-      "SessionsListFailedProblem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "title": "Type",
-            "description": "URI of the problem type; dereference it for its documentation"
-          },
-          "title": {
-            "type": "string",
-            "const": "Failed to retrieve sessions",
-            "title": "Title",
-            "description": "Summary of the problem type"
-          },
-          "status": {
-            "type": "integer",
-            "const": 500,
-            "title": "Status",
-            "description": "HTTP status code"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "Explanation of this occurrence",
-            "examples": [
-              "Failed to retrieve sessions"
-            ]
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "description": "Path of the request that failed"
-          },
-          "code": {
-            "type": "string",
-            "const": "sessions_list_failed",
-            "title": "Code",
-            "description": "Key of exactly this problem in the localization package"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "code"
-        ],
-        "title": "SessionsListFailedProblem",
-        "description": "Failed to retrieve sessions (HTTP 500). Problem type sessions_list_failed.",
-        "examples": [
-          {
-            "code": "sessions_list_failed",
-            "detail": "Failed to retrieve sessions",
-            "instance": "/api/v1/...",
-            "status": 500,
-            "title": "Failed to retrieve sessions",
-            "type": "https://example.org/problems/sessions_list_failed"
-          }
-        ]
       },
       "ShareLinkRequest": {
         "properties": {
@@ -32362,69 +31949,6 @@
             "status": 422,
             "title": "Thumbnails are not supported for this media type",
             "type": "https://example.org/problems/thumbnails_unsupported"
-          }
-        ]
-      },
-      "TokenRefreshFailedProblem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "title": "Type",
-            "description": "URI of the problem type; dereference it for its documentation"
-          },
-          "title": {
-            "type": "string",
-            "const": "Token refresh failed",
-            "title": "Title",
-            "description": "Summary of the problem type"
-          },
-          "status": {
-            "type": "integer",
-            "const": 500,
-            "title": "Status",
-            "description": "HTTP status code"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "Explanation of this occurrence",
-            "examples": [
-              "Token refresh failed"
-            ]
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "description": "Path of the request that failed"
-          },
-          "code": {
-            "type": "string",
-            "const": "token_refresh_failed",
-            "title": "Code",
-            "description": "Key of exactly this problem in the localization package"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "code"
-        ],
-        "title": "TokenRefreshFailedProblem",
-        "description": "Token refresh failed (HTTP 500). Problem type token_refresh_failed.",
-        "examples": [
-          {
-            "code": "token_refresh_failed",
-            "detail": "Token refresh failed",
-            "instance": "/api/v1/...",
-            "status": 500,
-            "title": "Token refresh failed",
-            "type": "https://example.org/problems/token_refresh_failed"
           }
         ]
       },
@@ -34586,69 +34110,6 @@
             "status": 400,
             "title": "User with this username already exists",
             "type": "https://example.org/problems/username_taken"
-          }
-        ]
-      },
-      "UsersListFailedProblem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "title": "Type",
-            "description": "URI of the problem type; dereference it for its documentation"
-          },
-          "title": {
-            "type": "string",
-            "const": "Failed to retrieve users",
-            "title": "Title",
-            "description": "Summary of the problem type"
-          },
-          "status": {
-            "type": "integer",
-            "const": 500,
-            "title": "Status",
-            "description": "HTTP status code"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "Explanation of this occurrence",
-            "examples": [
-              "Failed to retrieve users"
-            ]
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "description": "Path of the request that failed"
-          },
-          "code": {
-            "type": "string",
-            "const": "users_list_failed",
-            "title": "Code",
-            "description": "Key of exactly this problem in the localization package"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "code"
-        ],
-        "title": "UsersListFailedProblem",
-        "description": "Failed to retrieve users (HTTP 500). Problem type users_list_failed.",
-        "examples": [
-          {
-            "code": "users_list_failed",
-            "detail": "Failed to retrieve users",
-            "instance": "/api/v1/...",
-            "status": 500,
-            "title": "Failed to retrieve users",
-            "type": "https://example.org/problems/users_list_failed"
           }
         ]
       },
