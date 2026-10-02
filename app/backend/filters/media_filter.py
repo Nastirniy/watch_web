@@ -2,7 +2,7 @@
 MediaFilterService - Filter service for MediaFile entity
 """
 
-from typing import Optional, Iterable
+from typing import Optional, Iterable, get_args
 from sqlalchemy import and_, not_, or_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql.selectable import Select
@@ -11,7 +11,7 @@ from app.backend.models.media import MediaFile
 from app.backend.enums.general import MediaType, PosterStatus
 from app.backend.models.observation import Observation
 from app.backend.filters.simple_engine import SimpleFilterEngine
-from app.backend.filters.params.media_params import MediaFilterParams
+from app.backend.filters.params.media_params import MediaFilterParams, MediaSortField
 
 
 class MediaFilterService(SimpleFilterEngine):
@@ -19,7 +19,7 @@ class MediaFilterService(SimpleFilterEngine):
 
     MODEL = MediaFile
     PARAMS = MediaFilterParams
-    SORTABLE_FIELDS = ["id", "original_filename", "file_size", "media_type", "uploaded_at", "observation_id"]
+    SORTABLE_FIELDS = list(get_args(MediaSortField))
 
     @staticmethod
     def _apply_has_thumbnail(query: Select, has_thumbnail: Optional[bool]) -> Select:

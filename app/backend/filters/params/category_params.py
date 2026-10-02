@@ -2,14 +2,19 @@
 CategoryFilterParams - Strongly typed filter parameters for Category
 """
 
-from typing import Optional
+from typing import Optional, Literal
 from pydantic import Field
 
 from app.backend.filters.params.base_params import BaseFilterParams
 
+# Fields the results can be sorted by; sort_by accepts exactly these (another value answers 422)
+CategorySortField = Literal["id", "name", "alias"]
+
 
 class CategoryFilterParams(BaseFilterParams):
     """Filter parameters for Category search"""
+
+    sort_by: Optional[CategorySortField] = Field(default=None, description="Field to sort by")
 
     id: Optional[int] = Field(default=None, description="Exact category ID")
     name: Optional[str] = Field(default=None, description="Exact name")

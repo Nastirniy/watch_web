@@ -3,8 +3,8 @@ Unified Search API - Strongly typed endpoints for each entity
 All params visible in FastAPI /docs
 """
 
-from typing import Dict, List
-from fastapi import APIRouter, Depends, Request
+from typing import Dict, Annotated
+from fastapi import APIRouter, Depends, Request, Query
 from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -15,7 +15,7 @@ from app.backend.services.auth_context import AuthContext
 from app.backend.services.access_control import AccessControlService
 from app.backend.enums.routes import SearchRoutes
 from app.backend.enums.general import Permissions
-from app.backend.services.permissions import require, Require
+from app.backend.services.permissions import require
 from app.backend.models.user import User
 from app.backend.models.post import Post
 from app.backend.models.role import Role
@@ -25,7 +25,6 @@ from app.backend.models.media import MediaFile
 from app.backend.helpers.audit_helper import client_info, create_audit_log
 
 # Filter params
-from app.backend.filters.params.base_params import BaseFilterParams
 from app.backend.filters.params.observation_params import ObservationFilterParams
 from app.backend.filters.params.user_params import UserFilterParams
 from app.backend.filters.params.post_params import PostFilterParams
@@ -47,7 +46,6 @@ from app.backend.filters.signal_type_filter import SignalTypeFilterService
 from app.backend.filters.tag_filter import TagFilterService
 from app.backend.filters.media_filter import MediaFilterService
 
-from app.backend.filters.simple_engine import _get_type_name, _BASE_COMMON_FIELDS
 from app.backend.api.shared.models.response.observations_response import ObservationWithMedia
 from app.backend.api.shared.models.response.posts_response import PostResponse, post_to_response
 from app.backend.api.shared.models.response.user_response import UserResponse
@@ -57,44 +55,12 @@ from app.backend.api.shared.models.response.signal_type_response import SignalTy
 from app.backend.api.shared.models.response.tag_response import TagResponse
 from app.backend.api.shared.models.response.media_response import MediaFileInfo
 from app.backend.api.shared.models.response.media_format_response import MediaFormatResponse
-from app.backend.api.shared.models.response.search_response import (
-    SearchResponse,
-    SchemaResponse,
-    EntitySchemaInfo,
-    FilterParamInfo,
-)
+from app.backend.api.shared.models.response.search_response import SearchResponse
 from app.backend.openapi_problems import ADMIN, GUARDED, problems
 from app.backend.enums.errors import AccessErrorCode
 
 
 router = APIRouter(prefix=SearchRoutes.BASE.value, tags=[SearchRoutes.tag()])
-
-# Entity registry: name -> filter service and route requirement (shared by the search routes and the schema endpoint)
-ENTITY_REGISTRY: Dict[str, Dict] = {
-    "observations": {"service": ObservationFilterService, "require": Require.of(all=[Permissions.OBSERVATION_VIEW])},
-    "users": {"service": UserFilterService, "require": Require.of(all=[Permissions.USER_VIEW])},
-    "posts": {"service": PostFilterService, "require": Require.of(all=[Permissions.POST_VIEW])},
-    "roles": {"service": RoleFilterService, "require": Require.of(all=[Permissions.ROLE_VIEW], admin=True)},
-    "categories": {"service": CategoryFilterService, "require": Require.of(all=[Permissions.CATEGORY_VIEW])},
-    "signal_types": {"service": SignalTypeFilterService, "require": Require.of(all=[Permissions.SIGNAL_TYPE_VIEW])},
-    "tags": {"service": TagFilterService, "require": Require.of(all=[Permissions.TAG_VIEW])},
-    "media": {"service": MediaFilterService, "require": Require.of(all=[Permissions.MEDIA_VIEW])},
-    "media_formats": {"service": MediaFormatFilterService, "require": Require.of(all=[Permissions.MEDIA_FORMAT_VIEW])},
-}
-
-
-
-def _build_param_info(params_class, field_names: List[str]) -> List[FilterParamInfo]:
-    """Build FilterParamInfo list from a params class for given field names"""
-    result = []
-    for name in field_names:
-        field_info = params_class.model_fields.get(name)
-        if field_info is None:
-            continue
-        description = field_info.description or ""
-        type_str = _get_type_name(field_info.annotation)
-        result.append(FilterParamInfo(name=name, type=type_str, description=description))
-    return result
 
 
 async def log_search(
@@ -137,8 +103,8 @@ async def log_search(
 )
 async def search_observations(
     request: Request,
-    params: ObservationFilterParams = Depends(),
-    auth: AuthContext = Depends(ENTITY_REGISTRY["observations"]["require"]),
+    params: Annotated[ObservationFilterParams, Query()],
+    auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW])),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse[ObservationWithMedia]:
     access_post_ids = AccessControlService.resolve_post_scope(auth, params.post_id)
@@ -176,8 +142,8 @@ async def search_observations(
 )
 async def search_users(
     request: Request,
-    params: UserFilterParams = Depends(),
-    auth: AuthContext = Depends(ENTITY_REGISTRY["users"]["require"]),
+    params: Annotated[UserFilterParams, Query()],
+    auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW])),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse[UserResponse]:
     access_post_ids = AccessControlService.resolve_record_scope(auth, params.post_id)
@@ -209,8 +175,8 @@ async def search_users(
 )
 async def search_posts(
     request: Request,
-    params: PostFilterParams = Depends(),
-    auth: AuthContext = Depends(ENTITY_REGISTRY["posts"]["require"]),
+    params: Annotated[PostFilterParams, Query()],
+    auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW])),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse[PostResponse]:
     access_post_ids = AccessControlService.post_record_scope(auth)
@@ -241,8 +207,8 @@ async def search_posts(
 )
 async def search_roles(
     request: Request,
-    params: RoleFilterParams = Depends(),
-    auth: AuthContext = Depends(ENTITY_REGISTRY["roles"]["require"]),
+    params: Annotated[RoleFilterParams, Query()],
+    auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW], admin=True)),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse[RoleResponse]:
     AccessControlService.check_include_deleted(auth, params, Permissions.ROLE_ARCHIVE)
@@ -272,8 +238,8 @@ async def search_roles(
 )
 async def search_categories(
     request: Request,
-    params: CategoryFilterParams = Depends(),
-    auth: AuthContext = Depends(ENTITY_REGISTRY["categories"]["require"]),
+    params: Annotated[CategoryFilterParams, Query()],
+    auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW])),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse[CategoryResponse]:
     AccessControlService.check_include_deleted(auth, params, Permissions.CATEGORY_ARCHIVE)
@@ -303,8 +269,8 @@ async def search_categories(
 )
 async def search_signal_types(
     request: Request,
-    params: SignalTypeFilterParams = Depends(),
-    auth: AuthContext = Depends(ENTITY_REGISTRY["signal_types"]["require"]),
+    params: Annotated[SignalTypeFilterParams, Query()],
+    auth: AuthContext = Depends(require(all=[Permissions.SIGNAL_TYPE_VIEW])),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse[SignalTypeResponse]:
     AccessControlService.check_include_deleted(auth, params, Permissions.SIGNAL_TYPE_ARCHIVE)
@@ -334,8 +300,8 @@ async def search_signal_types(
 )
 async def search_tags(
     request: Request,
-    params: TagFilterParams = Depends(),
-    auth: AuthContext = Depends(ENTITY_REGISTRY["tags"]["require"]),
+    params: Annotated[TagFilterParams, Query()],
+    auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW])),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse[TagResponse]:
     AccessControlService.check_include_deleted(auth, params, Permissions.TAG_ARCHIVE)
@@ -365,8 +331,8 @@ async def search_tags(
 )
 async def search_media(
     request: Request,
-    params: MediaFilterParams = Depends(),
-    auth: AuthContext = Depends(ENTITY_REGISTRY["media"]["require"]),
+    params: Annotated[MediaFilterParams, Query()],
+    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW])),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse[MediaFileInfo]:
     access_post_ids = AccessControlService.post_scope(auth)
@@ -386,31 +352,6 @@ async def search_media(
 
 
 # =============================================================================
-# SCHEMA - Metadata about available entities, sortable fields, filter params
-# =============================================================================
-@router.get(
-    SearchRoutes.FILTER_SCHEMA.value,
-    response_model=SchemaResponse,
-    summary="Get filter schema for all entities",
-    description="Returns sortable fields and filter params for each searchable entity. "
-                "Fields are filtered based on user access level."
-)
-async def get_search_filter_schema(
-    auth: AuthContext = Depends(require())
-) -> SchemaResponse:
-    entities: Dict[str, EntitySchemaInfo] = {}
-
-    for entity_name, config in ENTITY_REGISTRY.items():
-        if not config["require"].evaluate(auth).allowed:
-            continue
-        entities[entity_name] = EntitySchemaInfo(**config["service"].get_schema(is_admin=auth.is_admin))
-
-    common_params = _build_param_info(BaseFilterParams, list(_BASE_COMMON_FIELDS))
-
-    return SchemaResponse(entities=entities, common_params=common_params)
-
-
-# =============================================================================
 # MEDIA FORMATS (accepted upload formats)
 # =============================================================================
 
@@ -423,8 +364,8 @@ async def get_search_filter_schema(
 )
 async def search_media_formats(
     request: Request,
-    params: MediaFormatFilterParams = Depends(),
-    auth: AuthContext = Depends(ENTITY_REGISTRY["media_formats"]["require"]),
+    params: Annotated[MediaFormatFilterParams, Query()],
+    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_FORMAT_VIEW])),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse[MediaFormatResponse]:
     AccessControlService.check_include_deleted(auth, params, Permissions.MEDIA_FORMAT_ARCHIVE)

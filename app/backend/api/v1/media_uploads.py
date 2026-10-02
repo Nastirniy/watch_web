@@ -29,7 +29,7 @@ from app.backend.api.shared.helpers.upload_helper import (
 from app.backend.api.shared.models.request.media_request import UploadSessionCreate
 from app.backend.api.shared.models.response.media_response import UploadResultResponse, UploadSessionResponse
 from app.backend.services.access_control import AccessControlService
-from app.backend.services.access_errors import AccessErrorCode, access_denied
+from app.backend.services.access_errors import access_denied
 from app.backend.services.auth_context import AuthContext
 from app.backend.services.media import formats, uploads
 from app.backend.services.media.formats import FileTooLarge, UnsupportedMediaFormat

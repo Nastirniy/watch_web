@@ -1,6 +1,6 @@
-from typing import List
+from typing import List, Annotated
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Query
 from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -20,7 +20,6 @@ from app.backend.api.shared.models.request.signal_type_request import SignalType
 from app.backend.api.shared.models.response.signal_type_response import SignalTypeResponse, SignalTypeWithCategoryResponse
 from app.backend.filters.params.signal_type_params import SignalTypeFilterParams
 from app.backend.filters.signal_type_filter import SignalTypeFilterService
-from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
 from app.backend.services.api_errors import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.openapi_problems import ADMIN, GUARDED, problems
@@ -34,7 +33,7 @@ router = APIRouter(prefix=SignalTypeRoutes.BASE.value, tags=[SignalTypeRoutes.ta
     responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
 )
 async def list_signal_types(
-        filters: SignalTypeFilterParams = Depends(),
+        filters: Annotated[SignalTypeFilterParams, Query()],
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.SIGNAL_TYPE_VIEW]))
 ):
@@ -45,16 +44,6 @@ async def list_signal_types(
     signal_types = result.all()
 
     return [SignalTypeResponse.model_validate(st) for st in signal_types]
-
-
-@router.get(SignalTypeRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo, responses=problems(*GUARDED))
-async def get_signal_type_filter_schema(
-        session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.SIGNAL_TYPE_VIEW]))
-):
-    """Available filter params and sortable fields for signal types."""
-    user_is_admin = auth.is_admin
-    return EntitySchemaInfo(**SignalTypeFilterService.get_schema(is_admin=user_is_admin))
 
 
 @router.post(

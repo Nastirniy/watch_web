@@ -2,13 +2,13 @@
 UserFilterService - Filter service for User entity
 """
 
-from typing import Optional, Iterable
+from typing import Optional, Iterable, get_args
 from sqlalchemy.sql.selectable import Select
 
 from app.backend.models.user import User
 from app.backend.services.presence import online_user_ids_select
 from app.backend.filters.simple_engine import SimpleFilterEngine
-from app.backend.filters.params.user_params import UserFilterParams
+from app.backend.filters.params.user_params import UserFilterParams, UserSortField
 
 
 class UserFilterService(SimpleFilterEngine):
@@ -16,9 +16,7 @@ class UserFilterService(SimpleFilterEngine):
 
     MODEL = User
     PARAMS = UserFilterParams
-    SORTABLE_FIELDS = ["id", "username", "username_alias", "created_at", "updated_at", "last_login_at", "is_active", "last_activity_at"]
-    ADMIN_ONLY_SORTABLE = []
-    ADMIN_ONLY_PARAMS = ["post_id", "include_deleted"]
+    SORTABLE_FIELDS = list(get_args(UserSortField))
 
     @classmethod
     def apply_filters(

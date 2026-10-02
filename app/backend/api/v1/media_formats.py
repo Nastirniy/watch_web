@@ -9,9 +9,9 @@ content_type again brings it back.
 Every write invalidates the in-process registry cache; other API processes
 pick the change up within REGISTRY_CACHE_TTL_SECONDS.
 """
-from typing import List, Optional
+from typing import List, Optional, Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Query
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
@@ -31,7 +31,6 @@ from app.backend.api.shared.models.request.media_format_request import MediaForm
 from app.backend.api.shared.models.response.media_format_response import MediaFormatResponse
 from app.backend.filters.params.media_format_params import MediaFormatFilterParams
 from app.backend.filters.media_format_filter import MediaFormatFilterService
-from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
 from app.backend.services.api_errors import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.openapi_problems import ADMIN, GUARDED, problems
@@ -81,7 +80,7 @@ async def _get_format(session: AsyncSession, format_id: int, include_deleted: bo
     responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
 )
 async def list_media_formats(
-        filters: MediaFormatFilterParams = Depends(),
+        filters: Annotated[MediaFormatFilterParams, Query()],
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.MEDIA_FORMAT_VIEW]))
 ):
@@ -90,14 +89,6 @@ async def list_media_formats(
     query = MediaFormatFilterService.apply_filters(select(MediaFormat), filters)
     rows = (await session.exec(query)).all()
     return [MediaFormatResponse.model_validate(row) for row in rows]
-
-
-@router.get(MediaFormatRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo, responses=problems(*GUARDED))
-async def get_media_format_filter_schema(
-        auth: AuthContext = Depends(require(all=[Permissions.MEDIA_FORMAT_VIEW]))
-):
-    """Available filter params and sortable fields for media formats."""
-    return EntitySchemaInfo(**MediaFormatFilterService.get_schema(is_admin=auth.is_admin))
 
 
 @router.post(

@@ -2,12 +2,12 @@
 MediaFormatFilterService - Filter service for MediaFormat entity
 """
 
-from typing import Optional, Iterable
+from typing import Optional, Iterable, get_args
 from sqlalchemy.sql.selectable import Select
 
 from app.backend.models.media_format import MediaFormat
 from app.backend.filters.simple_engine import SimpleFilterEngine
-from app.backend.filters.params.media_format_params import MediaFormatFilterParams
+from app.backend.filters.params.media_format_params import MediaFormatFilterParams, MediaFormatSortField
 
 
 class MediaFormatFilterService(SimpleFilterEngine):
@@ -15,8 +15,7 @@ class MediaFormatFilterService(SimpleFilterEngine):
 
     MODEL = MediaFormat
     PARAMS = MediaFormatFilterParams
-    SORTABLE_FIELDS = ["id", "media_type", "content_type", "label", "max_file_size_bytes", "sort_order", "is_active"]
-    ADMIN_ONLY_PARAMS = ["include_deleted"]
+    SORTABLE_FIELDS = list(get_args(MediaFormatSortField))
 
     @classmethod
     def _apply_common(cls, query: Select, params: MediaFormatFilterParams) -> Select:

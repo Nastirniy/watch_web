@@ -2,12 +2,12 @@
 RoleFilterService - Filter service for Role entity
 """
 
-from typing import Optional, Iterable
+from typing import Optional, Iterable, get_args
 from sqlalchemy.sql.selectable import Select
 
 from app.backend.models.role import Role
 from app.backend.filters.simple_engine import SimpleFilterEngine
-from app.backend.filters.params.role_params import RoleFilterParams
+from app.backend.filters.params.role_params import RoleFilterParams, RoleSortField
 
 
 class RoleFilterService(SimpleFilterEngine):
@@ -15,7 +15,7 @@ class RoleFilterService(SimpleFilterEngine):
 
     MODEL = Role
     PARAMS = RoleFilterParams
-    SORTABLE_FIELDS = ["id", "name", "display_name", "created_at", "updated_at"]
+    SORTABLE_FIELDS = list(get_args(RoleSortField))
 
     @classmethod
     def apply_filters(

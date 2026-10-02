@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Annotated
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Query, Request
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -18,7 +18,6 @@ from app.backend.enums.routes import PostRoutes
 from app.backend.helpers.audit_helper import client_info, create_audit_log
 from app.backend.filters.params.post_params import PostFilterParams
 from app.backend.filters.post_filter import PostFilterService
-from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
 from app.backend.api.shared.models.response.posts_response import PostResponse, PostObservationStatsResponse, post_to_response
 from app.backend.services.observation_counts import post_observation_stats
 from app.backend.services.api_errors import ApiError
@@ -47,7 +46,7 @@ async def _commit_post(session: AsyncSession) -> None:
 
 @router.get(PostRoutes.ROOT.value, response_model=List[PostResponse], responses=problems(*GUARDED))
 async def list_posts(
-        filters: PostFilterParams = Depends(),
+        filters: Annotated[PostFilterParams, Query()],
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW]))
 ):
@@ -96,15 +95,6 @@ async def create_post(
     await session.commit()
 
     return post_to_response(post)
-
-
-@router.get(PostRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo, responses=problems(*GUARDED))
-async def get_post_filter_schema(
-        session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW]))
-):
-    """Available filter params and sortable fields for posts."""
-    return EntitySchemaInfo(**PostFilterService.get_schema(is_admin=auth.is_admin))
 
 
 @router.get(

@@ -3,7 +3,7 @@ ObservationFilterParams - Strongly typed filter parameters for Observation
 All fields visible and documented in FastAPI /docs
 """
 
-from typing import Optional, List
+from typing import Optional, List, Literal
 from datetime import datetime
 from decimal import Decimal
 from pydantic import Field
@@ -11,11 +11,16 @@ from pydantic import Field
 from app.backend.enums.general import FrequencyKind
 from app.backend.filters.params.base_params import BaseFilterParams
 
+# Fields the results can be sorted by; sort_by accepts exactly these (another value answers 422)
+ObservationSortField = Literal["id", "observed_at", "created_at", "updated_at", "status", "post_id", "frequency_center"]
+
 
 class ObservationFilterParams(BaseFilterParams):
     """Filter parameters for Observation search"""
 
     # --- ID Filters ---
+    sort_by: Optional[ObservationSortField] = Field(default=None, description="Field to sort by")
+
     id: Optional[int] = Field(default=None, description="Exact observation ID")
     user_id: Optional[int] = Field(default=None, description="Filter by user ID")
     post_id: Optional[int] = Field(default=None, description="Filter by post ID")
@@ -23,7 +28,7 @@ class ObservationFilterParams(BaseFilterParams):
 
     # --- Status ---
     status: Optional[str] = Field(default=None, description="Exact status (active, disappeared, confirmed, false_positive, under_review)")
-    status_in: Optional[str] = Field(default=None, description="Comma-separated statuses: active,confirmed")
+    status_in: Optional[List[str]] = Field(default=None, description="Any of these statuses: ?status_in=active&status_in=confirmed")
     confidence_level: Optional[str] = Field(default=None, description="Confidence level (low, medium, high)")
 
     # --- Frequency bands (all conditions must hold for the same active band) ---
@@ -56,19 +61,7 @@ class ObservationFilterParams(BaseFilterParams):
     comment_contains: Optional[str] = Field(default=None, max_length=100, description="Comment contains text")
 
     # --- Tags ---
-    tag_ids: Optional[str] = Field(default=None, description="Comma-separated tag IDs (must have ALL)")
+    tag_ids: Optional[List[int]] = Field(default=None, description="Tag ids, all required: ?tag_ids=1&tag_ids=2")
 
     # --- Soft Delete ---
     include_deleted: bool = Field(default=False, description="Include archived records (requires observation.archive)")
-
-    def get_status_list(self) -> Optional[List[str]]:
-        """Parse comma-separated status_in to list"""
-        if self.status_in:
-            return [s.strip() for s in self.status_in.split(",")]
-        return None
-
-    def get_tag_id_list(self) -> Optional[List[int]]:
-        """Parse comma-separated tag_ids to list"""
-        if self.tag_ids:
-            return [int(t.strip()) for t in self.tag_ids.split(",")]
-        return None

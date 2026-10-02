@@ -2,15 +2,20 @@
 MediaFilterParams - Strongly typed filter parameters for MediaFile
 """
 
-from typing import Optional
+from typing import Optional, Literal
 from datetime import datetime
 from pydantic import Field
 
 from app.backend.filters.params.base_params import BaseFilterParams
 
+# Fields the results can be sorted by; sort_by accepts exactly these (another value answers 422)
+MediaSortField = Literal["id", "original_filename", "file_size", "media_type", "uploaded_at", "observation_id"]
+
 
 class MediaFilterParams(BaseFilterParams):
     """Filter parameters for MediaFile search"""
+
+    sort_by: Optional[MediaSortField] = Field(default=None, description="Field to sort by")
 
     id: Optional[int] = Field(default=None, description="Exact media ID")
     observation_id: Optional[int] = Field(default=None, description="Filter by observation ID")

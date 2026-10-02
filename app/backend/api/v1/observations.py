@@ -1,6 +1,6 @@
-from typing import List, Optional
+from typing import List, Optional, Annotated
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Query
 from fastapi.responses import Response
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
@@ -47,7 +47,6 @@ from app.backend.filters.observation_filter import ObservationFilterService
 from app.backend.filters.params.observation_report_params import ObservationReportParams, ObservationReportType
 from app.backend.filters.observation_report_filter import ObservationReportFilter
 from app.backend.services.observation_report_service import ObservationReportService
-from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
 from app.backend.services.api_errors import ApiError, field_problem
 from app.backend.enums.errors import AccessErrorCode, ErrorCode, FieldErrorCode
 from app.backend.api.shared.models.response.openapi_docs import file_response, header
@@ -109,7 +108,7 @@ async def _validate_and_get_tags(session: AsyncSession, tag_ids: List[int], keep
     ),
 )
 async def list_observations(
-        filters: ObservationFilterParams = Depends(),
+        filters: Annotated[ObservationFilterParams, Query()],
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW]))
 ):
@@ -132,16 +131,6 @@ async def list_observations(
 
     # Build response using Pydantic validation from attributes
     return [ObservationWithMedia.model_validate(obs) for obs in observations]
-
-
-@router.get(ObservationRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo, responses=problems(*GUARDED))
-async def get_observation_filter_schema(
-        session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW]))
-):
-    """Available filter params and sortable fields for observations."""
-    user_is_admin = auth.is_admin
-    return EntitySchemaInfo(**ObservationFilterService.get_schema(is_admin=user_is_admin))
 
 
 @router.post(

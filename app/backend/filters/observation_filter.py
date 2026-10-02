@@ -3,17 +3,15 @@ ObservationFilterService - Filter service for Observation entity
 Uses simple typed params for clear FastAPI docs
 """
 
-from typing import Optional, List, Dict, Iterable
-from datetime import datetime, timezone, timedelta
+from typing import Optional, Iterable, get_args
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql.selectable import Select
 from sqlmodel import select
-from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.models.observation import Observation, ObservationTag
 from app.backend.filters.observation_frequency_filter import ObservationFrequencyFilter
 from app.backend.filters.simple_engine import SimpleFilterEngine
-from app.backend.filters.params.observation_params import ObservationFilterParams
+from app.backend.filters.params.observation_params import ObservationFilterParams, ObservationSortField
 
 
 class ObservationFilterService(SimpleFilterEngine):
@@ -21,10 +19,7 @@ class ObservationFilterService(SimpleFilterEngine):
 
     MODEL = Observation
     PARAMS = ObservationFilterParams
-    SORTABLE_FIELDS = [
-        "id", "observed_at", "created_at", "updated_at", "status", "post_id",
-        "frequency_center",
-    ]
+    SORTABLE_FIELDS = list(get_args(ObservationSortField))
     # frequency_center is not a column of observations: an observation is sorted by the lowest
     # center among its active bands that match the band filters (frequency_kind, center and
     # bandwidth ranges). This is a correlated subquery per observation and the sort cannot use
@@ -81,7 +76,7 @@ class ObservationFilterService(SimpleFilterEngine):
         # === Status Filters ===
         query = cls._apply_exact(query, Observation.status, params.status)
         if params.status_in:
-            status_list = params.get_status_list()
+            status_list = params.status_in
             query = cls._apply_in_list(query, Observation.status, status_list)
         query = cls._apply_exact(query, Observation.confidence_level, params.confidence_level)
 
@@ -115,7 +110,7 @@ class ObservationFilterService(SimpleFilterEngine):
 
         # === Tag Filters (OR logic - must have ANY of the tags) ===
         if params.tag_ids:
-            tag_id_list = params.get_tag_id_list()
+            tag_id_list = params.tag_ids
             if tag_id_list:
                 query = query.where(
                     Observation.id.in_(
@@ -158,7 +153,7 @@ class ObservationFilterService(SimpleFilterEngine):
         query = cls._apply_exact(query, Observation.status, params.status)
 
         if params.status_in:
-            status_list = params.get_status_list()
+            status_list = params.status_in
             query = cls._apply_in_list(query, Observation.status, status_list)
 
         query = cls._apply_exact(query, Observation.confidence_level, params.confidence_level)
@@ -185,7 +180,7 @@ class ObservationFilterService(SimpleFilterEngine):
         query = cls._apply_contains(query, Observation.comment, params.comment_contains)
 
         if params.tag_ids:
-            tag_id_list = params.get_tag_id_list()
+            tag_id_list = params.tag_ids
             if tag_id_list:
                 query = query.where(
                     Observation.id.in_(

@@ -2,15 +2,20 @@
 PostFilterParams - Strongly typed filter parameters for Post
 """
 
-from typing import Optional
+from typing import Optional, Literal
 from datetime import datetime
 from pydantic import Field
 
 from app.backend.filters.params.base_params import BaseFilterParams
 
+# Fields the results can be sorted by; sort_by accepts exactly these (another value answers 422)
+PostSortField = Literal["id", "name", "code", "city", "created_at", "updated_at", "last_user_activity_at", "is_active", "online_user_count", "user_count"]
+
 
 class PostFilterParams(BaseFilterParams):
     """Filter parameters for Post search"""
+
+    sort_by: Optional[PostSortField] = Field(default=None, description="Field to sort by")
 
     id: Optional[int] = Field(default=None, description="Exact post ID")
     name: Optional[str] = Field(default=None, description="Exact name")

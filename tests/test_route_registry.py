@@ -89,7 +89,7 @@ def _registered_paths() -> set:
 
 
 def test_no_route_is_shadowed_by_an_earlier_one():
-    """Starlette takes the first match: /{user_id} registered before /filter-schema swallows it"""
+    """Starlette takes the first match: /{tag_id} registered before /list-all swallows it"""
     routes = [route for route in fastapi_app.routes if isinstance(route, APIRoute)]
     shadowed = []
     for index, later in enumerate(routes):

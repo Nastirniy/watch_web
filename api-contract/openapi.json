@@ -807,9 +807,11 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
+              "description": "Page number",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "Page number"
           },
           {
             "name": "page_size",
@@ -819,9 +821,11 @@
               "type": "integer",
               "maximum": 200,
               "minimum": 1,
+              "description": "Items per page",
               "default": 50,
               "title": "Page Size"
-            }
+            },
+            "description": "Items per page"
           },
           {
             "name": "sort_by",
@@ -830,14 +834,26 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "id",
+                    "username",
+                    "username_alias",
+                    "created_at",
+                    "updated_at",
+                    "last_login_at",
+                    "is_active",
+                    "last_activity_at"
+                  ],
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "Field to sort by",
               "title": "Sort By"
-            }
+            },
+            "description": "Field to sort by"
           },
           {
             "name": "sort_order",
@@ -845,8 +861,10 @@
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/SortOrder",
+              "description": "Sort order",
               "default": "ascending"
-            }
+            },
+            "description": "Sort order"
           },
           {
             "name": "id",
@@ -861,8 +879,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact user ID",
               "title": "Id"
-            }
+            },
+            "description": "Exact user ID"
           },
           {
             "name": "username",
@@ -877,8 +897,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact username",
               "title": "Username"
-            }
+            },
+            "description": "Exact username"
           },
           {
             "name": "username_contains",
@@ -894,8 +916,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Username contains text",
               "title": "Username Contains"
-            }
+            },
+            "description": "Username contains text"
           },
           {
             "name": "username_alias",
@@ -910,8 +934,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact username alias",
               "title": "Username Alias"
-            }
+            },
+            "description": "Exact username alias"
           },
           {
             "name": "username_alias_contains",
@@ -927,8 +953,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Alias contains text",
               "title": "Username Alias Contains"
-            }
+            },
+            "description": "Alias contains text"
           },
           {
             "name": "post_id",
@@ -943,8 +971,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by post ID",
               "title": "Post Id"
-            }
+            },
+            "description": "Filter by post ID"
           },
           {
             "name": "is_active",
@@ -959,8 +989,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by active status",
               "title": "Is Active"
-            }
+            },
+            "description": "Filter by active status"
           },
           {
             "name": "is_online",
@@ -975,8 +1007,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Online now (session touched within the online threshold)",
               "title": "Is Online"
-            }
+            },
+            "description": "Online now (session touched within the online threshold)"
           },
           {
             "name": "created_at_from",
@@ -992,8 +1026,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Created after",
               "title": "Created At From"
-            }
+            },
+            "description": "Created after"
           },
           {
             "name": "created_at_to",
@@ -1009,8 +1045,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Created before",
               "title": "Created At To"
-            }
+            },
+            "description": "Created before"
           },
           {
             "name": "last_login_from",
@@ -1026,8 +1064,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Last login after",
               "title": "Last Login From"
-            }
+            },
+            "description": "Last login after"
           },
           {
             "name": "last_login_to",
@@ -1043,8 +1083,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Last login before",
               "title": "Last Login To"
-            }
+            },
+            "description": "Last login before"
           },
           {
             "name": "include_deleted",
@@ -1052,9 +1094,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
+              "description": "Include archived records (requires user.archive)",
               "default": false,
               "title": "Include Deleted"
-            }
+            },
+            "description": "Include archived records (requires user.archive)"
           }
         ],
         "responses": {
@@ -1408,103 +1452,6 @@
             }
           }
         }
-      }
-    },
-    "/api/v1/users/filter-schema": {
-      "get": {
-        "tags": [
-          "USERS"
-        ],
-        "summary": "Get User Filter Schema",
-        "description": "Available filter params and sortable fields for users.",
-        "operationId": "get_user_filter_schema",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EntitySchemaInfo"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "`internal_error`: Internal server error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InternalErrorProblem"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountDeletedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountNotFoundProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InvalidTokenProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SessionExpiredProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
-                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
-                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
-                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
-                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
-                      "session_expired": "#/components/schemas/SessionExpiredProblem"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "`validation_error`: Request validation failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ValidationErrorProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`permission_denied`: Insufficient permissions",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PermissionDeniedProblem"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
       }
     },
     "/api/v1/users/{user_id}": {
@@ -2800,9 +2747,11 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
+              "description": "Page number",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "Page number"
           },
           {
             "name": "page_size",
@@ -2812,9 +2761,11 @@
               "type": "integer",
               "maximum": 200,
               "minimum": 1,
+              "description": "Items per page",
               "default": 50,
               "title": "Page Size"
-            }
+            },
+            "description": "Items per page"
           },
           {
             "name": "sort_by",
@@ -2823,14 +2774,23 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "id",
+                    "name",
+                    "display_name",
+                    "created_at",
+                    "updated_at"
+                  ],
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "Field to sort by",
               "title": "Sort By"
-            }
+            },
+            "description": "Field to sort by"
           },
           {
             "name": "sort_order",
@@ -2838,8 +2798,10 @@
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/SortOrder",
+              "description": "Sort order",
               "default": "ascending"
-            }
+            },
+            "description": "Sort order"
           },
           {
             "name": "id",
@@ -2854,8 +2816,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact role ID",
               "title": "Id"
-            }
+            },
+            "description": "Exact role ID"
           },
           {
             "name": "include_deleted",
@@ -2863,9 +2827,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
+              "description": "Include archived roles (requires role.archive)",
               "default": false,
               "title": "Include Deleted"
-            }
+            },
+            "description": "Include archived roles (requires role.archive)"
           },
           {
             "name": "name",
@@ -2880,8 +2846,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact name",
               "title": "Name"
-            }
+            },
+            "description": "Exact name"
           },
           {
             "name": "name_contains",
@@ -2897,8 +2865,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Name contains text",
               "title": "Name Contains"
-            }
+            },
+            "description": "Name contains text"
           },
           {
             "name": "display_name",
@@ -2913,8 +2883,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact display name",
               "title": "Display Name"
-            }
+            },
+            "description": "Exact display name"
           },
           {
             "name": "display_name_contains",
@@ -2930,8 +2902,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Display name contains text",
               "title": "Display Name Contains"
-            }
+            },
+            "description": "Display name contains text"
           },
           {
             "name": "description_contains",
@@ -2947,8 +2921,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Description contains text",
               "title": "Description Contains"
-            }
+            },
+            "description": "Description contains text"
           },
           {
             "name": "created_at_from",
@@ -2964,8 +2940,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Created after",
               "title": "Created At From"
-            }
+            },
+            "description": "Created after"
           },
           {
             "name": "created_at_to",
@@ -2981,8 +2959,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Created before",
               "title": "Created At To"
-            }
+            },
+            "description": "Created before"
           }
         ],
         "responses": {
@@ -3266,117 +3246,6 @@
             }
           }
         }
-      }
-    },
-    "/api/v1/roles/filter-schema": {
-      "get": {
-        "tags": [
-          "ROLES"
-        ],
-        "summary": "Get Role Filter Schema",
-        "description": "Available filter params and sortable fields for roles.",
-        "operationId": "get_role_filter_schema",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EntitySchemaInfo"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "`internal_error`: Internal server error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InternalErrorProblem"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountDeletedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountNotFoundProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InvalidTokenProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SessionExpiredProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
-                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
-                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
-                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
-                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
-                      "session_expired": "#/components/schemas/SessionExpiredProblem"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "`validation_error`: Request validation failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ValidationErrorProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
       }
     },
     "/api/v1/roles/list-all-permissions": {
@@ -4841,9 +4710,11 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
+              "description": "Page number",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "Page number"
           },
           {
             "name": "page_size",
@@ -4853,9 +4724,11 @@
               "type": "integer",
               "maximum": 200,
               "minimum": 1,
+              "description": "Items per page",
               "default": 50,
               "title": "Page Size"
-            }
+            },
+            "description": "Items per page"
           },
           {
             "name": "sort_by",
@@ -4864,14 +4737,21 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "id",
+                    "name",
+                    "alias"
+                  ],
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "Field to sort by",
               "title": "Sort By"
-            }
+            },
+            "description": "Field to sort by"
           },
           {
             "name": "sort_order",
@@ -4879,8 +4759,10 @@
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/SortOrder",
+              "description": "Sort order",
               "default": "ascending"
-            }
+            },
+            "description": "Sort order"
           },
           {
             "name": "id",
@@ -4895,8 +4777,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact category ID",
               "title": "Id"
-            }
+            },
+            "description": "Exact category ID"
           },
           {
             "name": "name",
@@ -4911,8 +4795,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact name",
               "title": "Name"
-            }
+            },
+            "description": "Exact name"
           },
           {
             "name": "name_contains",
@@ -4928,8 +4814,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Name contains text",
               "title": "Name Contains"
-            }
+            },
+            "description": "Name contains text"
           },
           {
             "name": "alias",
@@ -4944,8 +4832,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact alias",
               "title": "Alias"
-            }
+            },
+            "description": "Exact alias"
           },
           {
             "name": "alias_contains",
@@ -4961,8 +4851,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Alias contains text",
               "title": "Alias Contains"
-            }
+            },
+            "description": "Alias contains text"
           },
           {
             "name": "include_deleted",
@@ -4970,9 +4862,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
+              "description": "Include archived records (requires category.archive)",
               "default": false,
               "title": "Include Deleted"
-            }
+            },
+            "description": "Include archived records (requires category.archive)"
           }
         ],
         "responses": {
@@ -5075,103 +4969,6 @@
             }
           }
         }
-      }
-    },
-    "/api/v1/categories/filter-schema": {
-      "get": {
-        "tags": [
-          "CATEGORIES"
-        ],
-        "summary": "Get Category Filter Schema",
-        "description": "Available filter params and sortable fields for categories.",
-        "operationId": "get_category_filter_schema",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EntitySchemaInfo"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "`internal_error`: Internal server error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InternalErrorProblem"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountDeletedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountNotFoundProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InvalidTokenProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SessionExpiredProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
-                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
-                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
-                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
-                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
-                      "session_expired": "#/components/schemas/SessionExpiredProblem"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "`validation_error`: Request validation failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ValidationErrorProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`permission_denied`: Insufficient permissions",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PermissionDeniedProblem"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
       }
     },
     "/api/v1/categories/create": {
@@ -6057,9 +5854,11 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
+              "description": "Page number",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "Page number"
           },
           {
             "name": "page_size",
@@ -6069,9 +5868,11 @@
               "type": "integer",
               "maximum": 200,
               "minimum": 1,
+              "description": "Items per page",
               "default": 50,
               "title": "Page Size"
-            }
+            },
+            "description": "Items per page"
           },
           {
             "name": "sort_by",
@@ -6080,14 +5881,26 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "id",
+                    "code",
+                    "name",
+                    "sort_order",
+                    "created_at",
+                    "updated_at",
+                    "is_active",
+                    "category_id"
+                  ],
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "Field to sort by",
               "title": "Sort By"
-            }
+            },
+            "description": "Field to sort by"
           },
           {
             "name": "sort_order",
@@ -6095,8 +5908,10 @@
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/SortOrder",
+              "description": "Sort order",
               "default": "ascending"
-            }
+            },
+            "description": "Sort order"
           },
           {
             "name": "id",
@@ -6111,8 +5926,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact signal type ID",
               "title": "Id"
-            }
+            },
+            "description": "Exact signal type ID"
           },
           {
             "name": "code",
@@ -6127,8 +5944,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact code",
               "title": "Code"
-            }
+            },
+            "description": "Exact code"
           },
           {
             "name": "code_contains",
@@ -6144,8 +5963,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Code contains text",
               "title": "Code Contains"
-            }
+            },
+            "description": "Code contains text"
           },
           {
             "name": "name",
@@ -6160,8 +5981,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact name",
               "title": "Name"
-            }
+            },
+            "description": "Exact name"
           },
           {
             "name": "name_contains",
@@ -6177,8 +6000,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Name contains text",
               "title": "Name Contains"
-            }
+            },
+            "description": "Name contains text"
           },
           {
             "name": "description_contains",
@@ -6194,8 +6019,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Description contains text",
               "title": "Description Contains"
-            }
+            },
+            "description": "Description contains text"
           },
           {
             "name": "category_id",
@@ -6210,8 +6037,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by category ID",
               "title": "Category Id"
-            }
+            },
+            "description": "Filter by category ID"
           },
           {
             "name": "is_active",
@@ -6226,8 +6055,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by active status",
               "title": "Is Active"
-            }
+            },
+            "description": "Filter by active status"
           },
           {
             "name": "sort_order_from",
@@ -6242,8 +6073,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Sort order min",
               "title": "Sort Order From"
-            }
+            },
+            "description": "Sort order min"
           },
           {
             "name": "sort_order_to",
@@ -6258,8 +6091,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Sort order max",
               "title": "Sort Order To"
-            }
+            },
+            "description": "Sort order max"
           },
           {
             "name": "created_at_from",
@@ -6275,8 +6110,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Created after",
               "title": "Created At From"
-            }
+            },
+            "description": "Created after"
           },
           {
             "name": "created_at_to",
@@ -6292,8 +6129,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Created before",
               "title": "Created At To"
-            }
+            },
+            "description": "Created before"
           },
           {
             "name": "include_deleted",
@@ -6301,9 +6140,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
+              "description": "Include archived records (requires signal_type.archive)",
               "default": false,
               "title": "Include Deleted"
-            }
+            },
+            "description": "Include archived records (requires signal_type.archive)"
           }
         ],
         "responses": {
@@ -6406,103 +6247,6 @@
             }
           }
         }
-      }
-    },
-    "/api/v1/signal-types/filter-schema": {
-      "get": {
-        "tags": [
-          "SIGNAL_TYPES"
-        ],
-        "summary": "Get Signal Type Filter Schema",
-        "description": "Available filter params and sortable fields for signal types.",
-        "operationId": "get_signal_type_filter_schema",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EntitySchemaInfo"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "`internal_error`: Internal server error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InternalErrorProblem"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountDeletedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountNotFoundProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InvalidTokenProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SessionExpiredProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
-                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
-                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
-                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
-                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
-                      "session_expired": "#/components/schemas/SessionExpiredProblem"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "`validation_error`: Request validation failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ValidationErrorProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`permission_denied`: Insufficient permissions",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PermissionDeniedProblem"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
       }
     },
     "/api/v1/signal-types/create": {
@@ -7271,9 +7015,11 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
+              "description": "Page number",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "Page number"
           },
           {
             "name": "page_size",
@@ -7283,9 +7029,11 @@
               "type": "integer",
               "maximum": 200,
               "minimum": 1,
+              "description": "Items per page",
               "default": 50,
               "title": "Page Size"
-            }
+            },
+            "description": "Items per page"
           },
           {
             "name": "sort_by",
@@ -7294,14 +7042,21 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "id",
+                    "name",
+                    "created_at"
+                  ],
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "Field to sort by",
               "title": "Sort By"
-            }
+            },
+            "description": "Field to sort by"
           },
           {
             "name": "sort_order",
@@ -7309,8 +7064,10 @@
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/SortOrder",
+              "description": "Sort order",
               "default": "ascending"
-            }
+            },
+            "description": "Sort order"
           },
           {
             "name": "id",
@@ -7325,8 +7082,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact tag ID",
               "title": "Id"
-            }
+            },
+            "description": "Exact tag ID"
           },
           {
             "name": "name",
@@ -7341,8 +7100,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact name",
               "title": "Name"
-            }
+            },
+            "description": "Exact name"
           },
           {
             "name": "name_contains",
@@ -7358,8 +7119,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Name contains text",
               "title": "Name Contains"
-            }
+            },
+            "description": "Name contains text"
           },
           {
             "name": "created_at_from",
@@ -7375,8 +7138,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Created after",
               "title": "Created At From"
-            }
+            },
+            "description": "Created after"
           },
           {
             "name": "created_at_to",
@@ -7392,8 +7157,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Created before",
               "title": "Created At To"
-            }
+            },
+            "description": "Created before"
           },
           {
             "name": "include_deleted",
@@ -7401,9 +7168,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
+              "description": "Include archived records (requires tag.archive)",
               "default": false,
               "title": "Include Deleted"
-            }
+            },
+            "description": "Include archived records (requires tag.archive)"
           }
         ],
         "responses": {
@@ -7506,103 +7275,6 @@
             }
           }
         }
-      }
-    },
-    "/api/v1/tags/filter-schema": {
-      "get": {
-        "tags": [
-          "TAGS"
-        ],
-        "summary": "Get Tag Filter Schema",
-        "description": "Available filter params and sortable fields for tags.",
-        "operationId": "get_tag_filter_schema",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EntitySchemaInfo"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "`internal_error`: Internal server error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InternalErrorProblem"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountDeletedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountNotFoundProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InvalidTokenProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SessionExpiredProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
-                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
-                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
-                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
-                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
-                      "session_expired": "#/components/schemas/SessionExpiredProblem"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "`validation_error`: Request validation failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ValidationErrorProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`permission_denied`: Insufficient permissions",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PermissionDeniedProblem"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
       }
     },
     "/api/v1/tags/create": {
@@ -8338,9 +8010,11 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
+              "description": "Page number",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "Page number"
           },
           {
             "name": "page_size",
@@ -8350,9 +8024,11 @@
               "type": "integer",
               "maximum": 200,
               "minimum": 1,
+              "description": "Items per page",
               "default": 50,
               "title": "Page Size"
-            }
+            },
+            "description": "Items per page"
           },
           {
             "name": "sort_by",
@@ -8361,14 +8037,25 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "id",
+                    "observed_at",
+                    "created_at",
+                    "updated_at",
+                    "status",
+                    "post_id",
+                    "frequency_center"
+                  ],
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "Field to sort by",
               "title": "Sort By"
-            }
+            },
+            "description": "Field to sort by"
           },
           {
             "name": "sort_order",
@@ -8376,8 +8063,10 @@
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/SortOrder",
+              "description": "Sort order",
               "default": "ascending"
-            }
+            },
+            "description": "Sort order"
           },
           {
             "name": "id",
@@ -8392,8 +8081,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact observation ID",
               "title": "Id"
-            }
+            },
+            "description": "Exact observation ID"
           },
           {
             "name": "user_id",
@@ -8408,8 +8099,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by user ID",
               "title": "User Id"
-            }
+            },
+            "description": "Filter by user ID"
           },
           {
             "name": "post_id",
@@ -8424,8 +8117,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by post ID",
               "title": "Post Id"
-            }
+            },
+            "description": "Filter by post ID"
           },
           {
             "name": "signal_type_id",
@@ -8440,8 +8135,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by signal type ID",
               "title": "Signal Type Id"
-            }
+            },
+            "description": "Filter by signal type ID"
           },
           {
             "name": "status",
@@ -8456,8 +8153,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact status (active, disappeared, confirmed, false_positive, under_review)",
               "title": "Status"
-            }
+            },
+            "description": "Exact status (active, disappeared, confirmed, false_positive, under_review)"
           },
           {
             "name": "status_in",
@@ -8466,14 +8165,19 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "Any of these statuses: ?status_in=active&status_in=confirmed",
               "title": "Status In"
-            }
+            },
+            "description": "Any of these statuses: ?status_in=active&status_in=confirmed"
           },
           {
             "name": "confidence_level",
@@ -8488,8 +8192,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Confidence level (low, medium, high)",
               "title": "Confidence Level"
-            }
+            },
+            "description": "Confidence level (low, medium, high)"
           },
           {
             "name": "frequency_kind",
@@ -8504,8 +8210,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Band kind: rc or video",
               "title": "Frequency Kind"
-            }
+            },
+            "description": "Band kind: rc or video"
           },
           {
             "name": "frequency_center_from",
@@ -8523,8 +8231,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Band center frequency min (MHz)",
               "title": "Frequency Center From"
-            }
+            },
+            "description": "Band center frequency min (MHz)"
           },
           {
             "name": "frequency_center_to",
@@ -8542,8 +8252,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Band center frequency max (MHz)",
               "title": "Frequency Center To"
-            }
+            },
+            "description": "Band center frequency max (MHz)"
           },
           {
             "name": "bandwidth_from",
@@ -8561,8 +8273,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Bandwidth min (MHz)",
               "title": "Bandwidth From"
-            }
+            },
+            "description": "Bandwidth min (MHz)"
           },
           {
             "name": "bandwidth_to",
@@ -8580,8 +8294,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Bandwidth max (MHz)",
               "title": "Bandwidth To"
-            }
+            },
+            "description": "Bandwidth max (MHz)"
           },
           {
             "name": "observed_at_from",
@@ -8597,8 +8313,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Observed after (ISO datetime)",
               "title": "Observed At From"
-            }
+            },
+            "description": "Observed after (ISO datetime)"
           },
           {
             "name": "observed_at_to",
@@ -8614,8 +8332,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Observed before (ISO datetime)",
               "title": "Observed At To"
-            }
+            },
+            "description": "Observed before (ISO datetime)"
           },
           {
             "name": "last_n_days",
@@ -8632,8 +8352,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Last N days from today",
               "title": "Last N Days"
-            }
+            },
+            "description": "Last N days from today"
           },
           {
             "name": "created_at_from",
@@ -8649,8 +8371,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Created after",
               "title": "Created At From"
-            }
+            },
+            "description": "Created after"
           },
           {
             "name": "created_at_to",
@@ -8666,8 +8390,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Created before",
               "title": "Created At To"
-            }
+            },
+            "description": "Created before"
           },
           {
             "name": "is_disappeared",
@@ -8682,8 +8408,10 @@
                   "type": "null"
                 }
               ],
+              "description": "True=disappeared, False=not disappeared",
               "title": "Is Disappeared"
-            }
+            },
+            "description": "True=disappeared, False=not disappeared"
           },
           {
             "name": "disappeared_by",
@@ -8698,8 +8426,10 @@
                   "type": "null"
                 }
               ],
+              "description": "User ID who marked disappeared",
               "title": "Disappeared By"
-            }
+            },
+            "description": "User ID who marked disappeared"
           },
           {
             "name": "duration_from",
@@ -8715,8 +8445,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Duration min (seconds)",
               "title": "Duration From"
-            }
+            },
+            "description": "Duration min (seconds)"
           },
           {
             "name": "duration_to",
@@ -8732,8 +8464,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Duration max (seconds)",
               "title": "Duration To"
-            }
+            },
+            "description": "Duration max (seconds)"
           },
           {
             "name": "comment_contains",
@@ -8749,8 +8483,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Comment contains text",
               "title": "Comment Contains"
-            }
+            },
+            "description": "Comment contains text"
           },
           {
             "name": "tag_ids",
@@ -8759,14 +8495,19 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  }
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "Tag ids, all required: ?tag_ids=1&tag_ids=2",
               "title": "Tag Ids"
-            }
+            },
+            "description": "Tag ids, all required: ?tag_ids=1&tag_ids=2"
           },
           {
             "name": "include_deleted",
@@ -8774,9 +8515,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
+              "description": "Include archived records (requires observation.archive)",
               "default": false,
               "title": "Include Deleted"
-            }
+            },
+            "description": "Include archived records (requires observation.archive)"
           }
         ],
         "responses": {
@@ -8887,103 +8630,6 @@
             }
           }
         }
-      }
-    },
-    "/api/v1/observations/filter-schema": {
-      "get": {
-        "tags": [
-          "OBSERVATIONS"
-        ],
-        "summary": "Get Observation Filter Schema",
-        "description": "Available filter params and sortable fields for observations.",
-        "operationId": "get_observation_filter_schema",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EntitySchemaInfo"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "`internal_error`: Internal server error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InternalErrorProblem"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountDeletedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountNotFoundProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InvalidTokenProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SessionExpiredProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
-                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
-                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
-                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
-                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
-                      "session_expired": "#/components/schemas/SessionExpiredProblem"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "`validation_error`: Request validation failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ValidationErrorProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`permission_denied`: Insufficient permissions",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PermissionDeniedProblem"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
       }
     },
     "/api/v1/observations/create": {
@@ -10954,9 +10600,11 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
+              "description": "Page number",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "Page number"
           },
           {
             "name": "page_size",
@@ -10966,9 +10614,11 @@
               "type": "integer",
               "maximum": 200,
               "minimum": 1,
+              "description": "Items per page",
               "default": 50,
               "title": "Page Size"
-            }
+            },
+            "description": "Items per page"
           },
           {
             "name": "sort_by",
@@ -10977,14 +10627,28 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "id",
+                    "name",
+                    "code",
+                    "city",
+                    "created_at",
+                    "updated_at",
+                    "last_user_activity_at",
+                    "is_active",
+                    "online_user_count",
+                    "user_count"
+                  ],
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "Field to sort by",
               "title": "Sort By"
-            }
+            },
+            "description": "Field to sort by"
           },
           {
             "name": "sort_order",
@@ -10992,8 +10656,10 @@
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/SortOrder",
+              "description": "Sort order",
               "default": "ascending"
-            }
+            },
+            "description": "Sort order"
           },
           {
             "name": "id",
@@ -11008,8 +10674,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact post ID",
               "title": "Id"
-            }
+            },
+            "description": "Exact post ID"
           },
           {
             "name": "name",
@@ -11024,8 +10692,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact name",
               "title": "Name"
-            }
+            },
+            "description": "Exact name"
           },
           {
             "name": "name_contains",
@@ -11041,8 +10711,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Name contains text",
               "title": "Name Contains"
-            }
+            },
+            "description": "Name contains text"
           },
           {
             "name": "code",
@@ -11057,8 +10729,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact code",
               "title": "Code"
-            }
+            },
+            "description": "Exact code"
           },
           {
             "name": "code_contains",
@@ -11074,8 +10748,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Code contains text",
               "title": "Code Contains"
-            }
+            },
+            "description": "Code contains text"
           },
           {
             "name": "region",
@@ -11090,8 +10766,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact region",
               "title": "Region"
-            }
+            },
+            "description": "Exact region"
           },
           {
             "name": "region_contains",
@@ -11107,8 +10785,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Region contains text",
               "title": "Region Contains"
-            }
+            },
+            "description": "Region contains text"
           },
           {
             "name": "city",
@@ -11123,8 +10803,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact city",
               "title": "City"
-            }
+            },
+            "description": "Exact city"
           },
           {
             "name": "city_contains",
@@ -11140,8 +10822,10 @@
                   "type": "null"
                 }
               ],
+              "description": "City contains text",
               "title": "City Contains"
-            }
+            },
+            "description": "City contains text"
           },
           {
             "name": "description_contains",
@@ -11157,8 +10841,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Description contains text",
               "title": "Description Contains"
-            }
+            },
+            "description": "Description contains text"
           },
           {
             "name": "is_active",
@@ -11173,8 +10859,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by active status",
               "title": "Is Active"
-            }
+            },
+            "description": "Filter by active status"
           },
           {
             "name": "has_online_users",
@@ -11189,8 +10877,10 @@
                   "type": "null"
                 }
               ],
+              "description": "true: posts with at least one home user online now; false: posts without",
               "title": "Has Online Users"
-            }
+            },
+            "description": "true: posts with at least one home user online now; false: posts without"
           },
           {
             "name": "created_at_from",
@@ -11206,8 +10896,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Created after",
               "title": "Created At From"
-            }
+            },
+            "description": "Created after"
           },
           {
             "name": "created_at_to",
@@ -11223,8 +10915,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Created before",
               "title": "Created At To"
-            }
+            },
+            "description": "Created before"
           },
           {
             "name": "last_user_activity_from",
@@ -11240,8 +10934,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Latest home user activity after",
               "title": "Last User Activity From"
-            }
+            },
+            "description": "Latest home user activity after"
           },
           {
             "name": "last_user_activity_to",
@@ -11257,8 +10953,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Latest home user activity before",
               "title": "Last User Activity To"
-            }
+            },
+            "description": "Latest home user activity before"
           }
         ],
         "responses": {
@@ -11476,103 +11174,6 @@
             }
           }
         }
-      }
-    },
-    "/api/v1/posts/filter-schema": {
-      "get": {
-        "tags": [
-          "POSTS"
-        ],
-        "summary": "Get Post Filter Schema",
-        "description": "Available filter params and sortable fields for posts.",
-        "operationId": "get_post_filter_schema",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EntitySchemaInfo"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "`internal_error`: Internal server error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InternalErrorProblem"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountDeletedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountNotFoundProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InvalidTokenProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SessionExpiredProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
-                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
-                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
-                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
-                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
-                      "session_expired": "#/components/schemas/SessionExpiredProblem"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "`validation_error`: Request validation failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ValidationErrorProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`permission_denied`: Insufficient permissions",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PermissionDeniedProblem"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
       }
     },
     "/api/v1/posts/{post_id}": {
@@ -12104,103 +11705,6 @@
         }
       }
     },
-    "/api/v1/media/filter-schema": {
-      "get": {
-        "tags": [
-          "MEDIA"
-        ],
-        "summary": "Get Media Filter Schema",
-        "description": "Available filter params and sortable fields for media files.",
-        "operationId": "get_media_filter_schema",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EntitySchemaInfo"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "`internal_error`: Internal server error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InternalErrorProblem"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountDeletedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountNotFoundProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InvalidTokenProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SessionExpiredProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
-                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
-                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
-                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
-                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
-                      "session_expired": "#/components/schemas/SessionExpiredProblem"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "`validation_error`: Request validation failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ValidationErrorProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`permission_denied`: Insufficient permissions",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PermissionDeniedProblem"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
     "/api/v1/media/formats": {
       "get": {
         "tags": [
@@ -12319,9 +11823,11 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
+              "description": "Page number",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "Page number"
           },
           {
             "name": "page_size",
@@ -12331,9 +11837,11 @@
               "type": "integer",
               "maximum": 200,
               "minimum": 1,
+              "description": "Items per page",
               "default": 50,
               "title": "Page Size"
-            }
+            },
+            "description": "Items per page"
           },
           {
             "name": "sort_by",
@@ -12342,14 +11850,24 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "id",
+                    "original_filename",
+                    "file_size",
+                    "media_type",
+                    "uploaded_at",
+                    "observation_id"
+                  ],
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "Field to sort by",
               "title": "Sort By"
-            }
+            },
+            "description": "Field to sort by"
           },
           {
             "name": "sort_order",
@@ -12357,8 +11875,10 @@
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/SortOrder",
+              "description": "Sort order",
               "default": "ascending"
-            }
+            },
+            "description": "Sort order"
           },
           {
             "name": "id",
@@ -12373,8 +11893,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact media ID",
               "title": "Id"
-            }
+            },
+            "description": "Exact media ID"
           },
           {
             "name": "observation_id",
@@ -12389,8 +11911,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by observation ID",
               "title": "Observation Id"
-            }
+            },
+            "description": "Filter by observation ID"
           },
           {
             "name": "original_filename_contains",
@@ -12406,8 +11930,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Filename contains text",
               "title": "Original Filename Contains"
-            }
+            },
+            "description": "Filename contains text"
           },
           {
             "name": "media_type",
@@ -12422,8 +11948,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Media type (image, video, audio, document)",
               "title": "Media Type"
-            }
+            },
+            "description": "Media type (image, video, audio, document)"
           },
           {
             "name": "mime_type",
@@ -12438,8 +11966,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact MIME type",
               "title": "Mime Type"
-            }
+            },
+            "description": "Exact MIME type"
           },
           {
             "name": "file_extension",
@@ -12454,8 +11984,10 @@
                   "type": "null"
                 }
               ],
+              "description": "File extension (jpg, mp4, etc)",
               "title": "File Extension"
-            }
+            },
+            "description": "File extension (jpg, mp4, etc)"
           },
           {
             "name": "file_size_from",
@@ -12471,8 +12003,10 @@
                   "type": "null"
                 }
               ],
+              "description": "File size min (bytes)",
               "title": "File Size From"
-            }
+            },
+            "description": "File size min (bytes)"
           },
           {
             "name": "file_size_to",
@@ -12488,8 +12022,10 @@
                   "type": "null"
                 }
               ],
+              "description": "File size max (bytes)",
               "title": "File Size To"
-            }
+            },
+            "description": "File size max (bytes)"
           },
           {
             "name": "width_from",
@@ -12505,8 +12041,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Width min (pixels)",
               "title": "Width From"
-            }
+            },
+            "description": "Width min (pixels)"
           },
           {
             "name": "width_to",
@@ -12522,8 +12060,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Width max (pixels)",
               "title": "Width To"
-            }
+            },
+            "description": "Width max (pixels)"
           },
           {
             "name": "height_from",
@@ -12539,8 +12079,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Height min (pixels)",
               "title": "Height From"
-            }
+            },
+            "description": "Height min (pixels)"
           },
           {
             "name": "height_to",
@@ -12556,8 +12098,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Height max (pixels)",
               "title": "Height To"
-            }
+            },
+            "description": "Height max (pixels)"
           },
           {
             "name": "has_thumbnail",
@@ -12572,8 +12116,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Has a thumbnail available (images always, videos once the poster is ready)",
               "title": "Has Thumbnail"
-            }
+            },
+            "description": "Has a thumbnail available (images always, videos once the poster is ready)"
           },
           {
             "name": "uploaded_at_from",
@@ -12589,8 +12135,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Uploaded after",
               "title": "Uploaded At From"
-            }
+            },
+            "description": "Uploaded after"
           },
           {
             "name": "uploaded_at_to",
@@ -12606,8 +12154,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Uploaded before",
               "title": "Uploaded At To"
-            }
+            },
+            "description": "Uploaded before"
           }
         ],
         "responses": {
@@ -16526,9 +16076,11 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
+              "description": "Page number",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "Page number"
           },
           {
             "name": "page_size",
@@ -16538,9 +16090,11 @@
               "type": "integer",
               "maximum": 200,
               "minimum": 1,
+              "description": "Items per page",
               "default": 50,
               "title": "Page Size"
-            }
+            },
+            "description": "Items per page"
           },
           {
             "name": "sort_by",
@@ -16549,14 +16103,25 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "id",
+                    "media_type",
+                    "content_type",
+                    "label",
+                    "max_file_size_bytes",
+                    "sort_order",
+                    "is_active"
+                  ],
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "Field to sort by",
               "title": "Sort By"
-            }
+            },
+            "description": "Field to sort by"
           },
           {
             "name": "sort_order",
@@ -16564,8 +16129,10 @@
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/SortOrder",
+              "description": "Sort order",
               "default": "ascending"
-            }
+            },
+            "description": "Sort order"
           },
           {
             "name": "id",
@@ -16580,8 +16147,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact format ID",
               "title": "Id"
-            }
+            },
+            "description": "Exact format ID"
           },
           {
             "name": "media_type",
@@ -16596,8 +16165,10 @@
                   "type": "null"
                 }
               ],
+              "description": "image, video or audio",
               "title": "Media Type"
-            }
+            },
+            "description": "image, video or audio"
           },
           {
             "name": "content_type",
@@ -16612,8 +16183,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact Content-Type, e.g. image/jpeg",
               "title": "Content Type"
-            }
+            },
+            "description": "Exact Content-Type, e.g. image/jpeg"
           },
           {
             "name": "content_type_contains",
@@ -16629,8 +16202,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Content-Type contains text",
               "title": "Content Type Contains"
-            }
+            },
+            "description": "Content-Type contains text"
           },
           {
             "name": "label_contains",
@@ -16646,8 +16221,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Label contains text",
               "title": "Label Contains"
-            }
+            },
+            "description": "Label contains text"
           },
           {
             "name": "is_active",
@@ -16662,8 +16239,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Only active (accepted) or only disabled formats",
               "title": "Is Active"
-            }
+            },
+            "description": "Only active (accepted) or only disabled formats"
           },
           {
             "name": "include_deleted",
@@ -16671,9 +16250,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
+              "description": "Include archived records (requires media_format.archive)",
               "default": false,
               "title": "Include Deleted"
-            }
+            },
+            "description": "Include archived records (requires media_format.archive)"
           }
         ],
         "responses": {
@@ -16776,103 +16357,6 @@
             }
           }
         }
-      }
-    },
-    "/api/v1/media-formats/filter-schema": {
-      "get": {
-        "tags": [
-          "MEDIA_FORMATS"
-        ],
-        "summary": "Get Media Format Filter Schema",
-        "description": "Available filter params and sortable fields for media formats.",
-        "operationId": "get_media_format_filter_schema",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EntitySchemaInfo"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "`internal_error`: Internal server error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InternalErrorProblem"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountDeletedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountNotFoundProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InvalidTokenProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SessionExpiredProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
-                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
-                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
-                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
-                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
-                      "session_expired": "#/components/schemas/SessionExpiredProblem"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "`validation_error`: Request validation failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ValidationErrorProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`permission_denied`: Insufficient permissions",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PermissionDeniedProblem"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
       }
     },
     "/api/v1/media-formats/create": {
@@ -17673,9 +17157,11 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
+              "description": "Page number",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "Page number"
           },
           {
             "name": "page_size",
@@ -17685,9 +17171,11 @@
               "type": "integer",
               "maximum": 200,
               "minimum": 1,
+              "description": "Items per page",
               "default": 50,
               "title": "Page Size"
-            }
+            },
+            "description": "Items per page"
           },
           {
             "name": "sort_by",
@@ -17696,14 +17184,25 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "id",
+                    "observed_at",
+                    "created_at",
+                    "updated_at",
+                    "status",
+                    "post_id",
+                    "frequency_center"
+                  ],
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "Field to sort by",
               "title": "Sort By"
-            }
+            },
+            "description": "Field to sort by"
           },
           {
             "name": "sort_order",
@@ -17711,8 +17210,10 @@
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/SortOrder",
+              "description": "Sort order",
               "default": "ascending"
-            }
+            },
+            "description": "Sort order"
           },
           {
             "name": "id",
@@ -17727,8 +17228,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact observation ID",
               "title": "Id"
-            }
+            },
+            "description": "Exact observation ID"
           },
           {
             "name": "user_id",
@@ -17743,8 +17246,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by user ID",
               "title": "User Id"
-            }
+            },
+            "description": "Filter by user ID"
           },
           {
             "name": "post_id",
@@ -17759,8 +17264,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by post ID",
               "title": "Post Id"
-            }
+            },
+            "description": "Filter by post ID"
           },
           {
             "name": "signal_type_id",
@@ -17775,8 +17282,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by signal type ID",
               "title": "Signal Type Id"
-            }
+            },
+            "description": "Filter by signal type ID"
           },
           {
             "name": "status",
@@ -17791,8 +17300,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact status (active, disappeared, confirmed, false_positive, under_review)",
               "title": "Status"
-            }
+            },
+            "description": "Exact status (active, disappeared, confirmed, false_positive, under_review)"
           },
           {
             "name": "status_in",
@@ -17801,14 +17312,19 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "Any of these statuses: ?status_in=active&status_in=confirmed",
               "title": "Status In"
-            }
+            },
+            "description": "Any of these statuses: ?status_in=active&status_in=confirmed"
           },
           {
             "name": "confidence_level",
@@ -17823,8 +17339,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Confidence level (low, medium, high)",
               "title": "Confidence Level"
-            }
+            },
+            "description": "Confidence level (low, medium, high)"
           },
           {
             "name": "frequency_kind",
@@ -17839,8 +17357,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Band kind: rc or video",
               "title": "Frequency Kind"
-            }
+            },
+            "description": "Band kind: rc or video"
           },
           {
             "name": "frequency_center_from",
@@ -17858,8 +17378,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Band center frequency min (MHz)",
               "title": "Frequency Center From"
-            }
+            },
+            "description": "Band center frequency min (MHz)"
           },
           {
             "name": "frequency_center_to",
@@ -17877,8 +17399,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Band center frequency max (MHz)",
               "title": "Frequency Center To"
-            }
+            },
+            "description": "Band center frequency max (MHz)"
           },
           {
             "name": "bandwidth_from",
@@ -17896,8 +17420,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Bandwidth min (MHz)",
               "title": "Bandwidth From"
-            }
+            },
+            "description": "Bandwidth min (MHz)"
           },
           {
             "name": "bandwidth_to",
@@ -17915,8 +17441,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Bandwidth max (MHz)",
               "title": "Bandwidth To"
-            }
+            },
+            "description": "Bandwidth max (MHz)"
           },
           {
             "name": "observed_at_from",
@@ -17932,8 +17460,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Observed after (ISO datetime)",
               "title": "Observed At From"
-            }
+            },
+            "description": "Observed after (ISO datetime)"
           },
           {
             "name": "observed_at_to",
@@ -17949,8 +17479,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Observed before (ISO datetime)",
               "title": "Observed At To"
-            }
+            },
+            "description": "Observed before (ISO datetime)"
           },
           {
             "name": "last_n_days",
@@ -17967,8 +17499,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Last N days from today",
               "title": "Last N Days"
-            }
+            },
+            "description": "Last N days from today"
           },
           {
             "name": "created_at_from",
@@ -17984,8 +17518,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Created after",
               "title": "Created At From"
-            }
+            },
+            "description": "Created after"
           },
           {
             "name": "created_at_to",
@@ -18001,8 +17537,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Created before",
               "title": "Created At To"
-            }
+            },
+            "description": "Created before"
           },
           {
             "name": "is_disappeared",
@@ -18017,8 +17555,10 @@
                   "type": "null"
                 }
               ],
+              "description": "True=disappeared, False=not disappeared",
               "title": "Is Disappeared"
-            }
+            },
+            "description": "True=disappeared, False=not disappeared"
           },
           {
             "name": "disappeared_by",
@@ -18033,8 +17573,10 @@
                   "type": "null"
                 }
               ],
+              "description": "User ID who marked disappeared",
               "title": "Disappeared By"
-            }
+            },
+            "description": "User ID who marked disappeared"
           },
           {
             "name": "duration_from",
@@ -18050,8 +17592,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Duration min (seconds)",
               "title": "Duration From"
-            }
+            },
+            "description": "Duration min (seconds)"
           },
           {
             "name": "duration_to",
@@ -18067,8 +17611,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Duration max (seconds)",
               "title": "Duration To"
-            }
+            },
+            "description": "Duration max (seconds)"
           },
           {
             "name": "comment_contains",
@@ -18084,8 +17630,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Comment contains text",
               "title": "Comment Contains"
-            }
+            },
+            "description": "Comment contains text"
           },
           {
             "name": "tag_ids",
@@ -18094,14 +17642,19 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  }
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "Tag ids, all required: ?tag_ids=1&tag_ids=2",
               "title": "Tag Ids"
-            }
+            },
+            "description": "Tag ids, all required: ?tag_ids=1&tag_ids=2"
           },
           {
             "name": "include_deleted",
@@ -18109,9 +17662,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
+              "description": "Include archived records (requires observation.archive)",
               "default": false,
               "title": "Include Deleted"
-            }
+            },
+            "description": "Include archived records (requires observation.archive)"
           }
         ],
         "responses": {
@@ -18241,9 +17796,11 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
+              "description": "Page number",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "Page number"
           },
           {
             "name": "page_size",
@@ -18253,9 +17810,11 @@
               "type": "integer",
               "maximum": 200,
               "minimum": 1,
+              "description": "Items per page",
               "default": 50,
               "title": "Page Size"
-            }
+            },
+            "description": "Items per page"
           },
           {
             "name": "sort_by",
@@ -18264,14 +17823,26 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "id",
+                    "username",
+                    "username_alias",
+                    "created_at",
+                    "updated_at",
+                    "last_login_at",
+                    "is_active",
+                    "last_activity_at"
+                  ],
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "Field to sort by",
               "title": "Sort By"
-            }
+            },
+            "description": "Field to sort by"
           },
           {
             "name": "sort_order",
@@ -18279,8 +17850,10 @@
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/SortOrder",
+              "description": "Sort order",
               "default": "ascending"
-            }
+            },
+            "description": "Sort order"
           },
           {
             "name": "id",
@@ -18295,8 +17868,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact user ID",
               "title": "Id"
-            }
+            },
+            "description": "Exact user ID"
           },
           {
             "name": "username",
@@ -18311,8 +17886,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact username",
               "title": "Username"
-            }
+            },
+            "description": "Exact username"
           },
           {
             "name": "username_contains",
@@ -18328,8 +17905,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Username contains text",
               "title": "Username Contains"
-            }
+            },
+            "description": "Username contains text"
           },
           {
             "name": "username_alias",
@@ -18344,8 +17923,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact username alias",
               "title": "Username Alias"
-            }
+            },
+            "description": "Exact username alias"
           },
           {
             "name": "username_alias_contains",
@@ -18361,8 +17942,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Alias contains text",
               "title": "Username Alias Contains"
-            }
+            },
+            "description": "Alias contains text"
           },
           {
             "name": "post_id",
@@ -18377,8 +17960,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by post ID",
               "title": "Post Id"
-            }
+            },
+            "description": "Filter by post ID"
           },
           {
             "name": "is_active",
@@ -18393,8 +17978,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by active status",
               "title": "Is Active"
-            }
+            },
+            "description": "Filter by active status"
           },
           {
             "name": "is_online",
@@ -18409,8 +17996,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Online now (session touched within the online threshold)",
               "title": "Is Online"
-            }
+            },
+            "description": "Online now (session touched within the online threshold)"
           },
           {
             "name": "created_at_from",
@@ -18426,8 +18015,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Created after",
               "title": "Created At From"
-            }
+            },
+            "description": "Created after"
           },
           {
             "name": "created_at_to",
@@ -18443,8 +18034,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Created before",
               "title": "Created At To"
-            }
+            },
+            "description": "Created before"
           },
           {
             "name": "last_login_from",
@@ -18460,8 +18053,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Last login after",
               "title": "Last Login From"
-            }
+            },
+            "description": "Last login after"
           },
           {
             "name": "last_login_to",
@@ -18477,8 +18072,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Last login before",
               "title": "Last Login To"
-            }
+            },
+            "description": "Last login before"
           },
           {
             "name": "include_deleted",
@@ -18486,9 +18083,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
+              "description": "Include archived records (requires user.archive)",
               "default": false,
               "title": "Include Deleted"
-            }
+            },
+            "description": "Include archived records (requires user.archive)"
           }
         ],
         "responses": {
@@ -18618,9 +18217,11 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
+              "description": "Page number",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "Page number"
           },
           {
             "name": "page_size",
@@ -18630,9 +18231,11 @@
               "type": "integer",
               "maximum": 200,
               "minimum": 1,
+              "description": "Items per page",
               "default": 50,
               "title": "Page Size"
-            }
+            },
+            "description": "Items per page"
           },
           {
             "name": "sort_by",
@@ -18641,14 +18244,28 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "id",
+                    "name",
+                    "code",
+                    "city",
+                    "created_at",
+                    "updated_at",
+                    "last_user_activity_at",
+                    "is_active",
+                    "online_user_count",
+                    "user_count"
+                  ],
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "Field to sort by",
               "title": "Sort By"
-            }
+            },
+            "description": "Field to sort by"
           },
           {
             "name": "sort_order",
@@ -18656,8 +18273,10 @@
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/SortOrder",
+              "description": "Sort order",
               "default": "ascending"
-            }
+            },
+            "description": "Sort order"
           },
           {
             "name": "id",
@@ -18672,8 +18291,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact post ID",
               "title": "Id"
-            }
+            },
+            "description": "Exact post ID"
           },
           {
             "name": "name",
@@ -18688,8 +18309,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact name",
               "title": "Name"
-            }
+            },
+            "description": "Exact name"
           },
           {
             "name": "name_contains",
@@ -18705,8 +18328,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Name contains text",
               "title": "Name Contains"
-            }
+            },
+            "description": "Name contains text"
           },
           {
             "name": "code",
@@ -18721,8 +18346,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact code",
               "title": "Code"
-            }
+            },
+            "description": "Exact code"
           },
           {
             "name": "code_contains",
@@ -18738,8 +18365,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Code contains text",
               "title": "Code Contains"
-            }
+            },
+            "description": "Code contains text"
           },
           {
             "name": "region",
@@ -18754,8 +18383,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact region",
               "title": "Region"
-            }
+            },
+            "description": "Exact region"
           },
           {
             "name": "region_contains",
@@ -18771,8 +18402,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Region contains text",
               "title": "Region Contains"
-            }
+            },
+            "description": "Region contains text"
           },
           {
             "name": "city",
@@ -18787,8 +18420,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact city",
               "title": "City"
-            }
+            },
+            "description": "Exact city"
           },
           {
             "name": "city_contains",
@@ -18804,8 +18439,10 @@
                   "type": "null"
                 }
               ],
+              "description": "City contains text",
               "title": "City Contains"
-            }
+            },
+            "description": "City contains text"
           },
           {
             "name": "description_contains",
@@ -18821,8 +18458,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Description contains text",
               "title": "Description Contains"
-            }
+            },
+            "description": "Description contains text"
           },
           {
             "name": "is_active",
@@ -18837,8 +18476,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by active status",
               "title": "Is Active"
-            }
+            },
+            "description": "Filter by active status"
           },
           {
             "name": "has_online_users",
@@ -18853,8 +18494,10 @@
                   "type": "null"
                 }
               ],
+              "description": "true: posts with at least one home user online now; false: posts without",
               "title": "Has Online Users"
-            }
+            },
+            "description": "true: posts with at least one home user online now; false: posts without"
           },
           {
             "name": "created_at_from",
@@ -18870,8 +18513,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Created after",
               "title": "Created At From"
-            }
+            },
+            "description": "Created after"
           },
           {
             "name": "created_at_to",
@@ -18887,8 +18532,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Created before",
               "title": "Created At To"
-            }
+            },
+            "description": "Created before"
           },
           {
             "name": "last_user_activity_from",
@@ -18904,8 +18551,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Latest home user activity after",
               "title": "Last User Activity From"
-            }
+            },
+            "description": "Latest home user activity after"
           },
           {
             "name": "last_user_activity_to",
@@ -18921,8 +18570,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Latest home user activity before",
               "title": "Last User Activity To"
-            }
+            },
+            "description": "Latest home user activity before"
           }
         ],
         "responses": {
@@ -19030,9 +18681,11 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
+              "description": "Page number",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "Page number"
           },
           {
             "name": "page_size",
@@ -19042,9 +18695,11 @@
               "type": "integer",
               "maximum": 200,
               "minimum": 1,
+              "description": "Items per page",
               "default": 50,
               "title": "Page Size"
-            }
+            },
+            "description": "Items per page"
           },
           {
             "name": "sort_by",
@@ -19053,14 +18708,23 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "id",
+                    "name",
+                    "display_name",
+                    "created_at",
+                    "updated_at"
+                  ],
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "Field to sort by",
               "title": "Sort By"
-            }
+            },
+            "description": "Field to sort by"
           },
           {
             "name": "sort_order",
@@ -19068,8 +18732,10 @@
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/SortOrder",
+              "description": "Sort order",
               "default": "ascending"
-            }
+            },
+            "description": "Sort order"
           },
           {
             "name": "id",
@@ -19084,8 +18750,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact role ID",
               "title": "Id"
-            }
+            },
+            "description": "Exact role ID"
           },
           {
             "name": "include_deleted",
@@ -19093,9 +18761,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
+              "description": "Include archived roles (requires role.archive)",
               "default": false,
               "title": "Include Deleted"
-            }
+            },
+            "description": "Include archived roles (requires role.archive)"
           },
           {
             "name": "name",
@@ -19110,8 +18780,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact name",
               "title": "Name"
-            }
+            },
+            "description": "Exact name"
           },
           {
             "name": "name_contains",
@@ -19127,8 +18799,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Name contains text",
               "title": "Name Contains"
-            }
+            },
+            "description": "Name contains text"
           },
           {
             "name": "display_name",
@@ -19143,8 +18817,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact display name",
               "title": "Display Name"
-            }
+            },
+            "description": "Exact display name"
           },
           {
             "name": "display_name_contains",
@@ -19160,8 +18836,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Display name contains text",
               "title": "Display Name Contains"
-            }
+            },
+            "description": "Display name contains text"
           },
           {
             "name": "description_contains",
@@ -19177,8 +18855,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Description contains text",
               "title": "Description Contains"
-            }
+            },
+            "description": "Description contains text"
           },
           {
             "name": "created_at_from",
@@ -19194,8 +18874,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Created after",
               "title": "Created At From"
-            }
+            },
+            "description": "Created after"
           },
           {
             "name": "created_at_to",
@@ -19211,8 +18893,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Created before",
               "title": "Created At To"
-            }
+            },
+            "description": "Created before"
           }
         ],
         "responses": {
@@ -19338,9 +19022,11 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
+              "description": "Page number",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "Page number"
           },
           {
             "name": "page_size",
@@ -19350,9 +19036,11 @@
               "type": "integer",
               "maximum": 200,
               "minimum": 1,
+              "description": "Items per page",
               "default": 50,
               "title": "Page Size"
-            }
+            },
+            "description": "Items per page"
           },
           {
             "name": "sort_by",
@@ -19361,14 +19049,21 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "id",
+                    "name",
+                    "alias"
+                  ],
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "Field to sort by",
               "title": "Sort By"
-            }
+            },
+            "description": "Field to sort by"
           },
           {
             "name": "sort_order",
@@ -19376,8 +19071,10 @@
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/SortOrder",
+              "description": "Sort order",
               "default": "ascending"
-            }
+            },
+            "description": "Sort order"
           },
           {
             "name": "id",
@@ -19392,8 +19089,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact category ID",
               "title": "Id"
-            }
+            },
+            "description": "Exact category ID"
           },
           {
             "name": "name",
@@ -19408,8 +19107,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact name",
               "title": "Name"
-            }
+            },
+            "description": "Exact name"
           },
           {
             "name": "name_contains",
@@ -19425,8 +19126,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Name contains text",
               "title": "Name Contains"
-            }
+            },
+            "description": "Name contains text"
           },
           {
             "name": "alias",
@@ -19441,8 +19144,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact alias",
               "title": "Alias"
-            }
+            },
+            "description": "Exact alias"
           },
           {
             "name": "alias_contains",
@@ -19458,8 +19163,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Alias contains text",
               "title": "Alias Contains"
-            }
+            },
+            "description": "Alias contains text"
           },
           {
             "name": "include_deleted",
@@ -19467,9 +19174,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
+              "description": "Include archived records (requires category.archive)",
               "default": false,
               "title": "Include Deleted"
-            }
+            },
+            "description": "Include archived records (requires category.archive)"
           }
         ],
         "responses": {
@@ -19591,9 +19300,11 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
+              "description": "Page number",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "Page number"
           },
           {
             "name": "page_size",
@@ -19603,9 +19314,11 @@
               "type": "integer",
               "maximum": 200,
               "minimum": 1,
+              "description": "Items per page",
               "default": 50,
               "title": "Page Size"
-            }
+            },
+            "description": "Items per page"
           },
           {
             "name": "sort_by",
@@ -19614,14 +19327,26 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "id",
+                    "code",
+                    "name",
+                    "sort_order",
+                    "created_at",
+                    "updated_at",
+                    "is_active",
+                    "category_id"
+                  ],
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "Field to sort by",
               "title": "Sort By"
-            }
+            },
+            "description": "Field to sort by"
           },
           {
             "name": "sort_order",
@@ -19629,8 +19354,10 @@
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/SortOrder",
+              "description": "Sort order",
               "default": "ascending"
-            }
+            },
+            "description": "Sort order"
           },
           {
             "name": "id",
@@ -19645,8 +19372,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact signal type ID",
               "title": "Id"
-            }
+            },
+            "description": "Exact signal type ID"
           },
           {
             "name": "code",
@@ -19661,8 +19390,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact code",
               "title": "Code"
-            }
+            },
+            "description": "Exact code"
           },
           {
             "name": "code_contains",
@@ -19678,8 +19409,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Code contains text",
               "title": "Code Contains"
-            }
+            },
+            "description": "Code contains text"
           },
           {
             "name": "name",
@@ -19694,8 +19427,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact name",
               "title": "Name"
-            }
+            },
+            "description": "Exact name"
           },
           {
             "name": "name_contains",
@@ -19711,8 +19446,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Name contains text",
               "title": "Name Contains"
-            }
+            },
+            "description": "Name contains text"
           },
           {
             "name": "description_contains",
@@ -19728,8 +19465,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Description contains text",
               "title": "Description Contains"
-            }
+            },
+            "description": "Description contains text"
           },
           {
             "name": "category_id",
@@ -19744,8 +19483,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by category ID",
               "title": "Category Id"
-            }
+            },
+            "description": "Filter by category ID"
           },
           {
             "name": "is_active",
@@ -19760,8 +19501,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by active status",
               "title": "Is Active"
-            }
+            },
+            "description": "Filter by active status"
           },
           {
             "name": "sort_order_from",
@@ -19776,8 +19519,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Sort order min",
               "title": "Sort Order From"
-            }
+            },
+            "description": "Sort order min"
           },
           {
             "name": "sort_order_to",
@@ -19792,8 +19537,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Sort order max",
               "title": "Sort Order To"
-            }
+            },
+            "description": "Sort order max"
           },
           {
             "name": "created_at_from",
@@ -19809,8 +19556,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Created after",
               "title": "Created At From"
-            }
+            },
+            "description": "Created after"
           },
           {
             "name": "created_at_to",
@@ -19826,8 +19575,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Created before",
               "title": "Created At To"
-            }
+            },
+            "description": "Created before"
           },
           {
             "name": "include_deleted",
@@ -19835,9 +19586,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
+              "description": "Include archived records (requires signal_type.archive)",
               "default": false,
               "title": "Include Deleted"
-            }
+            },
+            "description": "Include archived records (requires signal_type.archive)"
           }
         ],
         "responses": {
@@ -19959,9 +19712,11 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
+              "description": "Page number",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "Page number"
           },
           {
             "name": "page_size",
@@ -19971,9 +19726,11 @@
               "type": "integer",
               "maximum": 200,
               "minimum": 1,
+              "description": "Items per page",
               "default": 50,
               "title": "Page Size"
-            }
+            },
+            "description": "Items per page"
           },
           {
             "name": "sort_by",
@@ -19982,14 +19739,21 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "id",
+                    "name",
+                    "created_at"
+                  ],
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "Field to sort by",
               "title": "Sort By"
-            }
+            },
+            "description": "Field to sort by"
           },
           {
             "name": "sort_order",
@@ -19997,8 +19761,10 @@
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/SortOrder",
+              "description": "Sort order",
               "default": "ascending"
-            }
+            },
+            "description": "Sort order"
           },
           {
             "name": "id",
@@ -20013,8 +19779,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact tag ID",
               "title": "Id"
-            }
+            },
+            "description": "Exact tag ID"
           },
           {
             "name": "name",
@@ -20029,8 +19797,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact name",
               "title": "Name"
-            }
+            },
+            "description": "Exact name"
           },
           {
             "name": "name_contains",
@@ -20046,8 +19816,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Name contains text",
               "title": "Name Contains"
-            }
+            },
+            "description": "Name contains text"
           },
           {
             "name": "created_at_from",
@@ -20063,8 +19835,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Created after",
               "title": "Created At From"
-            }
+            },
+            "description": "Created after"
           },
           {
             "name": "created_at_to",
@@ -20080,8 +19854,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Created before",
               "title": "Created At To"
-            }
+            },
+            "description": "Created before"
           },
           {
             "name": "include_deleted",
@@ -20089,9 +19865,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
+              "description": "Include archived records (requires tag.archive)",
               "default": false,
               "title": "Include Deleted"
-            }
+            },
+            "description": "Include archived records (requires tag.archive)"
           }
         ],
         "responses": {
@@ -20213,9 +19991,11 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
+              "description": "Page number",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "Page number"
           },
           {
             "name": "page_size",
@@ -20225,9 +20005,11 @@
               "type": "integer",
               "maximum": 200,
               "minimum": 1,
+              "description": "Items per page",
               "default": 50,
               "title": "Page Size"
-            }
+            },
+            "description": "Items per page"
           },
           {
             "name": "sort_by",
@@ -20236,14 +20018,24 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "id",
+                    "original_filename",
+                    "file_size",
+                    "media_type",
+                    "uploaded_at",
+                    "observation_id"
+                  ],
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "Field to sort by",
               "title": "Sort By"
-            }
+            },
+            "description": "Field to sort by"
           },
           {
             "name": "sort_order",
@@ -20251,8 +20043,10 @@
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/SortOrder",
+              "description": "Sort order",
               "default": "ascending"
-            }
+            },
+            "description": "Sort order"
           },
           {
             "name": "id",
@@ -20267,8 +20061,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact media ID",
               "title": "Id"
-            }
+            },
+            "description": "Exact media ID"
           },
           {
             "name": "observation_id",
@@ -20283,8 +20079,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by observation ID",
               "title": "Observation Id"
-            }
+            },
+            "description": "Filter by observation ID"
           },
           {
             "name": "original_filename_contains",
@@ -20300,8 +20098,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Filename contains text",
               "title": "Original Filename Contains"
-            }
+            },
+            "description": "Filename contains text"
           },
           {
             "name": "media_type",
@@ -20316,8 +20116,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Media type (image, video, audio, document)",
               "title": "Media Type"
-            }
+            },
+            "description": "Media type (image, video, audio, document)"
           },
           {
             "name": "mime_type",
@@ -20332,8 +20134,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact MIME type",
               "title": "Mime Type"
-            }
+            },
+            "description": "Exact MIME type"
           },
           {
             "name": "file_extension",
@@ -20348,8 +20152,10 @@
                   "type": "null"
                 }
               ],
+              "description": "File extension (jpg, mp4, etc)",
               "title": "File Extension"
-            }
+            },
+            "description": "File extension (jpg, mp4, etc)"
           },
           {
             "name": "file_size_from",
@@ -20365,8 +20171,10 @@
                   "type": "null"
                 }
               ],
+              "description": "File size min (bytes)",
               "title": "File Size From"
-            }
+            },
+            "description": "File size min (bytes)"
           },
           {
             "name": "file_size_to",
@@ -20382,8 +20190,10 @@
                   "type": "null"
                 }
               ],
+              "description": "File size max (bytes)",
               "title": "File Size To"
-            }
+            },
+            "description": "File size max (bytes)"
           },
           {
             "name": "width_from",
@@ -20399,8 +20209,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Width min (pixels)",
               "title": "Width From"
-            }
+            },
+            "description": "Width min (pixels)"
           },
           {
             "name": "width_to",
@@ -20416,8 +20228,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Width max (pixels)",
               "title": "Width To"
-            }
+            },
+            "description": "Width max (pixels)"
           },
           {
             "name": "height_from",
@@ -20433,8 +20247,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Height min (pixels)",
               "title": "Height From"
-            }
+            },
+            "description": "Height min (pixels)"
           },
           {
             "name": "height_to",
@@ -20450,8 +20266,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Height max (pixels)",
               "title": "Height To"
-            }
+            },
+            "description": "Height max (pixels)"
           },
           {
             "name": "has_thumbnail",
@@ -20466,8 +20284,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Has a thumbnail available (images always, videos once the poster is ready)",
               "title": "Has Thumbnail"
-            }
+            },
+            "description": "Has a thumbnail available (images always, videos once the poster is ready)"
           },
           {
             "name": "uploaded_at_from",
@@ -20483,8 +20303,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Uploaded after",
               "title": "Uploaded At From"
-            }
+            },
+            "description": "Uploaded after"
           },
           {
             "name": "uploaded_at_to",
@@ -20500,8 +20322,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Uploaded before",
               "title": "Uploaded At To"
-            }
+            },
+            "description": "Uploaded before"
           }
         ],
         "responses": {
@@ -20588,93 +20412,6 @@
         }
       }
     },
-    "/api/v1/search/filter-schema": {
-      "get": {
-        "tags": [
-          "SEARCH"
-        ],
-        "summary": "Get filter schema for all entities",
-        "description": "Returns sortable fields and filter params for each searchable entity. Fields are filtered based on user access level.",
-        "operationId": "get_search_filter_schema",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SchemaResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "`internal_error`: Internal server error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InternalErrorProblem"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountDeletedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountNotFoundProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InvalidTokenProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SessionExpiredProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
-                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
-                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
-                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
-                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
-                      "session_expired": "#/components/schemas/SessionExpiredProblem"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "`validation_error`: Request validation failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ValidationErrorProblem"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
     "/api/v1/search/media-formats": {
       "get": {
         "tags": [
@@ -20696,9 +20433,11 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
+              "description": "Page number",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "Page number"
           },
           {
             "name": "page_size",
@@ -20708,9 +20447,11 @@
               "type": "integer",
               "maximum": 200,
               "minimum": 1,
+              "description": "Items per page",
               "default": 50,
               "title": "Page Size"
-            }
+            },
+            "description": "Items per page"
           },
           {
             "name": "sort_by",
@@ -20719,14 +20460,25 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "id",
+                    "media_type",
+                    "content_type",
+                    "label",
+                    "max_file_size_bytes",
+                    "sort_order",
+                    "is_active"
+                  ],
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "Field to sort by",
               "title": "Sort By"
-            }
+            },
+            "description": "Field to sort by"
           },
           {
             "name": "sort_order",
@@ -20734,8 +20486,10 @@
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/SortOrder",
+              "description": "Sort order",
               "default": "ascending"
-            }
+            },
+            "description": "Sort order"
           },
           {
             "name": "id",
@@ -20750,8 +20504,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact format ID",
               "title": "Id"
-            }
+            },
+            "description": "Exact format ID"
           },
           {
             "name": "media_type",
@@ -20766,8 +20522,10 @@
                   "type": "null"
                 }
               ],
+              "description": "image, video or audio",
               "title": "Media Type"
-            }
+            },
+            "description": "image, video or audio"
           },
           {
             "name": "content_type",
@@ -20782,8 +20540,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Exact Content-Type, e.g. image/jpeg",
               "title": "Content Type"
-            }
+            },
+            "description": "Exact Content-Type, e.g. image/jpeg"
           },
           {
             "name": "content_type_contains",
@@ -20799,8 +20559,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Content-Type contains text",
               "title": "Content Type Contains"
-            }
+            },
+            "description": "Content-Type contains text"
           },
           {
             "name": "label_contains",
@@ -20816,8 +20578,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Label contains text",
               "title": "Label Contains"
-            }
+            },
+            "description": "Label contains text"
           },
           {
             "name": "is_active",
@@ -20832,8 +20596,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Only active (accepted) or only disabled formats",
               "title": "Is Active"
-            }
+            },
+            "description": "Only active (accepted) or only disabled formats"
           },
           {
             "name": "include_deleted",
@@ -20841,9 +20607,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
+              "description": "Include archived records (requires media_format.archive)",
               "default": false,
               "title": "Include Deleted"
-            }
+            },
+            "description": "Include archived records (requires media_format.archive)"
           }
         ],
         "responses": {
@@ -23018,31 +22786,6 @@
         "title": "DatabaseStatsModel",
         "description": "Database statistics model"
       },
-      "EntitySchemaInfo": {
-        "properties": {
-          "sortable_fields": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Sortable Fields"
-          },
-          "filter_params": {
-            "items": {
-              "$ref": "#/components/schemas/FilterParamInfo"
-            },
-            "type": "array",
-            "title": "Filter Params"
-          }
-        },
-        "type": "object",
-        "required": [
-          "sortable_fields",
-          "filter_params"
-        ],
-        "title": "EntitySchemaInfo",
-        "description": "Schema info for a single entity"
-      },
       "FieldError": {
         "properties": {
           "code": {
@@ -23141,30 +22884,6 @@
         ],
         "title": "FieldErrorCode",
         "description": "Rules of the API on single values. Built-in checks keep pydantic's codes (missing, string_too_short, ...)."
-      },
-      "FilterParamInfo": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "type": {
-            "type": "string",
-            "title": "Type"
-          },
-          "description": {
-            "type": "string",
-            "title": "Description"
-          }
-        },
-        "type": "object",
-        "required": [
-          "name",
-          "type",
-          "description"
-        ],
-        "title": "FilterParamInfo",
-        "description": "Single filter parameter description"
       },
       "FormContentTypeRequiredProblem": {
         "properties": {
@@ -30649,31 +30368,6 @@
           "routes"
         ],
         "title": "RouteAccessResponse"
-      },
-      "SchemaResponse": {
-        "properties": {
-          "entities": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/EntitySchemaInfo"
-            },
-            "type": "object",
-            "title": "Entities"
-          },
-          "common_params": {
-            "items": {
-              "$ref": "#/components/schemas/FilterParamInfo"
-            },
-            "type": "array",
-            "title": "Common Params"
-          }
-        },
-        "type": "object",
-        "required": [
-          "entities",
-          "common_params"
-        ],
-        "title": "SchemaResponse",
-        "description": "Response for /schema endpoint - metadata about all searchable entities"
       },
       "SearchResponse_CategoryResponse_": {
         "properties": {

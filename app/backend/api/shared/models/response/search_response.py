@@ -2,8 +2,7 @@
 Search response models for the unified search API
 """
 
-from typing import Dict, Generic, List, Sequence, TypeVar
-from pydantic import BaseModel
+from typing import Generic, List, Sequence, TypeVar
 
 from app.backend.utils.validators import PlainTextModel
 
@@ -29,22 +28,3 @@ class SearchResponse(PlainTextModel, Generic[Item]):
         """Page with total_pages computed"""
         total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
         return cls(entity=entity, items=list(items), total=total, page=page, page_size=page_size, total_pages=total_pages)
-
-
-class FilterParamInfo(BaseModel):
-    """Single filter parameter description"""
-    name: str
-    type: str
-    description: str
-
-
-class EntitySchemaInfo(BaseModel):
-    """Schema info for a single entity"""
-    sortable_fields: List[str]
-    filter_params: List[FilterParamInfo]
-
-
-class SchemaResponse(BaseModel):
-    """Response for /schema endpoint - metadata about all searchable entities"""
-    entities: Dict[str, EntitySchemaInfo]
-    common_params: List[FilterParamInfo]

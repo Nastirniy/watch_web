@@ -2,12 +2,12 @@
 TagFilterService - Filter service for Tag entity
 """
 
-from typing import Optional, Iterable
+from typing import Optional, Iterable, get_args
 from sqlalchemy.sql.selectable import Select
 
 from app.backend.models.observation import Tag
 from app.backend.filters.simple_engine import SimpleFilterEngine
-from app.backend.filters.params.tag_params import TagFilterParams
+from app.backend.filters.params.tag_params import TagFilterParams, TagSortField
 
 
 class TagFilterService(SimpleFilterEngine):
@@ -15,8 +15,7 @@ class TagFilterService(SimpleFilterEngine):
 
     MODEL = Tag
     PARAMS = TagFilterParams
-    SORTABLE_FIELDS = ["id", "name", "created_at"]
-    ADMIN_ONLY_PARAMS = ["include_deleted"]
+    SORTABLE_FIELDS = list(get_args(TagSortField))
 
     @classmethod
     def apply_filters(

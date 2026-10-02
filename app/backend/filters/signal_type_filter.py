@@ -2,12 +2,12 @@
 SignalTypeFilterService - Filter service for SignalType entity
 """
 
-from typing import Optional, Iterable
+from typing import Optional, Iterable, get_args
 from sqlalchemy.sql.selectable import Select
 
 from app.backend.models.observation import SignalType
 from app.backend.filters.simple_engine import SimpleFilterEngine
-from app.backend.filters.params.signal_type_params import SignalTypeFilterParams
+from app.backend.filters.params.signal_type_params import SignalTypeFilterParams, SignalTypeSortField
 
 
 class SignalTypeFilterService(SimpleFilterEngine):
@@ -15,8 +15,7 @@ class SignalTypeFilterService(SimpleFilterEngine):
 
     MODEL = SignalType
     PARAMS = SignalTypeFilterParams
-    SORTABLE_FIELDS = ["id", "code", "name", "sort_order", "created_at", "updated_at", "is_active", "category_id"]
-    ADMIN_ONLY_PARAMS = ["include_deleted"]
+    SORTABLE_FIELDS = list(get_args(SignalTypeSortField))
 
     @classmethod
     def apply_filters(

@@ -2,15 +2,20 @@
 UserFilterParams - Strongly typed filter parameters for User
 """
 
-from typing import Optional
+from typing import Optional, Literal
 from datetime import datetime
 from pydantic import Field
 
 from app.backend.filters.params.base_params import BaseFilterParams
 
+# Fields the results can be sorted by; sort_by accepts exactly these (another value answers 422)
+UserSortField = Literal["id", "username", "username_alias", "created_at", "updated_at", "last_login_at", "is_active", "last_activity_at"]
+
 
 class UserFilterParams(BaseFilterParams):
     """Filter parameters for User search"""
+
+    sort_by: Optional[UserSortField] = Field(default=None, description="Field to sort by")
 
     id: Optional[int] = Field(default=None, description="Exact user ID")
     username: Optional[str] = Field(default=None, description="Exact username")

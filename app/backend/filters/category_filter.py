@@ -2,12 +2,12 @@
 CategoryFilterService - Filter service for Category entity
 """
 
-from typing import Optional, Iterable
+from typing import Optional, Iterable, get_args
 from sqlalchemy.sql.selectable import Select
 
 from app.backend.models.observation import Category
 from app.backend.filters.simple_engine import SimpleFilterEngine
-from app.backend.filters.params.category_params import CategoryFilterParams
+from app.backend.filters.params.category_params import CategoryFilterParams, CategorySortField
 
 
 class CategoryFilterService(SimpleFilterEngine):
@@ -15,8 +15,7 @@ class CategoryFilterService(SimpleFilterEngine):
 
     MODEL = Category
     PARAMS = CategoryFilterParams
-    SORTABLE_FIELDS = ["id", "name", "alias"]
-    ADMIN_ONLY_PARAMS = ["include_deleted"]
+    SORTABLE_FIELDS = list(get_args(CategorySortField))
 
     @classmethod
     def apply_filters(

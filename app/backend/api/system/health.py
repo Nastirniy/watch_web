@@ -20,7 +20,6 @@ from app.backend.api.shared.helpers.health_helper import (
 )
 from app.backend.services.api_errors import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
-from app.backend.enums.errors import AccessErrorCode
 from app.backend.openapi_problems import problems
 
 router = APIRouter(tags=[SystemRoutes.tag()])

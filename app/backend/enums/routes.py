@@ -60,7 +60,6 @@ class PostRoutes(str, Enum):
     """Post/content management routes"""
     BASE = "/posts"
     ROOT = "/"  # collection: list and create (the trailing slash is part of the published path)
-    FILTER_SCHEMA = "/filter-schema"
     POST_BY_ID = "/{post_id}"
     POST_OBSERVATION_STATS = "/{post_id}/observation-stats"
 
@@ -74,7 +73,6 @@ class ObservationRoutes(str, Enum):
     BASE = "/observations"
     CREATE = "/create"
     LIST_ALL = "/list-all"
-    FILTER_SCHEMA = "/filter-schema"
     REPORT = "/report"
     REPORT_TYPES = "/report/types"
     OBSERVATION_BY_ID = "/{observation_id}"
@@ -95,7 +93,6 @@ class MediaRoutes(str, Enum):
     """Media file management routes"""
     BASE = "/media"
     ROOT = "/"  # collection: list
-    FILTER_SCHEMA = "/filter-schema"
     FORMATS = "/formats"
     UPLOAD = "/upload"
     NGINX_UPLOAD = "/nginx-upload"
@@ -126,7 +123,6 @@ class UserRoutes(str, Enum):
     """User management routes"""
     BASE = "/users"
     ROOT = "/"  # collection: list and create
-    FILTER_SCHEMA = "/filter-schema"
     USER_BY_ID = "/{user_id}"
     USER_ARCHIVE = "/{user_id}/archive"
     USER_RESTORE = "/{user_id}/restore"
@@ -143,7 +139,6 @@ class RoleRoutes(str, Enum):
     """Role management routes"""
     BASE = "/roles"
     ROOT = "/"  # collection: list and create
-    FILTER_SCHEMA = "/filter-schema"
     ROLE_BY_ID = "/{role_id}"  # DELETE here is the permanent delete (role.delete)
     ROLE_ARCHIVE = "/{role_id}/archive"
     ROLE_RESTORE = "/{role_id}/restore"
@@ -161,7 +156,6 @@ class MediaFormatRoutes(str, Enum):
     BASE = "/media-formats"
     LIST_ALL = "/list-all"
     CREATE = "/create"
-    FILTER_SCHEMA = "/filter-schema"
     FORMAT_BY_ID = "/{format_id}"
     FORMAT_ARCHIVE = "/{format_id}/archive"
     FORMAT_RESTORE = "/{format_id}/restore"
@@ -176,7 +170,6 @@ class CategoryRoutes(str, Enum):
     BASE = "/categories"
     LIST_ALL = "/list-all"
     CREATE = "/create"
-    FILTER_SCHEMA = "/filter-schema"
     CATEGORY_BY_ID = "/{category_id}"
     CATEGORY_ARCHIVE = "/{category_id}/archive"
     CATEGORY_RESTORE = "/{category_id}/restore"
@@ -192,7 +185,6 @@ class SignalTypeRoutes(str, Enum):
     BASE = "/signal-types"
     LIST_ALL = "/list-all"
     CREATE = "/create"
-    FILTER_SCHEMA = "/filter-schema"
     SIGNAL_TYPE_BY_ID = "/{signal_type_id}"
     SIGNAL_TYPE_ARCHIVE = "/{signal_type_id}/archive"
     SIGNAL_TYPE_RESTORE = "/{signal_type_id}/restore"
@@ -207,7 +199,6 @@ class TagRoutes(str, Enum):
     BASE = "/tags"
     LIST_ALL = "/list-all"
     CREATE = "/create"
-    FILTER_SCHEMA = "/filter-schema"
     TAG_BY_ID = "/{tag_id}"
     TAG_ARCHIVE = "/{tag_id}/archive"
     TAG_RESTORE = "/{tag_id}/restore"
@@ -220,7 +211,6 @@ class TagRoutes(str, Enum):
 class SearchRoutes(str, Enum):
     """Unified search routes"""
     BASE = "/search"
-    FILTER_SCHEMA = "/filter-schema"
     OBSERVATIONS = "/observations"
     USERS = "/users"
     POSTS = "/posts"

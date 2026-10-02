@@ -2,12 +2,12 @@
 PostFilterService - Filter service for Post entity
 """
 
-from typing import Optional, Iterable
+from typing import Optional, Iterable, get_args
 from sqlalchemy.sql.selectable import Select
 
 from app.backend.models.post import Post
 from app.backend.filters.simple_engine import SimpleFilterEngine
-from app.backend.filters.params.post_params import PostFilterParams
+from app.backend.filters.params.post_params import PostFilterParams, PostSortField
 
 
 class PostFilterService(SimpleFilterEngine):
@@ -15,7 +15,7 @@ class PostFilterService(SimpleFilterEngine):
 
     MODEL = Post
     PARAMS = PostFilterParams
-    SORTABLE_FIELDS = ["id", "name", "code", "city", "created_at", "updated_at", "last_user_activity_at", "is_active", "online_user_count", "user_count"]
+    SORTABLE_FIELDS = list(get_args(PostSortField))
 
     @classmethod
     def _apply_has_online_users(cls, query: Select, value: Optional[bool]) -> Select:

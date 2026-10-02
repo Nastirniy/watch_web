@@ -1,5 +1,5 @@
-from typing import List
-from fastapi import APIRouter, Depends, Request
+from typing import List, Annotated
+from fastapi import APIRouter, Depends, Request, Query
 from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -19,7 +19,6 @@ from app.backend.api.shared.models.response.category_response import CategoryRes
 from app.backend.api.shared.models.response.signal_type_response import SignalTypeResponse
 from app.backend.filters.params.category_params import CategoryFilterParams
 from app.backend.filters.category_filter import CategoryFilterService
-from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
 from app.backend.services.api_errors import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.openapi_problems import ADMIN, GUARDED, problems
@@ -33,7 +32,7 @@ router = APIRouter(prefix=CategoryRoutes.BASE.value, tags=[CategoryRoutes.tag()]
     responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
 )
 async def list_categories(
-        filters: CategoryFilterParams = Depends(),
+        filters: Annotated[CategoryFilterParams, Query()],
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW]))
 ):
@@ -44,15 +43,6 @@ async def list_categories(
     categories = result.all()
 
     return [CategoryResponse.model_validate(cat) for cat in categories]
-
-
-@router.get(CategoryRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo, responses=problems(*GUARDED))
-async def get_category_filter_schema(
-        session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW]))
-):
-    """Available filter params and sortable fields for categories."""
-    return EntitySchemaInfo(**CategoryFilterService.get_schema(is_admin=auth.is_admin))
 
 
 @router.post(

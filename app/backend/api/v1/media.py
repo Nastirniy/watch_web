@@ -5,7 +5,7 @@ are never generated here: imgproxy renders them on demand from the original
 (images) or from the poster the media worker extracted (videos), and nginx
 caches the result. This module only authorises, signs URLs and redirects.
 """
-from typing import List, Optional
+from typing import List, Optional, Annotated
 
 import httpx
 from fastapi import APIRouter, Depends, status as fapi_status, UploadFile, File, Form, BackgroundTasks, Header, Query, Request
@@ -42,7 +42,6 @@ from app.backend.api.shared.models.response.media_response import (
 )
 from app.backend.filters.params.media_params import MediaFilterParams
 from app.backend.filters.media_filter import MediaFilterService
-from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
 from app.backend.api.shared.helpers.upload_helper import (
     check_declared_format, finish_upload, format_rejected, load_observation_for_upload, store_rejected,
     too_large, validation_config_for,
@@ -68,14 +67,6 @@ _logger = get_api_logger()
 # Listing and metadata
 # ---------------------------------------------------------------------------
 
-@router.get(MediaRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo, responses=problems(*GUARDED))
-async def get_media_filter_schema(
-    session: AsyncSession = Depends(get_session),
-    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW]))
-):
-    """Available filter params and sortable fields for media files."""
-    return EntitySchemaInfo(**MediaFilterService.get_schema(is_admin=auth.is_admin))
-
 
 @router.get(MediaRoutes.FORMATS.value, response_model=MediaFormatsResponse, responses=problems(*GUARDED))
 async def get_media_formats(
@@ -95,7 +86,7 @@ async def get_media_formats(
 
 @router.get(MediaRoutes.ROOT.value, response_model=List[MediaFileInfo], responses=problems(*GUARDED))
 async def list_media_files(
-    filters: MediaFilterParams = Depends(),
+    filters: Annotated[MediaFilterParams, Query()],
     session: AsyncSession = Depends(get_session),
     auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW]))
 ):

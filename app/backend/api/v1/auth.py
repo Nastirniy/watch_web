@@ -16,7 +16,6 @@ from app.backend.models.user import User, UserSession
 from app.backend.enums.routes import AuthRoutes
 from app.backend.api.versioning import PublishedVersion, request_version
 from app.backend.enums.general import AppEnvironment
-from app.backend.enums.errors import AuthErrorCode
 from app.backend.utils.logging_config import get_auth_logger
 from app.backend.config import settings
 from app.backend.helpers.certeficates_helper import parse_cn
@@ -37,7 +36,6 @@ from app.backend.api.shared.models.response.auth_response import (
     RouteAccessEntryResponse
 )
 from app.backend.services.api_errors import ApiError
-from app.backend.enums.errors import ErrorCode
 from app.backend.openapi_problems import problems
 
 router = APIRouter(prefix=AuthRoutes.BASE.value, tags=[AuthRoutes.tag()])

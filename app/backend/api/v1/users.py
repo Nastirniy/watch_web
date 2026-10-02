@@ -1,5 +1,5 @@
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Form, Request, Response
+from typing import List, Optional, Annotated
+from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Form, Request, Response, Query
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -27,7 +27,6 @@ from app.backend.api.shared.models.request.user_request import UserCreateData, U
 from app.backend.api.shared.models.response.user_response import UserResponse, UserRoleResponse, UserPostAccessResponse
 from app.backend.filters.params.user_params import UserFilterParams
 from app.backend.filters.user_filter import UserFilterService
-from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
 from app.backend.services.api_errors import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.openapi_problems import ADMIN, GUARDED, problems
@@ -79,7 +78,7 @@ def _is_unique_violation(error_msg: str) -> bool:
     ),
 )
 async def list_users(
-        filters: UserFilterParams = Depends(),
+        filters: Annotated[UserFilterParams, Query()],
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW]))
 ):
@@ -289,16 +288,6 @@ async def create_user(
         else:
             _logger.error(f"Error creating user: {error_msg}")
             raise ApiError(ErrorCode.DATABASE_ERROR)
-
-
-@router.get(UserRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo, responses=problems(*GUARDED))
-async def get_user_filter_schema(
-        session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW]))
-):
-    """Available filter params and sortable fields for users."""
-    user_is_admin = auth.is_admin
-    return EntitySchemaInfo(**UserFilterService.get_schema(is_admin=user_is_admin))
 
 
 @router.get(

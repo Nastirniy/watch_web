@@ -1,5 +1,5 @@
-from typing import List
-from fastapi import APIRouter, Depends, status, Request
+from typing import List, Annotated
+from fastapi import APIRouter, Depends, status, Request, Query
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 from sqlalchemy import delete as sa_delete
@@ -17,7 +17,6 @@ from app.backend.helpers.audit_helper import client_info, create_audit_log
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.filters.params.role_params import RoleFilterParams
 from app.backend.filters.role_filter import RoleFilterService
-from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
 from app.backend.api.shared.helpers.roles_helper import (
     get_role_or_404,
     get_permission_or_404,
@@ -39,7 +38,7 @@ _logger = get_api_logger()
     responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, ErrorCode.ROLES_LIST_FAILED, *ADMIN),
 )
 async def list_roles(
-        filters: RoleFilterParams = Depends(),
+        filters: Annotated[RoleFilterParams, Query()],
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW], admin=True))
 ):
@@ -59,15 +58,6 @@ async def list_roles(
     except Exception as e:
         _logger.error(f"Error listing roles: {str(e)}")
         raise ApiError(ErrorCode.ROLES_LIST_FAILED)
-
-
-@router.get(RoleRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo, responses=problems(*ADMIN))
-async def get_role_filter_schema(
-        session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW], admin=True))
-):
-    """Available filter params and sortable fields for roles."""
-    return EntitySchemaInfo(**RoleFilterService.get_schema(is_admin=auth.is_admin))
 
 
 @router.post(

@@ -2,15 +2,20 @@
 SignalTypeFilterParams - Strongly typed filter parameters for SignalType
 """
 
-from typing import Optional
+from typing import Optional, Literal
 from datetime import datetime
 from pydantic import Field
 
 from app.backend.filters.params.base_params import BaseFilterParams
 
+# Fields the results can be sorted by; sort_by accepts exactly these (another value answers 422)
+SignalTypeSortField = Literal["id", "code", "name", "sort_order", "created_at", "updated_at", "is_active", "category_id"]
+
 
 class SignalTypeFilterParams(BaseFilterParams):
     """Filter parameters for SignalType search"""
+
+    sort_by: Optional[SignalTypeSortField] = Field(default=None, description="Field to sort by")
 
     id: Optional[int] = Field(default=None, description="Exact signal type ID")
     code: Optional[str] = Field(default=None, description="Exact code")

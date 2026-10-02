@@ -1,10 +1,12 @@
 """Frequency bands of an observation: create, change, archive, filters and reports."""
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
 from sqlmodel import select
 
+from app.main import fastapi_app
 from app.backend.enums.routes import ObservationRoutes
 from app.backend.api.v1 import V1
 from app.backend.filters.observation_report_filter import ObservationReportFilter
@@ -191,8 +193,12 @@ async def test_sort_by_lowest_matching_band_center(client, db, headers):
     assert await order(sort_order="descending") == [high_rc.id, low_rc.id]
     assert await order(sort_order="ascending", frequency_kind="video") == [high_rc.id, low_rc.id], \
         "the sort uses the bands selected by the band filters"
-    schema = await client.get(V1.path(ObservationRoutes.FILTER_SCHEMA), headers=headers(user))
-    assert "frequency_center" in schema.json()["sortable_fields"]
+    # The sortable fields are the enum of the sort_by query parameter in OpenAPI
+    parameters = fastapi_app.openapi()["paths"][LIST]["get"]["parameters"]
+    sort_by = next(p for p in parameters if p["name"] == "sort_by")
+    assert "frequency_center" in json.dumps(sort_by["schema"])
+    rejected = await client.get(LIST, params={"sort_by": "no_such_field"}, headers=headers(user))
+    assert rejected.status_code == 422 and rejected.json()["code"] == "validation_error"
 
 
 @pytest.mark.asyncio

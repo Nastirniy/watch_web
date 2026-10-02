@@ -2,15 +2,20 @@
 TagFilterParams - Strongly typed filter parameters for Tag
 """
 
-from typing import Optional
+from typing import Optional, Literal
 from datetime import datetime
 from pydantic import Field
 
 from app.backend.filters.params.base_params import BaseFilterParams
 
+# Fields the results can be sorted by; sort_by accepts exactly these (another value answers 422)
+TagSortField = Literal["id", "name", "created_at"]
+
 
 class TagFilterParams(BaseFilterParams):
     """Filter parameters for Tag search"""
+
+    sort_by: Optional[TagSortField] = Field(default=None, description="Field to sort by")
 
     id: Optional[int] = Field(default=None, description="Exact tag ID")
     name: Optional[str] = Field(default=None, description="Exact name")

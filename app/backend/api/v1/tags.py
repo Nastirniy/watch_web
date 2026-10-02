@@ -1,6 +1,6 @@
-from typing import List
+from typing import List, Annotated
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Query
 from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -19,7 +19,6 @@ from app.backend.api.shared.models.request.tag_request import TagCreate, TagUpda
 from app.backend.api.shared.models.response.tag_response import TagResponse
 from app.backend.filters.params.tag_params import TagFilterParams
 from app.backend.filters.tag_filter import TagFilterService
-from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
 from app.backend.services.api_errors import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.openapi_problems import ADMIN, GUARDED, problems
@@ -33,7 +32,7 @@ router = APIRouter(prefix=TagRoutes.BASE.value, tags=[TagRoutes.tag()])
     responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
 )
 async def list_tags(
-        filters: TagFilterParams = Depends(),
+        filters: Annotated[TagFilterParams, Query()],
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW]))
 ):
@@ -44,15 +43,6 @@ async def list_tags(
     tags = result.all()
 
     return [TagResponse.model_validate(t) for t in tags]
-
-
-@router.get(TagRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo, responses=problems(*GUARDED))
-async def get_tag_filter_schema(
-        session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW]))
-):
-    """Available filter params and sortable fields for tags."""
-    return EntitySchemaInfo(**TagFilterService.get_schema(is_admin=auth.is_admin))
 
 
 @router.post(
