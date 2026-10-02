@@ -7,6 +7,11 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## API versions as folders, errors declared on the routes, FastAPI built-ins instead of workarounds
 
+### Breaking changes for API clients
+
+- Security: the `/search/*` routes returned raw table rows; `/search/users` exposed `pki_certificate_cn_hash`, `pki_certificate_serial_hash` and `pki_certificate_fingerprint_hash`. Each search now returns the response model of the entity's list route (`SearchResponse[UserResponse]`, `SearchResponse[TagResponse]`, ...): items have exactly the fields of `GET /users/`, `GET /tags/list-all`, and so on. OpenAPI: `SearchResponse` becomes one schema per entity (`SearchResponse_UserResponse_`, ...).
+- `POST /categories/create`, `PUT /categories/{id}`, `POST /signal-types/create`, `PUT /signal-types/{id}` are documented with `CategoryResponse` / `SignalTypeResponse` instead of the table models `Category` / `SignalType` (same fields; `id` is no longer nullable).
+
 ### Changed for API clients
 
 - 18 operations without inputs (`GET /auth/me`, `/auth/sessions`, `/auth/route-access`, the `filter-schema` routes, `/media/formats`, `/media/statistics`, `/media/posters/status`, `/observations/report/types`, `/roles/list-all-permissions`) now also list 422 `validation_error`: the version router declares it for all of its routes. Only their error union widens.

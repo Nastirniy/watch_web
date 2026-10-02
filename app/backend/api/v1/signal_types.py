@@ -59,7 +59,7 @@ async def get_signal_type_filter_schema(
 
 @router.post(
     SignalTypeRoutes.CREATE.value,
-    response_model=SignalType,
+    response_model=SignalTypeResponse,
     responses=problems(
         ErrorCode.SIGNAL_TYPE_CODE_TAKEN, ErrorCode.CATEGORY_NOT_FOUND, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,
     ),
@@ -175,7 +175,7 @@ async def get_signal_type(
 
 @router.put(
     SignalTypeRoutes.SIGNAL_TYPE_BY_ID.value,
-    response_model=SignalType,
+    response_model=SignalTypeResponse,
     responses=problems(
         ErrorCode.SIGNAL_TYPE_CODE_ARCHIVED, ErrorCode.SIGNAL_TYPE_CODE_TAKEN, ErrorCode.CATEGORY_NOT_FOUND,
         ErrorCode.SIGNAL_TYPE_NOT_FOUND, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,

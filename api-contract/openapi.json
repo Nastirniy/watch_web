@@ -5197,7 +5197,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Category"
+                  "$ref": "#/components/schemas/CategoryResponse"
                 }
               }
             }
@@ -5472,7 +5472,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Category"
+                  "$ref": "#/components/schemas/CategoryResponse"
                 }
               }
             }
@@ -6528,7 +6528,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SignalType"
+                  "$ref": "#/components/schemas/SignalTypeResponse"
                 }
               }
             }
@@ -6813,7 +6813,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SignalType"
+                  "$ref": "#/components/schemas/SignalTypeResponse"
                 }
               }
             }
@@ -18120,7 +18120,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SearchResponse"
+                  "$ref": "#/components/schemas/SearchResponse_ObservationWithMedia_"
                 }
               }
             }
@@ -18497,7 +18497,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SearchResponse"
+                  "$ref": "#/components/schemas/SearchResponse_UserResponse_"
                 }
               }
             }
@@ -18931,7 +18931,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SearchResponse"
+                  "$ref": "#/components/schemas/SearchResponse_PostResponse_"
                 }
               }
             }
@@ -19221,7 +19221,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SearchResponse"
+                  "$ref": "#/components/schemas/SearchResponse_RoleResponse_"
                 }
               }
             }
@@ -19478,7 +19478,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SearchResponse"
+                  "$ref": "#/components/schemas/SearchResponse_CategoryResponse_"
                 }
               }
             }
@@ -19846,7 +19846,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SearchResponse"
+                  "$ref": "#/components/schemas/SearchResponse_SignalTypeResponse_"
                 }
               }
             }
@@ -20100,7 +20100,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SearchResponse"
+                  "$ref": "#/components/schemas/SearchResponse_TagResponse_"
                 }
               }
             }
@@ -20510,7 +20510,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SearchResponse"
+                  "$ref": "#/components/schemas/SearchResponse_MediaFileInfo_"
                 }
               }
             }
@@ -20852,7 +20852,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SearchResponse"
+                  "$ref": "#/components/schemas/SearchResponse_MediaFormatResponse_"
                 }
               }
             }
@@ -21819,42 +21819,6 @@
             "type": "https://example.org/problems/cannot_deactivate_self"
           }
         ]
-      },
-      "Category": {
-        "properties": {
-          "id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
-          },
-          "name": {
-            "type": "string",
-            "maxLength": 255,
-            "title": "Name"
-          },
-          "alias": {
-            "type": "string",
-            "maxLength": 255,
-            "title": "Alias"
-          },
-          "is_deleted": {
-            "type": "boolean",
-            "title": "Is Deleted",
-            "default": false
-          }
-        },
-        "type": "object",
-        "required": [
-          "name",
-          "alias"
-        ],
-        "title": "Category"
       },
       "CategoryCreate": {
         "properties": {
@@ -30711,7 +30675,7 @@
         "title": "SchemaResponse",
         "description": "Response for /schema endpoint - metadata about all searchable entities"
       },
-      "SearchResponse": {
+      "SearchResponse_CategoryResponse_": {
         "properties": {
           "entity": {
             "type": "string",
@@ -30719,8 +30683,7 @@
           },
           "items": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/CategoryResponse"
             },
             "type": "array",
             "title": "Items"
@@ -30752,8 +30715,343 @@
           "page_size",
           "total_pages"
         ],
-        "title": "SearchResponse",
-        "description": "Response model for search endpoint"
+        "title": "SearchResponse[CategoryResponse]"
+      },
+      "SearchResponse_MediaFileInfo_": {
+        "properties": {
+          "entity": {
+            "type": "string",
+            "title": "Entity"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MediaFileInfo"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "entity",
+          "items",
+          "total",
+          "page",
+          "page_size",
+          "total_pages"
+        ],
+        "title": "SearchResponse[MediaFileInfo]"
+      },
+      "SearchResponse_MediaFormatResponse_": {
+        "properties": {
+          "entity": {
+            "type": "string",
+            "title": "Entity"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MediaFormatResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "entity",
+          "items",
+          "total",
+          "page",
+          "page_size",
+          "total_pages"
+        ],
+        "title": "SearchResponse[MediaFormatResponse]"
+      },
+      "SearchResponse_ObservationWithMedia_": {
+        "properties": {
+          "entity": {
+            "type": "string",
+            "title": "Entity"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ObservationWithMedia"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "entity",
+          "items",
+          "total",
+          "page",
+          "page_size",
+          "total_pages"
+        ],
+        "title": "SearchResponse[ObservationWithMedia]"
+      },
+      "SearchResponse_PostResponse_": {
+        "properties": {
+          "entity": {
+            "type": "string",
+            "title": "Entity"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PostResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "entity",
+          "items",
+          "total",
+          "page",
+          "page_size",
+          "total_pages"
+        ],
+        "title": "SearchResponse[PostResponse]"
+      },
+      "SearchResponse_RoleResponse_": {
+        "properties": {
+          "entity": {
+            "type": "string",
+            "title": "Entity"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RoleResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "entity",
+          "items",
+          "total",
+          "page",
+          "page_size",
+          "total_pages"
+        ],
+        "title": "SearchResponse[RoleResponse]"
+      },
+      "SearchResponse_SignalTypeResponse_": {
+        "properties": {
+          "entity": {
+            "type": "string",
+            "title": "Entity"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SignalTypeResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "entity",
+          "items",
+          "total",
+          "page",
+          "page_size",
+          "total_pages"
+        ],
+        "title": "SearchResponse[SignalTypeResponse]"
+      },
+      "SearchResponse_TagResponse_": {
+        "properties": {
+          "entity": {
+            "type": "string",
+            "title": "Entity"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TagResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "entity",
+          "items",
+          "total",
+          "page",
+          "page_size",
+          "total_pages"
+        ],
+        "title": "SearchResponse[TagResponse]"
+      },
+      "SearchResponse_UserResponse_": {
+        "properties": {
+          "entity": {
+            "type": "string",
+            "title": "Entity"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UserResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "entity",
+          "items",
+          "total",
+          "page",
+          "page_size",
+          "total_pages"
+        ],
+        "title": "SearchResponse[UserResponse]"
       },
       "ServiceStatusModel": {
         "properties": {
@@ -31089,85 +31387,6 @@
           "expires_at"
         ],
         "title": "ShareLinkResponse"
-      },
-      "SignalType": {
-        "properties": {
-          "id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
-          },
-          "code": {
-            "type": "string",
-            "maxLength": 50,
-            "title": "Code"
-          },
-          "name": {
-            "type": "string",
-            "maxLength": 255,
-            "title": "Name"
-          },
-          "category_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Category Id"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 1000
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "is_active": {
-            "type": "boolean",
-            "title": "Is Active",
-            "default": true
-          },
-          "sort_order": {
-            "type": "integer",
-            "title": "Sort Order",
-            "default": 0
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Updated At"
-          },
-          "is_deleted": {
-            "type": "boolean",
-            "title": "Is Deleted",
-            "default": false
-          }
-        },
-        "type": "object",
-        "required": [
-          "code",
-          "name"
-        ],
-        "title": "SignalType"
       },
       "SignalTypeCodeArchivedProblem": {
         "properties": {

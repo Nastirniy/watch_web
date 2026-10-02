@@ -2,16 +2,19 @@
 Search response models for the unified search API
 """
 
-from typing import List, Any, Dict
+from typing import Dict, Generic, List, Sequence, TypeVar
 from pydantic import BaseModel
 
 from app.backend.utils.validators import PlainTextModel
 
+Item = TypeVar("Item")
 
-class SearchResponse(PlainTextModel):
-    """Response model for search endpoint"""
+
+class SearchResponse(PlainTextModel, Generic[Item]):
+    """One page of a search: the items are the same response model the list route of the entity returns
+    (SearchResponse[UserResponse], ...), never raw table rows"""
     entity: str
-    items: List[Dict[str, Any]]
+    items: List[Item]
     total: int
     page: int
     page_size: int
@@ -19,41 +22,13 @@ class SearchResponse(PlainTextModel):
 
     model_config = {
         "extra": "forbid",
-        "from_attributes": True
     }
 
     @classmethod
-    def create(
-        cls,
-        entity: str,
-        items: List[Any],
-        total: int,
-        page: int,
-        page_size: int
-    ) -> "SearchResponse":
-        """Factory method to create SearchResponse with computed total_pages"""
+    def create(cls, entity: str, items: Sequence[Item], total: int, page: int, page_size: int) -> "SearchResponse[Item]":
+        """Page with total_pages computed"""
         total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
-        
-        processed_items = []
-        for item in items:
-            if isinstance(item, dict):
-                processed_items.append(item)
-            elif hasattr(item, 'model_dump'):
-                # Prefer model_dump() for compatibility, but if it's an ORM object 
-                # that we want to validate through a response model, we already 
-                # handle that in the route. Here we just ensure it's a dict.
-                processed_items.append(item.model_dump())
-            else:
-                processed_items.append(dict(item))
-
-        return cls(
-            entity=entity,
-            items=processed_items,
-            total=total,
-            page=page,
-            page_size=page_size,
-            total_pages=total_pages
-        )
+        return cls(entity=entity, items=list(items), total=total, page=page, page_size=page_size, total_pages=total_pages)
 
 
 class FilterParamInfo(BaseModel):

@@ -49,7 +49,14 @@ from app.backend.filters.media_filter import MediaFilterService
 
 from app.backend.filters.simple_engine import _get_type_name, _BASE_COMMON_FIELDS
 from app.backend.api.shared.models.response.observations_response import ObservationWithMedia
-from app.backend.api.shared.models.response.posts_response import post_to_response
+from app.backend.api.shared.models.response.posts_response import PostResponse, post_to_response
+from app.backend.api.shared.models.response.user_response import UserResponse
+from app.backend.api.shared.models.response.roles_response import RoleResponse
+from app.backend.api.shared.models.response.category_response import CategoryResponse
+from app.backend.api.shared.models.response.signal_type_response import SignalTypeResponse
+from app.backend.api.shared.models.response.tag_response import TagResponse
+from app.backend.api.shared.models.response.media_response import MediaFileInfo
+from app.backend.api.shared.models.response.media_format_response import MediaFormatResponse
 from app.backend.api.shared.models.response.search_response import (
     SearchResponse,
     SchemaResponse,
@@ -120,7 +127,7 @@ async def log_search(
 # =============================================================================
 @router.get(
     SearchRoutes.OBSERVATIONS.value,
-    response_model=SearchResponse,
+    response_model=SearchResponse[ObservationWithMedia],
     summary="Search observations",
     description="Search observations with typed filters. All params visible in docs.",
     responses=problems(
@@ -133,7 +140,7 @@ async def search_observations(
     params: ObservationFilterParams = Depends(),
     auth: AuthContext = Depends(ENTITY_REGISTRY["observations"]["require"]),
     session: AsyncSession = Depends(get_session)
-) -> SearchResponse:
+) -> SearchResponse[ObservationWithMedia]:
     access_post_ids = AccessControlService.resolve_post_scope(auth, params.post_id)
 
     AccessControlService.check_include_deleted(auth, params, Permissions.OBSERVATION_ARCHIVE)
@@ -151,7 +158,7 @@ async def search_observations(
 
     await log_search(request, session, auth, "observations", params.model_dump(exclude_none=True), len(items))
 
-    return SearchResponse.create("observations", processed_items, total, params.page, params.page_size)
+    return SearchResponse[ObservationWithMedia].create("observations", processed_items, total, params.page, params.page_size)
 
 
 # =============================================================================
@@ -159,7 +166,7 @@ async def search_observations(
 # =============================================================================
 @router.get(
     SearchRoutes.USERS.value,
-    response_model=SearchResponse,
+    response_model=SearchResponse[UserResponse],
     summary="Search users",
     description="Search users with typed filters.",
     responses=problems(
@@ -172,7 +179,7 @@ async def search_users(
     params: UserFilterParams = Depends(),
     auth: AuthContext = Depends(ENTITY_REGISTRY["users"]["require"]),
     session: AsyncSession = Depends(get_session)
-) -> SearchResponse:
+) -> SearchResponse[UserResponse]:
     access_post_ids = AccessControlService.resolve_record_scope(auth, params.post_id)
 
     AccessControlService.check_include_deleted(auth, params, Permissions.USER_ARCHIVE)
@@ -187,7 +194,7 @@ async def search_users(
 
     await log_search(request, session, auth, "users", params.model_dump(exclude_none=True), len(items))
 
-    return SearchResponse.create("users", items, total, params.page, params.page_size)
+    return SearchResponse[UserResponse].create("users", [UserResponse.model_validate(item) for item in items], total, params.page, params.page_size)
 
 
 # =============================================================================
@@ -195,7 +202,7 @@ async def search_users(
 # =============================================================================
 @router.get(
     SearchRoutes.POSTS.value,
-    response_model=SearchResponse,
+    response_model=SearchResponse[PostResponse],
     summary="Search posts",
     description="Search posts with typed filters.",
     responses=problems(*GUARDED),
@@ -205,7 +212,7 @@ async def search_posts(
     params: PostFilterParams = Depends(),
     auth: AuthContext = Depends(ENTITY_REGISTRY["posts"]["require"]),
     session: AsyncSession = Depends(get_session)
-) -> SearchResponse:
+) -> SearchResponse[PostResponse]:
     access_post_ids = AccessControlService.post_record_scope(auth)
 
     query = select(Post)
@@ -219,7 +226,7 @@ async def search_posts(
 
     await log_search(request, session, auth, "posts", params.model_dump(exclude_none=True), len(items))
 
-    return SearchResponse.create("posts", [post_to_response(post) for post in items], total, params.page, params.page_size)
+    return SearchResponse[PostResponse].create("posts", [post_to_response(post) for post in items], total, params.page, params.page_size)
 
 
 # =============================================================================
@@ -227,7 +234,7 @@ async def search_posts(
 # =============================================================================
 @router.get(
     SearchRoutes.ROLES.value,
-    response_model=SearchResponse,
+    response_model=SearchResponse[RoleResponse],
     summary="Search roles",
     description="Search roles with typed filters.",
     responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *ADMIN),
@@ -237,7 +244,7 @@ async def search_roles(
     params: RoleFilterParams = Depends(),
     auth: AuthContext = Depends(ENTITY_REGISTRY["roles"]["require"]),
     session: AsyncSession = Depends(get_session)
-) -> SearchResponse:
+) -> SearchResponse[RoleResponse]:
     AccessControlService.check_include_deleted(auth, params, Permissions.ROLE_ARCHIVE)
     query = select(Role)
     query = RoleFilterService.apply_filters(query, params)
@@ -250,7 +257,7 @@ async def search_roles(
 
     await log_search(request, session, auth, "roles", params.model_dump(exclude_none=True), len(items))
 
-    return SearchResponse.create("roles", items, total, params.page, params.page_size)
+    return SearchResponse[RoleResponse].create("roles", [RoleResponse.model_validate(item) for item in items], total, params.page, params.page_size)
 
 
 # =============================================================================
@@ -258,7 +265,7 @@ async def search_roles(
 # =============================================================================
 @router.get(
     SearchRoutes.CATEGORIES.value,
-    response_model=SearchResponse,
+    response_model=SearchResponse[CategoryResponse],
     summary="Search categories",
     description="Search categories with typed filters.",
     responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
@@ -268,7 +275,7 @@ async def search_categories(
     params: CategoryFilterParams = Depends(),
     auth: AuthContext = Depends(ENTITY_REGISTRY["categories"]["require"]),
     session: AsyncSession = Depends(get_session)
-) -> SearchResponse:
+) -> SearchResponse[CategoryResponse]:
     AccessControlService.check_include_deleted(auth, params, Permissions.CATEGORY_ARCHIVE)
     query = select(Category)
     query = CategoryFilterService.apply_filters(query, params)
@@ -281,7 +288,7 @@ async def search_categories(
 
     await log_search(request, session, auth, "categories", params.model_dump(exclude_none=True), len(items))
 
-    return SearchResponse.create("categories", items, total, params.page, params.page_size)
+    return SearchResponse[CategoryResponse].create("categories", [CategoryResponse.model_validate(item) for item in items], total, params.page, params.page_size)
 
 
 # =============================================================================
@@ -289,7 +296,7 @@ async def search_categories(
 # =============================================================================
 @router.get(
     SearchRoutes.SIGNAL_TYPES.value,
-    response_model=SearchResponse,
+    response_model=SearchResponse[SignalTypeResponse],
     summary="Search signal types",
     description="Search signal types with typed filters.",
     responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
@@ -299,7 +306,7 @@ async def search_signal_types(
     params: SignalTypeFilterParams = Depends(),
     auth: AuthContext = Depends(ENTITY_REGISTRY["signal_types"]["require"]),
     session: AsyncSession = Depends(get_session)
-) -> SearchResponse:
+) -> SearchResponse[SignalTypeResponse]:
     AccessControlService.check_include_deleted(auth, params, Permissions.SIGNAL_TYPE_ARCHIVE)
     query = select(SignalType)
     query = SignalTypeFilterService.apply_filters(query, params)
@@ -312,7 +319,7 @@ async def search_signal_types(
 
     await log_search(request, session, auth, "signal_types", params.model_dump(exclude_none=True), len(items))
 
-    return SearchResponse.create("signal_types", items, total, params.page, params.page_size)
+    return SearchResponse[SignalTypeResponse].create("signal_types", [SignalTypeResponse.model_validate(item) for item in items], total, params.page, params.page_size)
 
 
 # =============================================================================
@@ -320,7 +327,7 @@ async def search_signal_types(
 # =============================================================================
 @router.get(
     SearchRoutes.TAGS.value,
-    response_model=SearchResponse,
+    response_model=SearchResponse[TagResponse],
     summary="Search tags",
     description="Search tags with typed filters.",
     responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
@@ -330,7 +337,7 @@ async def search_tags(
     params: TagFilterParams = Depends(),
     auth: AuthContext = Depends(ENTITY_REGISTRY["tags"]["require"]),
     session: AsyncSession = Depends(get_session)
-) -> SearchResponse:
+) -> SearchResponse[TagResponse]:
     AccessControlService.check_include_deleted(auth, params, Permissions.TAG_ARCHIVE)
     query = select(Tag)
     query = TagFilterService.apply_filters(query, params)
@@ -343,7 +350,7 @@ async def search_tags(
 
     await log_search(request, session, auth, "tags", params.model_dump(exclude_none=True), len(items))
 
-    return SearchResponse.create("tags", items, total, params.page, params.page_size)
+    return SearchResponse[TagResponse].create("tags", [TagResponse.model_validate(item) for item in items], total, params.page, params.page_size)
 
 
 # =============================================================================
@@ -351,7 +358,7 @@ async def search_tags(
 # =============================================================================
 @router.get(
     SearchRoutes.MEDIA.value,
-    response_model=SearchResponse,
+    response_model=SearchResponse[MediaFileInfo],
     summary="Search media files",
     description="Search media files with typed filters.",
     responses=problems(*GUARDED),
@@ -361,7 +368,7 @@ async def search_media(
     params: MediaFilterParams = Depends(),
     auth: AuthContext = Depends(ENTITY_REGISTRY["media"]["require"]),
     session: AsyncSession = Depends(get_session)
-) -> SearchResponse:
+) -> SearchResponse[MediaFileInfo]:
     access_post_ids = AccessControlService.post_scope(auth)
 
     query = select(MediaFile)
@@ -375,7 +382,7 @@ async def search_media(
 
     await log_search(request, session, auth, "media", params.model_dump(exclude_none=True), len(items))
 
-    return SearchResponse.create("media", items, total, params.page, params.page_size)
+    return SearchResponse[MediaFileInfo].create("media", [MediaFileInfo.model_validate(item) for item in items], total, params.page, params.page_size)
 
 
 # =============================================================================
@@ -409,7 +416,7 @@ async def get_search_filter_schema(
 
 @router.get(
     SearchRoutes.MEDIA_FORMATS.value,
-    response_model=SearchResponse,
+    response_model=SearchResponse[MediaFormatResponse],
     summary="Search media formats",
     description="Search accepted upload formats with typed filters.",
     responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
@@ -419,7 +426,7 @@ async def search_media_formats(
     params: MediaFormatFilterParams = Depends(),
     auth: AuthContext = Depends(ENTITY_REGISTRY["media_formats"]["require"]),
     session: AsyncSession = Depends(get_session)
-) -> SearchResponse:
+) -> SearchResponse[MediaFormatResponse]:
     AccessControlService.check_include_deleted(auth, params, Permissions.MEDIA_FORMAT_ARCHIVE)
     query = select(MediaFormat)
     query = MediaFormatFilterService.apply_filters(query, params)
@@ -432,4 +439,4 @@ async def search_media_formats(
 
     await log_search(request, session, auth, "media_formats", params.model_dump(exclude_none=True), len(items))
 
-    return SearchResponse.create("media_formats", items, total, params.page, params.page_size)
+    return SearchResponse[MediaFormatResponse].create("media_formats", [MediaFormatResponse.model_validate(item) for item in items], total, params.page, params.page_size)

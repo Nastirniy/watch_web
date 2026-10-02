@@ -57,7 +57,7 @@ async def get_category_filter_schema(
 
 @router.post(
     CategoryRoutes.CREATE.value,
-    response_model=Category,
+    response_model=CategoryResponse,
     responses=problems(ErrorCode.CATEGORY_NAME_TAKEN, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN),
 )
 async def create_category(
@@ -145,7 +145,7 @@ async def get_category(
 
 @router.put(
     CategoryRoutes.CATEGORY_BY_ID.value,
-    response_model=Category,
+    response_model=CategoryResponse,
     responses=problems(
         ErrorCode.CATEGORY_NAME_ARCHIVED, ErrorCode.CATEGORY_NAME_TAKEN, ErrorCode.CATEGORY_NOT_FOUND,
         ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,
