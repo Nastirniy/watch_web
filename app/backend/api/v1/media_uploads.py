@@ -11,7 +11,7 @@ opened it; media.manage_any may operate on any session.
 """
 from typing import List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, Response, status as fapi_status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, Request, Response, status as fapi_status
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.config import settings
@@ -225,6 +225,7 @@ async def head_upload_session(
 async def append_upload_chunk(
     request: Request,
     upload_id: str,
+    upload_offset: Optional[str] = Header(None, description="Bytes the server already has: must equal received_bytes of the session"),
     session: AsyncSession = Depends(get_session),
     auth: AuthContext = Depends(UPLOAD_REQUIRE),
 ):
@@ -236,7 +237,7 @@ async def append_upload_chunk(
     """
     row = await _require_open(session, await _owned_session(session, auth, upload_id))
 
-    raw_offset = request.headers.get("upload-offset")
+    raw_offset = upload_offset
     if raw_offset is None or not raw_offset.isdigit():
         raise ApiError(ErrorCode.UPLOAD_OFFSET_REQUIRED, headers=_session_headers(row))
     offset = int(raw_offset)

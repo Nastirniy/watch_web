@@ -7,10 +7,10 @@ caches the result. This module only authorises, signs URLs and redirects.
 """
 import asyncio
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, status as fapi_status, UploadFile, File, Form, BackgroundTasks, Query, Request
+from fastapi import APIRouter, Depends, status as fapi_status, UploadFile, File, Form, BackgroundTasks, Header, Query, Request
 from fastapi.responses import Response
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
@@ -468,6 +468,8 @@ async def nginx_upload_file(
     background_tasks: BackgroundTasks,
     observation_id: int = Query(..., description="Observation ID to attach file to"),
     media_type: str = Query(..., description="Media type: image, video or audio (see GET /media/formats)"),
+    x_file_name: Optional[str] = Header(None, include_in_schema=False),  # set by nginx, never by the client
+    x_original_filename: Optional[str] = Header(None, include_in_schema=False),
     session: AsyncSession = Depends(get_session),
     auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW, Permissions.MEDIA_CREATE])),
 ):
@@ -478,10 +480,10 @@ async def nginx_upload_file(
     if not settings.storage.enable_nginx:
         raise ApiError(ErrorCode.NGINX_UPLOAD_DISABLED)
 
-    temp_file_path = request.headers.get("X-File-Name")
+    temp_file_path = x_file_name
     if not temp_file_path:
         raise ApiError(ErrorCode.NGINX_FILE_NAME_MISSING)
-    original_filename = request.headers.get("X-Original-Filename", "uploaded_file")
+    original_filename = x_original_filename or "uploaded_file"
     registry = await formats.load_registry(session)
     spec = _check_declared_format(registry, media_type, original_filename, request.headers.get("content-type"))
     media_type = spec.media_type

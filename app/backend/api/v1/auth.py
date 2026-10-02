@@ -1,5 +1,5 @@
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, status, Request
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.database import get_session
@@ -47,7 +47,12 @@ _logger = get_auth_logger()
 async def login(
         request: Request,
         login_data: Optional[LoginRequest] = None,
-        session: AsyncSession = Depends(get_session)
+        session: AsyncSession = Depends(get_session),
+        # Set by nginx from the verified client certificate (production), never by the client
+        x_ssl_client_verify: Optional[str] = Header(None, include_in_schema=False),
+        x_ssl_client_dn: Optional[str] = Header(None, include_in_schema=False),
+        x_ssl_client_fingerprint: Optional[str] = Header(None, include_in_schema=False),
+        x_ssl_client_serial: Optional[str] = Header(None, include_in_schema=False),
 ):
     """Authenticate user with PKI certificate using SSL headers or JSON data for development"""
     try:
@@ -69,11 +74,10 @@ async def login(
 
         else:
             # Production mode: extract SSL certificate data from headers
-            ssl_verify = request.headers.get("x-ssl-client-verify")
-            ssl_dn = request.headers.get("x-ssl-client-dn")
-            ssl_fingerprint = request.headers.get("x-ssl-client-fingerprint")
-            ssl_serial = request.headers.get("x-ssl-client-serial")
-            ssl_issuer = request.headers.get("x-ssl-issuer-dn")
+            ssl_verify = x_ssl_client_verify
+            ssl_dn = x_ssl_client_dn
+            ssl_fingerprint = x_ssl_client_fingerprint
+            ssl_serial = x_ssl_client_serial
 
             # Verify that certificate was validated by nginx
             if ssl_verify != "SUCCESS":
