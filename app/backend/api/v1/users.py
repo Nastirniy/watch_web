@@ -89,7 +89,7 @@ async def list_users(
         ErrorCode.CERTIFICATE_FILE_EMPTY, ErrorCode.CERTIFICATE_INVALID, ErrorCode.CERTIFICATE_TAKEN,
         ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, ErrorCode.USERNAME_OR_CERTIFICATE_TAKEN, ErrorCode.USERNAME_TAKEN,
         ErrorCode.POST_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.CERTIFICATE_FILE_TOO_LARGE,
-        ErrorCode.DATA_TOO_LONG, ErrorCode.CERTIFICATE_PROCESSING_FAILED, ErrorCode.DATABASE_ERROR, *ADMIN,
+        ErrorCode.DATA_TOO_LONG, ErrorCode.DATABASE_ERROR, *ADMIN,
     ),
 )
 async def create_user(
@@ -144,15 +144,9 @@ async def create_user(
 
         _logger.info(f"Certificate parsed successfully for user {username}: CN={pki_cn}, Serial={pki_serial[:16]}...")
 
-    except ApiError:
-        # Empty or oversized file: already the right answer, not a 500
-        raise
     except ValueError as e:
         _logger.error(f"Certificate parsing error for user {username}: {str(e)}")
         raise ApiError(ErrorCode.CERTIFICATE_INVALID)
-    except Exception as e:
-        _logger.error(f"Unexpected error reading certificate: {str(e)}")
-        raise ApiError(ErrorCode.CERTIFICATE_PROCESSING_FAILED)
 
     # Validate all roles exist
     roles_to_assign = []
@@ -276,7 +270,7 @@ async def get_user(
         ErrorCode.CERTIFICATE_TAKEN, ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, ErrorCode.USERNAME_TAKEN,
         ErrorCode.POST_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.USER_NOT_FOUND,
         ErrorCode.CERTIFICATE_FILE_TOO_LARGE, ErrorCode.FORM_CONTENT_TYPE_REQUIRED,
-        ErrorCode.CERTIFICATE_PROCESSING_FAILED, ErrorCode.DATABASE_ERROR, *ADMIN,
+        ErrorCode.DATABASE_ERROR, *ADMIN,
     ),
 )
 async def update_user(
@@ -392,15 +386,9 @@ async def update_user(
 
             _logger.info(f"User {current_user.username} updated certificate for user {user.username}")
 
-        except ApiError:
-            # Empty, oversized or already used certificate: already the right answer, not a 500
-            raise
         except ValueError as e:
             _logger.error(f"Certificate parsing error for user {user.username}: {str(e)}")
             raise ApiError(ErrorCode.CERTIFICATE_INVALID)
-        except Exception as e:
-            _logger.error(f"Unexpected error reading certificate: {str(e)}")
-            raise ApiError(ErrorCode.CERTIFICATE_PROCESSING_FAILED)
 
     # Update timestamp
     user.updated_at = datetime.now(timezone.utc)

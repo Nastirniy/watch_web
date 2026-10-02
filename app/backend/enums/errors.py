@@ -181,7 +181,6 @@ class ErrorCode(ProblemType):
     CERTIFICATE_FILE_TOO_LARGE = ("certificate_file_too_large", problem(
         413, "Certificate file is too large", "Certificate file is too large (at most {max_bytes} bytes)", max_bytes=int))
     CERTIFICATE_INVALID = ("certificate_invalid", problem(400, "Invalid certificate"))
-    CERTIFICATE_PROCESSING_FAILED = ("certificate_processing_failed", problem(500, "Failed to process certificate file"))
     CANNOT_DEACTIVATE_SELF = ("cannot_deactivate_self", problem(400, "You cannot deactivate your own account"))
     CANNOT_ARCHIVE_SELF = ("cannot_archive_self", problem(400, "You cannot archive your own account"))
     POST_ACCESS_HOME_POST = ("post_access_home_post", problem(400, "This post is the home post of the user and already grants full access"))
@@ -273,7 +272,6 @@ class ErrorCode(ProblemType):
     MEDIA_UPLOADS_BUSY = ("media_uploads_busy", problem(503, "Too many concurrent uploads, try again later"))
     MEDIA_UPLOAD_SOURCE_MISSING = ("media_upload_source_missing", problem(400, "Uploaded file not found"))
     MEDIA_STORE_FAILED = ("media_store_failed", problem(500, "Failed to store the file"))
-    MEDIA_UPLOAD_FAILED = ("media_upload_failed", problem(500, "Upload failed"))
     NGINX_UPLOAD_DISABLED = ("nginx_upload_disabled", problem(501, "Nginx upload offloading is not enabled"))
     NGINX_FILE_NAME_MISSING = ("nginx_file_name_missing", problem(400, "Missing X-File-Name header"))
     THUMBNAILS_UNSUPPORTED = ("thumbnails_unsupported", problem(422, "Thumbnails are not supported for this media type"))
@@ -334,7 +332,6 @@ class ErrorCode(ProblemType):
     UPLOAD_CHECKSUM_MISMATCH = ("upload_checksum_mismatch", problem(
         422, "sha256 of the received bytes does not match; the session is aborted, open a new one",
         expected_sha256=str, actual_sha256=str))
-    UPLOAD_COMPLETE_FAILED = ("upload_complete_failed", problem(500, "Upload failed; the session is still open, retry complete later"))
 
 
 class FieldErrorCode(FieldCode):

@@ -11,6 +11,9 @@ from app.backend.models.user import User
 from app.backend.models.post import Post
 from app.backend.models.observation import Observation
 from app.backend.config import settings
+from app.backend.utils.logging_config import get_api_logger
+
+_logger = get_api_logger()
 
 
 # Pydantic v2 Models for Prepare Health Check Responses
@@ -167,9 +170,12 @@ async def check_database_health(session: AsyncSession) -> DatabaseHealthModel:
             )
         )
     except Exception as e:
+        # A health check reports a failing database instead of failing itself. The error text is a server
+        # detail: logged here, never part of the response
+        _logger.opt(exception=e).error(f"Health check: database check failed: {e!r}")
         return DatabaseHealthModel(
             status=ServiceHealthStatus.UNHEALTHY.value,
-            error="Server side error",  # TODO swap to real error message
+            error="Server side error",
             response_time=None,
             stats=None
         )

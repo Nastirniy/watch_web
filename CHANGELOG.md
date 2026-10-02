@@ -5,6 +5,43 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Unexpected failures are 500 `internal_error`, not a domain code
+
+A blanket `except Exception` turned every failure, bugs included, into a code that told the client something it
+could act on. Those clauses are gone or catch only the failure they are about; the rest is the global 500
+`internal_error` with an `error_id` in the server log.
+
+### Breaking changes for API clients
+
+- `PATCH /media/uploads/{upload_id}`: `upload_chunk_not_stored` (400) now means only that the transfer broke (client
+  disconnected) or the disk refused the bytes. Any other failure answers 500 `internal_error`; the part file is
+  truncated back to the offset in both cases, so resending from `GET`'s offset still works. Before, a server bug was
+  a 400 and a client retrying on 400 looped forever.
+- `POST /media/uploads/{upload_id}/complete`: `upload_complete_failed` is gone; an unexpected failure is 500
+  `internal_error` (the session stays open, retry later). `media_store_failed` is unchanged.
+- `POST /media/upload` and `POST /media/nginx-upload`: `media_upload_failed` is gone (500 `internal_error`).
+- `POST /users/` and `PATCH /users/{id}`: `certificate_processing_failed` is gone. A file that is not a PEM or DER
+  certificate is still 400 `certificate_invalid`; any other failure is 500 `internal_error`.
+- `POST /auth/login` (mTLS / PKI): a database failure while looking up the certificate answered 401
+  `certificate_not_recognized`; it is now 500 `internal_error`. `POST /auth/logout`: a database failure answered
+  `session_already_invalidated`; it is now 500. `POST /users/{id}/archive` no longer reports success when ending
+  the user's sessions failed (the user is archived either way; a session left live is ended the first time its
+  token is used).
+- `/search/*`: a failure to write the search audit entry fails the request (500) instead of being only logged.
+
+### Backend
+
+- Startup: a failing Alembic migration stops the startup. The `create_all` fallback, which created the missing tables
+  and left the schema half migrated, is gone. Seeding stops when the admin PKI credentials cannot be generated
+  instead of silently skipping the admin user.
+- Best-effort blocks catch only their own failure: `OSError` in the media manager (integrity check, cleanup,
+  storage statistics), `ImportError` / `RuntimeError` for the optional `imageio_ffmpeg`,
+  `NoInspectionAvailable` in the filter engine. A failed file move still removes the new media record whatever the
+  error is; only an `OSError` becomes `media_store_failed`.
+- The health check logs why the database check failed (the response still carries no error text).
+- Removed unused code: `AuthService.cleanup_expired_sessions`, `CertificateParser.validate_certificate`,
+  `app/backend/utils/security.py` (nothing imported it), the re-exports of `app/backend/utils/__init__.py`.
+
 ## API versions as folders, errors declared on the routes, FastAPI built-ins instead of workarounds
 
 ### Breaking changes for API clients

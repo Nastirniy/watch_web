@@ -64,7 +64,8 @@ Content-Length: 8388608
 | 409 | `upload_offset_mismatch`: `Upload-Offset` does not match. The header `Upload-Offset` and `offset` carry the real offset (`sent_offset` is what you sent). `upload_writer_busy`: another chunk is still being written. | Mismatch: continue from the offset in the header. Busy: wait one second and ask `GET` for the offset. |
 | 413 | `upload_chunk_too_large` (`max_chunk_bytes`) or `upload_chunk_overrun` (`expected_size`). Nothing was written. | Fix the chunking. |
 | 410 | `upload_session_closed`: session is `completed`, `aborted` or `expired` (`session_status`). | Completed: you are done, `media_file_id` is the file. Otherwise open a new session. |
-| 400 | `upload_offset_required` (header missing), `upload_chunk_empty`, or `upload_chunk_not_stored` (the transfer broke mid-chunk; the file was truncated back to `offset`). | Ask `GET` for the offset and resend. |
+| 400 | `upload_offset_required` (header missing), `upload_chunk_empty`, or `upload_chunk_not_stored` (the transfer broke mid-chunk or the disk refused the bytes; the file was truncated back to `offset`). | Ask `GET` for the offset and resend. |
+| 500 | `internal_error`: an unexpected failure (its `error_id` is in the server log); the file was truncated back to `offset`. | Ask `GET` for the offset and resend; stop after a few tries. |
 | 415 | `upload_chunk_content_type`: the body is not `application/offset+octet-stream`. | Fix the request. |
 | 401 | Token expired during a long upload. | Refresh the token and resend the same chunk. The session is not affected. |
 
@@ -92,7 +93,7 @@ POST /api/v1/media/uploads/{id}/complete
 | 415 / 413 | The content did not match the declared format (same 415 codes as on open, plus `media_extension_dangerous`) or `media_file_too_large`. Session aborted. | Tell the user. |
 | 400 | `media_file_empty` or `media_content_invalid` (the file header does not match its type). Session aborted. | Tell the user. |
 | 410 | `upload_session_closed`, or `upload_bytes_missing` (the stored bytes are gone; the session is aborted). | Open a new session. |
-| 500 | `upload_complete_failed` or `media_store_failed`: storage failed. | Retry `complete` later; if the session was aborted, open a new one. |
+| 500 | `media_store_failed`: the storage refused the file; the session is aborted. `internal_error`: an unexpected failure (its `error_id` is in the server log); the session stays open. | `media_store_failed`: open a new session. `internal_error`: retry `complete` later. |
 | 503 | `media_uploads_busy`: too many uploads are being stored at once. | Retry `complete` after a few seconds. |
 
 Completing an already completed session returns 200 with the same `media_file_id`, so a lost response to the first `complete` is harmless.

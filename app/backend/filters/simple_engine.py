@@ -7,6 +7,9 @@ from typing import Optional, Type, List, Set
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.sql.selectable import Select
 
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.exc import NoInspectionAvailable
+
 from app.backend.filters.params.base_params import BaseFilterParams, SortOrder
 
 def _get_model_columns(model: Type) -> Set[str]:
@@ -17,9 +20,8 @@ def _get_model_columns(model: Type) -> Set[str]:
         columns = {c.name for c in model.__table__.columns}
         # Mapper-level column properties (e.g. presence values attached in models/presence_properties.py)
         try:
-            from sqlalchemy import inspect as sa_inspect
             columns |= {attr.key for attr in sa_inspect(model).column_attrs}
-        except Exception:
+        except NoInspectionAvailable:
             pass
         return columns
     if hasattr(model, 'model_fields'):

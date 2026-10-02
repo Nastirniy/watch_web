@@ -2,7 +2,7 @@ from typing import AsyncGenerator, Optional
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio.engine import AsyncEngine
-from sqlmodel import SQLModel, select
+from sqlmodel import select
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -28,7 +28,7 @@ async def create_database_if_not_exists():
     async with engine_without_db.begin() as conn:
         # Check if database exists
         result = await conn.execute(
-            text(f"SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = :db_name"),
+            text("SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = :db_name"),
             {"db_name": db_config.name}
         )
         exists = result.fetchone() is not None
@@ -299,24 +299,19 @@ async def seed_database():
                     _logger.info("Using admin PKI credentials from configuration")
                 else:
                     # Generate new PKI credentials
-                    try:
-                        admin_pki = generate_admin_pki_credentials()
-                        use_generated = True
-                        _logger.info("Generated new admin PKI credentials")
+                    admin_pki = generate_admin_pki_credentials()
+                    use_generated = True
+                    _logger.info("Generated new admin PKI credentials")
 
-                        # Print certificate data in dev mode
-                        if settings.app.debug:
-                            _logger.debug("\n" + "=" * 80)
-                            _logger.debug("GENERATED ADMIN PKI CREDENTIALS (DEV MODE)")
-                            _logger.debug("=" * 80)
-                            _logger.debug(f"CN:          {admin_pki['pki_certificate_cn']}")
-                            _logger.debug(f"Serial:      {admin_pki['pki_certificate_serial']}")
-                            _logger.debug(f"Fingerprint: {admin_pki['pki_certificate_fingerprint']}")
-                            _logger.debug("=" * 80 + "\n")
-                    except Exception as e:
-                        _logger.error(f"Failed to generate PKI certificates: {e}")
-                        # Don't raise here, maybe roles/perms seeding was enough
-                        return
+                    # Print certificate data in dev mode
+                    if settings.app.debug:
+                        _logger.debug("\n" + "=" * 80)
+                        _logger.debug("GENERATED ADMIN PKI CREDENTIALS (DEV MODE)")
+                        _logger.debug("=" * 80)
+                        _logger.debug(f"CN:          {admin_pki['pki_certificate_cn']}")
+                        _logger.debug(f"Serial:      {admin_pki['pki_certificate_serial']}")
+                        _logger.debug(f"Fingerprint: {admin_pki['pki_certificate_fingerprint']}")
+                        _logger.debug("=" * 80 + "\n")
 
                 # Create admin user
                 admin_user = User(
@@ -407,37 +402,18 @@ async def _migrate_and_seed():
 
     try:
 
-        # Check if we need to run migrations
-        def check_and_run_migrations():
-            try:
-                from pathlib import Path
-                # Get the project root directory (where alembic.ini is located)
-                project_root = Path(__file__).parent.parent.parent
-                alembic_ini_path = project_root / "alembic.ini"
-                alembic_cfg = Config(str(alembic_ini_path))
-                
-                # Try to upgrade to head (this handles both fresh DB and updates)
-                command.upgrade(alembic_cfg, "head")
-                return True
-                
-            except Exception as e:
-                _logger.warning(f"Migration failed, will create tables manually: {e}")
-                return False
-        
-        # Run migrations in thread to avoid event loop issues
+        # A migration that fails stops the startup: no create_all fallback, which would create the missing
+        # tables only and leave the schema half migrated (CLAUDE.md, "Database Migrations")
+        def run_migrations():
+            from pathlib import Path
+            project_root = Path(__file__).parent.parent.parent  # where alembic.ini is
+            command.upgrade(Config(str(project_root / "alembic.ini")), "head")
+
+        # Run migrations in a thread to avoid event loop issues
         loop = asyncio.get_running_loop()
         with ThreadPoolExecutor() as executor:
-            migration_success = await loop.run_in_executor(executor, check_and_run_migrations)
-        
-        if migration_success:
-            _logger.info("Migrations applied successfully")
-        else:
-            # Fallback: create tables manually if migration fails
-            _logger.info("Creating tables manually as fallback...")
-            engine = await get_engine()
-            async with engine.begin() as conn:
-                await conn.run_sync(SQLModel.metadata.create_all)
-            _logger.info("Tables created manually")
+            await loop.run_in_executor(executor, run_migrations)
+        _logger.info("Migrations applied successfully")
         
         # Always seed initial data
         await seed_database()

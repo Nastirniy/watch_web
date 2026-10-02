@@ -1188,14 +1188,11 @@
             }
           },
           "500": {
-            "description": "`certificate_processing_failed`: Failed to process certificate file; `database_error`: Database error occurred; `internal_error`: Internal server error",
+            "description": "`database_error`: Database error occurred; `internal_error`: Internal server error",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/CertificateProcessingFailedProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/DatabaseErrorProblem"
                     },
@@ -1206,7 +1203,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "certificate_processing_failed": "#/components/schemas/CertificateProcessingFailedProblem",
                       "database_error": "#/components/schemas/DatabaseErrorProblem",
                       "internal_error": "#/components/schemas/InternalErrorProblem"
                     }
@@ -1558,14 +1554,11 @@
             }
           },
           "500": {
-            "description": "`certificate_processing_failed`: Failed to process certificate file; `database_error`: Database error occurred; `internal_error`: Internal server error",
+            "description": "`database_error`: Database error occurred; `internal_error`: Internal server error",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/CertificateProcessingFailedProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/DatabaseErrorProblem"
                     },
@@ -1576,7 +1569,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "certificate_processing_failed": "#/components/schemas/CertificateProcessingFailedProblem",
                       "database_error": "#/components/schemas/DatabaseErrorProblem",
                       "internal_error": "#/components/schemas/InternalErrorProblem"
                     }
@@ -13309,7 +13301,7 @@
             }
           },
           "500": {
-            "description": "`internal_error`: Internal server error; `media_store_failed`: Failed to store the file; `media_upload_failed`: Upload failed",
+            "description": "`internal_error`: Internal server error; `media_store_failed`: Failed to store the file",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13319,17 +13311,13 @@
                     },
                     {
                       "$ref": "#/components/schemas/MediaStoreFailedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/MediaUploadFailedProblem"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
                       "internal_error": "#/components/schemas/InternalErrorProblem",
-                      "media_store_failed": "#/components/schemas/MediaStoreFailedProblem",
-                      "media_upload_failed": "#/components/schemas/MediaUploadFailedProblem"
+                      "media_store_failed": "#/components/schemas/MediaStoreFailedProblem"
                     }
                   }
                 }
@@ -13569,7 +13557,7 @@
             }
           },
           "500": {
-            "description": "`internal_error`: Internal server error; `media_store_failed`: Failed to store the file; `media_upload_failed`: Upload failed",
+            "description": "`internal_error`: Internal server error; `media_store_failed`: Failed to store the file",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13579,17 +13567,13 @@
                     },
                     {
                       "$ref": "#/components/schemas/MediaStoreFailedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/MediaUploadFailedProblem"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
                       "internal_error": "#/components/schemas/InternalErrorProblem",
-                      "media_store_failed": "#/components/schemas/MediaStoreFailedProblem",
-                      "media_upload_failed": "#/components/schemas/MediaUploadFailedProblem"
+                      "media_store_failed": "#/components/schemas/MediaStoreFailedProblem"
                     }
                   }
                 }
@@ -15397,7 +15381,7 @@
             }
           },
           "500": {
-            "description": "`internal_error`: Internal server error; `media_store_failed`: Failed to store the file; `upload_complete_failed`: Upload failed; the session is still open, retry complete later",
+            "description": "`internal_error`: Internal server error; `media_store_failed`: Failed to store the file",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -15407,17 +15391,13 @@
                     },
                     {
                       "$ref": "#/components/schemas/MediaStoreFailedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/UploadCompleteFailedProblem"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
                       "internal_error": "#/components/schemas/InternalErrorProblem",
-                      "media_store_failed": "#/components/schemas/MediaStoreFailedProblem",
-                      "upload_complete_failed": "#/components/schemas/UploadCompleteFailedProblem"
+                      "media_store_failed": "#/components/schemas/MediaStoreFailedProblem"
                     }
                   }
                 }
@@ -21828,69 +21808,6 @@
           }
         ]
       },
-      "CertificateProcessingFailedProblem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "title": "Type",
-            "description": "URI of the problem type; dereference it for its documentation"
-          },
-          "title": {
-            "type": "string",
-            "const": "Failed to process certificate file",
-            "title": "Title",
-            "description": "Summary of the problem type"
-          },
-          "status": {
-            "type": "integer",
-            "const": 500,
-            "title": "Status",
-            "description": "HTTP status code"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "Explanation of this occurrence",
-            "examples": [
-              "Failed to process certificate file"
-            ]
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "description": "Path of the request that failed"
-          },
-          "code": {
-            "type": "string",
-            "const": "certificate_processing_failed",
-            "title": "Code",
-            "description": "Key of exactly this problem in the localization package"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "code"
-        ],
-        "title": "CertificateProcessingFailedProblem",
-        "description": "Failed to process certificate file (HTTP 500). Problem type certificate_processing_failed.",
-        "examples": [
-          {
-            "code": "certificate_processing_failed",
-            "detail": "Failed to process certificate file",
-            "instance": "/api/v1/...",
-            "status": 500,
-            "title": "Failed to process certificate file",
-            "type": "https://example.org/problems/certificate_processing_failed"
-          }
-        ]
-      },
       "CertificateTakenProblem": {
         "properties": {
           "type": {
@@ -25591,69 +25508,6 @@
             "status": 415,
             "title": "Unknown media type",
             "type": "https://example.org/problems/media_type_unknown"
-          }
-        ]
-      },
-      "MediaUploadFailedProblem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "title": "Type",
-            "description": "URI of the problem type; dereference it for its documentation"
-          },
-          "title": {
-            "type": "string",
-            "const": "Upload failed",
-            "title": "Title",
-            "description": "Summary of the problem type"
-          },
-          "status": {
-            "type": "integer",
-            "const": 500,
-            "title": "Status",
-            "description": "HTTP status code"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "Explanation of this occurrence",
-            "examples": [
-              "Upload failed"
-            ]
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "description": "Path of the request that failed"
-          },
-          "code": {
-            "type": "string",
-            "const": "media_upload_failed",
-            "title": "Code",
-            "description": "Key of exactly this problem in the localization package"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "code"
-        ],
-        "title": "MediaUploadFailedProblem",
-        "description": "Upload failed (HTTP 500). Problem type media_upload_failed.",
-        "examples": [
-          {
-            "code": "media_upload_failed",
-            "detail": "Upload failed",
-            "instance": "/api/v1/...",
-            "status": 500,
-            "title": "Upload failed",
-            "type": "https://example.org/problems/media_upload_failed"
           }
         ]
       },
@@ -32312,69 +32166,6 @@
             "status": 413,
             "title": "Chunk too large",
             "type": "https://example.org/problems/upload_chunk_too_large"
-          }
-        ]
-      },
-      "UploadCompleteFailedProblem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "title": "Type",
-            "description": "URI of the problem type; dereference it for its documentation"
-          },
-          "title": {
-            "type": "string",
-            "const": "Upload failed; the session is still open, retry complete later",
-            "title": "Title",
-            "description": "Summary of the problem type"
-          },
-          "status": {
-            "type": "integer",
-            "const": 500,
-            "title": "Status",
-            "description": "HTTP status code"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "Explanation of this occurrence",
-            "examples": [
-              "Upload failed; the session is still open, retry complete later"
-            ]
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "description": "Path of the request that failed"
-          },
-          "code": {
-            "type": "string",
-            "const": "upload_complete_failed",
-            "title": "Code",
-            "description": "Key of exactly this problem in the localization package"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "code"
-        ],
-        "title": "UploadCompleteFailedProblem",
-        "description": "Upload failed; the session is still open, retry complete later (HTTP 500). Problem type upload_complete_failed.",
-        "examples": [
-          {
-            "code": "upload_complete_failed",
-            "detail": "Upload failed; the session is still open, retry complete later",
-            "instance": "/api/v1/...",
-            "status": 500,
-            "title": "Upload failed; the session is still open, retry complete later",
-            "type": "https://example.org/problems/upload_complete_failed"
           }
         ]
       },

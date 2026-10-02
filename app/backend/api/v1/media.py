@@ -311,7 +311,7 @@ async def restore_media_file(
         ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_FILE_TOO_LARGE,
         ErrorCode.MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED,
         ErrorCode.MEDIA_EXTENSION_DANGEROUS, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, ErrorCode.MEDIA_TYPE_UNKNOWN,
-        ErrorCode.MEDIA_STORE_FAILED, ErrorCode.MEDIA_UPLOAD_FAILED, ErrorCode.MEDIA_UPLOADS_BUSY, *GUARDED,
+        ErrorCode.MEDIA_STORE_FAILED, ErrorCode.MEDIA_UPLOADS_BUSY, *GUARDED,
     ),
 )
 async def upload_complete_file(
@@ -362,9 +362,6 @@ async def upload_complete_file(
     except CodedError as e:
         _logger.warning(f"Upload rejected: {e}")
         raise store_rejected(e)
-    except Exception as e:
-        _logger.exception(f"Upload failed: {e}")
-        raise ApiError(ErrorCode.MEDIA_UPLOAD_FAILED)
     finally:
         temp_path.unlink(missing_ok=True)
 
@@ -380,7 +377,7 @@ async def upload_complete_file(
         AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_FILE_TOO_LARGE,
         ErrorCode.MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED,
         ErrorCode.MEDIA_EXTENSION_DANGEROUS, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, ErrorCode.MEDIA_TYPE_UNKNOWN,
-        ErrorCode.MEDIA_STORE_FAILED, ErrorCode.MEDIA_UPLOAD_FAILED, ErrorCode.NGINX_UPLOAD_DISABLED,
+        ErrorCode.MEDIA_STORE_FAILED, ErrorCode.NGINX_UPLOAD_DISABLED,
         ErrorCode.MEDIA_UPLOADS_BUSY, *GUARDED,
     ),
 )
@@ -429,9 +426,6 @@ async def nginx_upload_file(
     except CodedError as e:
         _logger.warning(f"Nginx upload rejected: {e}")
         raise store_rejected(e)
-    except Exception as e:
-        _logger.exception(f"Nginx upload failed: {e}")
-        raise ApiError(ErrorCode.MEDIA_UPLOAD_FAILED)
 
     return await finish_upload(request, session, auth, media_file_id, observation_id, original_filename, background_tasks, "nginx offload")
 

@@ -23,138 +23,43 @@ class CertificateParser:
 
         Returns:
             Dictionary containing:
-                - pki_certificate_cn: Common Name from subject
+                - pki_certificate_cn: Common Name from subject (or an identifier built from the subject)
                 - pki_certificate_serial: Serial number as hex string
-                - pki_certificate_fingerprint: SHA256 fingerprint
+                - pki_certificate_fingerprint: SHA1 fingerprint (matches nginx $ssl_client_fingerprint)
 
         Raises:
-            ValueError: If certificate cannot be parsed or required fields are missing
+            ValueError: cert_data is not a PEM or DER X.509 certificate (cryptography's own error). Any other
+            exception is a bug and is not disguised as an invalid certificate.
         """
         try:
-            # Try to load as PEM first
-            try:
-                cert = x509.load_pem_x509_certificate(cert_data, default_backend())
-                _logger.debug("Certificate loaded as PEM format")
-            except ValueError:
-                # If PEM fails, try DER
-                cert = x509.load_der_x509_certificate(cert_data, default_backend())
-                _logger.debug("Certificate loaded as DER format")
+            cert = x509.load_pem_x509_certificate(cert_data, default_backend())
+            _logger.debug("Certificate loaded as PEM format")
+        except ValueError:
+            # Not PEM: DER, or cryptography's ValueError when it is no certificate at all
+            cert = x509.load_der_x509_certificate(cert_data, default_backend())
+            _logger.debug("Certificate loaded as DER format")
 
-            # Extract Common Name (CN) from Subject, or use alternative identifier
-            cn = None
-            try:
-                cn_attributes = cert.subject.get_attributes_for_oid(x509.oid.NameOID.COMMON_NAME)
-                if cn_attributes:
-                    cn = cn_attributes[0].value
-                    _logger.debug(f"Extracted CN: {cn}")
-            except Exception as e:
-                _logger.warning(f"Could not extract CN: {str(e)}")
+        # Common Name; without one, an identifier from other subject fields, else the full subject DN
+        cn_attributes = cert.subject.get_attributes_for_oid(x509.oid.NameOID.COMMON_NAME)
+        cn = cn_attributes[0].value if cn_attributes else None
+        if not cn:
+            subject_parts = [
+                attributes[0].value
+                for oid in (x509.oid.NameOID.ORGANIZATION_NAME, x509.oid.NameOID.STATE_OR_PROVINCE_NAME)
+                if (attributes := cert.subject.get_attributes_for_oid(oid))
+            ]
+            cn = " - ".join(subject_parts) if subject_parts else str(cert.subject)
+            _logger.debug(f"CN not found, identifier from the subject: {cn}")
 
-            # If CN is not available, construct an identifier from other subject fields
-            if not cn:
-                _logger.debug("CN not found, constructing identifier from subject fields")
-                subject_parts = []
+        serial_number = format(cert.serial_number, 'x').lower()
+        fingerprint = cert.fingerprint(hashes.SHA1()).hex().lower()
+        _logger.debug(f"Certificate CN={cn}, serial={serial_number}, fingerprint={fingerprint[:16]}...")
 
-                # Try to get Organization Name
-                try:
-                    org_attrs = cert.subject.get_attributes_for_oid(x509.oid.NameOID.ORGANIZATION_NAME)
-                    if org_attrs:
-                        subject_parts.append(org_attrs[0].value)
-                except Exception:
-                    pass
-
-                # Try to get State/Province
-                try:
-                    state_attrs = cert.subject.get_attributes_for_oid(x509.oid.NameOID.STATE_OR_PROVINCE_NAME)
-                    if state_attrs:
-                        subject_parts.append(state_attrs[0].value)
-                except Exception:
-                    pass
-
-                # If we have parts, join them; otherwise use full subject DN
-                if subject_parts:
-                    cn = " - ".join(subject_parts)
-                    _logger.debug(f"Constructed identifier from subject parts: {cn}")
-                else:
-                    # Use full subject DN as fallback
-                    cn = str(cert.subject)
-                    _logger.debug(f"Using full subject DN as identifier: {cn}")
-
-            # Extract Serial Number
-            serial_number = format(cert.serial_number, 'x').lower()
-            _logger.debug(f"Extracted serial number: {serial_number}")
-
-            # Generate SHA1 fingerprint (matches nginx $ssl_client_fingerprint)
-            fingerprint = cert.fingerprint(hashes.SHA1()).hex().lower()
-            _logger.debug(f"Generated fingerprint: {fingerprint[:16]}...")
-
-            return {
-                "pki_certificate_cn": str(cn),
-                "pki_certificate_serial": str(serial_number),
-                "pki_certificate_fingerprint": str(fingerprint)
-            }
-
-        except Exception as e:
-            _logger.error(f"Certificate parsing error: {str(e)}")
-            raise ValueError(f"Invalid certificate format or content: {str(e)}")
-
-    @staticmethod
-    def validate_certificate(cert_data: bytes) -> bool:
-        """
-        Validate that certificate data is a valid X.509 certificate
-
-        Args:
-            cert_data: Certificate data to validate
-
-        Returns:
-            True if valid, False otherwise
-        """
-        try:
-            CertificateParser.parse_certificate(cert_data)
-            return True
-        except Exception:
-            return False
-
-    # @staticmethod
-    # def get_certificate_info(cert_data: bytes) -> Optional[Dict[str, str]]:
-    #     """
-    #     Get additional certificate information for logging/debugging
-    #
-    #     Args:
-    #         cert_data: Certificate data
-    #
-    #     Returns:
-    #         Dictionary with certificate details or None if parsing fails
-    #     """
-    #     try:
-    #         try:
-    #             cert = x509.load_pem_x509_certificate(cert_data, default_backend())
-    #         except ValueError:
-    #             cert = x509.load_der_x509_certificate(cert_data, default_backend())
-    #
-    #         # Extract subject fields
-    #         subject_fields = {}
-    #         for attribute in cert.subject:
-    #             subject_fields[attribute.oid._name] = attribute.value
-    #
-    #         # Extract issuer fields
-    #         issuer_fields = {}
-    #         for attribute in cert.issuer:
-    #             issuer_fields[attribute.oid._name] = attribute.value
-    #
-    #         return {
-    #             "subject": str(cert.subject),
-    #             "issuer": str(cert.issuer),
-    #             "serial_number": format(cert.serial_number, 'x').lower(),
-    #             "not_valid_before": cert.not_valid_before_utc.isoformat(),
-    #             "not_valid_after": cert.not_valid_after_utc.isoformat(),
-    #             "version": cert.version.name,
-    #             "subject_fields": subject_fields,
-    #             "issuer_fields": issuer_fields
-    #         }
-    #     except Exception as e:
-    #         _logger.error(f"Error getting certificate info: {str(e)}")
-            return None
+        return {
+            "pki_certificate_cn": str(cn),
+            "pki_certificate_serial": str(serial_number),
+            "pki_certificate_fingerprint": str(fingerprint)
+        }
 
 
 async def parse_cn(dn: str) -> Optional[str]:

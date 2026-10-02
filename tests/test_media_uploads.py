@@ -4,6 +4,7 @@ import io
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from starlette.requests import ClientDisconnect
 
 from app.backend.config import settings
 from app.backend.enums.routes import MediaRoutes
@@ -214,6 +215,44 @@ async def test_abort_sha_mismatch_and_expiry(client, db, headers, storage, monke
     bad = await client.post(COMPLETE.format(upload_id=upload_id), headers=headers(user))
     assert bad.status_code in (400, 415), bad.text
     assert (await client.get(SESSION.format(upload_id=upload_id), headers=headers(user))).json()["status"] == "aborted"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure, status_code, code", [
+    (ClientDisconnect(), 400, "upload_chunk_not_stored"),
+    (OSError(28, "No space left on device"), 400, "upload_chunk_not_stored"),
+    (RuntimeError("a bug, not a broken transfer"), 500, "internal_error"),
+])
+async def test_broken_chunk_is_rolled_back(client, db, headers, storage, monkeypatch, failure, status_code, code):
+    """Only a broken transfer or a refusing disk is upload_chunk_not_stored; a bug is a plain 500. Both roll back"""
+    post, user, observation = await _scene(db)
+    data = make_png(400, 300)
+    upload_id = (await client.post(CREATE, json=_create_body(observation.id, data), headers=headers(user))).json()["id"]
+    cut = len(data) // 2
+    first = await client.patch(SESSION.format(upload_id=upload_id), content=data[:cut], headers={**CHUNK, "Upload-Offset": "0", **headers(user)})
+    assert first.status_code == 204
+
+    real_append = uploads.append_chunk
+
+    async def breaks_after_some_bytes(body):
+        async for piece in body:
+            yield piece[:10]
+            break
+        raise failure
+
+    async def append_then_fail(session, row, token, root, body, offset, max_chunk):
+        return await real_append(session, row, token, root, breaks_after_some_bytes(body), offset, max_chunk)
+
+    monkeypatch.setattr(uploads, "append_chunk", append_then_fail)
+    broken = await client.patch(SESSION.format(upload_id=upload_id), content=data[cut:], headers={**CHUNK, "Upload-Offset": str(cut), **headers(user)})
+    assert broken.status_code == status_code and broken.json()["code"] == code, broken.text
+    monkeypatch.setattr(uploads, "append_chunk", real_append)
+
+    # the 10 bytes written before the failure are gone and the writer is free again
+    assert (await client.get(SESSION.format(upload_id=upload_id), headers=headers(user))).json()["received_bytes"] == cut
+    assert (storage / "_tmp" / "uploads" / f"{upload_id}.part").stat().st_size == cut
+    rest = await client.patch(SESSION.format(upload_id=upload_id), content=data[cut:], headers={**CHUNK, "Upload-Offset": str(cut), **headers(user)})
+    assert rest.status_code == 204 and rest.headers["upload-offset"] == str(len(data))
 
 
 @pytest.mark.asyncio

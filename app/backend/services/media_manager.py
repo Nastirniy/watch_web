@@ -294,14 +294,14 @@ class MediaManager:
         if filesystem_exists:
             try:
                 filesystem_size = file_path.stat().st_size
-            except Exception:
+            except OSError:
                 filesystem_size = None
 
             # Verify hash
             try:
                 file_hash = await self._compute_file_hash(file_path)
                 hash_matches = file_hash == media_file.file_hash
-            except Exception as e:
+            except OSError as e:
                 issues.append(f"Error during integrity check: {str(e)}")
 
             if not hash_matches:
@@ -375,7 +375,7 @@ class MediaManager:
                     if file_path.exists():
                         file_path.unlink()
                         fs_cleaned += 1
-                except Exception as e:
+                except OSError as e:
                     _logger.warning(f"Could not delete orphaned filesystem file {media_file.file_path}: {e}")
 
                 # Delete media file record
@@ -408,7 +408,8 @@ class MediaManager:
                         if not any(observation_dir.iterdir()):
                             observation_dir.rmdir()
 
-            except Exception as e:
+            except OSError as e:
+                # A filesystem failure stops this pass; a database error propagates
                 _logger.error(f"Error during filesystem cleanup: {e}")
 
         _logger.info(f"Cleanup completed: {db_cleaned} database records, {fs_cleaned} filesystem files")
@@ -551,10 +552,7 @@ class MediaManager:
                 existing_id = await self._check_for_duplicate(session, file_hash, observation_id)
                 if existing_id:
                     _logger.info(f"Duplicate file detected, returning existing ID: {existing_id}")
-                    try:
-                        source.unlink()
-                    except Exception:
-                        pass
+                    source.unlink(missing_ok=True)
                     return existing_id
 
             # -- Prepare storage path --
@@ -600,10 +598,14 @@ class MediaManager:
             try:
                 await self._move_file_to_storage(source, full_file_path)
             except Exception as e:
-                _logger.error(f"File move failed for media_file {media_file.id}, rolling back DB record: {e}")
+                # Whatever failed, the record must not point at a file that is not there; only a
+                # filesystem error is the storage refusing the file, anything else stays a 500
+                _logger.error(f"File move failed for media_file {media_file.id}, rolling back DB record: {e!r}")
                 await session.delete(media_file)
                 await session.commit()
-                raise CodedError(ErrorCode.MEDIA_STORE_FAILED) from e
+                if isinstance(e, OSError):
+                    raise CodedError(ErrorCode.MEDIA_STORE_FAILED) from e
+                raise
 
             if self.enable_deduplication:
                 self._hash_cache[file_hash] = media_file.id
@@ -651,7 +653,7 @@ class MediaManager:
                     try:
                         fs_size += file_path.stat().st_size
                         fs_files += 1
-                    except Exception:
+                    except OSError:  # removed while walking
                         pass
 
             # The absolute storage path is a server detail: never part of a response

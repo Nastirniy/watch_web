@@ -8,7 +8,6 @@ from fastapi import APIRouter, Depends, Request, Query
 from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
-from loguru import logger
 
 from app.backend.database import get_session
 from app.backend.services.auth_context import AuthContext
@@ -71,21 +70,18 @@ async def log_search(
     params: Dict,
     results_count: int
 ) -> None:
-    """Log search to audit"""
-    try:
-        await create_audit_log(
-            session=session,
-            user_id=auth.user.id,
-            action="search",
-            resource_type=entity,
-            new_values={"params": params, "results": results_count},
-            details={"message": f"User {auth.user.username} searched for {entity} with {results_count} results"},
-            success=True,
-            **client_info(request, auth),
-        )
-        await session.commit()
-    except Exception as e:
-        logger.error(f"Audit log failed: {e}")
+    """Log search to audit; like every audit entry, a failure to write it fails the request"""
+    await create_audit_log(
+        session=session,
+        user_id=auth.user.id,
+        action="search",
+        resource_type=entity,
+        new_values={"params": params, "results": results_count},
+        details={"message": f"User {auth.user.username} searched for {entity} with {results_count} results"},
+        success=True,
+        **client_info(request, auth),
+    )
+    await session.commit()
 
 
 # =============================================================================

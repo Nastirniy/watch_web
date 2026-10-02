@@ -48,7 +48,7 @@ def resolve_binary(configured: str, imageio_fallback: bool = False) -> Optional[
         try:
             import imageio_ffmpeg  # optional dependency, ships a static ffmpeg
             return imageio_ffmpeg.get_ffmpeg_exe()
-        except Exception:
+        except (ImportError, RuntimeError):  # not installed, or no binary for this platform
             return None
     return None
 

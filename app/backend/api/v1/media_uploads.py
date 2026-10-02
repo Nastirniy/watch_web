@@ -12,6 +12,7 @@ opened it; media.manage_any may operate on any session.
 from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, Request, Response, status as fapi_status
+from starlette.requests import ClientDisconnect
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.config import settings
@@ -299,9 +300,10 @@ async def append_upload_chunk(
         new_offset = await uploads.append_chunk(session, row, token, storage_root(), request.stream(), offset, max_chunk)
     except uploads.ChunkTooLarge as exc:
         raise exc.to_api_error(headers=_session_headers(row), offset=offset)
-    except Exception as exc:
-        # client went away mid-chunk or disk error: the part file is truncated back to `offset`
-        _logger.warning(f"upload session {upload_id}: chunk at {offset} failed: {exc}")
+    except (ClientDisconnect, OSError) as exc:
+        # The transfer broke (client gone) or the disk refused the bytes: append_chunk truncated the part
+        # file back to `offset`, so the client resends from there. Anything else is a bug: a plain 500.
+        _logger.warning(f"upload session {upload_id}: chunk at {offset} not stored: {exc!r}")
         raise ApiError(ErrorCode.UPLOAD_CHUNK_NOT_STORED, headers=_session_headers(row), offset=offset)
 
     row = await uploads.get_session_row(session, upload_id)
@@ -318,7 +320,7 @@ async def append_upload_chunk(
         ErrorCode.UPLOAD_BYTES_MISSING, ErrorCode.UPLOAD_SESSION_CLOSED, ErrorCode.MEDIA_FILE_TOO_LARGE,
         ErrorCode.MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED,
         ErrorCode.MEDIA_EXTENSION_DANGEROUS, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, ErrorCode.MEDIA_TYPE_UNKNOWN,
-        ErrorCode.UPLOAD_CHECKSUM_MISMATCH, ErrorCode.MEDIA_STORE_FAILED, ErrorCode.UPLOAD_COMPLETE_FAILED,
+        ErrorCode.UPLOAD_CHECKSUM_MISMATCH, ErrorCode.MEDIA_STORE_FAILED,
         ErrorCode.MEDIA_UPLOADS_BUSY, *GUARDED,
     ),
 )
@@ -385,9 +387,6 @@ async def complete_upload_session(
             await uploads.remove_part(row, root)
             await uploads.mark(session, row, uploads.STATUS_ABORTED, error=str(e))
         raise store_rejected(e, headers=_session_headers(row))
-    except Exception as e:
-        _logger.exception(f"upload session {upload_id}: completion failed: {e}")
-        raise ApiError(ErrorCode.UPLOAD_COMPLETE_FAILED)
 
     await uploads.mark(session, row, uploads.STATUS_COMPLETED, media_file_id=media_file_id)
     return await finish_upload(request, session, auth, media_file_id, row.observation_id, row.original_filename, background_tasks, "resumable", upload_id=row.id)
