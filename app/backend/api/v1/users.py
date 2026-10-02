@@ -29,7 +29,8 @@ from app.backend.filters.params.user_params import UserFilterParams
 from app.backend.filters.user_filter import UserFilterService
 from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
 from app.backend.services.api_errors import ApiError
-from app.backend.enums.errors import ErrorCode
+from app.backend.enums.errors import AccessErrorCode, ErrorCode
+from app.backend.openapi_problems import ADMIN, GUARDED, problems
 
 router = APIRouter(prefix=UserRoutes.BASE.value, tags=[UserRoutes.tag()])
 _logger = get_api_logger()
@@ -69,7 +70,13 @@ def _is_unique_violation(error_msg: str) -> bool:
     return "Duplicate entry" in error_msg or "UNIQUE constraint failed" in error_msg or "already exists" in error_msg
 
 
-@router.get(UserRoutes.ROOT.value, response_model=List[UserResponse])
+@router.get(
+    UserRoutes.ROOT.value,
+    response_model=List[UserResponse],
+    responses=problems(
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.USERS_LIST_FAILED, *GUARDED,
+    ),
+)
 async def list_users(
         filters: UserFilterParams = Depends(),
         session: AsyncSession = Depends(get_session),
@@ -102,7 +109,13 @@ async def list_users(
         raise ApiError(ErrorCode.USERS_LIST_FAILED)
 
 
-@router.post(UserRoutes.ROOT.value, response_model=UserResponse)
+@router.post(
+    UserRoutes.ROOT.value,
+    response_model=UserResponse,
+    responses=problems(
+        ErrorCode.CERTIFICATE_FILE_EMPTY, ErrorCode.CERTIFICATE_INVALID, ErrorCode.CERTIFICATE_TAKEN, ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, ErrorCode.ROLE_IDS_NOT_JSON_ARRAY, ErrorCode.USERNAME_OR_CERTIFICATE_TAKEN, ErrorCode.USERNAME_TAKEN, ErrorCode.POST_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.CERTIFICATE_FILE_TOO_LARGE, ErrorCode.DATA_TOO_LONG, ErrorCode.CERTIFICATE_PROCESSING_FAILED, ErrorCode.DATABASE_ERROR, *ADMIN,
+    ),
+)
 async def create_user(
         request: Request,
         certificate: UploadFile = File(..., description="PKI certificate file (PEM or DER format)"),
@@ -273,7 +286,7 @@ async def create_user(
             raise ApiError(ErrorCode.DATABASE_ERROR)
 
 
-@router.get(UserRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo)
+@router.get(UserRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo, responses=problems(*GUARDED))
 async def get_user_filter_schema(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW]))
@@ -283,7 +296,11 @@ async def get_user_filter_schema(
     return EntitySchemaInfo(**UserFilterService.get_schema(is_admin=user_is_admin))
 
 
-@router.get(UserRoutes.USER_BY_ID.value, response_model=UserResponse)
+@router.get(
+    UserRoutes.USER_BY_ID.value,
+    response_model=UserResponse,
+    responses=problems(ErrorCode.USER_ID_INVALID, AccessErrorCode.USER_SELF_ONLY, ErrorCode.USER_NOT_FOUND, *GUARDED),
+)
 async def get_user(
         user_id: int,
         session: AsyncSession = Depends(get_session),
@@ -307,7 +324,13 @@ async def get_user(
     return UserResponse.model_validate(user)
 
 
-@router.patch(UserRoutes.USER_BY_ID.value, response_model=UserResponse)
+@router.patch(
+    UserRoutes.USER_BY_ID.value,
+    response_model=UserResponse,
+    responses=problems(
+        ErrorCode.CANNOT_DEACTIVATE_SELF, ErrorCode.CERTIFICATE_FILE_EMPTY, ErrorCode.CERTIFICATE_INVALID, ErrorCode.CERTIFICATE_TAKEN, ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, ErrorCode.ROLE_IDS_NOT_JSON_ARRAY, ErrorCode.USER_ID_INVALID, ErrorCode.USERNAME_TAKEN, ErrorCode.POST_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.USER_NOT_FOUND, ErrorCode.CERTIFICATE_FILE_TOO_LARGE, ErrorCode.FORM_CONTENT_TYPE_REQUIRED, ErrorCode.CERTIFICATE_PROCESSING_FAILED, ErrorCode.DATABASE_ERROR, *ADMIN,
+    ),
+)
 async def update_user(
         request: Request,
         user_id: int,
@@ -545,7 +568,11 @@ async def update_user(
 
 # UserRole Management Routes
 
-@router.get(UserRoutes.USER_ROLES.value, response_model=List[UserRoleResponse])
+@router.get(
+    UserRoutes.USER_ROLES.value,
+    response_model=List[UserRoleResponse],
+    responses=problems(ErrorCode.USER_ID_INVALID, ErrorCode.USER_NOT_FOUND, *ADMIN),
+)
 async def list_user_roles(
         user_id: int,
         session: AsyncSession = Depends(get_session),
@@ -595,7 +622,11 @@ async def _get_active_user_or_404(session: AsyncSession, user_id: int) -> User:
     return user
 
 
-@router.get(UserRoutes.USER_POST_ACCESS.value, response_model=List[UserPostAccessResponse])
+@router.get(
+    UserRoutes.USER_POST_ACCESS.value,
+    response_model=List[UserPostAccessResponse],
+    responses=problems(ErrorCode.USER_NOT_FOUND, *ADMIN),
+)
 async def list_user_post_access(
         user_id: int,
         session: AsyncSession = Depends(get_session),
@@ -609,7 +640,11 @@ async def list_user_post_access(
     return [UserPostAccessResponse.model_validate(row) for row in result.all()]
 
 
-@router.put(UserRoutes.USER_POST_ACCESS_BY_POST.value, response_model=UserPostAccessResponse)
+@router.put(
+    UserRoutes.USER_POST_ACCESS_BY_POST.value,
+    response_model=UserPostAccessResponse,
+    responses=problems(ErrorCode.POST_ACCESS_HOME_POST, ErrorCode.POST_NOT_FOUND, ErrorCode.USER_NOT_FOUND, *ADMIN),
+)
 async def upsert_user_post_access(
         request: Request,
         user_id: int,
@@ -663,7 +698,11 @@ async def upsert_user_post_access(
     return UserPostAccessResponse.model_validate(row)
 
 
-@router.delete(UserRoutes.USER_POST_ACCESS_BY_POST.value, status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    UserRoutes.USER_POST_ACCESS_BY_POST.value,
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=problems(ErrorCode.POST_ACCESS_NOT_FOUND, ErrorCode.USER_NOT_FOUND, *ADMIN),
+)
 async def delete_user_post_access(
         request: Request,
         user_id: int,
@@ -703,7 +742,11 @@ async def delete_user_post_access(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post(UserRoutes.USER_ARCHIVE.value, response_model=UserResponse)
+@router.post(
+    UserRoutes.USER_ARCHIVE.value,
+    response_model=UserResponse,
+    responses=problems(ErrorCode.CANNOT_ARCHIVE_SELF, ErrorCode.USER_NOT_FOUND, *ADMIN),
+)
 async def archive_user(
         request: Request,
         user_id: int,
@@ -751,7 +794,11 @@ async def archive_user(
     return UserResponse.model_validate(user)
 
 
-@router.post(UserRoutes.USER_RESTORE.value, response_model=UserResponse)
+@router.post(
+    UserRoutes.USER_RESTORE.value,
+    response_model=UserResponse,
+    responses=problems(ErrorCode.USER_NOT_FOUND, ErrorCode.USER_NOT_ARCHIVED, *ADMIN),
+)
 async def restore_user(
         request: Request,
         user_id: int,

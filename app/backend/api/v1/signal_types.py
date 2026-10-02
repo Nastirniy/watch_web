@@ -22,12 +22,17 @@ from app.backend.filters.params.signal_type_params import SignalTypeFilterParams
 from app.backend.filters.signal_type_filter import SignalTypeFilterService
 from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
 from app.backend.services.api_errors import ApiError
-from app.backend.enums.errors import ErrorCode
+from app.backend.enums.errors import AccessErrorCode, ErrorCode
+from app.backend.openapi_problems import ADMIN, GUARDED, problems
 
 router = APIRouter(prefix=SignalTypeRoutes.BASE.value, tags=[SignalTypeRoutes.tag()])
 
 
-@router.get(SignalTypeRoutes.LIST_ALL.value, response_model=List[SignalTypeResponse])
+@router.get(
+    SignalTypeRoutes.LIST_ALL.value,
+    response_model=List[SignalTypeResponse],
+    responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
+)
 async def list_signal_types(
         filters: SignalTypeFilterParams = Depends(),
         session: AsyncSession = Depends(get_session),
@@ -42,7 +47,7 @@ async def list_signal_types(
     return [SignalTypeResponse.model_validate(st) for st in signal_types]
 
 
-@router.get(SignalTypeRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo)
+@router.get(SignalTypeRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo, responses=problems(*GUARDED))
 async def get_signal_type_filter_schema(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.SIGNAL_TYPE_VIEW]))
@@ -52,7 +57,13 @@ async def get_signal_type_filter_schema(
     return EntitySchemaInfo(**SignalTypeFilterService.get_schema(is_admin=user_is_admin))
 
 
-@router.post(SignalTypeRoutes.CREATE.value, response_model=SignalType)
+@router.post(
+    SignalTypeRoutes.CREATE.value,
+    response_model=SignalType,
+    responses=problems(
+        ErrorCode.SIGNAL_TYPE_CODE_TAKEN, ErrorCode.CATEGORY_NOT_FOUND, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,
+    ),
+)
 async def create_signal_type(
         request: Request,
         signal_type_data: SignalTypeCreate,
@@ -138,7 +149,11 @@ async def create_signal_type(
         raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
 
 
-@router.get(SignalTypeRoutes.SIGNAL_TYPE_BY_ID.value, response_model=SignalTypeWithCategoryResponse)
+@router.get(
+    SignalTypeRoutes.SIGNAL_TYPE_BY_ID.value,
+    response_model=SignalTypeWithCategoryResponse,
+    responses=problems(ErrorCode.SIGNAL_TYPE_NOT_FOUND, *GUARDED),
+)
 async def get_signal_type(
         signal_type_id: int,
         session: AsyncSession = Depends(get_session),
@@ -158,7 +173,13 @@ async def get_signal_type(
     return SignalTypeWithCategoryResponse.model_validate(signal_type)
 
 
-@router.put(SignalTypeRoutes.SIGNAL_TYPE_BY_ID.value, response_model=SignalType)
+@router.put(
+    SignalTypeRoutes.SIGNAL_TYPE_BY_ID.value,
+    response_model=SignalType,
+    responses=problems(
+        ErrorCode.SIGNAL_TYPE_CODE_ARCHIVED, ErrorCode.SIGNAL_TYPE_CODE_TAKEN, ErrorCode.CATEGORY_NOT_FOUND, ErrorCode.SIGNAL_TYPE_NOT_FOUND, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,
+    ),
+)
 async def update_signal_type(
         request: Request,
         signal_type_id: int,
@@ -239,7 +260,11 @@ async def update_signal_type(
         raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
 
 
-@router.post(SignalTypeRoutes.SIGNAL_TYPE_ARCHIVE.value, response_model=SignalTypeResponse)
+@router.post(
+    SignalTypeRoutes.SIGNAL_TYPE_ARCHIVE.value,
+    response_model=SignalTypeResponse,
+    responses=problems(ErrorCode.SIGNAL_TYPE_HAS_OBSERVATIONS, ErrorCode.SIGNAL_TYPE_NOT_FOUND, *ADMIN),
+)
 async def archive_signal_type(
         request: Request,
         signal_type_id: int,
@@ -279,7 +304,11 @@ async def archive_signal_type(
     return SignalTypeResponse.model_validate(row)
 
 
-@router.post(SignalTypeRoutes.SIGNAL_TYPE_RESTORE.value, response_model=SignalTypeResponse)
+@router.post(
+    SignalTypeRoutes.SIGNAL_TYPE_RESTORE.value,
+    response_model=SignalTypeResponse,
+    responses=problems(ErrorCode.SIGNAL_TYPE_NOT_FOUND, ErrorCode.SIGNAL_TYPE_NOT_ARCHIVED, *ADMIN),
+)
 async def restore_signal_type(
         request: Request,
         signal_type_id: int,

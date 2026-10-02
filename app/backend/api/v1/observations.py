@@ -49,8 +49,9 @@ from app.backend.filters.observation_report_filter import ObservationReportFilte
 from app.backend.services.observation_report_service import ObservationReportService
 from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
 from app.backend.services.api_errors import ApiError, field_problem
-from app.backend.enums.errors import ErrorCode, FieldErrorCode
+from app.backend.enums.errors import AccessErrorCode, ErrorCode, FieldErrorCode
 from app.backend.api.shared.models.response.openapi_docs import file_response, header
+from app.backend.openapi_problems import ADMIN, GUARDED, problems
 
 router = APIRouter(prefix=ObservationRoutes.BASE.value, tags=[ObservationRoutes.tag()])
 
@@ -99,7 +100,13 @@ async def _validate_and_get_tags(session: AsyncSession, tag_ids: List[int], keep
     return tags
 
 
-@router.get(ObservationRoutes.LIST_ALL.value, response_model=List[ObservationWithMedia])
+@router.get(
+    ObservationRoutes.LIST_ALL.value,
+    response_model=List[ObservationWithMedia],
+    responses=problems(
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, AccessErrorCode.POST_ACCESS_DENIED, *GUARDED,
+    ),
+)
 async def list_observations(
         filters: ObservationFilterParams = Depends(),
         session: AsyncSession = Depends(get_session),
@@ -126,7 +133,7 @@ async def list_observations(
     return [ObservationWithMedia.model_validate(obs) for obs in observations]
 
 
-@router.get(ObservationRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo)
+@router.get(ObservationRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo, responses=problems(*GUARDED))
 async def get_observation_filter_schema(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW]))
@@ -136,7 +143,13 @@ async def get_observation_filter_schema(
     return EntitySchemaInfo(**ObservationFilterService.get_schema(is_admin=user_is_admin))
 
 
-@router.post(ObservationRoutes.CREATE.value, response_model=ObservationWithMedia)
+@router.post(
+    ObservationRoutes.CREATE.value,
+    response_model=ObservationWithMedia,
+    responses=problems(
+        ErrorCode.SIGNAL_TYPE_INACTIVE, AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.POST_NOT_FOUND, ErrorCode.SIGNAL_TYPE_NOT_FOUND, ErrorCode.TAGS_NOT_FOUND, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *GUARDED,
+    ),
+)
 async def create_observation(
         request: Request,
         observation_data: ObservationCreate,
@@ -222,7 +235,13 @@ async def create_observation(
         raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
 
 
-@router.put(ObservationRoutes.OBSERVATION_BY_ID.value, response_model=ObservationWithMedia)
+@router.put(
+    ObservationRoutes.OBSERVATION_BY_ID.value,
+    response_model=ObservationWithMedia,
+    responses=problems(
+        ErrorCode.SIGNAL_TYPE_INACTIVE, AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_OWNER, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.SIGNAL_TYPE_NOT_FOUND, ErrorCode.TAGS_NOT_FOUND, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *GUARDED,
+    ),
+)
 async def update_observation(
         request: Request,
         observation_id: int,
@@ -315,7 +334,13 @@ async def update_observation(
         raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
 
 
-@router.post(ObservationRoutes.MARK_DISAPPEARED.value, response_model=MessageResponse)
+@router.post(
+    ObservationRoutes.MARK_DISAPPEARED.value,
+    response_model=MessageResponse,
+    responses=problems(
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_OWNER, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, *GUARDED,
+    ),
+)
 async def mark_observation_disappeared(
         request: Request,
         observation_id: int,
@@ -376,7 +401,7 @@ async def mark_observation_disappeared(
     return MessageResponse(message="Observation marked as disappeared")
 
 
-@router.get(ObservationRoutes.REPORT_TYPES.value, response_model=List[ReportTypeChoice])
+@router.get(ObservationRoutes.REPORT_TYPES.value, response_model=List[ReportTypeChoice], responses=problems(*GUARDED))
 async def get_report_types(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW]))
@@ -391,8 +416,8 @@ async def get_report_types(
 @router.post(
     ObservationRoutes.REPORT.value,
     response_class=Response,
-    responses=file_response("Excel report", ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
-                            {"Content-Disposition": header('attachment; filename="<report>.xlsx"')}),
+    responses={**file_response("Excel report", ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+                            {"Content-Disposition": header('attachment; filename="<report>.xlsx"')}), **problems(AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, AccessErrorCode.POST_ACCESS_DENIED, *ADMIN)},
 )
 async def generate_observation_report(
         params: ObservationReportParams,
@@ -483,7 +508,13 @@ async def _set_observation_archived(
     return await _load_observation_response(session, observation.id)
 
 
-@router.post(ObservationRoutes.OBSERVATION_ARCHIVE.value, response_model=ObservationWithMedia)
+@router.post(
+    ObservationRoutes.OBSERVATION_ARCHIVE.value,
+    response_model=ObservationWithMedia,
+    responses=problems(
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_OWNER, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.OBSERVATION_NOT_ARCHIVED, *GUARDED,
+    ),
+)
 async def archive_observation(
         request: Request,
         observation_id: int,
@@ -498,7 +529,13 @@ async def archive_observation(
     return await _set_observation_archived(request, session, auth, observation_id, archived=True)
 
 
-@router.post(ObservationRoutes.OBSERVATION_RESTORE.value, response_model=ObservationWithMedia)
+@router.post(
+    ObservationRoutes.OBSERVATION_RESTORE.value,
+    response_model=ObservationWithMedia,
+    responses=problems(
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_OWNER, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.OBSERVATION_NOT_ARCHIVED, *GUARDED,
+    ),
+)
 async def restore_observation(
         request: Request,
         observation_id: int,
@@ -536,7 +573,13 @@ async def _audit_frequency(
     )
 
 
-@router.get(ObservationRoutes.OBSERVATION_FREQUENCIES.value, response_model=List[ObservationFrequencyResponse])
+@router.get(
+    ObservationRoutes.OBSERVATION_FREQUENCIES.value,
+    response_model=List[ObservationFrequencyResponse],
+    responses=problems(
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, *GUARDED,
+    ),
+)
 async def list_observation_frequencies(
         observation_id: int,
         params: ObservationFrequencyListParams = Depends(),
@@ -556,7 +599,13 @@ async def list_observation_frequencies(
     return [ObservationFrequencyResponse.model_validate(f) for f in result.all()]
 
 
-@router.post(ObservationRoutes.OBSERVATION_FREQUENCIES.value, response_model=ObservationFrequencyResponse)
+@router.post(
+    ObservationRoutes.OBSERVATION_FREQUENCIES.value,
+    response_model=ObservationFrequencyResponse,
+    responses=problems(
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_OWNER, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, *GUARDED,
+    ),
+)
 async def add_observation_frequency(
         request: Request,
         observation_id: int,
@@ -579,7 +628,13 @@ async def add_observation_frequency(
     return ObservationFrequencyResponse.model_validate(frequency)
 
 
-@router.put(ObservationRoutes.OBSERVATION_FREQUENCY_BY_ID.value, response_model=ObservationFrequencyResponse)
+@router.put(
+    ObservationRoutes.OBSERVATION_FREQUENCY_BY_ID.value,
+    response_model=ObservationFrequencyResponse,
+    responses=problems(
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_OWNER, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.FREQUENCY_NOT_FOUND, ErrorCode.OBSERVATION_NOT_FOUND, *GUARDED,
+    ),
+)
 async def update_observation_frequency(
         request: Request,
         observation_id: int,
@@ -652,7 +707,13 @@ async def _set_frequency_archived(
     return ObservationFrequencyResponse.model_validate(frequency)
 
 
-@router.post(ObservationRoutes.OBSERVATION_FREQUENCY_ARCHIVE.value, response_model=ObservationFrequencyResponse)
+@router.post(
+    ObservationRoutes.OBSERVATION_FREQUENCY_ARCHIVE.value,
+    response_model=ObservationFrequencyResponse,
+    responses=problems(
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_OWNER, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.FREQUENCY_NOT_FOUND, ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.FREQUENCY_NOT_ARCHIVED, ErrorCode.LAST_FREQUENCY_NOT_ARCHIVABLE, *GUARDED,
+    ),
+)
 async def archive_observation_frequency(
         request: Request,
         observation_id: int,
@@ -666,7 +727,13 @@ async def archive_observation_frequency(
     return await _set_frequency_archived(request, session, auth, observation_id, frequency_id, archived=True)
 
 
-@router.post(ObservationRoutes.OBSERVATION_FREQUENCY_RESTORE.value, response_model=ObservationFrequencyResponse)
+@router.post(
+    ObservationRoutes.OBSERVATION_FREQUENCY_RESTORE.value,
+    response_model=ObservationFrequencyResponse,
+    responses=problems(
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_OWNER, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.FREQUENCY_NOT_FOUND, ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.FREQUENCY_NOT_ARCHIVED, ErrorCode.LAST_FREQUENCY_NOT_ARCHIVABLE, *GUARDED,
+    ),
+)
 async def restore_observation_frequency(
         request: Request,
         observation_id: int,

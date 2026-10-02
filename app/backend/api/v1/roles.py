@@ -26,13 +26,18 @@ from app.backend.api.shared.helpers.roles_helper import (
 from app.backend.api.shared.models.request.roles_request import RoleCreate, RoleUpdate
 from app.backend.api.shared.models.response.roles_response import RoleResponse, PermissionResponse
 from app.backend.services.api_errors import ApiError
-from app.backend.enums.errors import ErrorCode
+from app.backend.enums.errors import AccessErrorCode, ErrorCode
+from app.backend.openapi_problems import ADMIN, problems
 
 router = APIRouter(prefix=RoleRoutes.BASE.value, tags=[RoleRoutes.tag()])
 _logger = get_api_logger()
 
 
-@router.get(RoleRoutes.ROOT.value, response_model=List[RoleResponse])
+@router.get(
+    RoleRoutes.ROOT.value,
+    response_model=List[RoleResponse],
+    responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, ErrorCode.ROLES_LIST_FAILED, *ADMIN),
+)
 async def list_roles(
         filters: RoleFilterParams = Depends(),
         session: AsyncSession = Depends(get_session),
@@ -56,7 +61,7 @@ async def list_roles(
         raise ApiError(ErrorCode.ROLES_LIST_FAILED)
 
 
-@router.get(RoleRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo)
+@router.get(RoleRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo, responses=problems(*ADMIN))
 async def get_role_filter_schema(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW], admin=True))
@@ -65,7 +70,14 @@ async def get_role_filter_schema(
     return EntitySchemaInfo(**RoleFilterService.get_schema(is_admin=auth.is_admin))
 
 
-@router.post(RoleRoutes.ROOT.value, response_model=RoleResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    RoleRoutes.ROOT.value,
+    response_model=RoleResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses=problems(
+        ErrorCode.PERMISSION_ID_INVALID, ErrorCode.ROLE_NAME_TAKEN, ErrorCode.PERMISSION_NOT_FOUND, ErrorCode.ROLE_NAME_ARCHIVED, *ADMIN,
+    ),
+)
 async def create_role(
         request: Request,
         role_data: RoleCreate,
@@ -112,7 +124,11 @@ async def create_role(
     return RoleResponse.model_validate(role)
 
 
-@router.get(RoleRoutes.ALL_PERMISSIONS.value, response_model=List[PermissionResponse])
+@router.get(
+    RoleRoutes.ALL_PERMISSIONS.value,
+    response_model=List[PermissionResponse],
+    responses=problems(ErrorCode.PERMISSIONS_LIST_FAILED, *ADMIN),
+)
 async def list_all_permissions(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW], admin=True))
@@ -134,7 +150,11 @@ async def list_all_permissions(
         raise ApiError(ErrorCode.PERMISSIONS_LIST_FAILED)
 
 
-@router.get(RoleRoutes.ROLE_BY_ID.value, response_model=RoleResponse)
+@router.get(
+    RoleRoutes.ROLE_BY_ID.value,
+    response_model=RoleResponse,
+    responses=problems(ErrorCode.ROLE_ID_INVALID, ErrorCode.ROLE_NOT_FOUND, *ADMIN),
+)
 async def get_role(
         role_id: int,
         session: AsyncSession = Depends(get_session),
@@ -146,7 +166,13 @@ async def get_role(
     return RoleResponse.model_validate(role)
 
 
-@router.patch(RoleRoutes.ROLE_BY_ID.value, response_model=RoleResponse)
+@router.patch(
+    RoleRoutes.ROLE_BY_ID.value,
+    response_model=RoleResponse,
+    responses=problems(
+        ErrorCode.PERMISSION_ID_INVALID, ErrorCode.ROLE_ID_INVALID, ErrorCode.ROLE_NAME_TAKEN, ErrorCode.PERMISSION_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.ROLE_NAME_ARCHIVED, *ADMIN,
+    ),
+)
 async def update_role(
         request: Request,
         role_id: int,
@@ -216,7 +242,13 @@ async def update_role(
     return RoleResponse.model_validate(role)
 
 
-@router.post(RoleRoutes.ROLE_ARCHIVE.value, response_model=RoleResponse)
+@router.post(
+    RoleRoutes.ROLE_ARCHIVE.value,
+    response_model=RoleResponse,
+    responses=problems(
+        ErrorCode.ROLE_ID_INVALID, ErrorCode.ROLE_NOT_FOUND, ErrorCode.ADMIN_ROLE_NOT_ARCHIVABLE, *ADMIN,
+    ),
+)
 async def archive_role(
         request: Request,
         role_id: int,
@@ -254,7 +286,11 @@ async def archive_role(
     return RoleResponse.model_validate(role)
 
 
-@router.post(RoleRoutes.ROLE_RESTORE.value, response_model=RoleResponse)
+@router.post(
+    RoleRoutes.ROLE_RESTORE.value,
+    response_model=RoleResponse,
+    responses=problems(ErrorCode.ROLE_ID_INVALID, ErrorCode.ROLE_NOT_FOUND, ErrorCode.ROLE_NOT_ARCHIVED, *ADMIN),
+)
 async def restore_role(
         request: Request,
         role_id: int,
@@ -288,7 +324,13 @@ async def restore_role(
     return RoleResponse.model_validate(role)
 
 
-@router.delete(RoleRoutes.ROLE_BY_ID.value, status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    RoleRoutes.ROLE_BY_ID.value,
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=problems(
+        ErrorCode.ROLE_ID_INVALID, ErrorCode.ROLE_NOT_FOUND, ErrorCode.ADMIN_ROLE_NOT_DELETABLE, ErrorCode.ROLE_DELETE_REQUIRES_ARCHIVE, ErrorCode.ROLE_HAS_ACTIVE_USERS, *ADMIN,
+    ),
+)
 async def delete_role(
         request: Request,
         role_id: int,
@@ -357,7 +399,11 @@ async def delete_role(
 
 # RolePermission Management Routes
 
-@router.get(RoleRoutes.ROLE_PERMISSIONS.value, response_model=List[PermissionResponse])
+@router.get(
+    RoleRoutes.ROLE_PERMISSIONS.value,
+    response_model=List[PermissionResponse],
+    responses=problems(ErrorCode.ROLE_ID_INVALID, ErrorCode.ROLE_NOT_FOUND, *ADMIN),
+)
 async def list_role_permissions(
         role_id: int,
         session: AsyncSession = Depends(get_session),
@@ -386,7 +432,13 @@ async def _role_permissions(session: AsyncSession, role_id: int) -> List[Permiss
     return [PermissionResponse.model_validate(perm) for perm in result.all()]
 
 
-@router.put(RoleRoutes.ROLE_PERMISSION_BY_ID.value, response_model=List[PermissionResponse])
+@router.put(
+    RoleRoutes.ROLE_PERMISSION_BY_ID.value,
+    response_model=List[PermissionResponse],
+    responses=problems(
+        ErrorCode.PERMISSION_ID_INVALID, ErrorCode.ROLE_ID_INVALID, ErrorCode.PERMISSION_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, *ADMIN,
+    ),
+)
 async def add_role_permission(
         request: Request,
         role_id: int,
@@ -423,7 +475,13 @@ async def add_role_permission(
     return await _role_permissions(session, role_id)
 
 
-@router.delete(RoleRoutes.ROLE_PERMISSION_BY_ID.value, response_model=List[PermissionResponse])
+@router.delete(
+    RoleRoutes.ROLE_PERMISSION_BY_ID.value,
+    response_model=List[PermissionResponse],
+    responses=problems(
+        ErrorCode.PERMISSION_ID_INVALID, ErrorCode.ROLE_ID_INVALID, ErrorCode.PERMISSION_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.ROLE_PERMISSION_NOT_ASSIGNED, *ADMIN,
+    ),
+)
 async def remove_role_permission(
         request: Request,
         role_id: int,

@@ -33,7 +33,8 @@ from app.backend.filters.params.media_format_params import MediaFormatFilterPara
 from app.backend.filters.media_format_filter import MediaFormatFilterService
 from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
 from app.backend.services.api_errors import ApiError
-from app.backend.enums.errors import ErrorCode
+from app.backend.enums.errors import AccessErrorCode, ErrorCode
+from app.backend.openapi_problems import ADMIN, GUARDED, problems
 
 router = APIRouter(prefix=MediaFormatRoutes.BASE.value, tags=[MediaFormatRoutes.tag()])
 
@@ -74,7 +75,11 @@ async def _get_format(session: AsyncSession, format_id: int, include_deleted: bo
     return row
 
 
-@router.get(MediaFormatRoutes.LIST_ALL.value, response_model=List[MediaFormatResponse])
+@router.get(
+    MediaFormatRoutes.LIST_ALL.value,
+    response_model=List[MediaFormatResponse],
+    responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
+)
 async def list_media_formats(
         filters: MediaFormatFilterParams = Depends(),
         session: AsyncSession = Depends(get_session),
@@ -87,7 +92,7 @@ async def list_media_formats(
     return [MediaFormatResponse.model_validate(row) for row in rows]
 
 
-@router.get(MediaFormatRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo)
+@router.get(MediaFormatRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo, responses=problems(*GUARDED))
 async def get_media_format_filter_schema(
         auth: AuthContext = Depends(require(all=[Permissions.MEDIA_FORMAT_VIEW]))
 ):
@@ -95,7 +100,13 @@ async def get_media_format_filter_schema(
     return EntitySchemaInfo(**MediaFormatFilterService.get_schema(is_admin=auth.is_admin))
 
 
-@router.post(MediaFormatRoutes.CREATE.value, response_model=MediaFormatResponse)
+@router.post(
+    MediaFormatRoutes.CREATE.value,
+    response_model=MediaFormatResponse,
+    responses=problems(
+        ErrorCode.MEDIA_FORMAT_CONTENT_TYPE_CLASH, ErrorCode.MEDIA_FORMAT_EXISTS, ErrorCode.MEDIA_FORMAT_EXTENSION_CLASH, ErrorCode.MEDIA_FORMAT_SIZE_ABOVE_CEILING, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,
+    ),
+)
 async def create_media_format(
         request: Request,
         data: MediaFormatCreate,
@@ -145,7 +156,11 @@ async def create_media_format(
     return MediaFormatResponse.model_validate(row)
 
 
-@router.get(MediaFormatRoutes.FORMAT_BY_ID.value, response_model=MediaFormatResponse)
+@router.get(
+    MediaFormatRoutes.FORMAT_BY_ID.value,
+    response_model=MediaFormatResponse,
+    responses=problems(ErrorCode.MEDIA_FORMAT_NOT_FOUND, *GUARDED),
+)
 async def get_media_format(
         format_id: int,
         session: AsyncSession = Depends(get_session),
@@ -156,7 +171,13 @@ async def get_media_format(
     return MediaFormatResponse.model_validate(row)
 
 
-@router.put(MediaFormatRoutes.FORMAT_BY_ID.value, response_model=MediaFormatResponse)
+@router.put(
+    MediaFormatRoutes.FORMAT_BY_ID.value,
+    response_model=MediaFormatResponse,
+    responses=problems(
+        ErrorCode.MEDIA_FORMAT_CONTENT_TYPE_CLASH, ErrorCode.MEDIA_FORMAT_CONTENT_TYPE_MISMATCH, ErrorCode.MEDIA_FORMAT_EXISTS, ErrorCode.MEDIA_FORMAT_EXTENSION_CLASH, ErrorCode.MEDIA_FORMAT_NO_FIELDS, ErrorCode.MEDIA_FORMAT_SIZE_ABOVE_CEILING, ErrorCode.MEDIA_FORMAT_NOT_FOUND, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,
+    ),
+)
 async def update_media_format(
         request: Request,
         format_id: int,
@@ -212,7 +233,11 @@ async def update_media_format(
     return MediaFormatResponse.model_validate(row)
 
 
-@router.post(MediaFormatRoutes.FORMAT_ARCHIVE.value, response_model=MediaFormatResponse)
+@router.post(
+    MediaFormatRoutes.FORMAT_ARCHIVE.value,
+    response_model=MediaFormatResponse,
+    responses=problems(ErrorCode.MEDIA_FORMAT_NOT_FOUND, *ADMIN),
+)
 async def archive_media_format(
         request: Request,
         format_id: int,
@@ -239,7 +264,13 @@ async def archive_media_format(
     return MediaFormatResponse.model_validate(row)
 
 
-@router.post(MediaFormatRoutes.FORMAT_RESTORE.value, response_model=MediaFormatResponse)
+@router.post(
+    MediaFormatRoutes.FORMAT_RESTORE.value,
+    response_model=MediaFormatResponse,
+    responses=problems(
+        ErrorCode.MEDIA_FORMAT_CONTENT_TYPE_CLASH, ErrorCode.MEDIA_FORMAT_EXTENSION_CLASH, ErrorCode.MEDIA_FORMAT_NOT_FOUND, ErrorCode.MEDIA_FORMAT_NOT_ARCHIVED, *ADMIN,
+    ),
+)
 async def restore_media_format(
         request: Request,
         format_id: int,

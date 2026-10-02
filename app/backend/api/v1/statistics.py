@@ -31,6 +31,7 @@ from app.backend.api.shared.models.response.statistics_response import (
 )
 from app.backend.services.api_errors import ApiError
 from app.backend.enums.errors import ErrorCode
+from app.backend.openapi_problems import GUARDED, problems
 
 router = APIRouter(prefix=StatisticsRoutes.BASE.value, tags=[StatisticsRoutes.tag()])
 
@@ -42,7 +43,11 @@ async def _scalar(session: AsyncSession, query) -> int:
     return int(value or 0)
 
 
-@router.get(StatisticsRoutes.ROOT.value, response_model=StatisticsResponse)
+@router.get(
+    StatisticsRoutes.ROOT.value,
+    response_model=StatisticsResponse,
+    responses=problems(ErrorCode.PERIOD_REVERSED, *GUARDED),
+)
 async def get_statistics(
         date_from: Optional[datetime] = Query(None, description="Period start, observations by created_at (default: date_to minus 30 days)"),
         date_to: Optional[datetime] = Query(None, description="Period end, observations by created_at (default: now)"),

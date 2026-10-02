@@ -19,13 +19,18 @@ from app.backend.api.shared.helpers.health_helper import (
     ServiceStatusModel
 )
 from app.backend.services.api_errors import ApiError
-from app.backend.enums.errors import ErrorCode
+from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.enums.errors import AccessErrorCode
+from app.backend.openapi_problems import problems
 
 router = APIRouter(tags=[SystemRoutes.tag()])
 
 
-@router.get(SystemRoutes.HEALTH.value, response_model=HealthResponse)
+@router.get(
+    SystemRoutes.HEALTH.value,
+    response_model=HealthResponse,
+    responses=problems(AccessErrorCode.HEALTH_HOST_NOT_ALLOWED, ErrorCode.HEALTH_RATE_LIMITED),
+)
 async def health_check(
     request: Request,
     session: AsyncSession = Depends(get_session)

@@ -14,9 +14,10 @@ from app.backend.config import settings
 from app.backend.utils.logging_config import setup_logging, get_logger, get_main_logger
 from app.backend.database import initialize_database_with_migrations
 from app.backend.error_handlers import register_error_handlers
-from app.backend.openapi_problems import install_openapi
+from app.backend.enums.errors import ErrorCode
+from app.backend.openapi_problems import install_openapi, problems
 from app.backend.api.v1 import V1
-from app.backend.api.system import health, problems
+from app.backend.api.system import health, problems as problem_pages
 from app.backend.enums.routes import AuthRoutes, DocsRoutes, SystemRoutes
 
 # Initialize logging system
@@ -88,6 +89,8 @@ fastapi_app = FastAPI(
     docs_url=DocsRoutes.SWAGGER_UI.value,
     swagger_ui_oauth2_redirect_url=DocsRoutes.SWAGGER_UI_OAUTH2_REDIRECT.value,
     redoc_url=DocsRoutes.REDOC.value,
+    # Any route may fail unexpectedly: 500 internal_error is documented once for all of them
+    responses=problems(ErrorCode.INTERNAL_ERROR),
     # operationId = the endpoint function name (update_post), what client generators name their functions after;
     # tests/test_openapi.py keeps them unique
     generate_unique_id_function=lambda route: route.name,
@@ -110,7 +113,7 @@ fastapi_app.add_middleware(
 fastapi_app.include_router(health.router)
 fastapi_app.include_router(V1.router)
 # Documentation of the problem types (the "type" URI of every error); not part of the OpenAPI schema
-fastapi_app.include_router(problems.router)
+fastapi_app.include_router(problem_pages.router)
 
 # OpenAPI lists, per route and status, every problem type the route can answer (openapi_problems.py)
 install_openapi(fastapi_app)

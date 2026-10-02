@@ -15,7 +15,9 @@ from typing import ClassVar, Dict, Set
 from fastapi import APIRouter, Request
 from fastapi.routing import APIRoute
 
+from app.backend.enums.errors import ErrorCode
 from app.backend.enums.routes import APIVersionRoutes
+from app.backend.openapi_problems import AUTHENTICATED, problems
 
 
 class PublishedVersion:
@@ -27,7 +29,9 @@ class PublishedVersion:
         if version.value in self.published:
             raise ValueError(f"{version.value} is already published")
         self.version = version
-        self.router = APIRouter(prefix=version.value)
+        # Every route of a version is behind require() (login and refresh declare their own 401) and may
+        # answer validation_error; 500 internal_error comes from the app
+        self.router = APIRouter(prefix=version.value, responses=problems(*AUTHENTICATED, ErrorCode.VALIDATION_ERROR))
         for module in modules:
             self.router.include_router(module.router)
         self.templates: Set[str] = self._check_routes()

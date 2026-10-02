@@ -56,6 +56,8 @@ from app.backend.api.shared.models.response.search_response import (
     EntitySchemaInfo,
     FilterParamInfo,
 )
+from app.backend.openapi_problems import ADMIN, GUARDED, problems
+from app.backend.enums.errors import AccessErrorCode
 
 
 router = APIRouter(prefix=SearchRoutes.BASE.value, tags=[SearchRoutes.tag()])
@@ -120,7 +122,10 @@ async def log_search(
     SearchRoutes.OBSERVATIONS.value,
     response_model=SearchResponse,
     summary="Search observations",
-    description="Search observations with typed filters. All params visible in docs."
+    description="Search observations with typed filters. All params visible in docs.",
+    responses=problems(
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, AccessErrorCode.POST_ACCESS_DENIED, *GUARDED,
+    ),
 )
 async def search_observations(
     request: Request,
@@ -155,7 +160,10 @@ async def search_observations(
     SearchRoutes.USERS.value,
     response_model=SearchResponse,
     summary="Search users",
-    description="Search users with typed filters."
+    description="Search users with typed filters.",
+    responses=problems(
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, AccessErrorCode.POST_ACCESS_DENIED, *GUARDED,
+    ),
 )
 async def search_users(
     request: Request,
@@ -187,7 +195,8 @@ async def search_users(
     SearchRoutes.POSTS.value,
     response_model=SearchResponse,
     summary="Search posts",
-    description="Search posts with typed filters."
+    description="Search posts with typed filters.",
+    responses=problems(*GUARDED),
 )
 async def search_posts(
     request: Request,
@@ -218,7 +227,8 @@ async def search_posts(
     SearchRoutes.ROLES.value,
     response_model=SearchResponse,
     summary="Search roles",
-    description="Search roles with typed filters."
+    description="Search roles with typed filters.",
+    responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *ADMIN),
 )
 async def search_roles(
     request: Request,
@@ -248,7 +258,8 @@ async def search_roles(
     SearchRoutes.CATEGORIES.value,
     response_model=SearchResponse,
     summary="Search categories",
-    description="Search categories with typed filters."
+    description="Search categories with typed filters.",
+    responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
 )
 async def search_categories(
     request: Request,
@@ -278,7 +289,8 @@ async def search_categories(
     SearchRoutes.SIGNAL_TYPES.value,
     response_model=SearchResponse,
     summary="Search signal types",
-    description="Search signal types with typed filters."
+    description="Search signal types with typed filters.",
+    responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
 )
 async def search_signal_types(
     request: Request,
@@ -308,7 +320,8 @@ async def search_signal_types(
     SearchRoutes.TAGS.value,
     response_model=SearchResponse,
     summary="Search tags",
-    description="Search tags with typed filters."
+    description="Search tags with typed filters.",
+    responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
 )
 async def search_tags(
     request: Request,
@@ -338,7 +351,8 @@ async def search_tags(
     SearchRoutes.MEDIA.value,
     response_model=SearchResponse,
     summary="Search media files",
-    description="Search media files with typed filters."
+    description="Search media files with typed filters.",
+    responses=problems(*GUARDED),
 )
 async def search_media(
     request: Request,
@@ -395,7 +409,8 @@ async def get_search_filter_schema(
     SearchRoutes.MEDIA_FORMATS.value,
     response_model=SearchResponse,
     summary="Search media formats",
-    description="Search accepted upload formats with typed filters."
+    description="Search accepted upload formats with typed filters.",
+    responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
 )
 async def search_media_formats(
     request: Request,

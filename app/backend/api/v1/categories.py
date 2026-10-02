@@ -21,12 +21,17 @@ from app.backend.filters.params.category_params import CategoryFilterParams
 from app.backend.filters.category_filter import CategoryFilterService
 from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
 from app.backend.services.api_errors import ApiError
-from app.backend.enums.errors import ErrorCode
+from app.backend.enums.errors import AccessErrorCode, ErrorCode
+from app.backend.openapi_problems import ADMIN, GUARDED, problems
 
 router = APIRouter(prefix=CategoryRoutes.BASE.value, tags=[CategoryRoutes.tag()])
 
 
-@router.get(CategoryRoutes.LIST_ALL.value, response_model=List[CategoryResponse])
+@router.get(
+    CategoryRoutes.LIST_ALL.value,
+    response_model=List[CategoryResponse],
+    responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
+)
 async def list_categories(
         filters: CategoryFilterParams = Depends(),
         session: AsyncSession = Depends(get_session),
@@ -41,7 +46,7 @@ async def list_categories(
     return [CategoryResponse.model_validate(cat) for cat in categories]
 
 
-@router.get(CategoryRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo)
+@router.get(CategoryRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo, responses=problems(*GUARDED))
 async def get_category_filter_schema(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW]))
@@ -50,7 +55,11 @@ async def get_category_filter_schema(
     return EntitySchemaInfo(**CategoryFilterService.get_schema(is_admin=auth.is_admin))
 
 
-@router.post(CategoryRoutes.CREATE.value, response_model=Category)
+@router.post(
+    CategoryRoutes.CREATE.value,
+    response_model=Category,
+    responses=problems(ErrorCode.CATEGORY_NAME_TAKEN, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN),
+)
 async def create_category(
         request: Request,
         category_data: CategoryCreate,
@@ -110,7 +119,11 @@ async def create_category(
         raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
 
 
-@router.get(CategoryRoutes.CATEGORY_BY_ID.value, response_model=CategoryResponse)
+@router.get(
+    CategoryRoutes.CATEGORY_BY_ID.value,
+    response_model=CategoryResponse,
+    responses=problems(ErrorCode.CATEGORY_NOT_FOUND, *GUARDED),
+)
 async def get_category(
         category_id: int,
         session: AsyncSession = Depends(get_session),
@@ -130,7 +143,13 @@ async def get_category(
     return CategoryResponse.model_validate(category)
 
 
-@router.put(CategoryRoutes.CATEGORY_BY_ID.value, response_model=Category)
+@router.put(
+    CategoryRoutes.CATEGORY_BY_ID.value,
+    response_model=Category,
+    responses=problems(
+        ErrorCode.CATEGORY_NAME_ARCHIVED, ErrorCode.CATEGORY_NAME_TAKEN, ErrorCode.CATEGORY_NOT_FOUND, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,
+    ),
+)
 async def update_category(
         request: Request,
         category_id: int,
@@ -197,7 +216,11 @@ async def update_category(
         raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
 
 
-@router.post(CategoryRoutes.CATEGORY_ARCHIVE.value, response_model=CategoryResponse)
+@router.post(
+    CategoryRoutes.CATEGORY_ARCHIVE.value,
+    response_model=CategoryResponse,
+    responses=problems(ErrorCode.CATEGORY_NOT_FOUND, *ADMIN),
+)
 async def archive_category(
         request: Request,
         category_id: int,
@@ -231,7 +254,11 @@ async def archive_category(
     return CategoryResponse.model_validate(row)
 
 
-@router.post(CategoryRoutes.CATEGORY_RESTORE.value, response_model=CategoryResponse)
+@router.post(
+    CategoryRoutes.CATEGORY_RESTORE.value,
+    response_model=CategoryResponse,
+    responses=problems(ErrorCode.CATEGORY_NOT_FOUND, ErrorCode.CATEGORY_NOT_ARCHIVED, *ADMIN),
+)
 async def restore_category(
         request: Request,
         category_id: int,
@@ -266,7 +293,11 @@ async def restore_category(
     return CategoryResponse.model_validate(row)
 
 
-@router.get(CategoryRoutes.CATEGORY_SIGNAL_TYPES.value, response_model=List[SignalTypeResponse])
+@router.get(
+    CategoryRoutes.CATEGORY_SIGNAL_TYPES.value,
+    response_model=List[SignalTypeResponse],
+    responses=problems(ErrorCode.CATEGORY_NOT_FOUND, *GUARDED),
+)
 async def list_category_signal_types(
         category_id: int,
         skip: int = 0,

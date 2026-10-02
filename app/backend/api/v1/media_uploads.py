@@ -37,8 +37,9 @@ from app.backend.services.media.manager import get_media_manager
 from app.backend.services.permissions import Require, require
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.services.api_errors import ApiError, CodedError
-from app.backend.enums.errors import ErrorCode
+from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.api.shared.models.response.openapi_docs import UPLOAD_SESSION_HEADERS, empty_response, header, with_headers
+from app.backend.openapi_problems import GUARDED, problems
 
 router = APIRouter(prefix=MediaRoutes.BASE.value, tags=[MediaRoutes.tag()])
 _logger = get_api_logger()
@@ -118,7 +119,7 @@ async def _require_open(session: AsyncSession, row: UploadSession) -> UploadSess
 # Routes
 # ---------------------------------------------------------------------------
 
-@router.get(MediaRoutes.UPLOADS.value, response_model=List[UploadSessionResponse])
+@router.get(MediaRoutes.UPLOADS.value, response_model=List[UploadSessionResponse], responses=problems(*GUARDED))
 async def list_upload_sessions(
     status: Optional[str] = Query(None, description="open, completed, aborted or expired; default all"),
     observation_id: Optional[int] = Query(None),
@@ -144,7 +145,7 @@ async def list_upload_sessions(
     MediaRoutes.UPLOADS.value,
     response_model=UploadSessionResponse,
     status_code=fapi_status.HTTP_201_CREATED,
-    responses=with_headers(201, "Session open", {**UPLOAD_SESSION_HEADERS, "Location": header("URL of the session: send chunks there")}),
+    responses={**with_headers(201, "Session open", {**UPLOAD_SESSION_HEADERS, "Location": header("URL of the session: send chunks there")}), **problems(AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_FILE_TOO_LARGE, ErrorCode.MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, ErrorCode.MEDIA_TYPE_UNKNOWN, *GUARDED)},
 )
 async def create_upload_session(
     request: Request,
@@ -186,7 +187,7 @@ async def create_upload_session(
 @router.get(
     MediaRoutes.UPLOAD_SESSION.value,
     response_model=UploadSessionResponse,
-    responses=with_headers(200, "State of the session", UPLOAD_SESSION_HEADERS),
+    responses={**with_headers(200, "State of the session", UPLOAD_SESSION_HEADERS), **problems(AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, AccessErrorCode.UPLOAD_SESSION_NOT_OWNER, ErrorCode.UPLOAD_SESSION_NOT_FOUND, *GUARDED)},
 )
 async def get_upload_session(
     upload_id: str,
@@ -219,7 +220,7 @@ async def head_upload_session(
     MediaRoutes.UPLOAD_SESSION.value,
     status_code=fapi_status.HTTP_204_NO_CONTENT,
     response_class=Response,
-    responses=empty_response(204, "Chunk stored; Upload-Offset is the new offset", UPLOAD_SESSION_HEADERS),
+    responses={**empty_response(204, "Chunk stored; Upload-Offset is the new offset", UPLOAD_SESSION_HEADERS), **problems(ErrorCode.UPLOAD_CHUNK_EMPTY, ErrorCode.UPLOAD_CHUNK_NOT_STORED, ErrorCode.UPLOAD_OFFSET_REQUIRED, AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, AccessErrorCode.UPLOAD_SESSION_NOT_OWNER, ErrorCode.UPLOAD_SESSION_NOT_FOUND, ErrorCode.UPLOAD_OFFSET_MISMATCH, ErrorCode.UPLOAD_WRITER_BUSY, ErrorCode.UPLOAD_SESSION_CLOSED, ErrorCode.UPLOAD_CHUNK_OVERRUN, ErrorCode.UPLOAD_CHUNK_TOO_LARGE, ErrorCode.UPLOAD_CHUNK_CONTENT_TYPE, *GUARDED)},
 )
 async def append_upload_chunk(
     request: Request,
@@ -283,7 +284,13 @@ async def append_upload_chunk(
     return Response(status_code=fapi_status.HTTP_204_NO_CONTENT, headers={**_session_headers(row), "Upload-Offset": str(new_offset)})
 
 
-@router.post(MediaRoutes.UPLOAD_SESSION_COMPLETE.value, response_model=UploadResultResponse)
+@router.post(
+    MediaRoutes.UPLOAD_SESSION_COMPLETE.value,
+    response_model=UploadResultResponse,
+    responses=problems(
+        ErrorCode.MEDIA_CONTENT_INVALID, ErrorCode.MEDIA_FILE_EMPTY, ErrorCode.MEDIA_UPLOAD_SOURCE_MISSING, AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, AccessErrorCode.UPLOAD_SESSION_NOT_OWNER, ErrorCode.UPLOAD_SESSION_NOT_FOUND, ErrorCode.UPLOAD_INCOMPLETE, ErrorCode.UPLOAD_BYTES_MISSING, ErrorCode.UPLOAD_SESSION_CLOSED, ErrorCode.MEDIA_FILE_TOO_LARGE, ErrorCode.MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED, ErrorCode.MEDIA_EXTENSION_DANGEROUS, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, ErrorCode.MEDIA_TYPE_UNKNOWN, ErrorCode.UPLOAD_CHECKSUM_MISMATCH, ErrorCode.MEDIA_STORE_FAILED, ErrorCode.UPLOAD_COMPLETE_FAILED, ErrorCode.MEDIA_UPLOADS_BUSY, *GUARDED,
+    ),
+)
 async def complete_upload_session(
     request: Request,
     upload_id: str,
@@ -355,7 +362,13 @@ async def complete_upload_session(
     return await finish_upload(request, session, auth, media_file_id, row.observation_id, row.original_filename, background_tasks, "resumable", upload_id=row.id)
 
 
-@router.post(MediaRoutes.UPLOAD_SESSION_ABORT.value, response_model=UploadSessionResponse)
+@router.post(
+    MediaRoutes.UPLOAD_SESSION_ABORT.value,
+    response_model=UploadSessionResponse,
+    responses=problems(
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, AccessErrorCode.UPLOAD_SESSION_NOT_OWNER, ErrorCode.UPLOAD_SESSION_NOT_FOUND, ErrorCode.UPLOAD_SESSION_COMPLETED, *GUARDED,
+    ),
+)
 async def abort_upload_session(
     request: Request,
     upload_id: str,

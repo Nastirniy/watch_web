@@ -21,12 +21,17 @@ from app.backend.filters.params.tag_params import TagFilterParams
 from app.backend.filters.tag_filter import TagFilterService
 from app.backend.api.shared.models.response.search_response import EntitySchemaInfo
 from app.backend.services.api_errors import ApiError
-from app.backend.enums.errors import ErrorCode
+from app.backend.enums.errors import AccessErrorCode, ErrorCode
+from app.backend.openapi_problems import ADMIN, GUARDED, problems
 
 router = APIRouter(prefix=TagRoutes.BASE.value, tags=[TagRoutes.tag()])
 
 
-@router.get(TagRoutes.LIST_ALL.value, response_model=List[TagResponse])
+@router.get(
+    TagRoutes.LIST_ALL.value,
+    response_model=List[TagResponse],
+    responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
+)
 async def list_tags(
         filters: TagFilterParams = Depends(),
         session: AsyncSession = Depends(get_session),
@@ -41,7 +46,7 @@ async def list_tags(
     return [TagResponse.model_validate(t) for t in tags]
 
 
-@router.get(TagRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo)
+@router.get(TagRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo, responses=problems(*GUARDED))
 async def get_tag_filter_schema(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW]))
@@ -50,7 +55,11 @@ async def get_tag_filter_schema(
     return EntitySchemaInfo(**TagFilterService.get_schema(is_admin=auth.is_admin))
 
 
-@router.post(TagRoutes.CREATE.value, response_model=TagResponse)
+@router.post(
+    TagRoutes.CREATE.value,
+    response_model=TagResponse,
+    responses=problems(ErrorCode.TAG_NAME_TAKEN, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN),
+)
 async def create_tag(
         request: Request,
         tag_data: TagCreate,
@@ -107,7 +116,11 @@ async def create_tag(
         raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
 
 
-@router.get(TagRoutes.TAG_BY_ID.value, response_model=TagResponse)
+@router.get(
+    TagRoutes.TAG_BY_ID.value,
+    response_model=TagResponse,
+    responses=problems(ErrorCode.TAG_NOT_FOUND, *GUARDED),
+)
 async def get_tag(
         tag_id: int,
         session: AsyncSession = Depends(get_session),
@@ -127,7 +140,13 @@ async def get_tag(
     return TagResponse.model_validate(tag)
 
 
-@router.put(TagRoutes.TAG_BY_ID.value, response_model=TagResponse)
+@router.put(
+    TagRoutes.TAG_BY_ID.value,
+    response_model=TagResponse,
+    responses=problems(
+        ErrorCode.TAG_NAME_ARCHIVED, ErrorCode.TAG_NAME_TAKEN, ErrorCode.TAG_NOT_FOUND, ErrorCode.DATABASE_CONSTRAINT_VIOLATION, *ADMIN,
+    ),
+)
 async def update_tag(
         request: Request,
         tag_id: int,
@@ -194,7 +213,11 @@ async def update_tag(
         raise ApiError(ErrorCode.DATABASE_CONSTRAINT_VIOLATION)
 
 
-@router.post(TagRoutes.TAG_ARCHIVE.value, response_model=TagResponse)
+@router.post(
+    TagRoutes.TAG_ARCHIVE.value,
+    response_model=TagResponse,
+    responses=problems(ErrorCode.TAG_NOT_FOUND, *ADMIN),
+)
 async def archive_tag(
         request: Request,
         tag_id: int,
@@ -228,7 +251,11 @@ async def archive_tag(
     return TagResponse.model_validate(row)
 
 
-@router.post(TagRoutes.TAG_RESTORE.value, response_model=TagResponse)
+@router.post(
+    TagRoutes.TAG_RESTORE.value,
+    response_model=TagResponse,
+    responses=problems(ErrorCode.TAG_NOT_FOUND, ErrorCode.TAG_NOT_ARCHIVED, *ADMIN),
+)
 async def restore_tag(
         request: Request,
         tag_id: int,

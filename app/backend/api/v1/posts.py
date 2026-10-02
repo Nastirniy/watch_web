@@ -22,7 +22,8 @@ from app.backend.api.shared.models.response.search_response import EntitySchemaI
 from app.backend.api.shared.models.response.posts_response import PostResponse, PostObservationStatsResponse, post_to_response
 from app.backend.services.observation_counts import post_observation_stats
 from app.backend.services.api_errors import ApiError
-from app.backend.enums.errors import ErrorCode
+from app.backend.enums.errors import AccessErrorCode, ErrorCode
+from app.backend.openapi_problems import ADMIN, GUARDED, problems
 
 router = APIRouter(prefix=PostRoutes.BASE.value, tags=[PostRoutes.tag()])
 
@@ -44,7 +45,7 @@ async def _commit_post(session: AsyncSession) -> None:
         raise ApiError(ErrorCode.POST_CODE_TAKEN)
 
 
-@router.get(PostRoutes.ROOT.value, response_model=List[PostResponse])
+@router.get(PostRoutes.ROOT.value, response_model=List[PostResponse], responses=problems(*GUARDED))
 async def list_posts(
         filters: PostFilterParams = Depends(),
         session: AsyncSession = Depends(get_session),
@@ -62,7 +63,7 @@ async def list_posts(
     return [post_to_response(post) for post in result.all()]
 
 
-@router.post(PostRoutes.ROOT.value, response_model=PostResponse)
+@router.post(PostRoutes.ROOT.value, response_model=PostResponse, responses=problems(ErrorCode.POST_CODE_TAKEN, *ADMIN))
 async def create_post(
         request: Request,
         post_data: PostCreate,
@@ -97,7 +98,7 @@ async def create_post(
     return post_to_response(post)
 
 
-@router.get(PostRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo)
+@router.get(PostRoutes.FILTER_SCHEMA.value, response_model=EntitySchemaInfo, responses=problems(*GUARDED))
 async def get_post_filter_schema(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW]))
@@ -106,7 +107,13 @@ async def get_post_filter_schema(
     return EntitySchemaInfo(**PostFilterService.get_schema(is_admin=auth.is_admin))
 
 
-@router.get(PostRoutes.POST_BY_ID.value, response_model=PostResponse)
+@router.get(
+    PostRoutes.POST_BY_ID.value,
+    response_model=PostResponse,
+    responses=problems(
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.POST_NOT_FOUND, *GUARDED,
+    ),
+)
 async def get_post(
         post_id: int,
         session: AsyncSession = Depends(get_session),
@@ -132,7 +139,13 @@ async def get_post(
     return post_to_response(post)
 
 
-@router.get(PostRoutes.POST_OBSERVATION_STATS.value, response_model=PostObservationStatsResponse)
+@router.get(
+    PostRoutes.POST_OBSERVATION_STATS.value,
+    response_model=PostObservationStatsResponse,
+    responses=problems(
+        ErrorCode.PERIOD_REVERSED, ErrorCode.PERIOD_TOO_LONG, ErrorCode.UNKNOWN_TIME_ZONE, AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.POST_NOT_FOUND, *GUARDED,
+    ),
+)
 async def get_post_observation_stats(
         post_id: int,
         date_from: Optional[datetime] = Query(None, description="Period start, created_at (default: date_to minus 30 days; naive values are UTC)"),
@@ -158,7 +171,11 @@ async def get_post_observation_stats(
     )
 
 
-@router.put(PostRoutes.POST_BY_ID.value, response_model=PostResponse)
+@router.put(
+    PostRoutes.POST_BY_ID.value,
+    response_model=PostResponse,
+    responses=problems(ErrorCode.POST_CODE_TAKEN, ErrorCode.POST_NOT_FOUND, *ADMIN),
+)
 async def update_post(
         request: Request,
         post_id: int,

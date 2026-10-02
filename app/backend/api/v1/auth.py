@@ -11,7 +11,7 @@ from app.backend.services.auth_context import AuthContext, load_auth_context
 from app.backend.services.permissions import Require
 from app.backend.services.route_access import route_access_map, routes_allowed_for
 from app.backend.api.shared.helpers.auth_helper import build_user_info, build_login_response
-from app.backend.enums.errors import RequiredPermissions
+from app.backend.enums.errors import AuthErrorCode, ErrorCode, RequiredPermissions
 from app.backend.models.user import User, UserSession
 from app.backend.enums.routes import AuthRoutes
 from app.backend.api.versioning import PublishedVersion, request_version
@@ -38,12 +38,19 @@ from app.backend.api.shared.models.response.auth_response import (
 )
 from app.backend.services.api_errors import ApiError
 from app.backend.enums.errors import ErrorCode
+from app.backend.openapi_problems import problems
 
 router = APIRouter(prefix=AuthRoutes.BASE.value, tags=[AuthRoutes.tag()])
 _logger = get_auth_logger()
 
 
-@router.post(AuthRoutes.LOGIN.value, response_model=LoginResponse)
+@router.post(
+    AuthRoutes.LOGIN.value,
+    response_model=LoginResponse,
+    responses=problems(
+        ErrorCode.LOGIN_DATA_REQUIRED, AuthErrorCode.ACCOUNT_DEACTIVATED, AuthErrorCode.ACCOUNT_DELETED, AuthErrorCode.CERTIFICATE_DATA_MISSING, AuthErrorCode.CERTIFICATE_NOT_RECOGNIZED, AuthErrorCode.CERTIFICATE_VERIFICATION_FAILED, ErrorCode.AUTHENTICATION_UNAVAILABLE,
+    ),
+)
 async def login(
         request: Request,
         login_data: Optional[LoginRequest] = None,
@@ -143,7 +150,13 @@ async def login(
 
 
 
-@router.post(AuthRoutes.REFRESH.value, response_model=LoginResponse)
+@router.post(
+    AuthRoutes.REFRESH.value,
+    response_model=LoginResponse,
+    responses=problems(
+        AuthErrorCode.ACCOUNT_DEACTIVATED, AuthErrorCode.ACCOUNT_DELETED, AuthErrorCode.ACCOUNT_NOT_FOUND, AuthErrorCode.INVALID_REFRESH_TOKEN, AuthErrorCode.SESSION_EXPIRED, ErrorCode.TOKEN_REFRESH_FAILED,
+    ),
+)
 async def refresh_token(
         request: Request,
         refresh_request: RefreshRequest,
@@ -213,7 +226,11 @@ async def refresh_token(
         raise ApiError(ErrorCode.TOKEN_REFRESH_FAILED)
 
 
-@router.post(AuthRoutes.LOGOUT.value, response_model=LogoutResponse)
+@router.post(
+    AuthRoutes.LOGOUT.value,
+    response_model=LogoutResponse,
+    responses=problems(ErrorCode.NO_ACTIVE_SESSION, ErrorCode.SESSION_ALREADY_INVALIDATED, ErrorCode.LOGOUT_FAILED),
+)
 async def logout(
         request: Request,
         logout_request: LogoutRequest,
@@ -261,7 +278,11 @@ async def get_current_user_info(
     return build_user_info(auth)
 
 
-@router.get(AuthRoutes.SESSIONS.value, response_model=UserSessionsResponse)
+@router.get(
+    AuthRoutes.SESSIONS.value,
+    response_model=UserSessionsResponse,
+    responses=problems(ErrorCode.SESSIONS_LIST_FAILED),
+)
 async def get_user_sessions(
         auth: AuthContext = Depends(require()),
         session: AsyncSession = Depends(get_session)

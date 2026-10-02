@@ -14,7 +14,7 @@ import ast
 import inspect
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Literal, Optional, Set, Tuple
+from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional, Set, Tuple, Union, get_args, get_origin
 
 from fastapi import FastAPI
 from fastapi.dependencies.utils import get_flat_dependant
@@ -23,7 +23,7 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from app.backend.enums.errors import (
-    PROBLEM_ENUMS, AccessErrorCode, ErrorCode, FieldErrorCode, ProblemType, RequiredPermissions, UserRef,
+    PROBLEM_ENUMS, AccessErrorCode, AuthErrorCode, ErrorCode, FieldErrorCode, ProblemType, RequiredPermissions, UserRef,
 )
 from app.backend.enums.routes import APIVersionRoutes
 from app.backend.services.api_errors import PROBLEM_JSON, is_optional
@@ -250,6 +250,57 @@ def _problem_model(code: ProblemType) -> type:
 @lru_cache(maxsize=None)
 def problem_models() -> Dict[ProblemType, type]:
     return {code: _problem_model(code) for cls in PROBLEM_ENUMS for code in cls}
+
+
+# ============================================================ declaring the problems of a route
+
+# 401 of every route behind require(): the version routers declare it (login and refresh declare their own)
+AUTHENTICATED = (AuthErrorCode.CREDENTIALS_REQUIRED, AuthErrorCode.INVALID_TOKEN, AuthErrorCode.SESSION_EXPIRED,
+                 AuthErrorCode.ACCOUNT_NOT_FOUND, AuthErrorCode.ACCOUNT_DEACTIVATED, AuthErrorCode.ACCOUNT_DELETED)
+# 403 of require(all=[...]) and of require(all=[...], admin=True)
+GUARDED = (AccessErrorCode.PERMISSION_DENIED,)
+ADMIN = (AccessErrorCode.PERMISSION_DENIED, AccessErrorCode.ADMIN_REQUIRED)
+
+# FastAPI merges responses per status by replacement (app, version router, route): a route that declares
+# its own 500 or 422 keeps the generic member of that status
+_KEPT_IN_STATUS = {500: ErrorCode.INTERNAL_ERROR, 422: ErrorCode.VALIDATION_ERROR}
+
+
+def problems(*codes: ProblemType) -> Dict[int, Dict[str, Any]]:
+    """`responses=` of a route, app or router: the problem types it answers, grouped by status.
+
+        @router.put(PostRoutes.POST_BY_ID.value, response_model=PostResponse,
+                    responses=problems(ErrorCode.POST_NOT_FOUND, ErrorCode.POST_CODE_TAKEN, *ADMIN))
+
+    One code per status is its model, several are a union discriminated by "code"; FastAPI registers the
+    component schemas itself. Combine with success helpers: responses={**file_response(...), **problems(...)}."""
+    by_status: Dict[int, set] = {}
+    for code in codes:
+        by_status.setdefault(code.status, set()).add(code)
+    for status, kept in _KEPT_IN_STATUS.items():
+        if status in by_status:
+            by_status[status].add(kept)
+    responses: Dict[int, Dict[str, Any]] = {}
+    for status in sorted(by_status):
+        group = sorted(by_status[status], key=lambda c: c.value)
+        models = tuple(problem_models()[code] for code in group)
+        model = models[0] if len(models) == 1 else Annotated[Union[models], Field(discriminator="code")]
+        responses[status] = {"description": "; ".join(f"`{code.value}`: {code.title}" for code in group), "model": model}
+    return responses
+
+
+def declared_problems(responses: Dict[Any, Dict[str, Any]]) -> Set[ProblemType]:
+    """The problem types in a `responses=` dict built by problems() (route.responses holds the merged one)"""
+    by_model = {model: code for code, model in problem_models().items()}
+    found: Set[ProblemType] = set()
+    for response in responses.values():
+        model = response.get("model")
+        if model is None:
+            continue
+        for candidate in get_args(get_args(model)[0]) if get_origin(model) is Annotated else (model,):
+            if candidate in by_model:
+                found.add(by_model[candidate])
+    return found
 
 
 def _example(code: ProblemType) -> Dict[str, Any]:
