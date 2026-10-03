@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional
-from fastapi import Depends
+from fastapi import Depends, Header
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -12,8 +12,7 @@ from app.backend.enums.errors import AuthErrorCode
 from app.backend.services.auth import AuthService
 from app.backend.services.auth_context import AuthContext, load_auth_context
 from app.backend.services.presence import should_touch
-from app.backend.services.sessions import live_session
-from datetime import datetime, timezone
+from app.backend.services.sessions import certificate_matches, live_session, touch
 from app.backend.services.api_errors import ApiError
 
 security = HTTPBearer(auto_error=False)
@@ -43,7 +42,9 @@ async def get_token_claims(credentials: Optional[HTTPAuthorizationCredentials] =
 
 async def get_current_user(
         claims: TokenClaims = Depends(get_token_claims),
-        session: AsyncSession = Depends(get_session)
+        session: AsyncSession = Depends(get_session),
+        # Set by nginx from the verified client certificate (nginx-proxy.conf), never by the client
+        x_ssl_client_fingerprint: Optional[str] = Header(None, include_in_schema=False),
 ) -> User:
     """Get current authenticated user"""
     user_id = claims.user_id
@@ -67,14 +68,18 @@ async def get_current_user(
         logger.warning(f"Deactivated user attempted to authenticate: user_id={user_id}, username={user.username}, sessions ended={ended}")
         raise ApiError(AuthErrorCode.ACCOUNT_DEACTIVATED)
 
-    # The session of the token must be live: not ended, not past its absolute end or idle timeout
+    # The session of the token must be live (not ended, used within the idle timeout) and, when it was opened
+    # with a client certificate, this request must present the same certificate
     if session_id:
         user_session = await live_session(session, session_id, int(user_id))
         if user_session is None:
             raise ApiError(AuthErrorCode.SESSION_EXPIRED)
+        if not await certificate_matches(user_session, x_ssl_client_fingerprint):
+            logger.warning(f"Token presented with another client certificate: session_id={session_id}, user_id={user_id}")
+            raise ApiError(AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH)
         if should_touch(user_session.last_activity):
-            # Presence and the idle timeout: refresh last_activity at most once per touch interval
-            user_session.last_activity = datetime.now(timezone.utc)
+            # Activity moves the end of the session (and feeds presence), at most once per touch interval
+            touch(user_session)
             session.add(user_session)
             await session.commit()
 

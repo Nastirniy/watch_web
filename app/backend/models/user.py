@@ -55,7 +55,11 @@ class UserSession(SQLModel, table=True):
     ip_address: Optional[str] = Field(default=None, max_length=45)
     user_agent: Optional[str] = Field(default=None)
     last_activity: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
-    expires_at: datetime = Field(index=True)  # absolute end: login + security.session_max_hours
+    # When the session ends unless a request comes: every request moves it (services/sessions.touch)
+    expires_at: datetime = Field(index=True)
+    # SHA-256 of the client certificate fingerprint the session was opened with (production login through nginx);
+    # every request must present the same certificate. Empty for development logins.
+    certificate_fingerprint_hash: Optional[str] = Field(default=None, max_length=64)
     # Set when the server knows the session ended. The state (online / idle / ended) is computed when the row is
     # read (services/sessions.py): a session past expires_at or its idle timeout is ended even before these are set.
     ended_at: Optional[datetime] = Field(default=None, index=True)

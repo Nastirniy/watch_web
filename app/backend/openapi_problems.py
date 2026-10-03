@@ -137,7 +137,8 @@ def problem_models() -> Dict[ProblemType, type]:
 
 # 401 of every route behind require(): the version routers declare it (login and refresh declare their own)
 AUTHENTICATED = (AuthErrorCode.CREDENTIALS_REQUIRED, AuthErrorCode.INVALID_TOKEN, AuthErrorCode.SESSION_EXPIRED,
-                 AuthErrorCode.ACCOUNT_NOT_FOUND, AuthErrorCode.ACCOUNT_DEACTIVATED, AuthErrorCode.ACCOUNT_DELETED)
+                 AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH, AuthErrorCode.ACCOUNT_NOT_FOUND,
+                 AuthErrorCode.ACCOUNT_DEACTIVATED, AuthErrorCode.ACCOUNT_DELETED)
 # 403 of require(all=[...]) and of require(all=[...], admin=True)
 GUARDED = (AccessErrorCode.PERMISSION_DENIED,)
 ADMIN = (AccessErrorCode.PERMISSION_DENIED, AccessErrorCode.ADMIN_REQUIRED)

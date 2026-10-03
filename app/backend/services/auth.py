@@ -62,9 +62,9 @@ class AuthService:
 
     @staticmethod
     def create_refresh_token(user_id: int, session_id: Optional[str] = None, expires_at: Optional[datetime] = None) -> str:
-        """Create JWT refresh token; it expires with its session (expires_at, the absolute end)"""
+        """Create JWT refresh token (session_tokens sets expires_at; the session is checked at every refresh anyway)"""
         now = datetime.now(timezone.utc)
-        expire = session_lifetimes.utc(expires_at) if expires_at is not None else now + session_lifetimes.session_lifetime()
+        expire = session_lifetimes.utc(expires_at) if expires_at is not None else now + AuthService.refresh_window()
         
         payload = {
             "sub": str(user_id),
@@ -81,14 +81,23 @@ class AuthService:
         return jwt.encode(payload, settings.security.secret_key, algorithm=settings.security.algorithm)
 
     @staticmethod
+    def refresh_window() -> timedelta:
+        """How long a refresh token stays usable: the client may use its access token to the end and then still
+        refresh, as long as the session has not ended by inactivity in between"""
+        return timedelta(minutes=settings.security.access_token_expire_minutes) + session_lifetimes.idle_timeout()
+
+    @staticmethod
     def session_tokens(user_id: int, user_session: UserSession) -> tuple[str, str, int]:
-        """(access token, refresh token, access lifetime in seconds) of a live session: the access token never
-        outlives the session, the refresh token expires at its absolute end (security.session_max_hours)"""
+        """(access token, refresh token, access lifetime in seconds) of a live session. Neither outlives the hard
+        end of the session (security.session_max_hours, when set); every refresh issues both again."""
         now = datetime.now(timezone.utc)
-        session_end = session_lifetimes.utc(user_session.expires_at)
-        access_expires = min(now + timedelta(minutes=settings.security.access_token_expire_minutes), session_end)
-        access = AuthService.create_access_token(user_id, session_id=user_session.id, not_after=session_end)
-        refresh = AuthService.create_refresh_token(user_id, session_id=user_session.id, expires_at=session_end)
+        hard_end = session_lifetimes.hard_end(user_session)
+        access_expires = now + timedelta(minutes=settings.security.access_token_expire_minutes)
+        refresh_expires = now + AuthService.refresh_window()
+        if hard_end is not None:
+            access_expires, refresh_expires = min(access_expires, hard_end), min(refresh_expires, hard_end)
+        access = AuthService.create_access_token(user_id, session_id=user_session.id, not_after=access_expires)
+        refresh = AuthService.create_refresh_token(user_id, session_id=user_session.id, expires_at=refresh_expires)
         return access, refresh, max(0, int((access_expires - now).total_seconds()))
 
     @staticmethod
@@ -117,19 +126,23 @@ class AuthService:
             user: User,
             ip_address: Optional[str] = None,
             user_agent: Optional[str] = None,
-            request_url: Optional[str] = None
+            request_url: Optional[str] = None,
+            certificate_fingerprint: Optional[str] = None
     ) -> UserSession:
-        """Create user session"""
+        """Create a user session; with certificate_fingerprint (production login) it is bound to that certificate"""
         session_id = secrets.token_urlsafe(64)
-        expires_at = datetime.now(timezone.utc) + session_lifetimes.session_lifetime()
+        now = datetime.now(timezone.utc)
 
         user_session = UserSession(
             id=session_id,
             user_id=user.id,
             ip_address=ip_address,
             user_agent=user_agent,
-            expires_at=expires_at
+            created_at=now,
+            expires_at=now,
         )
+        session_lifetimes.touch(user_session, now)
+        await session_lifetimes.bind_certificate(user_session, certificate_fingerprint)
         session.add(user_session)
 
         # Update last login
@@ -305,7 +318,7 @@ class AuthService:
         for user_session in not_ended:
             state = session_lifetimes.session_state(user_session, now)
             if state.status is SessionStatus.ENDED:
-                session_lifetimes.end(user_session, state.end_reason, at=state.ended_at)
+                session_lifetimes.end(user_session, state.end_reason, at=state.ends_at)
             else:
                 session_lifetimes.end(user_session, SessionEndReason.REVOKED, cause, at=now)
                 count += 1

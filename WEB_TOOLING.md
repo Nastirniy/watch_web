@@ -138,3 +138,43 @@ is committed and `tests/test_api_contract.py` fails while the code and the file 
 operations and schemas. An intended change is accepted by rewriting the file
 (`python -m app.backend.api_contract`), committed with the code, noted in `CHANGELOG.md` and announced to the
 web team; the web project's `npm run api:all` then shows exactly what it has to adapt.
+
+## 8. Development server: one origin through its proxy
+
+The API sends no CORS headers: in production the web client comes from the same nginx and origin as the API.
+In development do the same with the dev server that `npm run dev` (or `npm start`) starts: let it proxy the API
+paths, and call the API with relative URLs (`/api/v1/...`), never `http://localhost:8000/...`.
+
+The API paths: `/api`, `/docs`, `/redoc`, `/openapi.json`, `/problems`, `/health`. Point the proxy at the API
+started in development mode (`environment = "development"`: the login takes the certificate fields from a JSON
+body, no client certificate needed).
+
+Vite (`vite.config.ts`):
+
+```ts
+export default defineConfig({
+  server: {
+    proxy: Object.fromEntries(
+      ["/api", "/docs", "/redoc", "/openapi.json", "/problems", "/health"]
+        .map((path) => [path, { target: "http://127.0.0.1:60800", changeOrigin: true }]),
+    ),
+  },
+});
+```
+
+webpack-dev-server (`webpack.config.js`):
+
+```js
+module.exports = {
+  devServer: {
+    proxy: [{
+      context: ["/api", "/docs", "/redoc", "/openapi.json", "/problems", "/health"],
+      target: "http://127.0.0.1:60800",
+      changeOrigin: true,
+    }],
+  },
+};
+```
+
+Other dev servers have the same option (Create React App: `"proxy"` in `package.json`; Angular: `proxy.conf.json`).
+The port is `server.port` of the API configuration.

@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
+from app.backend.enums.general import SessionStatus
 from app.backend.models.user import UserSession
 from app.backend.services.auth_context import AuthContext
 from app.backend.services.presence import online_threshold_seconds
@@ -54,17 +55,17 @@ def _iso(value: Optional[datetime]) -> Optional[str]:
 
 
 def build_session_response(row: UserSession, state: SessionState) -> UserSessionResponse:
-    """A session with its computed state; the end fields are present only for ended sessions"""
+    """A session with its computed state; the end fields are set only for ended sessions"""
+    ended = state.status is SessionStatus.ENDED
     return UserSessionResponse(
         id=row.id,
         status=state.status,
         ip_address=row.ip_address,
         user_agent=row.user_agent,
         created_at=_iso(row.created_at),
-        expires_at=_iso(row.expires_at),
-        idle_expires_at=_iso(state.idle_expires_at),
+        expires_at=_iso(row.expires_at if ended else state.ends_at),
         last_activity_at=_iso(row.last_activity),
-        ended_at=_iso(state.ended_at),
+        ended_at=_iso(state.ends_at) if ended else None,
         end_reason=state.end_reason,
         revoke_cause=state.revoke_cause,
     )

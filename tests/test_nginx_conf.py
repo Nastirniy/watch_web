@@ -10,6 +10,7 @@ import re
 from pathlib import Path
 
 from app.backend.api.v1.auth import login
+from app.main import fastapi_app
 
 ROOT = Path(__file__).resolve().parent.parent
 APP = (ROOT / "nginx-app.conf").read_text(encoding="utf-8")
@@ -57,11 +58,32 @@ def test_proxy_snippet_sets_every_certificate_header_from_nginx_variables():
     assert found == expected
 
 
+def _api_locations() -> list[tuple[str, str]]:
+    return [(header, body) for header, body in _blocks(APP, "location") if "proxy_pass http://watch_web_api" in body]
+
+
+def _matches(header: str, path: str) -> bool:
+    """nginx prefix and exact locations (the files use no regular expressions)"""
+    parts = header.split()
+    if parts[0] == "=":
+        return path == parts[1]
+    return path.startswith(parts[-1])
+
+
 def test_every_api_location_includes_the_proxy_snippet():
-    api_locations = [(header, body) for header, body in _blocks(APP, "location") if "proxy_pass http://watch_web_api" in body]
-    assert {header for header, _ in api_locations} >= {"/", "/api/v1/media/nginx-upload", "^~ /api/v1/media/uploads"}
+    api_locations = _api_locations()
+    assert {header for header, _ in api_locations} >= {"/api/", "/api/v1/media/nginx-upload", "^~ /api/v1/media/uploads"}
     for header, body in api_locations:
         assert f"include {PROXY_SNIPPET};" in body, f"location {header} reaches the API without the certificate headers"
+
+
+def test_every_api_route_reaches_the_api():
+    """The locations claim the API's paths only, so "/" stays free for the web client; none may be missed"""
+    headers = [header for header, _ in _api_locations()]
+    assert "/" not in headers, "/ belongs to the server block (the web client), not to the API"
+    for route in fastapi_app.routes:
+        path = re.sub(r"\{[^}]+\}", "x", route.path)
+        assert any(_matches(header, path) for header in headers), f"no nginx location proxies {route.path} to the API"
 
 
 def test_production_server_requires_a_verified_client_certificate():

@@ -32,14 +32,16 @@ def now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def row(last_activity_ago: timedelta, expires_in: timedelta, at: datetime = None, **ended) -> UserSession:
+def row(last_activity_ago: timedelta, expires_in: timedelta, at: datetime = None, created_ago: timedelta = timedelta(0),
+        **ended) -> UserSession:
     at = at or now()
     return UserSession(id=uuid.uuid4().hex, user_id=1, last_activity=at - last_activity_ago,
-                       expires_at=at + expires_in, **ended)
+                       expires_at=at + expires_in, created_at=at - created_ago, **ended)
 
 
-async def make_session(db, user, last_activity_ago=timedelta(0), expires_in=timedelta(hours=8)) -> UserSession:
-    session_row = row(last_activity_ago, expires_in)
+async def make_session(db, user, last_activity_ago=timedelta(0), expires_in=timedelta(hours=8),
+                       created_ago=timedelta(0)) -> UserSession:
+    session_row = row(last_activity_ago, expires_in, created_ago=created_ago)
     session_row.user_id = user.id
     db.add(session_row)
     await db.commit()
@@ -53,29 +55,52 @@ def bearer(user, session_row) -> dict:
 
 # ------------------------------------------------------------------ computed state
 def test_live_states():
-    NOW = now()
-    online = session_lifetimes.session_state(row(timedelta(seconds=10), timedelta(hours=1), at=NOW), NOW)
+    at = now()
+    online = session_lifetimes.session_state(row(timedelta(seconds=10), timedelta(hours=1), at=at), at)
     assert online.status is SessionStatus.ONLINE and online.end_reason is None
-    idle = session_lifetimes.session_state(row(IDLE - timedelta(minutes=1), timedelta(hours=1), at=NOW), NOW)
+    idle = session_lifetimes.session_state(row(IDLE - timedelta(minutes=1), timedelta(hours=1), at=at), at)
     assert idle.status is SessionStatus.IDLE
-    assert idle.idle_expires_at == session_lifetimes.utc(NOW - (IDLE - timedelta(minutes=1))) + IDLE
+    assert idle.ends_at == at + timedelta(minutes=1), "ends when the idle timeout runs out unless a request comes"
 
 
 def test_ended_by_the_computation_with_the_earlier_reason():
-    NOW = now()
-    quiet = session_lifetimes.session_state(row(IDLE + timedelta(minutes=1), timedelta(hours=1), at=NOW), NOW)
+    at = now()
+    quiet = session_lifetimes.session_state(row(IDLE + timedelta(minutes=1), timedelta(hours=1), at=at), at)
     assert (quiet.status, quiet.end_reason) == (SessionStatus.ENDED, SessionEndReason.IDLE_TIMEOUT)
-    assert quiet.ended_at == NOW - timedelta(minutes=1), "ended when the idle timeout ran out, not when read"
+    assert quiet.ends_at == at - timedelta(minutes=1), "ended when the idle timeout ran out, not when read"
 
-    past_end = session_lifetimes.session_state(row(timedelta(seconds=10), timedelta(minutes=-2), at=NOW), NOW)
+    # a stored end before the inactivity deadline (a session from before sliding sessions) is an expiry
+    past_end = session_lifetimes.session_state(row(timedelta(seconds=10), timedelta(minutes=-2), at=at), at)
     assert (past_end.status, past_end.end_reason) == (SessionStatus.ENDED, SessionEndReason.EXPIRED)
-    assert past_end.ended_at == NOW - timedelta(minutes=2)
+    assert past_end.ends_at == at - timedelta(minutes=2)
+
+
+def test_activity_keeps_a_session_alive_unless_a_hard_end_is_set(monkeypatch):
+    at = now()
+    old_but_active = row(timedelta(seconds=10), IDLE, at=at, created_ago=timedelta(days=3))
+    assert session_lifetimes.session_state(old_but_active, at).status is SessionStatus.ONLINE
+
+    monkeypatch.setattr(settings.security, "session_max_hours", 1)
+    state = session_lifetimes.session_state(old_but_active, at)
+    assert (state.status, state.end_reason) == (SessionStatus.ENDED, SessionEndReason.EXPIRED)
+    assert state.ends_at == at - timedelta(days=3) + timedelta(hours=1)
+
+
+def test_touch_moves_the_end_never_past_the_hard_end(monkeypatch):
+    at = now()
+    session_row = row(timedelta(minutes=10), timedelta(minutes=20), at=at, created_ago=timedelta(minutes=50))
+    session_lifetimes.touch(session_row, at)
+    assert session_row.last_activity == at and session_row.expires_at == at + IDLE
+
+    monkeypatch.setattr(settings.security, "session_max_hours", 1)
+    session_lifetimes.touch(session_row, at)
+    assert session_row.expires_at == at + timedelta(minutes=10), "login 50 minutes ago + 1 hour"
 
 
 def test_stored_end_wins():
-    NOW = now()
-    revoked = row(timedelta(seconds=10), timedelta(hours=1), ended_at=NOW, end_reason="revoked", revoke_cause="ended_by_admin")
-    state = session_lifetimes.session_state(revoked, NOW)
+    at = now()
+    revoked = row(timedelta(seconds=10), timedelta(hours=1), ended_at=at, end_reason="revoked", revoke_cause="ended_by_admin")
+    state = session_lifetimes.session_state(revoked, at)
     assert (state.status, state.end_reason, state.revoke_cause) == (
         SessionStatus.ENDED, SessionEndReason.REVOKED, SessionRevokeCause.ENDED_BY_ADMIN)
 
@@ -93,31 +118,48 @@ async def test_idle_session_is_refused_and_recorded(client, db):
 
 
 @pytest.mark.asyncio
-async def test_refresh_moves_the_idle_deadline_never_the_end(client, db):
+async def test_a_request_moves_the_end_of_a_long_running_session(client, db):
+    """No hard end by default: a session opened days ago lives on while it is used"""
     user = await make_user(db)
-    session_row = await make_session(db, user, last_activity_ago=IDLE - timedelta(minutes=2), expires_in=timedelta(hours=3))
-    refresh_token = AuthService.create_refresh_token(user.id, session_id=session_row.id, expires_at=session_row.expires_at)
+    session_row = await make_session(db, user, last_activity_ago=timedelta(minutes=2), expires_in=IDLE - timedelta(minutes=2),
+                                     created_ago=timedelta(days=3))
+    response = await client.get(ME, headers=bearer(user, session_row))
+    assert response.status_code == 200, response.text
+    await db.refresh(session_row)
+    assert abs((session_lifetimes.utc(session_row.expires_at) - (now() + IDLE)).total_seconds()) < 5
+
+
+@pytest.mark.asyncio
+async def test_refresh_is_activity_and_renews_both_tokens(client, db):
+    user = await make_user(db)
+    session_row = await make_session(db, user, last_activity_ago=IDLE - timedelta(minutes=2), expires_in=timedelta(minutes=2),
+                                     created_ago=timedelta(days=1))
+    refresh_token = AuthService.create_refresh_token(user.id, session_id=session_row.id)
 
     response = await client.post(REFRESH, json={"refresh_token": refresh_token})
     assert response.status_code == 200, response.text
     body = response.json()
     await db.refresh(session_row)
     assert now() - session_lifetimes.utc(session_row.last_activity) < timedelta(seconds=30), "a refresh is activity"
+    assert abs((session_lifetimes.utc(session_row.expires_at) - (now() + IDLE)).total_seconds()) < 5, "the end moved"
 
     claims = jwt.get_unverified_claims(body["refresh_token"])
     assert claims["sid"] == session_row.id
-    assert claims["exp"] == int(session_lifetimes.utc(session_row.expires_at).timestamp()), "expires with the session"
-    access = jwt.get_unverified_claims(body["access_token"])
-    assert access["exp"] <= claims["exp"] and body["expires_in"] <= settings.security.access_token_expire_minutes * 60
+    window = AuthService.refresh_window().total_seconds()
+    assert abs(claims["exp"] - (now().timestamp() + window)) < 5, "usable until after the access token, plus the idle timeout"
+    assert body["expires_in"] == settings.security.access_token_expire_minutes * 60
 
 
 @pytest.mark.asyncio
-async def test_access_token_never_outlives_its_session(db):
+async def test_tokens_never_outlive_a_hard_end(db, monkeypatch):
+    monkeypatch.setattr(settings.security, "session_max_hours", 1)
     user = await make_user(db)
-    short = await make_session(db, user, expires_in=timedelta(minutes=5))
-    access, refresh, expires_in = AuthService.session_tokens(user.id, short)
+    late = await make_session(db, user, created_ago=timedelta(minutes=55))
+    access, refresh, expires_in = AuthService.session_tokens(user.id, late)
+    hard_end = int((session_lifetimes.utc(late.created_at) + timedelta(hours=1)).timestamp())
     assert 0 < expires_in <= 300
-    assert jwt.get_unverified_claims(access)["exp"] <= int(session_lifetimes.utc(short.expires_at).timestamp())
+    assert jwt.get_unverified_claims(access)["exp"] <= hard_end
+    assert jwt.get_unverified_claims(refresh)["exp"] <= hard_end
 
 
 @pytest.mark.asyncio
@@ -160,12 +202,12 @@ async def test_admin_sees_live_and_ended_sessions_with_reasons(client, db, heade
 
     live = (await client.get(SESSIONS.format(user_id=user.id), headers=headers(admin))).json()
     assert {s["id"]: s["status"] for s in live} == {online.id: "online", idle.id: "idle"}
-    assert all(s["idle_expires_at"] and s["end_reason"] is None for s in live)
+    assert all(s["expires_at"] and s["end_reason"] is None and s["ended_at"] is None for s in live)
 
     everything = (await client.get(SESSIONS.format(user_id=user.id), params={"include_ended": True}, headers=headers(admin))).json()
     ended = {s["id"]: s for s in everything if s["status"] == "ended"}
     assert set(ended) == {quiet.id} and ended[quiet.id]["end_reason"] == "idle_timeout"
-    assert ended[quiet.id]["revoke_cause"] is None and ended[quiet.id]["idle_expires_at"] is None
+    assert ended[quiet.id]["revoke_cause"] is None and ended[quiet.id]["ended_at"]
 
     missing = await client.get(SESSIONS.format(user_id=999999), headers=headers(admin))
     assert missing.status_code == 404 and missing.json()["code"] == "user_not_found"

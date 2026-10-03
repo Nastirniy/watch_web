@@ -54,9 +54,9 @@ class SessionInfoResponse(BaseModel):
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
     created_at: str
-    expires_at: str = Field(description="Absolute end: login + security.session_max_hours")
-    idle_expires_at: Optional[str] = Field(
-        default=None, description="Live sessions: when the session ends if no request comes before")
+    expires_at: str = Field(
+        description="When the session ends unless a request comes before: every request and refresh moves it "
+                    "(never past login + security.session_max_hours when that is set)")
     last_activity_at: Optional[str] = None
 
 

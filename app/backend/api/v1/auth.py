@@ -4,7 +4,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.database import get_session
 from app.backend.services.auth import AuthService
-from app.backend.services.sessions import live_clause, live_session, session_state
+from app.backend.services.sessions import certificate_matches, live_clause, live_session, session_state, touch
 from datetime import datetime, timezone
 from sqlmodel import select
 from app.backend.services.permissions import require
@@ -121,15 +121,18 @@ async def login(
         raise ApiError(AuthErrorCode(auth_error or AuthErrorCode.CERTIFICATE_NOT_RECOGNIZED))
 
     # Create session
+    # A production session is bound to the certificate nginx verified: every later request must present it
+    development = settings.app.environment == AppEnvironment.DEVELOPMENT.value
     user_session = await AuthService.create_session(
         session,
         user,
         ip_address=client_ip,
         user_agent=user_agent,
-        request_url=str(request.url)
+        request_url=str(request.url),
+        certificate_fingerprint=None if development else ssl_fingerprint,
     )
 
-    # Both tokens are bound to the session and never outlive it
+    # Both tokens are bound to the session
     access_token, refresh_token, expires_in = AuthService.session_tokens(user.id, user_session)
 
     _logger.info(
@@ -147,13 +150,15 @@ async def login(
     response_model=LoginResponse,
     responses=problems(
         AuthErrorCode.ACCOUNT_DEACTIVATED, AuthErrorCode.ACCOUNT_DELETED, AuthErrorCode.ACCOUNT_NOT_FOUND,
-        AuthErrorCode.INVALID_REFRESH_TOKEN, AuthErrorCode.SESSION_EXPIRED,
+        AuthErrorCode.INVALID_REFRESH_TOKEN, AuthErrorCode.SESSION_EXPIRED, AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH,
     ),
 )
 async def refresh_token(
         request: Request,
         refresh_request: RefreshRequest,
-        session: AsyncSession = Depends(get_session)
+        session: AsyncSession = Depends(get_session),
+        # Set by nginx from the verified client certificate (nginx-proxy.conf), never by the client
+        x_ssl_client_fingerprint: Optional[str] = Header(None, include_in_schema=False),
 ):
     """Refresh access token using refresh token"""
     payload = AuthService.verify_token(refresh_request.refresh_token, "refresh")
@@ -187,8 +192,11 @@ async def refresh_token(
     if refresh_session is None:
         raise ApiError(AuthErrorCode.SESSION_EXPIRED)
 
-    # A refresh is activity: it moves the idle timeout, never the absolute end of the session
-    refresh_session.last_activity = datetime.now(timezone.utc)
+    if not await certificate_matches(refresh_session, x_ssl_client_fingerprint):
+        _logger.warning(f"Refresh token presented with another client certificate: session_id={session_id}, user_id={user_id}")
+        raise ApiError(AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH)
+    # A refresh is activity: it moves the end of the session (never past the hard end, when one is set)
+    touch(refresh_session)
     session.add(refresh_session)
     await session.commit()
 

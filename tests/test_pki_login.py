@@ -17,6 +17,7 @@ from app.backend.models.role import Role
 from tests.helpers import make_admin
 
 LOGIN = V1.path(AuthRoutes.LOGIN)
+REFRESH = V1.path(AuthRoutes.REFRESH)
 ME = V1.path(AuthRoutes.ME)
 CREATE_USER = V1.path(UserRoutes.ROOT)
 USER = V1.path(UserRoutes.USER_BY_ID)
@@ -68,10 +69,16 @@ async def _create_user(client, db, headers, username: str, cert: x509.Certificat
     return created.json()["id"]
 
 
-async def _login(client, cert: x509.Certificate) -> dict:
+async def _tokens(client, cert: x509.Certificate) -> dict:
     response = await client.post(LOGIN, headers=nginx_headers(cert))
     assert response.status_code == 200, response.text
-    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+    return response.json()
+
+
+async def _login(client, cert: x509.Certificate) -> dict:
+    """Headers of later requests: the token, plus the certificate headers nginx adds to every request"""
+    tokens = await _tokens(client, cert)
+    return {**nginx_headers(cert), "Authorization": f"Bearer {tokens['access_token']}"}
 
 
 @pytest.mark.asyncio
@@ -116,3 +123,28 @@ async def test_new_certificate_ends_the_sessions_of_the_old_one(client, db, head
     refused = await client.post(LOGIN, headers=nginx_headers(old))
     assert refused.status_code == 401 and refused.json()["code"] == "certificate_not_recognized"
     assert (await client.get(ME, headers=await _login(client, new))).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_session_is_bound_to_its_certificate(client, db, headers, production):
+    """RFC 8705 style: a token works only with the certificate the session was opened with"""
+    own = make_certificate("cn-bound", 0x4444)
+    other = make_certificate("cn-other", 0x5555)
+    await _create_user(client, db, headers, "bound", own)
+    await _create_user(client, db, headers, "otheruser", other)
+    tokens = await _tokens(client, own)
+    bearer = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+    assert (await client.get(ME, headers={**nginx_headers(own), **bearer})).status_code == 200
+    stolen = await client.get(ME, headers={**nginx_headers(other), **bearer})
+    assert stolen.status_code == 401 and stolen.json()["code"] == "token_certificate_mismatch"
+    without = await client.get(ME, headers=bearer)
+    assert without.status_code == 401 and without.json()["code"] == "token_certificate_mismatch", "no certificate, no use"
+
+    refresh = await client.post(REFRESH, json={"refresh_token": tokens["refresh_token"]}, headers=nginx_headers(other))
+    assert refresh.status_code == 401 and refresh.json()["code"] == "token_certificate_mismatch"
+    refresh = await client.post(REFRESH, json={"refresh_token": tokens["refresh_token"]}, headers=nginx_headers(own))
+    assert refresh.status_code == 200, refresh.text
+    # a refused attempt does not end the session: the owner keeps working
+    assert (await client.get(ME, headers={**nginx_headers(own), **bearer})).status_code == 200
+

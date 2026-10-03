@@ -102,10 +102,13 @@ The localization package needs one entry per code:
 Send `Authorization: Bearer <access token>` from `POST /api/v1/auth/login`.
 
 - `invalid_token` (the access token expired): refresh with `POST /api/v1/auth/refresh`, then repeat the request.
-- `session_expired`: the session itself ended (logout, no request for `session_idle_timeout_minutes`, `session_max_hours` after the login, or revoked by the server); a refresh cannot bring it back: log in again.
+- `session_expired`: the session itself ended (logout, no request for `session_idle_timeout_minutes`, the optional hard limit `session_max_hours`, or revoked by the server); a refresh cannot bring it back: log in again. With a client certificate the login needs no user input, so the client can do it by itself.
+- `token_certificate_mismatch`: the token belongs to a session opened with another client certificate (the browser presented a different one, or the token was copied); log in again with the current certificate.
 - `credentials_required`, `account_not_found`, `account_deactivated`, `account_deleted`, `invalid_refresh_token`: log in again.
 
-Session lifetime: a session ends after `security.session_idle_timeout_minutes` (30) without a request, and in any case `security.session_max_hours` (12) after the login. Every request and every refresh moves the idle deadline; nothing moves the absolute end. The refresh token expires with its session, the access token (`expires_in`) never outlives it. `GET /auth/sessions` lists the caller's live sessions with `status` (`online` / `idle`) and `idle_expires_at`; administrators see any user's sessions, ended ones with `end_reason` / `revoke_cause`, under `/users/{id}/sessions`.
+Session lifetime: a session lives while it is used. It ends after `security.session_idle_timeout_minutes` (30) without a request; every request and every refresh moves that end (`expires_at` of the session). `security.session_max_hours` can add a hard limit since the login (0, the default: none). Every refresh issues a new access and refresh token; a refresh token stays usable for the access token lifetime plus the idle timeout, so a client that refreshes when its access token expires never loses an active session.
+
+A session opened through nginx with a client certificate is bound to it: every request and refresh must present the same certificate, so a copied token is useless elsewhere (`token_certificate_mismatch`). `GET /auth/sessions` lists the caller's live sessions with `status` (`online` / `idle`); administrators see any user's sessions, ended ones with `end_reason` / `revoke_cause`, under `/users/{id}/sessions`.
 
 ### Not allowed (403)
 

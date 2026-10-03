@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent
@@ -99,15 +98,8 @@ fastapi_app = FastAPI(
 # Every error is an RFC 9457 problem (application/problem+json), FastAPI's own 422/404/405/500 included
 register_error_handlers(fastapi_app)
 
-# Add CORS middleware (must be before other middleware)
-fastapi_app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.security.allowed_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["*"],
-    max_age=600
-)
+# No CORS here: the web client is served by nginx from the same origin as the API, and a browser client on
+# another origin gets CORS at the nginx edge, where nginx's own errors get the headers too (DEPLOYMENT.md)
 
 # Include routers: each module carries its prefix and tag; a published version adds its prefix (api/vN)
 fastapi_app.include_router(health.router)

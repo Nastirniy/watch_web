@@ -112,6 +112,8 @@ class AuthErrorCode(ProblemType):
     CERTIFICATE_DATA_MISSING = ("certificate_data_missing", problem(401, "Invalid certificate data"))
     CERTIFICATE_NOT_RECOGNIZED = ("certificate_not_recognized", problem(401, "Certificate not recognized"))
     SESSION_EXPIRED = ("session_expired", problem(401, "Session expired or invalidated"))
+    # The session was opened with another client certificate than the one this request presents (RFC 8705)
+    TOKEN_CERTIFICATE_MISMATCH = ("token_certificate_mismatch", problem(401, "Token belongs to another client certificate"))
     ACCOUNT_NOT_FOUND = ("account_not_found", problem(401, "Account not found"))
     ACCOUNT_DEACTIVATED = ("account_deactivated", problem(401, "Account deactivated"))
     ACCOUNT_DELETED = ("account_deleted", problem(401, "Account deleted"))

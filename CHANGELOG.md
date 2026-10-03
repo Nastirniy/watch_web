@@ -5,22 +5,29 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
-## Session state computed when read; idle timeout and absolute end; administrator view of sessions
+## Sessions live while used, bound to the client certificate; state computed when read; no CORS in the API
 
 ### Breaking changes for API clients
 
-- A session now ends after `session_idle_timeout_minutes` (default 30) without a request, and in any case
-  `session_max_hours` (default 12) after the login. Before, it lasted exactly 8 hours from the login whatever the
-  activity, and the 7-day refresh token was cut by it. Every request and every `POST /auth/refresh` moves the idle
-  deadline; nothing moves the absolute end. The refresh token now expires with its session; the access token never
-  outlives it (`expires_in` can be shorter than 30 minutes near the end).
+- A session lives while it is used: it ends after `session_idle_timeout_minutes` (default 30) without a request,
+  and every request and every `POST /auth/refresh` moves that end. Before, it ended exactly 8 hours after the login
+  whatever the activity, and the 7-day refresh token was cut by it. `session_max_hours` can add a hard limit since
+  the login (default 0: none). Every refresh issues a new access and refresh token; a refresh token stays usable
+  for the access token lifetime plus the idle timeout.
+- A session opened through nginx with a client certificate is bound to it (RFC 8705 style): every request and
+  refresh must present the same certificate, otherwise 401 `token_certificate_mismatch` (new code, in the 401 set
+  of every authenticated operation). A copied token is useless without the certificate's private key; a refused
+  attempt does not end the owner's session. Development logins (JSON body) are not bound.
 - `POST /auth/refresh` with a refresh token that belongs to no session answers 401 `invalid_refresh_token` (every
   token from `POST /auth/login` has one).
-- `session_expired` means the session ended (logout, idle timeout, absolute end, revoked): a refresh cannot help,
-  log in again (API.md, "Authentication").
+- `session_expired` means the session ended (logout, idle timeout, hard limit, revoked): a refresh cannot help,
+  log in again (API.md, "Authentication"); with a client certificate that needs no user input.
 - `GET /auth/sessions`: only live sessions (before: also sessions idle for hours), each with `status` (`online` /
-  `idle`) and `idle_expires_at`, newest first. Times carry the UTC offset (`2026-10-03T08:00:00+00:00`); they were
-  naive, which JavaScript reads as local time.
+  `idle`), newest first; `expires_at` is when the session ends unless a request comes. Times carry the UTC offset
+  (`2026-10-03T08:00:00+00:00`); they were naive, which JavaScript reads as local time.
+- The API sends no CORS headers any more (it allowed `*` with credentials). The web client comes from the same
+  nginx and origin; in development the dev server proxies the API paths (WEB_TOOLING.md, section 8). A browser
+  application on another origin gets CORS at nginx (DEPLOYMENT.md, "Web client and other clients").
 
 ### Added
 
@@ -45,8 +52,19 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - Migration `015_session_end_state`: `user_sessions.end_reason`, `user_sessions.revoke_cause`, index on
   `ended_at`; `user_sessions.is_active` is dropped (it duplicated `ended_at` and read like a row lock). Inactive
   rows without `ended_at` get `ended_at = last_activity`; their `end_reason` stays null.
+- Migration `016_session_certificate_binding`: `user_sessions.certificate_fingerprint_hash` (SHA-256 of the
+  certificate fingerprint). Sessions opened before stay unbound until they end.
+- `user_sessions.expires_at` is now when the session ends unless a request comes; requests move it.
 - Settings: `security.session_expire_hours` and `security.refresh_token_expire_days` are replaced by
-  `security.session_idle_timeout_minutes` and `security.session_max_hours` (ENV.md). Old keys are ignored.
+  `security.session_idle_timeout_minutes` (30) and `security.session_max_hours` (0: no hard limit) (ENV.md).
+  `security.allowed_origins` is gone with CORS. Old keys are ignored.
+
+### Deployment
+
+- `nginx-app.conf` claims only the paths the API publishes (`/api/`, `/docs`, `/redoc`, `/openapi.json`,
+  `/problems`, `/health`); `/` belongs to the server block in `nginx.conf`, where the web client build is
+  configured (`root`, client-side routes fall back to `index.html`, 404 without a build).
+  `tests/test_nginx_conf.py` fails when an API route has no location.
 
 ## Client certificates checked by nginx; certificate replacement ends sessions
 
