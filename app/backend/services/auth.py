@@ -13,6 +13,7 @@ from app.backend.enums.errors import AuthErrorCode
 from app.backend.helpers.certeficates_helper import (
     validate_pki_certificate_data,
     hash_pki_certificate_data,
+    serial_hashes,
     create_pki_auth_audit_details
 )
 from app.backend.helpers.audit_helper import (
@@ -163,9 +164,10 @@ class AuthService:
         )
 
         # Hash the certificate data for secure comparison using helper
-        cn_hash, serial_hash, fingerprint_hash = await hash_pki_certificate_data(
+        cn_hash, _, fingerprint_hash = await hash_pki_certificate_data(
             certificate_cn, certificate_serial, certificate_fingerprint
         )
+        stored_serial_forms = await serial_hashes(certificate_serial)
 
         # Create audit log for authentication attempt using helper
         audit_details = await create_pki_auth_audit_details(
@@ -185,7 +187,7 @@ class AuthService:
             select(User).where(
                 and_(
                     User.pki_certificate_cn_hash == cn_hash,
-                    User.pki_certificate_serial_hash == serial_hash,
+                    User.pki_certificate_serial_hash.in_(stored_serial_forms),
                     User.pki_certificate_fingerprint_hash == fingerprint_hash,
                 )
             )

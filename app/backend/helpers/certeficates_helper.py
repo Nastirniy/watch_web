@@ -97,6 +97,17 @@ async def hash_data(data: str) -> str:
     return hashlib.sha256(normalized.encode('utf-8')).hexdigest()
 
 
+async def serial_hashes(certificate_serial: str) -> set[str]:
+    """The hashes a stored serial may have: as written and without leading zeros.
+
+    nginx ($ssl_client_serial, OpenSSL i2a_ASN1_INTEGER) writes two hex digits per byte, so serial 0x1 arrives
+    as "01", while CertificateParser stores format(serial, 'x'), "1". A serial typed into the configuration
+    (settings.admin) may have either form, so the login matches both.
+    """
+    normalized = certificate_serial.replace(":", "").replace("-", "").strip().lower()
+    return {await hash_data(normalized), await hash_data(normalized.lstrip("0") or "0")}
+
+
 async def validate_pki_certificate_data(
     certificate_cn: str,
     certificate_serial: str,

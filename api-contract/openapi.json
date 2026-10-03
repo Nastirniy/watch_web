@@ -1499,7 +1499,7 @@
           "USERS"
         ],
         "summary": "Update User",
-        "description": "Update user fields - all fields are optional\n\nSupports updating:\n- username: Unique username (3-50 characters)\n- username_alias: User's display name (1-255 characters)\n- post_id: User's post/position ID\n- is_active: User's active status (boolean)\n- role_ids: Replace all user roles, one form field per role (role_ids=1&role_ids=2)\n- certificate: Update PKI certificate authentication data (file upload)\n\nOnly provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).\nThe fields are form fields: any other body (JSON included) answers 415 instead of being ignored.",
+        "description": "Update user fields - all fields are optional\n\nSupports updating:\n- username: Unique username (3-50 characters)\n- username_alias: User's display name (1-255 characters)\n- post_id: User's post/position ID\n- is_active: User's active status (boolean)\n- role_ids: Replace all user roles, one form field per role (role_ids=1&role_ids=2)\n- certificate: Update PKI certificate authentication data (file upload). A different certificate ends every\n  session of the user, like deactivation: the old certificate's tokens stop working.\n\nOnly provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).\nThe fields are form fields: any other body (JSON included) answers 415 instead of being ignored.",
         "operationId": "update_user",
         "security": [
           {

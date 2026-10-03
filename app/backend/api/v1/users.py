@@ -282,7 +282,8 @@ async def update_user(
     - post_id: User's post/position ID
     - is_active: User's active status (boolean)
     - role_ids: Replace all user roles, one form field per role (role_ids=1&role_ids=2)
-    - certificate: Update PKI certificate authentication data (file upload)
+    - certificate: Update PKI certificate authentication data (file upload). A different certificate ends every
+      session of the user, like deactivation: the old certificate's tokens stop working.
 
     Only provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).
     The fields are form fields: any other body (JSON included) answers 415 instead of being ignored.
@@ -337,6 +338,7 @@ async def update_user(
         user.is_active = update_data.is_active
 
     # Handle certificate update if provided
+    certificate_replaced = False
     if certificate is not None:
         try:
             cert_data = await certificate.read()
@@ -373,6 +375,7 @@ async def update_user(
             if duplicate_check.first():
                 raise ApiError(ErrorCode.CERTIFICATE_TAKEN)
 
+            certificate_replaced = user.pki_certificate_fingerprint_hash != pki_fingerprint_hash
             user.pki_certificate_cn_hash = pki_cn_hash
             user.pki_certificate_serial_hash = pki_serial_hash
             user.pki_certificate_fingerprint_hash = pki_fingerprint_hash
@@ -387,20 +390,23 @@ async def update_user(
     user.updated_at = datetime.now(timezone.utc)
     session.add(user)
 
-    # Deactivation ends every live session in the same transaction as the flag change, so the user's
-    # tokens stop working the moment the update is committed (the request dependency rejects them).
-    if deactivating:
+    # Deactivation and a new certificate end every live session in the same transaction as the change, so the
+    # user's tokens stop working the moment the update is committed (the request dependency rejects them).
+    # A certificate is replaced because the old one is lost, compromised or revoked: its sessions must not
+    # outlive it. An administrator replacing their own certificate ends their own session too.
+    end_sessions_reason = "account_deactivated" if deactivating else "certificate_replaced" if certificate_replaced else None
+    if end_sessions_reason:
         invalidated_count = await AuthService.invalidate_all_user_sessions(
             session=session,
             user_id=user_id,
-            reason="account_deactivated",
+            reason=end_sessions_reason,
             actor_user_id=current_user.id,
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
             commit=False
         )
         _logger.info(
-            f"User {current_user.username} deactivated user {user.username}, "
+            f"User {current_user.username} updated user {user.username} ({end_sessions_reason}), "
             f"invalidated {invalidated_count} active sessions"
         )
 

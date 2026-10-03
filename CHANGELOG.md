@@ -5,6 +5,34 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Client certificates checked by nginx; certificate replacement ends sessions
+
+### Security
+
+- `nginx.conf` had no client certificate verification and did not set the `X-SSL-Client-*` headers that
+  `POST /auth/login` trusts in production: nginx passed the client's own headers through, so anyone could send
+  `X-SSL-Client-Verify: SUCCESS` with the DN, serial and fingerprint of another user's certificate (public data)
+  and log in as that user. Now port 443 requires a client certificate (`ssl_verify_client on`,
+  `ssl_client_certificate`, `ssl_crl`), port 80 only redirects, and every location that proxies to the API sets
+  the four headers from nginx's variables, replacing whatever the client sent. Verified against nginx 1.27:
+  a forged header arrives as the real certificate's value, no certificate or a revoked one gets 400.
+- nginx files: `nginx.conf` (server blocks), `nginx-app.conf` (locations, new, shared with the e2e stack),
+  `nginx-proxy.conf` (API proxy headers, new). DEPLOYMENT.md: install steps, "Client certificates (mTLS)".
+  `tests/test_nginx_conf.py` fails when an API location misses the headers or mTLS is off.
+- nginx keepalive to the API and imgproxy works in every location (`proxy_set_header Connection ""` was set at
+  server level, which nginx does not copy into locations that set their own headers). The unused WebSocket
+  `Upgrade` lines are gone.
+
+### Changed for API clients
+
+- `PATCH /users/{id}` with a different certificate ends every session of the user (audit `force_logout`, reason
+  `certificate_replaced`), like deactivation: the old certificate's tokens answer 401 `session_expired`. The
+  same certificate uploaded again changes nothing. An administrator replacing their own certificate ends their
+  own session as well.
+- `POST /auth/login` (production) matches the certificate serial as nginx writes it: OpenSSL prints two hex
+  digits per byte, so serial `0x0A1B2C` arrives as `0A1B2C` while the upload stored `a1b2c`. Every certificate
+  with an odd number of hex digits in its serial was refused with `certificate_not_recognized`.
+
 ## Unexpected failures are 500 `internal_error`, not a domain code
 
 A blanket `except Exception` turned every failure, bugs included, into a code that told the client something it

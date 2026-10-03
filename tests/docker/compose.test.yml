@@ -8,8 +8,9 @@
 #   docker compose -f tests/docker/compose.test.yml down -v
 #
 # Everything that matters in production is kept identical: the media directory is mounted at the
-# same absolute path in every container, the real nginx.conf server block is used unchanged, the
-# app containers run as the nginx worker uid (101) so files cross between nginx and the API.
+# same absolute path in every container, the real locations and proxy headers (nginx-app.conf,
+# nginx-proxy.conf) are used unchanged, the app containers run as the nginx worker uid (101) so files
+# cross between nginx and the API. Only the server block differs: plain http, no client certificates.
 
 name: watch-web-e2e
 
@@ -147,7 +148,9 @@ services:
       - "127.0.0.1:${E2E_NGINX_PORT:-18089}:80"
     volumes:
       - ./nginx-http.test.conf:/etc/nginx/conf.d/00-watch-web-http.conf:ro
-      - ../../nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx-server.test.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../../nginx-app.conf:/etc/nginx/snippets/watch-web-app.conf:ro
+      - ../../nginx-proxy.conf:/etc/nginx/snippets/watch-web-proxy.conf:ro
       - media:/var/www/radio_monitoring/uploads:ro
       - nginx_uploads:/var/www/nginx_uploads
       - thumbcache:/var/cache/nginx/thumbs

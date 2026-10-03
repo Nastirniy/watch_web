@@ -49,11 +49,14 @@ Ownership: run `id -u <owner>` and `id -g <owner>` of `MEDIA_ROOT` and put the n
 
 ## Host nginx
 
-Install both files on the host:
+Install the four files on the host:
 
 ```bash
 sudo cp nginx-http.conf /etc/nginx/conf.d/00-watch-web-http.conf     # cache zone, upstreams (http context)
-sudo cp nginx.conf /etc/nginx/sites-available/watch_web               # server block
+sudo mkdir -p /etc/nginx/snippets
+sudo cp nginx-app.conf /etc/nginx/snippets/watch-web-app.conf         # locations (server context)
+sudo cp nginx-proxy.conf /etc/nginx/snippets/watch-web-proxy.conf     # API proxy headers, certificate headers
+sudo cp nginx.conf /etc/nginx/sites-available/watch_web               # server blocks: 80 -> 443, TLS + client certificates
 sudo ln -s /etc/nginx/sites-available/watch_web /etc/nginx/sites-enabled/
 sudo mkdir -p /var/www/nginx_uploads /var/cache/nginx/thumbs
 sudo chown www-data:www-data /var/www/nginx_uploads /var/cache/nginx/thumbs
@@ -64,16 +67,29 @@ Edit before reloading:
 
 | In file | Line | Set to |
 |---------|------|--------|
-| nginx.conf | `alias /var/www/radio_monitoring/uploads/;` | `MEDIA_ROOT` with a trailing slash |
-| nginx.conf | `client_body_temp_path /var/www/nginx_uploads 1 2;` | `NGINX_UPLOAD_TEMP` |
-| nginx.conf | `server_name`, `listen`, TLS | your domain and certificates |
+| nginx-app.conf | `alias /var/www/radio_monitoring/uploads/;` | `MEDIA_ROOT` with a trailing slash |
+| nginx-app.conf | `client_body_temp_path /var/www/nginx_uploads 1 2;` | `NGINX_UPLOAD_TEMP` |
+| nginx.conf | `server_name` (both servers) | your domain |
+| nginx.conf | `ssl_certificate` / `ssl_certificate_key` | the server certificate (with its chain) and key |
+| nginx.conf | `ssl_client_certificate` / `ssl_crl` | the CA that issues user certificates and its revocation list |
 | nginx-http.conf | `server 127.0.0.1:8000;` / `server 127.0.0.1:8080;` | `API_PORT` / `IMGPROXY_PORT` |
 | nginx-http.conf | `proxy_cache_path /var/cache/nginx/thumbs ... max_size=20g` | local disk, sized for the box |
-| nginx.conf | `client_max_body_size 64m;` in the `/api/v1/media/uploads` location | at least `storage.upload.max_chunk_bytes` |
+| nginx-app.conf | `client_max_body_size 64m;` in the `/api/v1/media/uploads` location | at least `storage.upload.max_chunk_bytes` |
 
 The API container mounts `NGINX_UPLOAD_TEMP` at the same path, so the temp file nginx names in `X-File-Name` is the file the API moves. The directory must be writable by nginx and readable by `MEDIA_UID`; the simplest arrangement is `MEDIA_UID` = the nginx worker user (`www-data`).
 
-If another nginx or a load balancer sits in front of this host, keep this server block as is and proxy to it; the cache and the internal locations must live on the nginx that can read `MEDIA_ROOT`.
+If another nginx or a load balancer sits in front of this host, keep this server block as is and pass TLS through to it (TCP, no TLS termination in front): this nginx must see the client certificate. The cache and the internal locations must live on the nginx that can read `MEDIA_ROOT`.
+
+### Client certificates (mTLS)
+
+nginx is the control point for user certificates. `ssl_verify_client on` makes every request (API, thumbnails, `/docs`) present a certificate issued by `ssl_client_certificate`, inside its validity period and not on `ssl_crl`; anything else gets an nginx 400 page ("No required SSL certificate was sent" / "The SSL certificate error") and never reaches the API. Port 80 only redirects to 443.
+
+- The API sees the certificate only through four headers nginx sets in `nginx-proxy.conf`: `X-SSL-Client-Verify`, `-DN`, `-Serial`, `-Fingerprint`. `POST /auth/login` maps them to a user. nginx replaces any header of these names the client sends, but only in locations that include the snippet: every location with `proxy_pass http://watch_web_api` must include it (`tests/test_nginx_conf.py` fails otherwise).
+- Revocation: a certificate added to the CRL is refused after `nginx -s reload`. Refresh the CRL before its `nextUpdate`: an expired CRL makes nginx refuse every certificate. A resumed TLS session is not checked again, for at most `ssl_session_timeout` (10 minutes). Sessions already logged in with the revoked certificate stay valid in the API until they end, but every request still needs the certificate here.
+- `ssl_verify_depth 2` accepts a user certificate issued by an intermediate CA under the root in `ssl_client_certificate`; raise it for longer chains.
+- Servers run with `MYSETTINGS_APP__ENVIRONMENT=production`. In `development` the login takes the certificate fields from a JSON body without any check.
+- The admin user: set `MYSETTINGS_ADMIN__PKI_CERTIFICATE_CN` / `_SERIAL` / `_FINGERPRINT` from the real admin certificate (serial in hex, fingerprint SHA-1, as nginx reports them). Credentials generated on first start have no private key anyone can install; they only serve the development login.
+- Check: `curl --cert user.crt --key user.key https://host/health` answers; the same without `--cert` gets 400.
 
 ## MySQL on the host
 
@@ -97,7 +113,7 @@ Upgrades: `docker compose build api && docker compose up -d api media-worker`. T
 
 ## End-to-end test stack
 
-`tests/docker/compose.test.yml` runs the whole pipeline on a developer machine, including Docker Desktop on Windows: MySQL and nginx are containers there too (a bridge network, not the production layout), but the media path, the real `nginx.conf` server block and the uid handling are the same as in production.
+`tests/docker/compose.test.yml` runs the whole pipeline on a developer machine, including Docker Desktop on Windows: MySQL and nginx are containers there too (a bridge network, not the production layout), but the media path, the real locations and proxy headers (`nginx-app.conf`, `nginx-proxy.conf`) and the uid handling are the same as in production. Only the server block differs (`tests/docker/nginx-server.test.conf`: plain http, no client certificates, the API in development mode).
 
 ```bash
 docker build -t watch-web .
@@ -111,17 +127,20 @@ The script exits non-zero when any check fails. Ports default to 18089 (nginx) a
 ## Verification
 
 ```bash
+# every request presents a user certificate (nginx refuses it otherwise)
+CERT="--cert user.crt --key user.key"
+
 # health through nginx
-curl -s https://host/health | head -c 200
+curl -s $CERT https://host/health | head -c 200
 
 # originals: nginx must serve the body, the API only the redirect
-curl -sI -H "Authorization: Bearer $TOKEN" https://host/api/v1/media/1/download | grep -i "x-served-by\|accept-ranges"
+curl -sI $CERT -H "Authorization: Bearer $TOKEN" https://host/api/v1/media/1/download | grep -i "x-served-by\|accept-ranges"
 
 # thumbnails: first call MISS, second HIT
-curl -sI -H "Authorization: Bearer $TOKEN" "https://host/api/v1/media/1/thumbnail?size=medium" | grep -i "x-cache\|content-type"
+curl -sI $CERT -H "Authorization: Bearer $TOKEN" "https://host/api/v1/media/1/thumbnail?size=medium" | grep -i "x-cache\|content-type"
 
-# public URL from a list response loads without a token
-curl -sI "https://host/t/<signature>/rs:fit:300:300:0:0/q:85/exp:.../<source>" | head -1
+# public URL from a list response loads without a token (the certificate is still required)
+curl -sI $CERT "https://host/t/<signature>/rs:fit:300:300:0:0/q:85/exp:.../<source>" | head -1
 
 # queue and worker
 docker compose exec media-worker python -m app.backend.media_tools poster-status
