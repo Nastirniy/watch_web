@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-HEAD = "014_drop_post_connection_columns"
+HEAD = "015_session_end_state"
 
 
 def run_migrate(db_file: Path, cwd: Path = PROJECT_ROOT) -> subprocess.CompletedProcess:
@@ -220,5 +220,41 @@ def test_014_drops_post_connection_columns(tmp_path):
     indexes = {row[1] for row in conn.execute("pragma index_list(posts)")}
     assert not {"ix_posts_connection_status", "ix_posts_last_connection_at"} & indexes
     assert conn.execute("select code from posts").fetchall() == [("P1",)]
+    assert conn.execute("select version_num from alembic_version").fetchone()[0] == HEAD
+    conn.close()
+
+
+def test_015_moves_session_state_from_is_active_to_ended_at(tmp_path):
+    """A database from before 015 has user_sessions.is_active; 015 keeps the ended sessions ended (ended_at),
+    adds end_reason / revoke_cause and drops is_active with its index."""
+    db_file = tmp_path / "sessions.db"
+    first = run_migrate(db_file)
+    assert first.returncode == 0, first.stdout + first.stderr
+
+    conn = sqlite3.connect(db_file)  # sqlite checks no foreign keys here: the sessions need no user row
+    conn.execute("alter table user_sessions add column is_active boolean not null default 1")
+    conn.execute("create index ix_user_sessions_is_active on user_sessions (is_active)")
+    rows = [("live", 1, None), ("logged-out", 0, "2026-09-02 10:00:00"), ("ended-without-time", 0, None)]
+    for session_id, is_active, ended_at in rows:
+        conn.execute("insert into user_sessions (id, user_id, is_active, last_activity, expires_at, ended_at, created_at)"
+                     " values (?, 1, ?, '2026-09-02 09:00:00', '2026-09-02 21:00:00', ?, '2026-09-02 08:00:00')",
+                     (session_id, is_active, ended_at))
+    conn.execute("update alembic_version set version_num = '014_drop_post_connection_columns'")
+    conn.commit()
+    conn.close()
+
+    second = run_migrate(db_file)
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert "dropping column user_sessions.is_active" in second.stdout + second.stderr
+
+    conn = sqlite3.connect(db_file)
+    columns = {row[1] for row in conn.execute("pragma table_info(user_sessions)")}
+    assert "is_active" not in columns and {"end_reason", "revoke_cause", "ended_at"} <= columns
+    indexes = {row[1] for row in conn.execute("pragma index_list(user_sessions)")}
+    assert "ix_user_sessions_is_active" not in indexes and "ix_user_sessions_ended_at" in indexes
+    ended_at = dict(conn.execute("select id, ended_at from user_sessions"))
+    assert ended_at["live"] is None
+    assert ended_at["logged-out"].startswith("2026-09-02 10:00:00")
+    assert ended_at["ended-without-time"].startswith("2026-09-02 09:00:00"), "last_activity becomes the end"
     assert conn.execute("select version_num from alembic_version").fetchone()[0] == HEAD
     conn.close()

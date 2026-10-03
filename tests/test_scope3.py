@@ -59,7 +59,7 @@ async def test_expired_session_is_rejected_and_closed(client, db):
     assert response.json()["code"] == "session_expired"
     row = (await db.exec(select(UserSession).where(UserSession.id == expired.id))).one()
     await db.refresh(row)
-    assert row.is_active is False and row.ended_at is not None
+    assert row.ended_at is not None and row.end_reason == "expired"
 
     valid = await make_session(db, user, timedelta(hours=1))
     assert (await client.get(ME, headers=bearer(user, valid))).status_code == 200

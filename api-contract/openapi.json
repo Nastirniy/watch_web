@@ -465,7 +465,7 @@
           "AUTHENTICATION"
         ],
         "summary": "Get User Sessions",
-        "description": "Get current user's active sessions",
+        "description": "The caller's live sessions (online or idle), newest first",
         "operationId": "get_user_sessions",
         "responses": {
           "200": {
@@ -2585,6 +2585,469 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/UserNotArchivedProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/{user_id}/sessions": {
+      "get": {
+        "tags": [
+          "USERS"
+        ],
+        "summary": "List User Sessions",
+        "description": "Login sessions of a user, newest first. status is computed when read: online (a request within\nsecurity.online_threshold_seconds), idle (live, client quiet) or ended; a session past its absolute end or\nidle timeout is ended even if nothing has recorded it yet. Archived users are listed too.",
+        "operationId": "list_user_sessions",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "include_ended",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Also list ended sessions, with end_reason and revoke_cause",
+              "default": false,
+              "title": "Include Ended"
+            },
+            "description": "Also list ended sessions, with end_reason and revoke_cause"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "description": "Newest first",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Newest first"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UserSessionResponse"
+                  },
+                  "title": "Response List User Sessions"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AdminRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "admin_required": "#/components/schemas/AdminRequiredProblem",
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`user_not_found`: User not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserNotFoundProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/{user_id}/sessions/end": {
+      "post": {
+        "tags": [
+          "USERS"
+        ],
+        "summary": "End User Sessions",
+        "description": "Revoke every live session of a user (revoke_cause ended_by_admin); the account stays as it is and can log\nin again. The caller's own session ends too when user_id is the caller. Archived users: 404.",
+        "operationId": "end_user_sessions",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionsEndedResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AdminRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "admin_required": "#/components/schemas/AdminRequiredProblem",
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`user_not_found`: User not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserNotFoundProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/{user_id}/sessions/{session_id}/end": {
+      "post": {
+        "tags": [
+          "USERS"
+        ],
+        "summary": "End User Session",
+        "description": "Revoke one live session of a user (revoke_cause ended_by_admin). Ended already: 409 with its end_reason.",
+        "operationId": "end_user_session",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserSessionResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AdminRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "admin_required": "#/components/schemas/AdminRequiredProblem",
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`session_not_found`: Session not found; `user_not_found`: User not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/SessionNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UserNotFoundProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "session_not_found": "#/components/schemas/SessionNotFoundProblem",
+                      "user_not_found": "#/components/schemas/UserNotFoundProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`session_already_ended`: Session already ended",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionAlreadyEndedProblem"
                 }
               }
             }
@@ -29528,6 +29991,73 @@
         "title": "ServicesHealthModel",
         "description": "Services health check response model"
       },
+      "SessionAlreadyEndedProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Session already ended",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Session already ended"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "session_already_ended",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          },
+          "end_reason": {
+            "type": "string",
+            "title": "End Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "SessionAlreadyEndedProblem",
+        "description": "Session already ended (HTTP 409). Problem type session_already_ended.",
+        "examples": [
+          {
+            "code": "session_already_ended",
+            "detail": "Session already ended",
+            "instance": "/api/v1/...",
+            "status": 409,
+            "title": "Session already ended",
+            "type": "https://example.org/problems/session_already_ended"
+          }
+        ]
+      },
       "SessionAlreadyInvalidatedProblem": {
         "properties": {
           "type": {
@@ -29590,6 +30120,17 @@
             "type": "https://example.org/problems/session_already_invalidated"
           }
         ]
+      },
+      "SessionEndReason": {
+        "type": "string",
+        "enum": [
+          "logout",
+          "expired",
+          "idle_timeout",
+          "revoked"
+        ],
+        "title": "SessionEndReason",
+        "description": "Why a session ended, from the session's point of view"
       },
       "SessionExpiredProblem": {
         "properties": {
@@ -29660,6 +30201,10 @@
             "type": "string",
             "title": "Id"
           },
+          "status": {
+            "$ref": "#/components/schemas/SessionStatus",
+            "description": "Computed when read: online, idle (live, client quiet) or ended"
+          },
           "ip_address": {
             "anyOf": [
               {
@@ -29688,7 +30233,20 @@
           },
           "expires_at": {
             "type": "string",
-            "title": "Expires At"
+            "title": "Expires At",
+            "description": "Absolute end: login + security.session_max_hours"
+          },
+          "idle_expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idle Expires At",
+            "description": "Live sessions: when the session ends if no request comes before"
           },
           "last_activity_at": {
             "anyOf": [
@@ -29705,10 +30263,110 @@
         "type": "object",
         "required": [
           "id",
+          "status",
           "created_at",
           "expires_at"
         ],
-        "title": "SessionInfoResponse"
+        "title": "SessionInfoResponse",
+        "description": "A login session; times are ISO 8601 in UTC with the offset"
+      },
+      "SessionNotFoundProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Session not found",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 404,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Session not found"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "session_not_found",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "SessionNotFoundProblem",
+        "description": "Session not found (HTTP 404). Problem type session_not_found.",
+        "examples": [
+          {
+            "code": "session_not_found",
+            "detail": "Session not found",
+            "instance": "/api/v1/...",
+            "status": 404,
+            "title": "Session not found",
+            "type": "https://example.org/problems/session_not_found"
+          }
+        ]
+      },
+      "SessionRevokeCause": {
+        "type": "string",
+        "enum": [
+          "account_deactivated",
+          "account_archived",
+          "certificate_changed",
+          "ended_by_admin"
+        ],
+        "title": "SessionRevokeCause",
+        "description": "What made the server revoke a session; the account itself may stay as it is"
+      },
+      "SessionStatus": {
+        "type": "string",
+        "enum": [
+          "online",
+          "idle",
+          "ended"
+        ],
+        "title": "SessionStatus",
+        "description": "State of a login session, computed when it is read (services/sessions.py), never stored"
+      },
+      "SessionsEndedResponse": {
+        "properties": {
+          "ended_count": {
+            "type": "integer",
+            "title": "Ended Count",
+            "description": "Live sessions that were revoked"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ended_count"
+        ],
+        "title": "SessionsEndedResponse"
       },
       "ShareLinkRequest": {
         "properties": {
@@ -33296,6 +33954,114 @@
             "type": "https://example.org/problems/user_self_only"
           }
         ]
+      },
+      "UserSessionResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SessionStatus",
+            "description": "Computed when read: online, idle (live, client quiet) or ended"
+          },
+          "ip_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip Address"
+          },
+          "user_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Agent"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "expires_at": {
+            "type": "string",
+            "title": "Expires At",
+            "description": "Absolute end: login + security.session_max_hours"
+          },
+          "idle_expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idle Expires At",
+            "description": "Live sessions: when the session ends if no request comes before"
+          },
+          "last_activity_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Activity At"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "end_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionEndReason"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ended sessions: logout, expired, idle_timeout or revoked (null for sessions ended before reasons were recorded)"
+          },
+          "revoke_cause": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionRevokeCause"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Revoked sessions: what made the server end it; the account may be unchanged"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "created_at",
+          "expires_at"
+        ],
+        "title": "UserSessionResponse",
+        "description": "A session as administrators see it, ended ones included"
       },
       "UserSessionsResponse": {
         "properties": {

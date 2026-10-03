@@ -101,8 +101,11 @@ The localization package needs one entry per code:
 
 Send `Authorization: Bearer <access token>` from `POST /api/v1/auth/login`.
 
-- `invalid_token` or `session_expired`: refresh with `POST /api/v1/auth/refresh`, then repeat the request.
+- `invalid_token` (the access token expired): refresh with `POST /api/v1/auth/refresh`, then repeat the request.
+- `session_expired`: the session itself ended (logout, no request for `session_idle_timeout_minutes`, `session_max_hours` after the login, or revoked by the server); a refresh cannot bring it back: log in again.
 - `credentials_required`, `account_not_found`, `account_deactivated`, `account_deleted`, `invalid_refresh_token`: log in again.
+
+Session lifetime: a session ends after `security.session_idle_timeout_minutes` (30) without a request, and in any case `security.session_max_hours` (12) after the login. Every request and every refresh moves the idle deadline; nothing moves the absolute end. The refresh token expires with its session, the access token (`expires_in`) never outlives it. `GET /auth/sessions` lists the caller's live sessions with `status` (`online` / `idle`) and `idle_expires_at`; administrators see any user's sessions, ended ones with `end_reason` / `revoke_cause`, under `/users/{id}/sessions`.
 
 ### Not allowed (403)
 

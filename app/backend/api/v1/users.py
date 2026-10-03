@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from app.backend.api.shared.helpers.db_errors import is_data_too_long, is_unique_violation
 from app.backend.database import get_session
-from app.backend.models.user import User
+from app.backend.models.user import User, UserSession
 from app.backend.models.role import Role, UserRole
 from app.backend.models.post import Post
 from app.backend.models.user_post_access import UserPostAccess
@@ -17,7 +17,10 @@ from app.backend.services.permissions import require
 from app.backend.services.access_control import AccessControlService
 from app.backend.services.auth import AuthService
 from app.backend.helpers.certeficates_helper import CertificateParser, hash_data, hash_pki_certificate_data
-from app.backend.enums.general import Permissions
+from app.backend.enums.general import Permissions, SessionEndReason, SessionRevokeCause, SessionStatus
+from app.backend.services import sessions as session_lifetimes
+from app.backend.api.shared.helpers.auth_helper import build_session_response
+from app.backend.api.shared.models.response.auth_response import SessionsEndedResponse, UserSessionResponse
 from app.backend.enums.routes import UserRoutes
 from app.backend.helpers.audit_helper import client_info, create_audit_log
 from app.backend.utils.logging_config import get_api_logger
@@ -35,6 +38,19 @@ _logger = get_api_logger()
 # PATCH /users/{id} reads form fields only; a JSON body would reach the route with every field unset
 FORM_CONTENT_TYPES = ("multipart/form-data", "application/x-www-form-urlencoded")
 MAX_CERTIFICATE_BYTES = 5 * 1024 * 1024
+
+
+async def _assignable_roles(session: AsyncSession, role_ids: List[int]) -> List[Role]:
+    """The roles to assign; unknown or archived ones are refused before anything is written"""
+    roles = []
+    for role_id in role_ids:
+        role = (await session.exec(select(Role).where(Role.id == role_id))).first()
+        if not role:
+            raise ApiError(ErrorCode.ROLE_NOT_FOUND, role_id=role_id)
+        if role.is_deleted:
+            raise ApiError(ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, role_id=role_id)
+        roles.append(role)
+    return roles
 
 
 def _username_taken(username: str, exclude_user_id: Optional[int] = None):
@@ -144,18 +160,7 @@ async def create_user(
         _logger.error(f"Certificate parsing error for user {username}: {str(e)}")
         raise ApiError(ErrorCode.CERTIFICATE_INVALID)
 
-    # Validate all roles exist
-    roles_to_assign = []
-    for role_id in user_data.role_ids:
-        role_result = await session.exec(
-            select(Role).where(Role.id == role_id)
-        )
-        role = role_result.first()
-        if not role:
-            raise ApiError(ErrorCode.ROLE_NOT_FOUND, role_id=role_id)
-        if role.is_deleted:
-            raise ApiError(ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, role_id=role_id)
-        roles_to_assign.append(role)
+    roles_to_assign = await _assignable_roles(session, user_data.role_ids)
 
     # Hash PKI certificate data before storing
     pki_cn_hash, pki_serial_hash, pki_fingerprint_hash = await hash_pki_certificate_data(
@@ -312,6 +317,8 @@ async def update_user(
     old_values = user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"})
 
     certificate = update_data.certificate
+    # Checked before any change: a refused role must not leave the other fields of the PATCH saved
+    roles_to_assign = await _assignable_roles(session, update_data.role_ids) if update_data.role_ids is not None else None
 
     if update_data.username is not None:
         existing_username = await session.exec(_username_taken(update_data.username, exclude_user_id=user_id))
@@ -394,58 +401,34 @@ async def update_user(
     # user's tokens stop working the moment the update is committed (the request dependency rejects them).
     # A certificate is replaced because the old one is lost, compromised or revoked: its sessions must not
     # outlive it. An administrator replacing their own certificate ends their own session too.
-    end_sessions_reason = "account_deactivated" if deactivating else "certificate_replaced" if certificate_replaced else None
-    if end_sessions_reason:
+    revoke_cause = (SessionRevokeCause.ACCOUNT_DEACTIVATED if deactivating
+                    else SessionRevokeCause.CERTIFICATE_CHANGED if certificate_replaced else None)
+    if revoke_cause:
         invalidated_count = await AuthService.invalidate_all_user_sessions(
             session=session,
             user_id=user_id,
-            reason=end_sessions_reason,
+            cause=revoke_cause,
             actor_user_id=current_user.id,
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
             commit=False
         )
         _logger.info(
-            f"User {current_user.username} updated user {user.username} ({end_sessions_reason}), "
+            f"User {current_user.username} updated user {user.username} ({revoke_cause.value}), "
             f"invalidated {invalidated_count} active sessions"
         )
 
     try:
-        await session.commit()
-
-        # Handle role updates if provided
-        if update_data.role_ids is not None:
-            # Validate all roles exist
-            roles_to_assign = []
-            for role_id in update_data.role_ids:
-                role_result = await session.exec(
-                    select(Role).where(Role.id == role_id)
-                )
-                role = role_result.first()
-                if not role:
-                    await session.rollback()
-                    raise ApiError(ErrorCode.ROLE_NOT_FOUND, role_id=role_id)
-                if role.is_deleted:
-                    await session.rollback()
-                    raise ApiError(ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, role_id=role_id)
-                roles_to_assign.append(role)
-
-            # Delete existing role assignments
-            existing_assignments_result = await session.exec(
-                select(UserRole).where(UserRole.user_id == user_id)
-            )
-            existing_assignments = existing_assignments_result.all()
-
+        if roles_to_assign is not None:
+            # Replace the role assignments in the same transaction as the other changes
+            existing_assignments = (await session.exec(select(UserRole).where(UserRole.user_id == user_id))).all()
             for assignment in existing_assignments:
                 await session.delete(assignment)
-
-            # Assign new roles
             for role in roles_to_assign:
-                user_role = UserRole(user_id=user_id, role_id=role.id)
-                session.add(user_role)
+                session.add(UserRole(user_id=user_id, role_id=role.id))
+            _logger.info(f"User {current_user.username} replaced the roles of user {user.username} with {len(roles_to_assign)} roles")
 
-            await session.commit()
-            _logger.info(f"User {current_user.username} updated user {user.username} and replaced roles with {len(roles_to_assign)} new roles")
+        await session.commit()
 
         await session.refresh(user)
         
@@ -676,15 +659,15 @@ async def archive_user(
     user.is_active = False
     user.updated_at = datetime.now(timezone.utc)
     session.add(user)
-    await session.commit()
 
     invalidated = await AuthService.invalidate_all_user_sessions(
         session=session,
         user_id=user_id,
-        reason="account_deleted",
+        cause=SessionRevokeCause.ACCOUNT_ARCHIVED,
         actor_user_id=current_user.id,
         ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent")
+        user_agent=request.headers.get("user-agent"),
+        commit=False,
     )
     await create_audit_log(
         session=session,
@@ -741,3 +724,97 @@ async def restore_user(
     await session.refresh(user)
     _logger.info(f"User {current_user.username} restored user {user.username}")
     return UserResponse.model_validate(user)
+
+
+@router.get(
+    UserRoutes.USER_SESSIONS.value,
+    response_model=List[UserSessionResponse],
+    responses=problems(ErrorCode.USER_NOT_FOUND, *ADMIN),
+)
+async def list_user_sessions(
+        user_id: Annotated[int, Path(ge=1)],
+        include_ended: bool = Query(False, description="Also list ended sessions, with end_reason and revoke_cause"),
+        limit: int = Query(50, ge=1, le=500, description="Newest first"),
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW], admin=True))
+):
+    """Login sessions of a user, newest first. status is computed when read: online (a request within
+    security.online_threshold_seconds), idle (live, client quiet) or ended; a session past its absolute end or
+    idle timeout is ended even if nothing has recorded it yet. Archived users are listed too."""
+    if not (await session.exec(select(User.id).where(User.id == user_id))).first():
+        raise ApiError(ErrorCode.USER_NOT_FOUND)
+    query = select(UserSession).where(UserSession.user_id == user_id)
+    if not include_ended:
+        query = query.where(session_lifetimes.live_clause())
+    rows = (await session.exec(query.order_by(UserSession.created_at.desc()).limit(limit))).all()
+    now = datetime.now(timezone.utc)
+    return [build_session_response(row, session_lifetimes.session_state(row, now)) for row in rows]
+
+
+@router.post(
+    UserRoutes.USER_SESSIONS_END.value,
+    response_model=SessionsEndedResponse,
+    responses=problems(ErrorCode.USER_NOT_FOUND, *ADMIN),
+)
+async def end_user_sessions(
+        request: Request,
+        user_id: Annotated[int, Path(ge=1)],
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE], admin=True))
+):
+    """Revoke every live session of a user (revoke_cause ended_by_admin); the account stays as it is and can log
+    in again. The caller's own session ends too when user_id is the caller. Archived users: 404."""
+    await _get_active_user_or_404(session, user_id)
+    ended = await AuthService.invalidate_all_user_sessions(
+        session=session,
+        user_id=user_id,
+        cause=SessionRevokeCause.ENDED_BY_ADMIN,
+        actor_user_id=auth.user.id,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    _logger.info(f"User {auth.user.username} ended {ended} sessions of user_id={user_id}")
+    return SessionsEndedResponse(ended_count=ended)
+
+
+@router.post(
+    UserRoutes.USER_SESSION_END.value,
+    response_model=UserSessionResponse,
+    responses=problems(ErrorCode.USER_NOT_FOUND, ErrorCode.SESSION_NOT_FOUND, ErrorCode.SESSION_ALREADY_ENDED, *ADMIN),
+)
+async def end_user_session(
+        request: Request,
+        user_id: Annotated[int, Path(ge=1)],
+        session_id: Annotated[str, Path(max_length=128)],
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE], admin=True))
+):
+    """Revoke one live session of a user (revoke_cause ended_by_admin). Ended already: 409 with its end_reason."""
+    await _get_active_user_or_404(session, user_id)
+    row = (await session.exec(
+        select(UserSession).where(UserSession.id == session_id, UserSession.user_id == user_id)
+    )).first()
+    if not row:
+        raise ApiError(ErrorCode.SESSION_NOT_FOUND)
+    state = session_lifetimes.session_state(row)
+    if state.status is SessionStatus.ENDED:
+        await session_lifetimes.record_end(session, row, state)
+        if state.end_reason:
+            raise ApiError(ErrorCode.SESSION_ALREADY_ENDED, end_reason=state.end_reason.value)
+        raise ApiError(ErrorCode.SESSION_ALREADY_ENDED)
+
+    session_lifetimes.end(row, SessionEndReason.REVOKED, SessionRevokeCause.ENDED_BY_ADMIN)
+    session.add(row)
+    await create_audit_log(
+        session=session,
+        action="force_logout",
+        resource_type="session",
+        resource_id=user_id,
+        user_id=auth.user.id,
+        details={"message": f"User {auth.user.username} ended one session of user_id={user_id}",
+                 "ended_session_id": row.id, "cause": SessionRevokeCause.ENDED_BY_ADMIN.value},
+        **client_info(request, auth)
+    )
+    await session.commit()
+    await session.refresh(row)
+    return build_session_response(row, session_lifetimes.session_state(row))

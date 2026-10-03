@@ -38,7 +38,8 @@ def session_headers(user, user_session) -> dict:
 @pytest.mark.asyncio
 async def test_request_touches_session_and_me_reports_presence(client, db):
     user = await make_user(db)
-    old = datetime.now(timezone.utc) - timedelta(minutes=30)
+    # quiet for longer than the touch interval, shorter than the idle timeout (a quieter session has ended)
+    old = datetime.now(timezone.utc) - timedelta(minutes=settings.security.session_idle_timeout_minutes - 10)
     user_session = await make_session(db, user, old)
 
     response = await client.get(ME, headers=session_headers(user, user_session))

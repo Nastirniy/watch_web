@@ -2,6 +2,7 @@ from typing import Optional, List
 from pydantic import BaseModel, Field
 
 from app.backend.enums.errors import RequiredPermissions
+from app.backend.enums.general import SessionEndReason, SessionRevokeCause, SessionStatus
 from app.backend.utils.validators import PlainTextModel
 
 
@@ -47,16 +48,34 @@ class UserInfoResponse(AuthorizationInfo):
 
 
 class SessionInfoResponse(BaseModel):
+    """A login session; times are ISO 8601 in UTC with the offset"""
     id: str
+    status: SessionStatus = Field(description="Computed when read: online, idle (live, client quiet) or ended")
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
     created_at: str
-    expires_at: str
+    expires_at: str = Field(description="Absolute end: login + security.session_max_hours")
+    idle_expires_at: Optional[str] = Field(
+        default=None, description="Live sessions: when the session ends if no request comes before")
     last_activity_at: Optional[str] = None
+
+
+class UserSessionResponse(SessionInfoResponse):
+    """A session as administrators see it, ended ones included"""
+    ended_at: Optional[str] = None
+    end_reason: Optional[SessionEndReason] = Field(
+        default=None, description="Ended sessions: logout, expired, idle_timeout or revoked (null for sessions "
+                                  "ended before reasons were recorded)")
+    revoke_cause: Optional[SessionRevokeCause] = Field(
+        default=None, description="Revoked sessions: what made the server end it; the account may be unchanged")
 
 
 class UserSessionsResponse(BaseModel):
     sessions: list[SessionInfoResponse]
+
+
+class SessionsEndedResponse(BaseModel):
+    ended_count: int = Field(description="Live sessions that were revoked")
 
 
 class PermissionCheckResponse(BaseModel):

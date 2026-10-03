@@ -60,9 +60,9 @@ Variables marked `[REQUIRED in prod]` have an insecure or wrong default and must
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MYSETTINGS_SECURITY__SECRET_KEY` | **[REQUIRED]** | JWT signing key |
-| `MYSETTINGS_SECURITY__ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | Access token lifetime in minutes |
-| `MYSETTINGS_SECURITY__REFRESH_TOKEN_EXPIRE_DAYS` | `7` | Refresh token lifetime in days |
-| `MYSETTINGS_SECURITY__SESSION_EXPIRE_HOURS` | `8` | Session lifetime in hours |
+| `MYSETTINGS_SECURITY__ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | Access token lifetime in minutes, never beyond the end of its session |
+| `MYSETTINGS_SECURITY__SESSION_IDLE_TIMEOUT_MINUTES` | `30` | A session ends after this long without a request (every request and refresh moves the deadline) |
+| `MYSETTINGS_SECURITY__SESSION_MAX_HOURS` | `12` | A session ends this long after the login whatever the activity; the refresh token expires with it |
 | `MYSETTINGS_SECURITY__ALLOWED_ORIGINS` | `["https://localhost:3000"]` | CORS allowed origins |
 | `MYSETTINGS_SECURITY__JWT_LEEWAY_SECONDS` | `10` | Clock skew tolerance for JWT validation |
 

@@ -129,6 +129,9 @@ class UserRoutes(str, Enum):
     USER_ROLES = "/{user_id}/roles"
     USER_POST_ACCESS = "/{user_id}/post-access"
     USER_POST_ACCESS_BY_POST = "/{user_id}/post-access/{post_id}"
+    USER_SESSIONS = "/{user_id}/sessions"
+    USER_SESSIONS_END = "/{user_id}/sessions/end"
+    USER_SESSION_END = "/{user_id}/sessions/{session_id}/end"
 
     @staticmethod
     def tag() -> str:

@@ -36,9 +36,11 @@ class DatabaseConfig(BaseModel):
 class SecurityConfig(BaseModel):
     secret_key: str
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 30  # Reduced from 1440 for better security
-    refresh_token_expire_days: int = 7
-    session_expire_hours: int = 8  # Reduced from 24 for better security
+    access_token_expire_minutes: int = 30  # never beyond the end of its session
+    # A session ends after this long without a request (sliding: every request and refresh moves it) ...
+    session_idle_timeout_minutes: int = 30
+    # ... and in any case this long after the login (absolute; the refresh token expires with it)
+    session_max_hours: int = 12
     allowed_origins: list[str] = ["https://localhost:3000"]
     jwt_leeway_seconds: int = 10
     online_threshold_seconds: int = 300  # user is online when a session was touched within this window

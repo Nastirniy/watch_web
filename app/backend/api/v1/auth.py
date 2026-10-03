@@ -4,13 +4,14 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.database import get_session
 from app.backend.services.auth import AuthService
-from app.backend.services.presence import is_expired
+from app.backend.services.sessions import live_clause, live_session, session_state
 from datetime import datetime, timezone
+from sqlmodel import select
 from app.backend.services.permissions import require
 from app.backend.services.auth_context import AuthContext, load_auth_context
 from app.backend.services.permissions import Require
 from app.backend.services.route_access import route_access_map, routes_allowed_for
-from app.backend.api.shared.helpers.auth_helper import build_user_info, build_login_response
+from app.backend.api.shared.helpers.auth_helper import build_user_info, build_login_response, build_session_response
 from app.backend.enums.errors import AuthErrorCode, ErrorCode, RequiredPermissions
 from app.backend.models.user import User, UserSession
 from app.backend.enums.routes import AuthRoutes
@@ -29,7 +30,6 @@ from app.backend.api.shared.models.response.auth_response import (
     LoginResponse,
     LogoutResponse,
     UserInfoResponse,
-    SessionInfoResponse,
     UserSessionsResponse,
     PermissionCheckResponse,
     RouteAccessResponse,
@@ -129,9 +129,8 @@ async def login(
         request_url=str(request.url)
     )
 
-    # Create both access and refresh tokens with session binding
-    access_token = AuthService.create_access_token(user.id, session_id=user_session.id)
-    refresh_token = AuthService.create_refresh_token(user.id, session_id=user_session.id)
+    # Both tokens are bound to the session and never outlive it
+    access_token, refresh_token, expires_in = AuthService.session_tokens(user.id, user_session)
 
     _logger.info(
         f"Successful login for user {user.username} from IP: {client_ip}, "
@@ -139,7 +138,7 @@ async def login(
     )
 
     auth_context = await load_auth_context(session, user)
-    return build_login_response(auth_context, access_token, refresh_token)
+    return build_login_response(auth_context, access_token, refresh_token, expires_in)
 
 
 
@@ -165,7 +164,6 @@ async def refresh_token(
     session_id = payload.get("sid", None)
 
     # Verify user still exists
-    from sqlmodel import select
     user_result = await session.exec(
         select(User).where(User.id == user_id)
     )
@@ -182,34 +180,23 @@ async def refresh_token(
             raise ApiError(AuthErrorCode.ACCOUNT_DELETED)
         raise ApiError(AuthErrorCode.ACCOUNT_DEACTIVATED)
 
-    # Verify the session is still active (reject if sessions were invalidated)
-    if session_id:
-        session_result = await session.exec(
-            select(UserSession).where(
-                UserSession.id == session_id,
-                UserSession.user_id == user_id,
-                UserSession.is_active == True
-            )
-        )
-        refresh_session = session_result.first()
-        if refresh_session and is_expired(refresh_session.expires_at):
-            refresh_session.is_active = False
-            refresh_session.ended_at = datetime.now(timezone.utc)
-            session.add(refresh_session)
-            await session.commit()
-            refresh_session = None
-        if not refresh_session:
-            _logger.warning(f"Refresh attempt with invalidated or expired session: user_id={user_id}, session_id={session_id}")
-            raise ApiError(AuthErrorCode.SESSION_EXPIRED)
+    # A refresh token always belongs to a session (POST /auth/login), which must still be live
+    if not session_id:
+        raise ApiError(AuthErrorCode.INVALID_REFRESH_TOKEN)
+    refresh_session = await live_session(session, session_id, user_id)
+    if refresh_session is None:
+        raise ApiError(AuthErrorCode.SESSION_EXPIRED)
 
-    # Create new tokens bound to the same session
-    access_token = AuthService.create_access_token(user.id, session_id=session_id)
-    new_refresh_token = AuthService.create_refresh_token(user.id, session_id=session_id)
+    # A refresh is activity: it moves the idle timeout, never the absolute end of the session
+    refresh_session.last_activity = datetime.now(timezone.utc)
+    session.add(refresh_session)
+    await session.commit()
 
+    access_token, new_refresh_token, expires_in = AuthService.session_tokens(user.id, refresh_session)
     _logger.info(f"Token refreshed for user {user.username}")
 
     auth_context = await load_auth_context(session, user)
-    return build_login_response(auth_context, access_token, new_refresh_token)
+    return build_login_response(auth_context, access_token, new_refresh_token, expires_in)
 
 
 @router.post(
@@ -264,31 +251,14 @@ async def get_user_sessions(
         auth: AuthContext = Depends(require()),
         session: AsyncSession = Depends(get_session)
 ):
-    """Get current user's active sessions"""
-    current_user = auth.user
-    from sqlmodel import select
-    from datetime import datetime, timezone
-
-    sessions_result = await session.exec(
-        select(UserSession).where(
-            UserSession.user_id == current_user.id,
-            UserSession.is_active == True,
-            UserSession.expires_at > datetime.now(timezone.utc)
-        )
-    )
-
-    sessions = []
-    for user_session in sessions_result.all():
-        sessions.append(SessionInfoResponse(
-            id=user_session.id,
-            ip_address=user_session.ip_address,
-            user_agent=user_session.user_agent,
-            created_at=user_session.created_at.isoformat(),
-            expires_at=user_session.expires_at.isoformat(),
-            last_activity_at=user_session.last_activity.isoformat() if user_session.last_activity else None
-        ))
-
-    return UserSessionsResponse(sessions=sessions)
+    """The caller's live sessions (online or idle), newest first"""
+    rows = (await session.exec(
+        select(UserSession)
+        .where(UserSession.user_id == auth.user.id, live_clause())
+        .order_by(UserSession.created_at.desc())
+    )).all()
+    now = datetime.now(timezone.utc)
+    return UserSessionsResponse(sessions=[build_session_response(row, session_state(row, now)) for row in rows])
 
 
 

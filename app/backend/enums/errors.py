@@ -167,6 +167,8 @@ class ErrorCode(ProblemType):
     # ---------------------------------------------------------------- auth and sessions
     LOGIN_DATA_REQUIRED = ("login_data_required", problem(400, "JSON authentication data required in development mode"))
     NO_ACTIVE_SESSION = ("no_active_session", problem(400, "No active session found"))
+    SESSION_NOT_FOUND = ("session_not_found", problem(404, "Session not found"))
+    SESSION_ALREADY_ENDED = ("session_already_ended", problem(409, "Session already ended", end_reason=Optional[str]))
     SESSION_ALREADY_INVALIDATED = ("session_already_invalidated", problem(400, "Session already invalidated"))
 
     # ---------------------------------------------------------------- users

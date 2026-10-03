@@ -7,11 +7,12 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from loguru import logger
 
 from app.backend.database import get_session
-from app.backend.models.user import User, UserSession
+from app.backend.models.user import User
 from app.backend.enums.errors import AuthErrorCode
 from app.backend.services.auth import AuthService
 from app.backend.services.auth_context import AuthContext, load_auth_context
-from app.backend.services.presence import should_touch, is_expired
+from app.backend.services.presence import should_touch
+from app.backend.services.sessions import live_session
 from datetime import datetime, timezone
 from app.backend.services.api_errors import ApiError
 
@@ -66,32 +67,16 @@ async def get_current_user(
         logger.warning(f"Deactivated user attempted to authenticate: user_id={user_id}, username={user.username}, sessions ended={ended}")
         raise ApiError(AuthErrorCode.ACCOUNT_DEACTIVATED)
 
-    # Validate session is still active in DB (ensures invalidated sessions are rejected immediately)
+    # The session of the token must be live: not ended, not past its absolute end or idle timeout
     if session_id:
-        session_result = await session.exec(
-            select(UserSession).where(
-                UserSession.id == session_id,
-                UserSession.user_id == int(user_id),
-                UserSession.is_active == True
-            )
-        )
-        user_session = session_result.first()
-        if user_session and is_expired(user_session.expires_at):
-            # Enforce the session lifetime: mark it inactive and reject the request
-            user_session.is_active = False
-            user_session.ended_at = datetime.now(timezone.utc)
-            session.add(user_session)
-            await session.commit()
-            logger.warning(f"Session expired: session_id={session_id}, user_id={user_id}")
-            user_session = None
-        if user_session and should_touch(user_session.last_activity):
-            # Presence: refresh last_activity at most once per touch interval
+        user_session = await live_session(session, session_id, int(user_id))
+        if user_session is None:
+            raise ApiError(AuthErrorCode.SESSION_EXPIRED)
+        if should_touch(user_session.last_activity):
+            # Presence and the idle timeout: refresh last_activity at most once per touch interval
             user_session.last_activity = datetime.now(timezone.utc)
             session.add(user_session)
             await session.commit()
-        if not user_session:
-            logger.warning(f"Session invalidated or not found: session_id={session_id}, user_id={user_id}")
-            raise ApiError(AuthErrorCode.SESSION_EXPIRED)
 
     logger.info(f"User authenticated successfully: user_id={user_id}, username={user.username}")
     return user

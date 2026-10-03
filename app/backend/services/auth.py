@@ -10,6 +10,8 @@ from app.backend.config import settings
 from app.backend.utils.logging_config import get_auth_logger
 from app.backend.models.user import User, UserSession
 from app.backend.enums.errors import AuthErrorCode
+from app.backend.enums.general import SessionEndReason, SessionRevokeCause, SessionStatus
+from app.backend.services import sessions as session_lifetimes
 from app.backend.helpers.certeficates_helper import (
     validate_pki_certificate_data,
     hash_pki_certificate_data,
@@ -33,10 +35,13 @@ _pwd_context = CryptContext(
 
 class AuthService:
     @staticmethod
-    def create_access_token(user_id: int, session_id: Optional[str] = None, additional_claims: Optional[Dict[str, Any]] = None) -> str:
-        """Create JWT access token with enhanced security"""
+    def create_access_token(user_id: int, session_id: Optional[str] = None, additional_claims: Optional[Dict[str, Any]] = None,
+                            not_after: Optional[datetime] = None) -> str:
+        """Create JWT access token; it never outlives not_after (the end of its session)"""
         now = datetime.now(timezone.utc)
         expire = now + timedelta(minutes=settings.security.access_token_expire_minutes)
+        if not_after is not None:
+            expire = min(expire, session_lifetimes.utc(not_after))
         
         payload = {
             "sub": str(user_id),
@@ -56,10 +61,10 @@ class AuthService:
         return jwt.encode(payload, settings.security.secret_key, algorithm=settings.security.algorithm)
 
     @staticmethod
-    def create_refresh_token(user_id: int, session_id: Optional[str] = None) -> str:
-        """Create JWT refresh token"""
+    def create_refresh_token(user_id: int, session_id: Optional[str] = None, expires_at: Optional[datetime] = None) -> str:
+        """Create JWT refresh token; it expires with its session (expires_at, the absolute end)"""
         now = datetime.now(timezone.utc)
-        expire = now + timedelta(days=settings.security.refresh_token_expire_days)
+        expire = session_lifetimes.utc(expires_at) if expires_at is not None else now + session_lifetimes.session_lifetime()
         
         payload = {
             "sub": str(user_id),
@@ -74,6 +79,17 @@ class AuthService:
             payload["sid"] = session_id
         
         return jwt.encode(payload, settings.security.secret_key, algorithm=settings.security.algorithm)
+
+    @staticmethod
+    def session_tokens(user_id: int, user_session: UserSession) -> tuple[str, str, int]:
+        """(access token, refresh token, access lifetime in seconds) of a live session: the access token never
+        outlives the session, the refresh token expires at its absolute end (security.session_max_hours)"""
+        now = datetime.now(timezone.utc)
+        session_end = session_lifetimes.utc(user_session.expires_at)
+        access_expires = min(now + timedelta(minutes=settings.security.access_token_expire_minutes), session_end)
+        access = AuthService.create_access_token(user_id, session_id=user_session.id, not_after=session_end)
+        refresh = AuthService.create_refresh_token(user_id, session_id=user_session.id, expires_at=session_end)
+        return access, refresh, max(0, int((access_expires - now).total_seconds()))
 
     @staticmethod
     def verify_token(token: str, token_type: str = "access") -> Optional[Dict[str, Any]]:
@@ -105,7 +121,7 @@ class AuthService:
     ) -> UserSession:
         """Create user session"""
         session_id = secrets.token_urlsafe(64)
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=settings.security.session_expire_hours)
+        expires_at = datetime.now(timezone.utc) + session_lifetimes.session_lifetime()
 
         user_session = UserSession(
             id=session_id,
@@ -228,17 +244,20 @@ class AuthService:
             ip_address: Optional[str] = None,
             user_agent: Optional[str] = None
     ) -> bool:
-        """Invalidate a user session"""
-        query = select(UserSession).where(UserSession.id == session_id)
+        """End a live session by logout. False when there is no such session or it has already ended."""
+        query = select(UserSession).where(UserSession.id == session_id, UserSession.ended_at.is_(None))
         if user_id:
             query = query.where(UserSession.user_id == user_id)
-        
+
         result = await session.exec(query)
         user_session = result.first()
-
         if user_session:
-            user_session.is_active = False
-            user_session.ended_at = datetime.now(timezone.utc)
+            state = session_lifetimes.session_state(user_session)
+            if state.status is SessionStatus.ENDED:
+                await session_lifetimes.record_end(session, user_session, state)
+                return False
+
+            session_lifetimes.end(user_session, SessionEndReason.LOGOUT)
             session.add(user_session)
 
             # Create audit log using helper
@@ -263,32 +282,34 @@ class AuthService:
     async def invalidate_all_user_sessions(
             session: AsyncSession,
             user_id: int,
-            reason: str = "account_deactivated",
+            cause: SessionRevokeCause,
             actor_user_id: Optional[int] = None,
             ip_address: Optional[str] = None,
             user_agent: Optional[str] = None,
             commit: bool = True
     ) -> int:
-        """Invalidate all active sessions for a user (e.g. on deactivation or soft-delete).
+        """Revoke every live session of a user (deactivation, archive, new certificate, administrator).
 
+        A session already past its absolute end or idle timeout is recorded with that reason, not as revoked.
         commit=False leaves the changes in the caller's transaction so that they land together with
         the change that caused them (the caller commits). Database errors propagate either way.
+        Returns the number of sessions revoked.
         """
         result = await session.exec(
-            select(UserSession).where(
-                UserSession.user_id == user_id,
-                UserSession.is_active == True
-            )
+            select(UserSession).where(UserSession.user_id == user_id, UserSession.ended_at.is_(None))
         )
-        active_sessions = result.all()
+        not_ended = result.all()
 
         count = 0
         now = datetime.now(timezone.utc)
-        for user_session in active_sessions:
-            user_session.is_active = False
-            user_session.ended_at = now
+        for user_session in not_ended:
+            state = session_lifetimes.session_state(user_session, now)
+            if state.status is SessionStatus.ENDED:
+                session_lifetimes.end(user_session, state.end_reason, at=state.ended_at)
+            else:
+                session_lifetimes.end(user_session, SessionEndReason.REVOKED, cause, at=now)
+                count += 1
             session.add(user_session)
-            count += 1
 
         if count > 0:
             await create_audit_log(
@@ -300,14 +321,14 @@ class AuthService:
                 ip_address=ip_address,
                 user_agent=user_agent,
                 details={
-                    "message": f"All {count} active sessions invalidated for user_id={user_id}",
-                    "reason": reason
+                    "message": f"All {count} live sessions revoked for user_id={user_id}",
+                    "cause": cause.value
                 },
                 success=True
             )
-            if commit:
-                await session.commit()
-            _logger.info(f"Invalidated {count} active sessions for user_id={user_id}, reason={reason}")
+            _logger.info(f"Revoked {count} live sessions for user_id={user_id}, cause={cause.value}")
+        if commit and not_ended:
+            await session.commit()
 
         return count
 
@@ -321,8 +342,8 @@ class AuthService:
         """
         if user.is_active and not user.is_deleted:
             return 0
-        reason = "account_deleted" if user.is_deleted else "account_deactivated"
-        return await AuthService.invalidate_all_user_sessions(session, user_id=user.id, reason=reason)
+        cause = SessionRevokeCause.ACCOUNT_ARCHIVED if user.is_deleted else SessionRevokeCause.ACCOUNT_DEACTIVATED
+        return await AuthService.invalidate_all_user_sessions(session, user_id=user.id, cause=cause)
 
     @staticmethod
     def hash_password(password: str) -> str:

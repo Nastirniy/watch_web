@@ -159,6 +159,29 @@ class ThumbnailStatus(str, Enum):
     UNSUPPORTED = "unsupported"
 
 
+class SessionStatus(str, Enum):
+    """State of a login session, computed when it is read (services/sessions.py), never stored"""
+    ONLINE = "online"  # live, a request within security.online_threshold_seconds
+    IDLE = "idle"      # live, the client is quiet; ends after security.session_idle_timeout_minutes
+    ENDED = "ended"    # why: SessionEndReason
+
+
+class SessionEndReason(str, Enum):
+    """Why a session ended, from the session's point of view"""
+    LOGOUT = "logout"              # the client logged out
+    EXPIRED = "expired"            # security.session_max_hours after the login
+    IDLE_TIMEOUT = "idle_timeout"  # no request for security.session_idle_timeout_minutes
+    REVOKED = "revoked"            # ended by the server before its time; the cause is a SessionRevokeCause
+
+
+class SessionRevokeCause(str, Enum):
+    """What made the server revoke a session; the account itself may stay as it is"""
+    ACCOUNT_DEACTIVATED = "account_deactivated"
+    ACCOUNT_ARCHIVED = "account_archived"
+    CERTIFICATE_CHANGED = "certificate_changed"  # the user got another certificate: the old one's sessions end
+    ENDED_BY_ADMIN = "ended_by_admin"
+
+
 class ExportJobType(Enum):
     PDF_REPORT = "pdf_report"
     CSV_EXPORT = "csv_export"

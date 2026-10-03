@@ -23,7 +23,7 @@ async def login(db, user):
 
 
 async def live_sessions(db, user_id: int):
-    result = await db.exec(select(UserSession).where(UserSession.user_id == user_id, UserSession.is_active == True))
+    result = await db.exec(select(UserSession).where(UserSession.user_id == user_id, UserSession.ended_at.is_(None)))
     return result.all()
 
 
@@ -45,7 +45,7 @@ async def test_deactivation_ends_sessions_and_rejects_the_token(client, db, head
     assert await live_sessions(db, victim_id) == []
     for user_session in (first, second):
         await db.refresh(user_session)
-        assert user_session.is_active is False
+        assert user_session.ended_at is not None and user_session.end_reason == "revoked"
         assert user_session.ended_at is not None
 
     # The access token is dead, with the reason the client needs
@@ -76,7 +76,7 @@ async def test_flag_changed_outside_the_api_still_expires_the_session(client, db
 
     db.expire_all()
     await db.refresh(user_session)
-    assert user_session.is_active is False
+    assert user_session.ended_at is not None and user_session.end_reason == "revoked"
     assert user_session.ended_at is not None
 
 
@@ -93,7 +93,7 @@ async def test_refresh_of_inactive_user_ends_live_session(client, db):
     assert response.json()["code"] == "account_deactivated"
     db.expire_all()
     await db.refresh(user_session)
-    assert user_session.is_active is False
+    assert user_session.ended_at is not None and user_session.end_reason == "revoked"
 
 
 @pytest.mark.asyncio
@@ -105,7 +105,7 @@ async def test_archive_rejects_the_token_as_deleted(client, db, headers):
     assert (await client.post(ARCHIVE.format(user_id=victim.id), headers=headers(admin))).status_code == 200
     db.expire_all()
     await db.refresh(user_session)
-    assert user_session.is_active is False
+    assert user_session.ended_at is not None and user_session.end_reason == "revoked"
 
     response = await client.get(ME, headers=victim_headers)
     assert response.status_code == 401

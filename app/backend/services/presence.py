@@ -1,12 +1,12 @@
 """User presence (online / offline).
 
-A user is online when one of their active sessions was touched within
+A user is online when one of their live sessions (services/sessions.py) was touched within
 security.online_threshold_seconds. Sessions are touched by
 dependencies.get_current_user on every authenticated request, at most once
 per security.activity_touch_interval_seconds.
 
 Presence is exposed through:
-- User.last_activity_at (column property, max last_activity of active sessions)
+- User.last_activity_at (column property, max last_activity of sessions not ended)
 - User.is_online (property comparing last_activity_at with the cutoff)
 - Post.online_user_count / Post.last_user_activity_at (column properties)
 """
@@ -42,14 +42,6 @@ def is_recent(last_activity: Optional[datetime]) -> bool:
     return _as_aware_utc(last_activity) >= online_cutoff()
 
 
-def is_expired(expires_at: Optional[datetime], now: Optional[datetime] = None) -> bool:
-    """True when a session's expires_at is in the past. Accepts naive (UTC) or aware values."""
-    if expires_at is None:
-        return False
-    now = now or datetime.now(timezone.utc)
-    return _as_aware_utc(expires_at) <= now
-
-
 def should_touch(last_activity: Optional[datetime], now: Optional[datetime] = None) -> bool:
     """True when the session's last_activity is older than the touch interval."""
     if last_activity is None:
@@ -64,9 +56,7 @@ def online_cutoff_param():
 
 
 def online_user_ids_select():
-    """SELECT user_id FROM user_sessions WHERE active AND touched within the threshold."""
+    """SELECT user_id FROM user_sessions WHERE live AND touched within the threshold."""
     from app.backend.models.user import UserSession
-    return sa_select(UserSession.user_id).where(
-        UserSession.is_active == True,
-        UserSession.last_activity >= online_cutoff_param(),
-    )
+    from app.backend.services.sessions import live_clause
+    return sa_select(UserSession.user_id).where(live_clause(), UserSession.last_activity >= online_cutoff_param())

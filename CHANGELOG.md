@@ -5,6 +5,49 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Session state computed when read; idle timeout and absolute end; administrator view of sessions
+
+### Breaking changes for API clients
+
+- A session now ends after `session_idle_timeout_minutes` (default 30) without a request, and in any case
+  `session_max_hours` (default 12) after the login. Before, it lasted exactly 8 hours from the login whatever the
+  activity, and the 7-day refresh token was cut by it. Every request and every `POST /auth/refresh` moves the idle
+  deadline; nothing moves the absolute end. The refresh token now expires with its session; the access token never
+  outlives it (`expires_in` can be shorter than 30 minutes near the end).
+- `POST /auth/refresh` with a refresh token that belongs to no session answers 401 `invalid_refresh_token` (every
+  token from `POST /auth/login` has one).
+- `session_expired` means the session ended (logout, idle timeout, absolute end, revoked): a refresh cannot help,
+  log in again (API.md, "Authentication").
+- `GET /auth/sessions`: only live sessions (before: also sessions idle for hours), each with `status` (`online` /
+  `idle`) and `idle_expires_at`, newest first. Times carry the UTC offset (`2026-10-03T08:00:00+00:00`); they were
+  naive, which JavaScript reads as local time.
+
+### Added
+
+- `GET /users/{id}/sessions` (`user.view`, administration): a user's sessions, newest first, live only unless
+  `include_ended=true`. Each has `status` (`online` / `idle` / `ended`), computed when read, and for ended ones
+  `end_reason` (`logout`, `expired`, `idle_timeout`, `revoked`) and, for revoked ones, `revoke_cause`
+  (`account_deactivated`, `account_archived`, `certificate_changed`, `ended_by_admin`). The cause describes what
+  made the server end the session; the account itself can be unchanged (a new certificate, an administrator).
+- `POST /users/{id}/sessions/end` and `POST /users/{id}/sessions/{session_id}/end` (`user.view` + `user.update`,
+  administration): revoke all live sessions / one session (`ended_by_admin`); the account stays as it is.
+  New codes: `session_not_found` (404), `session_already_ended` (409, `end_reason`).
+
+### Fixed
+
+- `PATCH /users/{id}` validated `role_ids` after committing the other fields: `role_not_found` or
+  `role_archived_not_assignable` left the rest of the PATCH saved. Roles are now checked before anything is written
+  and replaced in the same transaction.
+- `POST /users/{id}/archive` ends the user's sessions in the transaction of the archive flag, like deactivation.
+
+### Database
+
+- Migration `015_session_end_state`: `user_sessions.end_reason`, `user_sessions.revoke_cause`, index on
+  `ended_at`; `user_sessions.is_active` is dropped (it duplicated `ended_at` and read like a row lock). Inactive
+  rows without `ended_at` get `ended_at = last_activity`; their `end_reason` stays null.
+- Settings: `security.session_expire_hours` and `security.refresh_token_expire_days` are replaced by
+  `security.session_idle_timeout_minutes` and `security.session_max_hours` (ENV.md). Old keys are ignored.
+
 ## Client certificates checked by nginx; certificate replacement ends sessions
 
 ### Security
@@ -25,8 +68,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ### Changed for API clients
 
-- `PATCH /users/{id}` with a different certificate ends every session of the user (audit `force_logout`, reason
-  `certificate_replaced`), like deactivation: the old certificate's tokens answer 401 `session_expired`. The
+- `PATCH /users/{id}` with a different certificate ends every session of the user (`end_reason` `revoked`,
+  `revoke_cause` `certificate_changed`; audit `force_logout`), like deactivation: the old certificate's tokens
+  answer 401 `session_expired`; the user stays as is and logs in with the new certificate. The
   same certificate uploaded again changes nothing. An administrator replacing their own certificate ends their
   own session as well.
 - `POST /auth/login` (production) matches the certificate serial as nginx writes it: OpenSSL prints two hex
