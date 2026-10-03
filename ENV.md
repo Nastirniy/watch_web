@@ -4,6 +4,8 @@ All variables follow the pattern `MYSETTINGS_SECTION__KEY`.
 They override the corresponding values in `app/config.toml`.
 
 Variables marked `[REQUIRED]` have no default — the app will refuse to start if they are missing.
+A variable or `config.toml` key that no setting declares (removed, renamed or misspelled) is ignored, and the app
+says so at startup: `WARNING: unknown setting security.session_expire_hours is ignored`.
 Variables marked `[REQUIRED in prod]` have an insecure or wrong default and must be set before going live.
 
 ---

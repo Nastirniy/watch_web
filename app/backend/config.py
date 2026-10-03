@@ -270,6 +270,20 @@ class HealthConfig(BaseModel):
         return max(10, min(3600, v))
 
 
+def _warn_unknown_settings(values: dict, fields: dict, prefix: str = "") -> None:
+    """A key that no settings model declares is ignored: a setting that was removed or renamed, or a typo.
+    Say so at startup instead of running silently with the default (logging is not set up yet: print)."""
+    for key, value in values.items():
+        name = f"{prefix}{key}"
+        if key not in fields:
+            print(f"WARNING: unknown setting {name} is ignored (removed, renamed or misspelled; see ENV.md)")
+            continue
+        model = fields[key]
+        if isinstance(value, dict) and isinstance(model, type) and issubclass(model, BaseModel):
+            nested = {field: info.annotation for field, info in model.model_fields.items()}
+            _warn_unknown_settings(value, nested, f"{name}.")
+
+
 class Settings(BaseSettings):
     app: AppConfig = Field(default_factory=AppConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
@@ -311,6 +325,8 @@ class Settings(BaseSettings):
                         current[part] = {}
                     current = current[part]
                 current[path[-1]] = value
+
+        _warn_unknown_settings(config_data, dict(self.__annotations__))
 
         # Initialize models
         for field_name, field_type in self.__annotations__.items():

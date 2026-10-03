@@ -57,7 +57,11 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - `user_sessions.expires_at` is now when the session ends unless a request comes; requests move it.
 - Settings: `security.session_expire_hours` and `security.refresh_token_expire_days` are replaced by
   `security.session_idle_timeout_minutes` (30) and `security.session_max_hours` (0: no hard limit) (ENV.md).
-  `security.allowed_origins` is gone with CORS. Old keys are ignored.
+  `security.allowed_origins` is gone with CORS. `app/config.toml` and `.env.example` carry the new keys only.
+- Startup reports every setting no model declares, from `config.toml` or a `MYSETTINGS_*` variable:
+  `WARNING: unknown setting security.session_expire_hours is ignored`; remove such keys from deployed `.env` files.
+- `.env.example`: the admin certificate fingerprint is SHA-1 (`openssl x509 -fingerprint -sha1`), as nginx reports it;
+  the SHA-256 the template asked for could never match, and the admin could not log in through nginx.
 
 ### Deployment
 

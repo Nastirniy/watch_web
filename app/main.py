@@ -34,8 +34,10 @@ Radio monitoring API. This page, `{DocsRoutes.REDOC.value}` and `{DocsRoutes.OPE
 from the code, errors included.
 
 ## Authentication
-`Authorization: Bearer <access token>` from `POST {V1.path(AuthRoutes.LOGIN)}`. A 401 with `invalid_token` or
-`session_expired` means: refresh with `POST {V1.path(AuthRoutes.REFRESH)}`; any other 401 code means: log in again.
+`Authorization: Bearer <access token>` from `POST {V1.path(AuthRoutes.LOGIN)}`. A 401 with `invalid_token` means:
+refresh with `POST {V1.path(AuthRoutes.REFRESH)}`; any other 401 code (`session_expired` included: the session
+ended) means: log in again. A session lives while it is used and is bound to the client certificate it was
+opened with.
 
 ## Errors (RFC 9457 Problem Details)
 Every error answers `Content-Type: application/problem+json`:
