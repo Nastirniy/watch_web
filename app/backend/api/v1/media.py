@@ -43,7 +43,7 @@ from app.backend.api.v1.models.response.media import (
     ORIGINAL_FILE_HEADERS,
     THUMBNAIL_PENDING_HEADERS,
 )
-from app.backend.filters.params.media_params import MediaFilterParams
+from app.backend.api.v1.models.query.media import MediaFilterParams
 from app.backend.filters.media_filter import MediaFilterService
 from app.backend.api.shared.helpers.upload_helper import (
     check_declared_format, format_rejected, load_observation_for_upload, record_upload, store_rejected,

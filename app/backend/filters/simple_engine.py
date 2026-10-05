@@ -1,16 +1,42 @@
 """
-SimpleFilterEngine - Applies simple typed filter params to queries
-Works with the strongly-typed FilterParams classes
+SimpleFilterEngine - Applies the criteria of a filter service to queries
+Every service declares its criteria as a frozen dataclass extending ListCriteria
 """
 
-from typing import Optional, Type, List, Set
+from dataclasses import dataclass
+from typing import Optional, Type, TypeVar, List, Set
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.sql.selectable import Select
 
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.exc import NoInspectionAvailable
 
-from app.backend.filters.params.base_params import BaseFilterParams, SortOrder
+from app.backend.enums.general import SortOrder
+
+C = TypeVar("C")
+
+
+@dataclass(frozen=True, kw_only=True)
+class ListCriteria:
+    """Pagination and sorting of a list; every filter service extends it with what it filters by"""
+    page: int = 1
+    page_size: int = 50
+    sort_by: Optional[str] = None
+    sort_order: SortOrder = SortOrder.ASCENDING
+
+    @property
+    def offset(self) -> int:
+        return (self.page - 1) * self.page_size
+
+
+def as_criteria(criteria_class: Type[C], params) -> C:
+    """The criteria of a service from the query model of an API version (the same field names). A field the
+    service does not know is a TypeError, never a silently ignored filter; a version whose names differ
+    builds the criteria itself."""
+    if isinstance(params, criteria_class):
+        return params
+    return criteria_class(**params.model_dump())
+
 
 def _get_model_columns(model: Type) -> Set[str]:
     """Get all column names from a SQLModel class"""
@@ -38,13 +64,13 @@ class SimpleFilterEngine:
     If a field listed in SORTABLE_FIELDS does not exist on MODEL,
     an AttributeError is raised immediately.
 
-    PARAMS - the FilterParams class used by this service.
+    CRITERIA - the criteria dataclass of this service; criteria() converts a query model into it.
     EXPRESSION_SORTABLE - entries of SORTABLE_FIELDS that are not MODEL columns; the
     subclass builds their ORDER BY expression in _sort_expression().
     """
 
     MODEL: Type = None
-    PARAMS: Type = None
+    CRITERIA: Type[ListCriteria] = ListCriteria
     SORTABLE_FIELDS: List[str] = []
     EXPRESSION_SORTABLE: List[str] = []
 
@@ -61,6 +87,11 @@ class SimpleFilterEngine:
                         f"not found on {cls.MODEL.__name__}: {invalid}. "
                         f"Available columns: {sorted(model_columns)}"
                     )
+
+    @classmethod
+    def criteria(cls, params) -> ListCriteria:
+        """The criteria of this service from a query model (see as_criteria)"""
+        return as_criteria(cls.CRITERIA, params)
 
     @classmethod
     def _apply_exact(cls, query: Select, column, value) -> Select:
@@ -102,17 +133,17 @@ class SimpleFilterEngine:
         return query
 
     @classmethod
-    def _apply_pagination(cls, query: Select, params: BaseFilterParams) -> Select:
+    def _apply_pagination(cls, query: Select, params: ListCriteria) -> Select:
         """Apply pagination"""
         return query.offset(params.offset).limit(params.page_size)
 
     @classmethod
-    def _sort_expression(cls, name: str, params: BaseFilterParams):
+    def _sort_expression(cls, name: str, params: ListCriteria):
         """ORDER BY target for a sortable field: a MODEL column; override for EXPRESSION_SORTABLE entries"""
         return getattr(cls.MODEL, name, None)
 
     @classmethod
-    def _apply_sorting(cls, query: Select, params: BaseFilterParams) -> Select:
+    def _apply_sorting(cls, query: Select, params: ListCriteria) -> Select:
         """Apply sorting using SortOrder enum"""
         if params.sort_by and params.sort_by in cls.SORTABLE_FIELDS:
             column = cls._sort_expression(params.sort_by, params)
@@ -133,7 +164,7 @@ class SimpleFilterEngine:
         return query
 
     @classmethod
-    def _apply_soft_delete(cls, query: Select, params: BaseFilterParams) -> Select:
+    def _apply_soft_delete(cls, query: Select, params: ListCriteria) -> Select:
         """Apply soft delete filter if model has is_deleted"""
         include_deleted = getattr(params, 'include_deleted', False)
         if hasattr(cls.MODEL, 'is_deleted') and not include_deleted:

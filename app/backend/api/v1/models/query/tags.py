@@ -6,7 +6,7 @@ from typing import Optional, Literal
 from datetime import datetime
 from pydantic import Field
 
-from app.backend.filters.params.base_params import BaseFilterParams
+from app.backend.api.v1.models.query.base import BaseFilterParams
 
 # Fields the results can be sorted by; sort_by accepts exactly these (another value answers 422)
 TagSortField = Literal["id", "name", "created_at"]

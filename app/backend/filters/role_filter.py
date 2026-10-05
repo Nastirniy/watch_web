@@ -2,29 +2,45 @@
 RoleFilterService - Filter service for Role entity
 """
 
-from typing import Optional, Iterable, get_args
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Optional, Iterable
 from sqlalchemy.sql.selectable import Select
 
 from app.backend.models.role import Role
-from app.backend.filters.simple_engine import SimpleFilterEngine
-from app.backend.filters.params.role_params import RoleFilterParams, RoleSortField
+from app.backend.filters.simple_engine import ListCriteria, SimpleFilterEngine
+
+
+@dataclass(frozen=True, kw_only=True)
+class RoleCriteria(ListCriteria):
+    """What RoleFilterService filters by; each API version converts its query model into it"""
+    id: Optional[int] = None
+    include_deleted: bool = False
+    name: Optional[str] = None
+    name_contains: Optional[str] = None
+    display_name: Optional[str] = None
+    display_name_contains: Optional[str] = None
+    description_contains: Optional[str] = None
+    created_at_from: Optional[datetime] = None
+    created_at_to: Optional[datetime] = None
 
 
 class RoleFilterService(SimpleFilterEngine):
     """Filter service for Role entity"""
 
     MODEL = Role
-    PARAMS = RoleFilterParams
-    SORTABLE_FIELDS = list(get_args(RoleSortField))
+    CRITERIA = RoleCriteria
+    SORTABLE_FIELDS = ["id", "name", "display_name", "created_at", "updated_at"]
 
     @classmethod
     def apply_filters(
         cls,
         query: Select,
-        params: RoleFilterParams,
+        params: RoleCriteria,
         access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
-        """Apply all filters from RoleFilterParams"""
+        """Apply all filters from RoleCriteria"""
+        params = cls.criteria(params)
 
         query = cls._apply_soft_delete(query, params)
 
@@ -45,10 +61,11 @@ class RoleFilterService(SimpleFilterEngine):
     def apply_filters_for_count(
         cls,
         query: Select,
-        params: RoleFilterParams,
+        params: RoleCriteria,
         access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
         """Apply filters without pagination"""
+        params = cls.criteria(params)
         query = cls._apply_soft_delete(query, params)
         query = cls._apply_exact(query, Role.id, params.id)
         query = cls._apply_exact(query, Role.name, params.name)

@@ -2,29 +2,49 @@
 SignalTypeFilterService - Filter service for SignalType entity
 """
 
-from typing import Optional, Iterable, get_args
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Optional, Iterable
 from sqlalchemy.sql.selectable import Select
 
 from app.backend.models.observation import SignalType
-from app.backend.filters.simple_engine import SimpleFilterEngine
-from app.backend.filters.params.signal_type_params import SignalTypeFilterParams, SignalTypeSortField
+from app.backend.filters.simple_engine import ListCriteria, SimpleFilterEngine
+
+
+@dataclass(frozen=True, kw_only=True)
+class SignalTypeCriteria(ListCriteria):
+    """What SignalTypeFilterService filters by; each API version converts its query model into it"""
+    id: Optional[int] = None
+    code: Optional[str] = None
+    code_contains: Optional[str] = None
+    name: Optional[str] = None
+    name_contains: Optional[str] = None
+    description_contains: Optional[str] = None
+    category_id: Optional[int] = None
+    is_active: Optional[bool] = None
+    sort_order_from: Optional[int] = None
+    sort_order_to: Optional[int] = None
+    created_at_from: Optional[datetime] = None
+    created_at_to: Optional[datetime] = None
+    include_deleted: bool = False
 
 
 class SignalTypeFilterService(SimpleFilterEngine):
     """Filter service for SignalType entity"""
 
     MODEL = SignalType
-    PARAMS = SignalTypeFilterParams
-    SORTABLE_FIELDS = list(get_args(SignalTypeSortField))
+    CRITERIA = SignalTypeCriteria
+    SORTABLE_FIELDS = ["id", "code", "name", "sort_order", "created_at", "updated_at", "is_active", "category_id"]
 
     @classmethod
     def apply_filters(
         cls,
         query: Select,
-        params: SignalTypeFilterParams,
+        params: SignalTypeCriteria,
         access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
-        """Apply all filters from SignalTypeFilterParams"""
+        """Apply all filters from SignalTypeCriteria"""
+        params = cls.criteria(params)
 
         query = cls._apply_soft_delete(query, params)
 
@@ -48,10 +68,11 @@ class SignalTypeFilterService(SimpleFilterEngine):
     def apply_filters_for_count(
         cls,
         query: Select,
-        params: SignalTypeFilterParams,
+        params: SignalTypeCriteria,
         access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
         """Apply filters without pagination"""
+        params = cls.criteria(params)
         query = cls._apply_soft_delete(query, params)
         query = cls._apply_exact(query, SignalType.id, params.id)
         query = cls._apply_exact(query, SignalType.code, params.code)

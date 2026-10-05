@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from pydantic import BaseModel, Field, field_validator, model_validator, PositiveInt
 
-from app.backend.enums.general import ConfidenceLevel, FrequencyKind
+from app.backend.enums.general import ConfidenceLevel, FrequencyKind, ObservationReportType
 from app.backend.services.api_errors import invalid
 from app.backend.enums.errors import FieldErrorCode
 
@@ -61,15 +61,6 @@ class ObservationFrequencyUpdate(BaseModel):
             if name in self.model_fields_set and getattr(self, name) is None:
                 raise invalid(FieldErrorCode.VALUE_NULL)
         return self
-
-
-class ObservationFrequencyListParams(BaseModel):
-    """Query parameters of GET /observations/{observation_id}/frequencies"""
-
-    include_deleted: bool = Field(
-        default=False,
-        description="Also archived bands, and bands of an archived observation (requires observation.archive)"
-    )
 
 
 class ObservationCreate(BaseModel):
@@ -182,3 +173,99 @@ class ObservationDisappeared(BaseModel):
         if v.tzinfo is None:
             return v.replace(tzinfo=timezone.utc)
         return v
+
+
+class ObservationReportParams(BaseModel):
+    """
+    Filter parameters for generating an observation Excel report.
+
+    Supports filtering by:
+    - Specific observation IDs
+    - User IDs (one or many)
+    - Post IDs (one or many)
+    - Signal type IDs
+    - Statuses
+    - Observed-at date range
+    - Created-at date range
+    - Any combination of the above
+    """
+
+    # --- Observation ID filter ---
+    observation_ids: Optional[List[int]] = Field(
+        default=None,
+        description="Specific observation IDs to include in report"
+    )
+
+    # --- User filter ---
+    user_ids: Optional[List[int]] = Field(
+        default=None,
+        description="Include only observations by these user IDs"
+    )
+
+    # --- Post filter ---
+    post_ids: Optional[List[int]] = Field(
+        default=None,
+        description="Include only observations from these post IDs"
+    )
+
+    # --- Signal type filter ---
+    signal_type_ids: Optional[List[int]] = Field(
+        default=None,
+        description="Include only observations of these signal type IDs"
+    )
+
+    # --- Status filter ---
+    statuses: Optional[List[str]] = Field(
+        default=None,
+        description="Filter by statuses: active, disappeared, confirmed, false_positive, under_review"
+    )
+
+    # --- Confidence level filter ---
+    confidence_level: Optional[str] = Field(
+        default=None,
+        description="Filter by confidence level: low, medium, high"
+    )
+
+    # --- Band range (applies to the bands of the report's kind; every kind for all_fields) ---
+    frequency_center_from: Optional[Decimal] = Field(default=None, description="Band center frequency >= (MHz)")
+    frequency_center_to: Optional[Decimal] = Field(default=None, description="Band center frequency <= (MHz)")
+    bandwidth_from: Optional[Decimal] = Field(default=None, description="Bandwidth >= (MHz)")
+    bandwidth_to: Optional[Decimal] = Field(default=None, description="Bandwidth <= (MHz)")
+
+    # --- Duration range ---
+    duration_from: Optional[int] = Field(default=None, ge=0, description="Duration >= (seconds)")
+    duration_to: Optional[int] = Field(default=None, ge=0, description="Duration <= (seconds)")
+
+    # --- Tag filter ---
+    tag_ids: Optional[List[int]] = Field(default=None, description="Include only observations that have ALL of these tag IDs")
+
+    # --- Date range (observed_at) ---
+    observed_at_from: Optional[datetime] = Field(
+        default=None,
+        description="Include observations with observed_at >= this value (ISO datetime, UTC)"
+    )
+    observed_at_to: Optional[datetime] = Field(
+        default=None,
+        description="Include observations with observed_at <= this value (ISO datetime, UTC)"
+    )
+
+    # --- Date range (created_at) ---
+    created_at_from: Optional[datetime] = Field(
+        default=None,
+        description="Include observations with created_at >= this value (ISO datetime, UTC)"
+    )
+    created_at_to: Optional[datetime] = Field(
+        default=None,
+        description="Include observations with created_at <= this value (ISO datetime, UTC)"
+    )
+
+    # --- Report type (required) ---
+    report_type: ObservationReportType = Field(
+        description="'rc_freq_part' - rc bands; 'video_freq_part' - video bands; 'all_fields' - every band, all fields"
+    )
+
+    # --- Soft delete ---
+    include_deleted: bool = Field(
+        default=False,
+        description="Include archived observations and archived bands in the report (requires observation.archive)"
+    )

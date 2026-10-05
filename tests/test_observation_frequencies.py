@@ -9,8 +9,8 @@ from sqlmodel import select
 from app.main import fastapi_app
 from app.backend.enums.routes import ObservationRoutes
 from app.backend.api.v1 import V1
-from app.backend.filters.observation_report_filter import ObservationReportFilter
-from app.backend.filters.params.observation_report_params import ObservationReportParams
+from app.backend.enums.general import ObservationReportType
+from app.backend.filters.observation_report_filter import ObservationReportCriteria, ObservationReportFilter
 from app.backend.models.observation import Observation, ObservationFrequency
 from tests.helpers import make_post, make_user, make_dictionary, make_observation
 
@@ -218,7 +218,7 @@ async def test_report_rows_are_bands_of_visible_observations(db):
     await db.commit()
 
     async def rows(report_type, scope=None, **params):
-        query = ObservationReportFilter.build_query(ObservationReportParams(report_type=report_type, **params), scope)
+        query = ObservationReportFilter.build_query(ObservationReportCriteria(report_type=ObservationReportType(report_type), **params), scope)
         return [(f.observation_id, f.kind, str(f.frequency_min)) for f in (await db.exec(query)).all()]
 
     rc_rows = await rows("rc_freq_part", scope={post.id})

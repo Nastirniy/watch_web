@@ -5,7 +5,8 @@ from decimal import Decimal
 
 import openpyxl
 
-from app.backend.filters.params.observation_report_params import ObservationReportParams
+from app.backend.enums.general import ObservationReportType
+from app.backend.filters.observation_report_filter import ObservationReportCriteria
 from app.backend.models.observation import Observation, ObservationFrequency
 from app.backend.services.observation_report_service import (
     ObservationReportService,
@@ -25,7 +26,7 @@ def test_fmt_minutes_rounds_to_one_decimal():
 
 
 def test_filter_rows_show_duration_bounds_in_minutes():
-    rows = dict(_build_filter_rows(ObservationReportParams(report_type="all_fields", duration_from=90, duration_to=600)))
+    rows = dict(_build_filter_rows(ObservationReportCriteria(report_type=ObservationReportType.ALL_FIELDS, duration_from=90, duration_to=600)))
     assert rows["Тривалість від (хв):"] == "1.5"
     assert rows["Тривалість до (хв):"] == "10.0"
     assert not any("(сек)" in label for label in rows)
@@ -51,7 +52,7 @@ def test_all_fields_report_writes_duration_in_minutes():
         bandwidth=Decimal("100.000"),
     )
     band.observation = observation
-    params = ObservationReportParams(report_type="all_fields")
+    params = ObservationReportCriteria(report_type=ObservationReportType.ALL_FIELDS)
 
     workbook = openpyxl.load_workbook(io.BytesIO(ObservationReportService.generate_excel([band], params)))
     sheet = workbook.active

@@ -24,15 +24,15 @@ from app.backend.models.media import MediaFile
 from app.backend.helpers.audit_helper import client_info, create_audit_log
 
 # Filter params
-from app.backend.filters.params.observation_params import ObservationFilterParams
-from app.backend.filters.params.user_params import UserFilterParams
-from app.backend.filters.params.post_params import PostFilterParams
-from app.backend.filters.params.role_params import RoleFilterParams
-from app.backend.filters.params.category_params import CategoryFilterParams
-from app.backend.filters.params.media_format_params import MediaFormatFilterParams
-from app.backend.filters.params.signal_type_params import SignalTypeFilterParams
-from app.backend.filters.params.tag_params import TagFilterParams
-from app.backend.filters.params.media_params import MediaFilterParams
+from app.backend.api.v1.models.query.observations import ObservationFilterParams
+from app.backend.api.v1.models.query.users import UserFilterParams
+from app.backend.api.v1.models.query.posts import PostFilterParams
+from app.backend.api.v1.models.query.roles import RoleFilterParams
+from app.backend.api.v1.models.query.categories import CategoryFilterParams
+from app.backend.api.v1.models.query.media_formats import MediaFormatFilterParams
+from app.backend.api.v1.models.query.signal_types import SignalTypeFilterParams
+from app.backend.api.v1.models.query.tags import TagFilterParams
+from app.backend.api.v1.models.query.media import MediaFilterParams
 
 # Filter services
 from app.backend.filters.observation_filter import ObservationFilterService

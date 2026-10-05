@@ -25,7 +25,7 @@ from app.backend.helpers.audit_helper import client_info, create_audit_log
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.api.v1.models.request.users import UserCreateForm, UserUpdateForm, UserPostAccessUpsert
 from app.backend.api.v1.models.response.users import UserResponse, UserRoleResponse, UserPostAccessResponse
-from app.backend.filters.params.user_params import UserFilterParams
+from app.backend.api.v1.models.query.users import UserFilterParams
 from app.backend.filters.user_filter import UserFilterService
 from app.backend.services.api_errors import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode

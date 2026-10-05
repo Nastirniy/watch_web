@@ -5,21 +5,48 @@ observation (ObservationFrequencyFilter.rows_query), so archive flags and the
 post scope always apply. No pagination - fetches all matching rows for export.
 """
 
-from typing import Iterable, Optional
+from dataclasses import dataclass
+from datetime import datetime
+from decimal import Decimal
+from typing import Iterable, List, Optional
 
 from sqlalchemy.orm import contains_eager
 from sqlalchemy.sql.selectable import Select
 from sqlmodel import select as sa_select
 
-from app.backend.enums.general import FrequencyKind
+from app.backend.enums.general import FrequencyKind, ObservationReportType
 from app.backend.models.observation import Observation, ObservationFrequency, ObservationTag
 from app.backend.filters.observation_frequency_filter import ObservationFrequencyFilter
-from app.backend.filters.params.observation_report_params import ObservationReportParams, ObservationReportType
+from app.backend.filters.simple_engine import as_criteria
 
 REPORT_TYPE_KIND = {
     ObservationReportType.RC_FREQ_PART: FrequencyKind.RC,
     ObservationReportType.VIDEO_FREQ_PART: FrequencyKind.VIDEO,
 }
+
+
+@dataclass(frozen=True, kw_only=True)
+class ObservationReportCriteria:
+    """What the report filters by; each API version converts its request body into it"""
+    report_type: ObservationReportType
+    observation_ids: Optional[List[int]] = None
+    user_ids: Optional[List[int]] = None
+    post_ids: Optional[List[int]] = None
+    signal_type_ids: Optional[List[int]] = None
+    statuses: Optional[List[str]] = None
+    confidence_level: Optional[str] = None
+    frequency_center_from: Optional[Decimal] = None
+    frequency_center_to: Optional[Decimal] = None
+    bandwidth_from: Optional[Decimal] = None
+    bandwidth_to: Optional[Decimal] = None
+    duration_from: Optional[int] = None
+    duration_to: Optional[int] = None
+    tag_ids: Optional[List[int]] = None
+    observed_at_from: Optional[datetime] = None
+    observed_at_to: Optional[datetime] = None
+    created_at_from: Optional[datetime] = None
+    created_at_to: Optional[datetime] = None
+    include_deleted: bool = False
 
 
 class ObservationReportFilter:
@@ -32,8 +59,9 @@ class ObservationReportFilter:
     MODEL = ObservationFrequency
 
     @classmethod
-    def build_query(cls, params: ObservationReportParams, access_post_ids: Optional[Iterable[int]] = None) -> Select:
+    def build_query(cls, params: ObservationReportCriteria, access_post_ids: Optional[Iterable[int]] = None) -> Select:
         """Bands matching the report filters, their observation and its report relations eager-loaded."""
+        params = as_criteria(ObservationReportCriteria, params)
         query = ObservationFrequencyFilter.rows_query(access_post_ids, include_deleted=params.include_deleted)
 
         # Band filters: the report type selects the kind

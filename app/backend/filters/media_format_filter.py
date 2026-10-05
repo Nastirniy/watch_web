@@ -2,23 +2,35 @@
 MediaFormatFilterService - Filter service for MediaFormat entity
 """
 
-from typing import Optional, Iterable, get_args
+from dataclasses import dataclass
+from typing import Optional, Iterable
 from sqlalchemy.sql.selectable import Select
 
 from app.backend.models.media_format import MediaFormat
-from app.backend.filters.simple_engine import SimpleFilterEngine
-from app.backend.filters.params.media_format_params import MediaFormatFilterParams, MediaFormatSortField
+from app.backend.filters.simple_engine import ListCriteria, SimpleFilterEngine
+
+
+@dataclass(frozen=True, kw_only=True)
+class MediaFormatCriteria(ListCriteria):
+    """What MediaFormatFilterService filters by; each API version converts its query model into it"""
+    id: Optional[int] = None
+    media_type: Optional[str] = None
+    content_type: Optional[str] = None
+    content_type_contains: Optional[str] = None
+    label_contains: Optional[str] = None
+    is_active: Optional[bool] = None
+    include_deleted: bool = False
 
 
 class MediaFormatFilterService(SimpleFilterEngine):
     """Filter service for MediaFormat entity"""
 
     MODEL = MediaFormat
-    PARAMS = MediaFormatFilterParams
-    SORTABLE_FIELDS = list(get_args(MediaFormatSortField))
+    CRITERIA = MediaFormatCriteria
+    SORTABLE_FIELDS = ["id", "media_type", "content_type", "label", "max_file_size_bytes", "sort_order", "is_active"]
 
     @classmethod
-    def _apply_common(cls, query: Select, params: MediaFormatFilterParams) -> Select:
+    def _apply_common(cls, query: Select, params: MediaFormatCriteria) -> Select:
         query = cls._apply_soft_delete(query, params)
         query = cls._apply_exact(query, MediaFormat.id, params.id)
         query = cls._apply_exact(query, MediaFormat.media_type, params.media_type.lower() if params.media_type else None)
@@ -32,9 +44,10 @@ class MediaFormatFilterService(SimpleFilterEngine):
     def apply_filters(
         cls,
         query: Select,
-        params: MediaFormatFilterParams,
+        params: MediaFormatCriteria,
         access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
+        params = cls.criteria(params)
         query = cls._apply_common(query, params)
         query = cls._apply_sorting(query, params)
         query = cls._apply_pagination(query, params)
@@ -44,7 +57,8 @@ class MediaFormatFilterService(SimpleFilterEngine):
     def apply_filters_for_count(
         cls,
         query: Select,
-        params: MediaFormatFilterParams,
+        params: MediaFormatCriteria,
         access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
+        params = cls.criteria(params)
         return cls._apply_common(query, params)

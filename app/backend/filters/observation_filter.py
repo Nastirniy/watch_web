@@ -3,23 +3,55 @@ ObservationFilterService - Filter service for Observation entity
 Uses simple typed params for clear FastAPI docs
 """
 
-from typing import Optional, Iterable, get_args
+from dataclasses import dataclass
+from datetime import datetime
+from decimal import Decimal
+from typing import Optional, Iterable, List
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql.selectable import Select
 from sqlmodel import select
 
 from app.backend.models.observation import Observation, ObservationTag
 from app.backend.filters.observation_frequency_filter import ObservationFrequencyFilter
-from app.backend.filters.simple_engine import SimpleFilterEngine
-from app.backend.filters.params.observation_params import ObservationFilterParams, ObservationSortField
+from app.backend.enums.general import FrequencyKind
+from app.backend.filters.simple_engine import ListCriteria, SimpleFilterEngine
+
+
+@dataclass(frozen=True, kw_only=True)
+class ObservationCriteria(ListCriteria):
+    """What ObservationFilterService filters by; each API version converts its query model into it"""
+    id: Optional[int] = None
+    user_id: Optional[int] = None
+    post_id: Optional[int] = None
+    signal_type_id: Optional[int] = None
+    status: Optional[str] = None
+    status_in: Optional[List[str]] = None
+    confidence_level: Optional[str] = None
+    frequency_kind: Optional[FrequencyKind] = None
+    frequency_center_from: Optional[Decimal] = None
+    frequency_center_to: Optional[Decimal] = None
+    bandwidth_from: Optional[Decimal] = None
+    bandwidth_to: Optional[Decimal] = None
+    observed_at_from: Optional[datetime] = None
+    observed_at_to: Optional[datetime] = None
+    last_n_days: Optional[int] = None
+    created_at_from: Optional[datetime] = None
+    created_at_to: Optional[datetime] = None
+    is_disappeared: Optional[bool] = None
+    disappeared_by: Optional[int] = None
+    duration_from: Optional[int] = None
+    duration_to: Optional[int] = None
+    comment_contains: Optional[str] = None
+    tag_ids: Optional[List[int]] = None
+    include_deleted: bool = False
 
 
 class ObservationFilterService(SimpleFilterEngine):
     """Filter service for Observation entity"""
 
     MODEL = Observation
-    PARAMS = ObservationFilterParams
-    SORTABLE_FIELDS = list(get_args(ObservationSortField))
+    CRITERIA = ObservationCriteria
+    SORTABLE_FIELDS = ["id", "observed_at", "created_at", "updated_at", "status", "post_id", "frequency_center"]
     # frequency_center is not a column of observations: an observation is sorted by the lowest
     # center among its active bands that match the band filters (frequency_kind, center and
     # bandwidth ranges). This is a correlated subquery per observation and the sort cannot use
@@ -28,7 +60,7 @@ class ObservationFilterService(SimpleFilterEngine):
     EXPRESSION_SORTABLE = ["frequency_center"]
 
     @classmethod
-    def _band_conditions(cls, params: ObservationFilterParams) -> list:
+    def _band_conditions(cls, params: ObservationCriteria) -> list:
         return ObservationFrequencyFilter.band_conditions(
             kind=params.frequency_kind,
             center_from=params.frequency_center_from,
@@ -38,13 +70,13 @@ class ObservationFilterService(SimpleFilterEngine):
         )
 
     @classmethod
-    def _sort_expression(cls, name: str, params: ObservationFilterParams):
+    def _sort_expression(cls, name: str, params: ObservationCriteria):
         if name == "frequency_center":
             return ObservationFrequencyFilter.lowest_center(cls._band_conditions(params))
         return super()._sort_expression(name, params)
 
     @classmethod
-    def _apply_frequency_filters(cls, query: Select, params: ObservationFilterParams) -> Select:
+    def _apply_frequency_filters(cls, query: Select, params: ObservationCriteria) -> Select:
         """Every band condition goes into one subquery, so they must hold for the same active band"""
         conditions = cls._band_conditions(params)
         if conditions:
@@ -55,10 +87,11 @@ class ObservationFilterService(SimpleFilterEngine):
     def apply_filters(
         cls,
         query: Select,
-        params: ObservationFilterParams,
+        params: ObservationCriteria,
         access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
-        """Apply all filters from ObservationFilterParams"""
+        """Apply all filters from ObservationCriteria"""
+        params = cls.criteria(params)
 
         # Soft delete
         query = cls._apply_soft_delete(query, params)
@@ -136,10 +169,11 @@ class ObservationFilterService(SimpleFilterEngine):
     def apply_filters_for_count(
         cls,
         query: Select,
-        params: ObservationFilterParams,
+        params: ObservationCriteria,
         access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
         """Apply filters without pagination (for counting)"""
+        params = cls.criteria(params)
         # Same as apply_filters but without pagination and eager loading
         query = cls._apply_soft_delete(query, params)
 

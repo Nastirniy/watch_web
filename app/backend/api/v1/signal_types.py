@@ -16,7 +16,7 @@ from app.backend.enums.routes import SignalTypeRoutes
 from app.backend.helpers.audit_helper import client_info, create_audit_log
 from app.backend.api.v1.models.request.signal_types import SignalTypeCreate, SignalTypeUpdate
 from app.backend.api.v1.models.response.signal_types import SignalTypeResponse, SignalTypeWithCategoryResponse
-from app.backend.filters.params.signal_type_params import SignalTypeFilterParams
+from app.backend.api.v1.models.query.signal_types import SignalTypeFilterParams
 from app.backend.filters.signal_type_filter import SignalTypeFilterService
 from app.backend.services.api_errors import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode

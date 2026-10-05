@@ -15,7 +15,7 @@ from app.backend.helpers.audit_helper import client_info, create_audit_log
 from app.backend.api.v1.models.request.categories import CategoryCreate, CategoryUpdate
 from app.backend.api.v1.models.response.categories import CategoryResponse
 from app.backend.api.v1.models.response.signal_types import SignalTypeResponse
-from app.backend.filters.params.category_params import CategoryFilterParams
+from app.backend.api.v1.models.query.categories import CategoryFilterParams
 from app.backend.filters.category_filter import CategoryFilterService
 from app.backend.services.api_errors import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode

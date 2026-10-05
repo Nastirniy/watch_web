@@ -15,7 +15,7 @@ from app.backend.enums.general import Permissions
 from app.backend.enums.routes import RoleRoutes
 from app.backend.helpers.audit_helper import client_info, create_audit_log
 from app.backend.utils.logging_config import get_api_logger
-from app.backend.filters.params.role_params import RoleFilterParams
+from app.backend.api.v1.models.query.roles import RoleFilterParams
 from app.backend.filters.role_filter import RoleFilterService
 from app.backend.api.shared.helpers.roles_helper import (
     get_role_or_404,

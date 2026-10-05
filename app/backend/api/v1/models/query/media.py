@@ -6,7 +6,7 @@ from typing import Optional, Literal
 from datetime import datetime
 from pydantic import Field
 
-from app.backend.filters.params.base_params import BaseFilterParams
+from app.backend.api.v1.models.query.base import BaseFilterParams
 
 # Fields the results can be sorted by; sort_by accepts exactly these (another value answers 422)
 MediaSortField = Literal["id", "original_filename", "file_size", "media_type", "uploaded_at", "observation_id"]

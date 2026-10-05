@@ -2,19 +2,10 @@
 BaseFilterParams - Common pagination and sorting for all entities
 """
 
-from enum import Enum
 from typing import Optional
 from pydantic import BaseModel, Field
 
-
-class SortOrder(str, Enum):
-    """Sort order options (SQLAlchemy-compatible)"""
-    ASCENDING = "ascending"
-    DESCENDING = "descending"
-    ASCENDING_NULLS_FIRST = "ascending_nulls_first"
-    ASCENDING_NULLS_LAST = "ascending_nulls_last"
-    DESCENDING_NULLS_FIRST = "descending_nulls_first"
-    DESCENDING_NULLS_LAST = "descending_nulls_last"
+from app.backend.enums.general import SortOrder
 
 
 class BaseFilterParams(BaseModel):

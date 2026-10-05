@@ -6,7 +6,8 @@ from app.backend.enums.routes import ObservationRoutes, TagRoutes
 from app.backend.api.v1 import V1
 from app.backend.models.observation import Observation, Tag
 from app.backend.services.observation_report_service import _tag_label, _tag_filter_label, _build_filter_rows
-from app.backend.filters.params.observation_report_params import ObservationReportParams
+from app.backend.enums.general import ObservationReportType
+from app.backend.filters.observation_report_filter import ObservationReportCriteria
 from tests.helpers import make_post, make_user, make_admin, make_dictionary, make_observation
 
 LIST = V1.path(ObservationRoutes.LIST_ALL)
@@ -74,6 +75,6 @@ def test_report_labels_mark_deleted_tags():
     assert _tag_label(T("alpha", True)).startswith("alpha (")
     assert _tag_filter_label(7, {7: "alpha"}) == "alpha (#7)"
     assert _tag_filter_label(8, {7: "alpha"}) == "#8"
-    rows = _build_filter_rows(ObservationReportParams(report_type="all_fields", tag_ids=[7, 8]), {7: "alpha"})
+    rows = _build_filter_rows(ObservationReportCriteria(report_type=ObservationReportType.ALL_FIELDS, tag_ids=[7, 8]), {7: "alpha"})
     tag_row = [r for r in rows if "alpha (#7)" in r[1]]
     assert tag_row and "#8" in tag_row[0][1]

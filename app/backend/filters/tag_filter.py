@@ -2,29 +2,42 @@
 TagFilterService - Filter service for Tag entity
 """
 
-from typing import Optional, Iterable, get_args
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Optional, Iterable
 from sqlalchemy.sql.selectable import Select
 
 from app.backend.models.observation import Tag
-from app.backend.filters.simple_engine import SimpleFilterEngine
-from app.backend.filters.params.tag_params import TagFilterParams, TagSortField
+from app.backend.filters.simple_engine import ListCriteria, SimpleFilterEngine
+
+
+@dataclass(frozen=True, kw_only=True)
+class TagCriteria(ListCriteria):
+    """What TagFilterService filters by; each API version converts its query model into it"""
+    id: Optional[int] = None
+    name: Optional[str] = None
+    name_contains: Optional[str] = None
+    created_at_from: Optional[datetime] = None
+    created_at_to: Optional[datetime] = None
+    include_deleted: bool = False
 
 
 class TagFilterService(SimpleFilterEngine):
     """Filter service for Tag entity"""
 
     MODEL = Tag
-    PARAMS = TagFilterParams
-    SORTABLE_FIELDS = list(get_args(TagSortField))
+    CRITERIA = TagCriteria
+    SORTABLE_FIELDS = ["id", "name", "created_at"]
 
     @classmethod
     def apply_filters(
         cls,
         query: Select,
-        params: TagFilterParams,
+        params: TagCriteria,
         access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
-        """Apply all filters from TagFilterParams"""
+        """Apply all filters from TagCriteria"""
+        params = cls.criteria(params)
 
         query = cls._apply_soft_delete(query, params)
 
@@ -42,10 +55,11 @@ class TagFilterService(SimpleFilterEngine):
     def apply_filters_for_count(
         cls,
         query: Select,
-        params: TagFilterParams,
+        params: TagCriteria,
         access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
         """Apply filters without pagination"""
+        params = cls.criteria(params)
         query = cls._apply_soft_delete(query, params)
         query = cls._apply_exact(query, Tag.id, params.id)
         query = cls._apply_exact(query, Tag.name, params.name)

@@ -14,7 +14,7 @@ from app.backend.models.post import Post
 from app.backend.services.auth_context import AuthContext
 from app.backend.services.permissions import require
 from app.backend.services.access_control import AccessControlService
-from app.backend.enums.general import Permissions, ObservationStatus
+from app.backend.enums.general import Permissions, ObservationStatus, ObservationReportType
 from app.backend.enums.routes import ObservationRoutes
 from app.backend.helpers.audit_helper import client_info, create_audit_log
 from app.backend.api.v1.models.request.observations import (
@@ -23,7 +23,7 @@ from app.backend.api.v1.models.request.observations import (
     ObservationDisappeared,
     ObservationFrequencyCreate,
     ObservationFrequencyUpdate,
-    ObservationFrequencyListParams,
+    ObservationReportParams,
     default_frequency_center,
 )
 from app.backend.api.v1.models.response.observations import (
@@ -41,9 +41,8 @@ from app.backend.api.shared.helpers.observation_helper import (
     frequency_rows,
 )
 from app.backend.filters.observation_frequency_filter import ObservationFrequencyFilter
-from app.backend.filters.params.observation_params import ObservationFilterParams
+from app.backend.api.v1.models.query.observations import ObservationFilterParams, ObservationFrequencyListParams
 from app.backend.filters.observation_filter import ObservationFilterService
-from app.backend.filters.params.observation_report_params import ObservationReportParams, ObservationReportType
 from app.backend.filters.observation_report_filter import ObservationReportFilter
 from app.backend.services.observation_report_service import ObservationReportService
 from app.backend.services.api_errors import ApiError, field_problem

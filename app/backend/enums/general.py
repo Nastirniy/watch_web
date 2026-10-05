@@ -195,3 +195,53 @@ class ExportJobStatus(Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+
+class SortOrder(str, Enum):
+    """Sort order options (SQLAlchemy-compatible)"""
+    ASCENDING = "ascending"
+    DESCENDING = "descending"
+    ASCENDING_NULLS_FIRST = "ascending_nulls_first"
+    ASCENDING_NULLS_LAST = "ascending_nulls_last"
+    DESCENDING_NULLS_FIRST = "descending_nulls_first"
+    DESCENDING_NULLS_LAST = "descending_nulls_last"
+
+
+class ObservationReportType(str, Enum):
+    """
+    Selects report layout.
+
+    One row per frequency band.
+    RC_FREQ_PART    - rc bands only: frequency_min, frequency_max
+    VIDEO_FREQ_PART - video bands only: frequency_min, frequency_max
+    ALL_FIELDS      - every band with all fields: user, post, kind, emitter group, frequencies, bandwidth, duration, tags
+    """
+    RC_FREQ_PART    = "rc_freq_part"
+    VIDEO_FREQ_PART = "video_freq_part"
+    ALL_FIELDS      = "all_fields"
+
+    @property
+    def label(self) -> str:
+        _labels = {
+            "rc_freq_part":    "RC частоти",
+            "video_freq_part": "Вiдео частоти",
+            "all_fields":      "Повний звiт (всi поля)",
+        }
+        return _labels[self.value]
+
+    @property
+    def description(self) -> str:
+        _desc = {
+            "rc_freq_part":    "Частота мiн/макс, тип сигналу, коментар",
+            "video_freq_part": "Вiдео частота мiн/макс, тип сигналу, коментар",
+            "all_fields":      "Всi поля: користувач, пост, тип частоти, група, частоти та смуга, тривалiсть, теги",
+        }
+        return _desc[self.value]
+
+    @classmethod
+    def choices(cls) -> list:
+        """Return list of {value, label, description} dicts for web UI select/dropdown."""
+        return [
+            {"value": m.value, "label": m.label, "description": m.description}
+            for m in cls
+        ]

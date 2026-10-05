@@ -5,7 +5,7 @@ MediaFormatFilterParams - Strongly typed filter parameters for MediaFormat
 from typing import Optional, Literal
 from pydantic import Field
 
-from app.backend.filters.params.base_params import BaseFilterParams
+from app.backend.api.v1.models.query.base import BaseFilterParams
 
 # Fields the results can be sorted by; sort_by accepts exactly these (another value answers 422)
 MediaFormatSortField = Literal["id", "media_type", "content_type", "label", "max_file_size_bytes", "sort_order", "is_active"]

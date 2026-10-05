@@ -26,12 +26,10 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-from app.backend.enums.general import FrequencyKind
+from app.backend.enums.general import FrequencyKind, ObservationReportType
 from app.backend.models.observation import ObservationFrequency
-from app.backend.filters.params.observation_report_params import (
-    ObservationReportParams,
-    ObservationReportType,
-)
+from app.backend.filters.observation_report_filter import ObservationReportCriteria
+from app.backend.filters.simple_engine import as_criteria
 
 _KYIV_TZ = ZoneInfo("Europe/Kyiv")
 
@@ -140,7 +138,7 @@ def _tag_filter_label(tag_id: int, tag_names: Optional[Dict[int, str]]) -> str:
     return f"#{tag_id}"
 
 
-def _build_filter_rows(params: ObservationReportParams, tag_names: Optional[Dict[int, str]] = None) -> List[tuple]:
+def _build_filter_rows(params: ObservationReportCriteria, tag_names: Optional[Dict[int, str]] = None) -> List[tuple]:
     rows = []
     if params.observation_ids:
         rows.append(("ID спостережень:", ", ".join(str(i) for i in params.observation_ids)))
@@ -197,9 +195,10 @@ class ObservationReportService:
     def generate_excel(
         cls,
         frequencies: List[ObservationFrequency],
-        params: ObservationReportParams,
+        params: ObservationReportCriteria,
         tag_names: Optional[Dict[int, str]] = None,
     ) -> bytes:
+        params = as_criteria(ObservationReportCriteria, params)
         rtype = params.report_type
         if rtype == ObservationReportType.VIDEO_FREQ_PART:
             headers = _HEADERS_VIDEO_FREQ

@@ -2,20 +2,42 @@
 PostFilterService - Filter service for Post entity
 """
 
-from typing import Optional, Iterable, get_args
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Optional, Iterable
 from sqlalchemy.sql.selectable import Select
 
 from app.backend.models.post import Post
-from app.backend.filters.simple_engine import SimpleFilterEngine
-from app.backend.filters.params.post_params import PostFilterParams, PostSortField
+from app.backend.filters.simple_engine import ListCriteria, SimpleFilterEngine
+
+
+@dataclass(frozen=True, kw_only=True)
+class PostCriteria(ListCriteria):
+    """What PostFilterService filters by; each API version converts its query model into it"""
+    id: Optional[int] = None
+    name: Optional[str] = None
+    name_contains: Optional[str] = None
+    code: Optional[str] = None
+    code_contains: Optional[str] = None
+    region: Optional[str] = None
+    region_contains: Optional[str] = None
+    city: Optional[str] = None
+    city_contains: Optional[str] = None
+    description_contains: Optional[str] = None
+    is_active: Optional[bool] = None
+    has_online_users: Optional[bool] = None
+    created_at_from: Optional[datetime] = None
+    created_at_to: Optional[datetime] = None
+    last_user_activity_from: Optional[datetime] = None
+    last_user_activity_to: Optional[datetime] = None
 
 
 class PostFilterService(SimpleFilterEngine):
     """Filter service for Post entity"""
 
     MODEL = Post
-    PARAMS = PostFilterParams
-    SORTABLE_FIELDS = list(get_args(PostSortField))
+    CRITERIA = PostCriteria
+    SORTABLE_FIELDS = ["id", "name", "code", "city", "created_at", "updated_at", "last_user_activity_at", "is_active", "online_user_count", "user_count"]
 
     @classmethod
     def _apply_has_online_users(cls, query: Select, value: Optional[bool]) -> Select:
@@ -28,10 +50,11 @@ class PostFilterService(SimpleFilterEngine):
     def apply_filters(
         cls,
         query: Select,
-        params: PostFilterParams,
+        params: PostCriteria,
         access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
-        """Apply all filters from PostFilterParams"""
+        """Apply all filters from PostCriteria"""
+        params = cls.criteria(params)
 
         # Post has no is_deleted field, skip soft delete
 
@@ -79,10 +102,11 @@ class PostFilterService(SimpleFilterEngine):
     def apply_filters_for_count(
         cls,
         query: Select,
-        params: PostFilterParams,
+        params: PostCriteria,
         access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
         """Apply filters without pagination"""
+        params = cls.criteria(params)
         if access_post_ids is not None:
             query = query.where(Post.id.in_(list(access_post_ids)))
         query = cls._apply_exact(query, Post.id, params.id)

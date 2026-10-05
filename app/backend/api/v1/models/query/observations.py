@@ -6,10 +6,10 @@ All fields visible and documented in FastAPI /docs
 from typing import Optional, List, Literal
 from datetime import datetime
 from decimal import Decimal
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from app.backend.enums.general import FrequencyKind
-from app.backend.filters.params.base_params import BaseFilterParams
+from app.backend.api.v1.models.query.base import BaseFilterParams
 
 # Fields the results can be sorted by; sort_by accepts exactly these (another value answers 422)
 ObservationSortField = Literal["id", "observed_at", "created_at", "updated_at", "status", "post_id", "frequency_center"]
@@ -65,3 +65,12 @@ class ObservationFilterParams(BaseFilterParams):
 
     # --- Soft Delete ---
     include_deleted: bool = Field(default=False, description="Include archived records (requires observation.archive)")
+
+
+class ObservationFrequencyListParams(BaseModel):
+    """Query parameters of GET /observations/{observation_id}/frequencies"""
+
+    include_deleted: bool = Field(
+        default=False,
+        description="Also archived bands, and bands of an archived observation (requires observation.archive)"
+    )

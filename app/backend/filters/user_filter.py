@@ -2,30 +2,50 @@
 UserFilterService - Filter service for User entity
 """
 
-from typing import Optional, Iterable, get_args
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Optional, Iterable
 from sqlalchemy.sql.selectable import Select
 
 from app.backend.models.user import User
 from app.backend.services.presence import online_user_ids_select
-from app.backend.filters.simple_engine import SimpleFilterEngine
-from app.backend.filters.params.user_params import UserFilterParams, UserSortField
+from app.backend.filters.simple_engine import ListCriteria, SimpleFilterEngine
+
+
+@dataclass(frozen=True, kw_only=True)
+class UserCriteria(ListCriteria):
+    """What UserFilterService filters by; each API version converts its query model into it"""
+    id: Optional[int] = None
+    username: Optional[str] = None
+    username_contains: Optional[str] = None
+    username_alias: Optional[str] = None
+    username_alias_contains: Optional[str] = None
+    post_id: Optional[int] = None
+    is_active: Optional[bool] = None
+    is_online: Optional[bool] = None
+    created_at_from: Optional[datetime] = None
+    created_at_to: Optional[datetime] = None
+    last_login_from: Optional[datetime] = None
+    last_login_to: Optional[datetime] = None
+    include_deleted: bool = False
 
 
 class UserFilterService(SimpleFilterEngine):
     """Filter service for User entity"""
 
     MODEL = User
-    PARAMS = UserFilterParams
-    SORTABLE_FIELDS = list(get_args(UserSortField))
+    CRITERIA = UserCriteria
+    SORTABLE_FIELDS = ["id", "username", "username_alias", "created_at", "updated_at", "last_login_at", "is_active", "last_activity_at"]
 
     @classmethod
     def apply_filters(
         cls,
         query: Select,
-        params: UserFilterParams,
+        params: UserCriteria,
         access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
-        """Apply all filters from UserFilterParams"""
+        """Apply all filters from UserCriteria"""
+        params = cls.criteria(params)
 
         query = cls._apply_soft_delete(query, params)
 
@@ -63,10 +83,11 @@ class UserFilterService(SimpleFilterEngine):
     def apply_filters_for_count(
         cls,
         query: Select,
-        params: UserFilterParams,
+        params: UserCriteria,
         access_post_ids: Optional[Iterable[int]] = None
     ) -> Select:
         """Apply filters without pagination"""
+        params = cls.criteria(params)
         query = cls._apply_soft_delete(query, params)
         if access_post_ids is not None:
             query = query.where(User.post_id.in_(list(access_post_ids)))
