@@ -45,6 +45,17 @@ class ServicesHealthModel(BaseModel):
     system: ServiceStatusModel = Field(..., description="System service status")
 
 
+class HealthResponse(BaseModel):
+    """Main health check response model"""
+    status: str = Field(..., description="Overall system status")
+    timestamp: datetime = Field(..., description="Current server timestamp")
+    version: str = Field(..., description="Application version")
+    environment: str = Field(..., description="Current environment")
+    timezone: str = Field(..., description="Server timezone")
+    database: DatabaseHealthModel = Field(..., description="Database health information")
+    services: ServicesHealthModel = Field(..., description="Services health information")
+
+
 # Rate limiting for health endpoint
 class HealthRateLimiter:
     """Simple rate limiter specifically for health endpoint"""
