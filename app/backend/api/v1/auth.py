@@ -11,7 +11,6 @@ from app.backend.services.permissions import require
 from app.backend.services.auth_context import AuthContext, load_auth_context
 from app.backend.services.permissions import Require
 from app.backend.services.route_access import route_access_map, routes_allowed_for
-from app.backend.api.shared.helpers.auth_helper import build_user_info, build_login_response, build_session_response
 from app.backend.enums.errors import AuthErrorCode, ErrorCode, RequiredPermissions
 from app.backend.models.user import User, UserSession
 from app.backend.enums.routes import AuthRoutes
@@ -20,20 +19,23 @@ from app.backend.enums.general import AppEnvironment
 from app.backend.utils.logging_config import get_auth_logger
 from app.backend.config import settings
 from app.backend.helpers.certeficates_helper import parse_cn
-from app.backend.api.shared.models.request.auth_request import (
+from app.backend.api.v1.models.request.auth import (
     LoginRequest,
     RefreshRequest,
     LogoutRequest,
-    PermissionCheckRequest
+    PermissionCheckRequest,
 )
-from app.backend.api.shared.models.response.auth_response import (
+from app.backend.api.v1.models.response.auth import (
     LoginResponse,
     LogoutResponse,
     UserInfoResponse,
     UserSessionsResponse,
     PermissionCheckResponse,
     RouteAccessResponse,
-    RouteAccessEntryResponse
+    RouteAccessEntryResponse,
+    build_user_info,
+    build_login_response,
+    build_session_response,
 )
 from app.backend.services.api_errors import ApiError
 from app.backend.openapi_problems import problems

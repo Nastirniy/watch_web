@@ -28,8 +28,8 @@ from app.backend.enums.routes import MediaRoutes
 from app.backend.helpers.audit_helper import client_info, create_audit_log
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.config import settings
-from app.backend.api.shared.models.request.media_request import ListAttachedMediaRequest, ShareLinkRequest, PosterReconcileRequest
-from app.backend.api.shared.models.response.media_response import (
+from app.backend.api.v1.models.request.media import ListAttachedMediaRequest, ShareLinkRequest, PosterReconcileRequest
+from app.backend.api.v1.models.response.media import (
     MediaFileInfo,
     ShareLinkResponse,
     PosterStatusResponse,

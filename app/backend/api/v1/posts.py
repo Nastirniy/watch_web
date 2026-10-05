@@ -10,7 +10,7 @@ from app.backend.api.shared.helpers.db_errors import is_unique_violation
 from app.backend.database import get_session
 from app.backend.models.post import Post
 from app.backend.services.auth_context import AuthContext
-from app.backend.api.shared.models.request.posts_request import PostCreate, PostUpdate
+from app.backend.api.v1.models.request.posts import PostCreate, PostUpdate
 from app.backend.services.access_control import AccessControlService
 from app.backend.services.permissions import require
 from app.backend.enums.general import Permissions, StatsGroupBy
@@ -19,7 +19,7 @@ from app.backend.enums.routes import PostRoutes
 from app.backend.helpers.audit_helper import client_info, create_audit_log
 from app.backend.filters.params.post_params import PostFilterParams
 from app.backend.filters.post_filter import PostFilterService
-from app.backend.api.shared.models.response.posts_response import PostResponse, PostObservationStatsResponse, post_to_response
+from app.backend.api.v1.models.response.posts import PostResponse, PostObservationStatsResponse, post_to_response
 from app.backend.services.observation_counts import post_observation_stats
 from app.backend.services.api_errors import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode

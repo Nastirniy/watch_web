@@ -19,13 +19,12 @@ from app.backend.services.auth import AuthService
 from app.backend.helpers.certeficates_helper import CertificateParser, hash_data, hash_pki_certificate_data
 from app.backend.enums.general import Permissions, SessionEndReason, SessionRevokeCause, SessionStatus
 from app.backend.services import sessions as session_lifetimes
-from app.backend.api.shared.helpers.auth_helper import build_session_response
-from app.backend.api.shared.models.response.auth_response import SessionsEndedResponse, UserSessionResponse
+from app.backend.api.v1.models.response.auth import SessionsEndedResponse, UserSessionResponse, build_session_response
 from app.backend.enums.routes import UserRoutes
 from app.backend.helpers.audit_helper import client_info, create_audit_log
 from app.backend.utils.logging_config import get_api_logger
-from app.backend.api.shared.models.request.user_request import UserCreateForm, UserUpdateForm, UserPostAccessUpsert
-from app.backend.api.shared.models.response.user_response import UserResponse, UserRoleResponse, UserPostAccessResponse
+from app.backend.api.v1.models.request.users import UserCreateForm, UserUpdateForm, UserPostAccessUpsert
+from app.backend.api.v1.models.response.users import UserResponse, UserRoleResponse, UserPostAccessResponse
 from app.backend.filters.params.user_params import UserFilterParams
 from app.backend.filters.user_filter import UserFilterService
 from app.backend.services.api_errors import ApiError

@@ -17,7 +17,7 @@ from app.backend.services.access_control import AccessControlService
 from app.backend.enums.general import Permissions, ObservationStatus
 from app.backend.enums.routes import ObservationRoutes
 from app.backend.helpers.audit_helper import client_info, create_audit_log
-from app.backend.api.shared.models.request.observations_request import (
+from app.backend.api.v1.models.request.observations import (
     ObservationCreate,
     ObservationUpdate,
     ObservationDisappeared,
@@ -26,7 +26,7 @@ from app.backend.api.shared.models.request.observations_request import (
     ObservationFrequencyListParams,
     default_frequency_center,
 )
-from app.backend.api.shared.models.response.observations_response import (
+from app.backend.api.v1.models.response.observations import (
     MessageResponse,
     ReportTypeChoice,
     ObservationWithMedia,

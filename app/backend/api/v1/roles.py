@@ -22,8 +22,8 @@ from app.backend.api.shared.helpers.roles_helper import (
     get_permission_or_404,
     check_role_name_exists
 )
-from app.backend.api.shared.models.request.roles_request import RoleCreate, RoleUpdate
-from app.backend.api.shared.models.response.roles_response import RoleResponse, PermissionResponse
+from app.backend.api.v1.models.request.roles import RoleCreate, RoleUpdate
+from app.backend.api.v1.models.response.roles import RoleResponse, PermissionResponse
 from app.backend.services.api_errors import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.openapi_problems import ADMIN, problems

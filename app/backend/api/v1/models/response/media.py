@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from sqlalchemy import inspect as sa_inspect
 
 from app.backend.models.media import MediaFile
-from app.backend.api.shared.models.response.user_response import UserPublicResponse
+from app.backend.api.v1.models.response.users import UserPublicResponse
 from app.backend.utils.validators import PlainTextModel
 from app.backend.services.media.urls import thumbnail_urls
 from app.backend.api.shared.openapi_docs import header
@@ -172,26 +172,6 @@ class StorageStatisticsResponse(BaseModel):
     filesystem_size_bytes: Optional[int] = None
 
 
-class UploadSessionResponse(BaseModel):
-    """State of a resumable upload; received_bytes is the offset to continue from"""
-    id: str
-    status: str                                   # open | completed | aborted | expired
-    observation_id: int
-    media_type: str
-    original_filename: str
-    expected_size: int
-    received_bytes: int
-    remaining_bytes: int
-    max_chunk_bytes: int
-    media_file_id: Optional[int] = None
-    error: Optional[str] = None
-    created_at: datetime
-    last_activity_at: datetime
-    expires_at: datetime
-    completed_at: Optional[datetime] = None
-    urls: Dict[str, str]
-
-
 class MediaFormatInfo(BaseModel):
     id: Optional[int] = None
     content_type: str
@@ -209,20 +189,13 @@ class MediaFormatsResponse(BaseModel):
     max_file_size_bytes: int
 
 
-# Headers shared by the file and upload routes
+# Headers of the file and thumbnail routes
 ORIGINAL_FILE_HEADERS = {
     "Content-Disposition": header('attachment (download) or inline (stream), with filename="<original name>"'),
     "ETag": header("sha256 of the file, quoted"),
     "X-File-Hash": header("sha256 of the file"),
     "Accept-Ranges": header("bytes: the file can be read in parts with Range"),
     "Cache-Control": header("private, max-age=3600"),
-}
-UPLOAD_SESSION_HEADERS = {
-    "Upload-Offset": header("Bytes received so far: send the next chunk from here", "integer"),
-    "Upload-Length": header("expected_size of the session", "integer"),
-    "Upload-Expires": header("When the session expires", "string", "date-time"),
-    "Upload-Status": header("open, completed, aborted or expired"),
-    "Cache-Control": header("no-store"),
 }
 THUMBNAIL_PENDING_HEADERS = {
     "Retry-After": header("Seconds to wait before asking again", "integer"),

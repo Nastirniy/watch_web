@@ -45,16 +45,16 @@ from app.backend.filters.signal_type_filter import SignalTypeFilterService
 from app.backend.filters.tag_filter import TagFilterService
 from app.backend.filters.media_filter import MediaFilterService
 
-from app.backend.api.shared.models.response.observations_response import ObservationWithMedia
-from app.backend.api.shared.models.response.posts_response import PostResponse, post_to_response
-from app.backend.api.shared.models.response.user_response import UserResponse
-from app.backend.api.shared.models.response.roles_response import RoleResponse
-from app.backend.api.shared.models.response.category_response import CategoryResponse
-from app.backend.api.shared.models.response.signal_type_response import SignalTypeResponse
-from app.backend.api.shared.models.response.tag_response import TagResponse
-from app.backend.api.shared.models.response.media_response import MediaFileInfo
-from app.backend.api.shared.models.response.media_format_response import MediaFormatResponse
-from app.backend.api.shared.models.response.search_response import SearchResponse
+from app.backend.api.v1.models.response.observations import ObservationWithMedia
+from app.backend.api.v1.models.response.posts import PostResponse, post_to_response
+from app.backend.api.v1.models.response.users import UserResponse
+from app.backend.api.v1.models.response.roles import RoleResponse
+from app.backend.api.v1.models.response.categories import CategoryResponse
+from app.backend.api.v1.models.response.signal_types import SignalTypeResponse
+from app.backend.api.v1.models.response.tags import TagResponse
+from app.backend.api.v1.models.response.media import MediaFileInfo
+from app.backend.api.v1.models.response.media_formats import MediaFormatResponse
+from app.backend.api.v1.models.response.search import SearchResponse
 from app.backend.openapi_problems import ADMIN, GUARDED, problems
 from app.backend.enums.errors import AccessErrorCode
 

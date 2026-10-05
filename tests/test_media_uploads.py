@@ -295,7 +295,7 @@ async def test_session_list_scope(client, db, headers, storage):
 @pytest.mark.asyncio
 async def test_upload_result_is_built_from_the_stored_row(db, storage):
     """Every upload route answers the same body, built by the v1 response module from the stored media row"""
-    from app.backend.api.shared.models.response.media_response import UploadResultResponse, upload_result
+    from app.backend.api.v1.models.response.media import UploadResultResponse, upload_result
     from tests.helpers import make_media
 
     _, user, observation = await _scene(db)

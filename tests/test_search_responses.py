@@ -1,7 +1,7 @@
 """Search returns the response model of the entity's list route, never raw table rows."""
 import pytest
 
-from app.backend.api.shared.models.response.user_response import UserResponse
+from app.backend.api.v1.models.response.users import UserResponse
 from app.backend.api.v1 import V1
 from app.backend.enums.routes import SearchRoutes, TagRoutes
 from tests.helpers import make_admin, make_user

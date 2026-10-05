@@ -27,8 +27,9 @@ from app.backend.api.shared.helpers.upload_helper import (
     check_declared_format, load_observation_for_upload, record_upload,
     format_rejected, store_rejected, too_large, validation_config_for,
 )
-from app.backend.api.shared.models.request.media_request import UploadSessionCreate
-from app.backend.api.shared.models.response.media_response import UPLOAD_SESSION_HEADERS, UploadResultResponse, UploadSessionResponse, upload_result
+from app.backend.api.v1.models.request.media_uploads import UploadSessionCreate
+from app.backend.api.v1.models.response.media_uploads import UPLOAD_SESSION_HEADERS, UploadSessionResponse
+from app.backend.api.v1.models.response.media import UploadResultResponse, upload_result
 from app.backend.services.access_control import AccessControlService
 from app.backend.services.access_errors import access_denied
 from app.backend.services.auth_context import AuthContext

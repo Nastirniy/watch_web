@@ -12,9 +12,9 @@ from app.backend.services.permissions import require
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import CategoryRoutes
 from app.backend.helpers.audit_helper import client_info, create_audit_log
-from app.backend.api.shared.models.request.category_request import CategoryCreate, CategoryUpdate
-from app.backend.api.shared.models.response.category_response import CategoryResponse
-from app.backend.api.shared.models.response.signal_type_response import SignalTypeResponse
+from app.backend.api.v1.models.request.categories import CategoryCreate, CategoryUpdate
+from app.backend.api.v1.models.response.categories import CategoryResponse
+from app.backend.api.v1.models.response.signal_types import SignalTypeResponse
 from app.backend.filters.params.category_params import CategoryFilterParams
 from app.backend.filters.category_filter import CategoryFilterService
 from app.backend.services.api_errors import ApiError
