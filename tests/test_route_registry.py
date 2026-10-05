@@ -45,13 +45,30 @@ API_MODULE = re.compile(r"app\.backend\.api(\.|$)")
 API_WIRING = {APP_DIR / "main.py", APP_DIR / "backend" / "api_contract.py"}
 
 
-def _imported_modules(path: Path):
+def _imported_modules(path: Path, root: Path = APP_DIR.parent):
+    """Absolute names a module imports: relative imports resolved against its package, and for
+    `from package import name` also package.name (the name may be a module: from app.backend.api import v1)"""
+    package = list(path.relative_to(root).with_suffix("").parts[:-1])
     for node in ast.walk(ast.parse(path.read_text(encoding="utf-8-sig"))):
-        if isinstance(node, ast.ImportFrom) and node.module:
-            yield node.lineno, node.module
+        if isinstance(node, ast.ImportFrom):
+            base = package[:len(package) - node.level + 1] if node.level else []
+            module = ".".join(base + ([node.module] if node.module else []))
+            yield node.lineno, module
+            for alias in node.names:
+                yield node.lineno, f"{module}.{alias.name}"
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 yield node.lineno, alias.name
+
+
+def test_imported_modules_resolve_relative_and_package_imports(tmp_path):
+    """The import rules see every form: relative imports and a module imported as a name of its package"""
+    module = tmp_path / "app" / "backend" / "api" / "shared" / "x.py"
+    module.parent.mkdir(parents=True)
+    module.write_text("from app.backend.api import v1\nfrom ..v2.models import y\nfrom .. import v3\n"
+                      "from app.backend import api\n", encoding="utf-8")
+    names = {name for _, name in _imported_modules(module, root=tmp_path)}
+    assert {"app.backend.api.v1", "app.backend.api.v2.models", "app.backend.api.v3", "app.backend.api"} <= names
 
 
 def test_shared_and_system_never_import_a_version():
