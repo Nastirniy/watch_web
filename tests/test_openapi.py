@@ -136,6 +136,12 @@ def test_operation_ids_are_unique_function_names(schema):
     assert schema["paths"][V1.path(PostRoutes.POST_BY_ID)]["put"]["operationId"] == "update_post"
 
 
+def test_component_names_carry_no_module_path(schema):
+    """Two models of one name and different fields make FastAPI name BOTH components after their module path
+    (app__backend__api__v1__...__UserResponse), which renames the types the web client uses"""
+    assert [name for name in schema["components"]["schemas"] if "__" in name] == []
+
+
 def test_optional_members_are_absent_not_null(schema):
     """Bodies leave an optional member out; the schema must not type it as a present nullable value"""
     post_not_found = schema["components"]["schemas"][schema_name(ErrorCode.POST_NOT_FOUND)]
