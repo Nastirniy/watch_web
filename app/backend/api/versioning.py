@@ -7,17 +7,23 @@ to a new version resource by resource. See CLAUDE.md, "Routes and API versions".
     V1 = PublishedVersion(APIVersionRoutes.V1, auth, users, ...)      # app/backend/api/v1/__init__.py
     V1.path(PostRoutes.POST_BY_ID, post_id=7)                          # /api/v1/posts/7
     version: PublishedVersion = Depends(request_version)               # in a route that returns URLs
+
+Each version serves its own OpenAPI document and viewers (/api/v1/openapi.json, /docs, /redoc), the way
+FastAPI.setup() serves them for an app: a component name is unique within one version only.
 """
 from enum import Enum
 from types import ModuleType
-from typing import ClassVar, Dict, Set
+from typing import Any, ClassVar, Dict, Set
+from weakref import WeakKeyDictionary
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, FastAPI, Request
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html, get_swagger_ui_oauth2_redirect_html
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.routing import APIRoute
 
 from app.backend.enums.errors import ErrorCode
-from app.backend.enums.routes import APIVersionRoutes
-from app.backend.openapi_problems import AUTHENTICATED, problems
+from app.backend.enums.routes import APIVersionRoutes, DocsRoutes
+from app.backend.openapi_problems import AUTHENTICATED, openapi_document, problems
 
 
 class PublishedVersion:
@@ -35,6 +41,8 @@ class PublishedVersion:
         for module in modules:
             self.router.include_router(module.router)
         self.templates: Set[str] = self._check_routes()
+        self._documents: WeakKeyDictionary = WeakKeyDictionary()
+        self._serve_documentation()
         self.published[version.value] = self
 
     def _check_routes(self) -> Set[str]:
@@ -53,6 +61,46 @@ class PublishedVersion:
             if names.setdefault(route.name, route.path_format) != route.path_format:
                 raise ValueError(f"operation {route.name} is published twice in {self.version.value}")
         return {path for _, path in methods}
+
+    def _serve_documentation(self) -> None:
+        """What FastAPI.setup() does for an app, for this version: its document, Swagger UI and ReDoc"""
+        openapi_url = self.version.value + DocsRoutes.OPENAPI_JSON.value
+        oauth2_redirect_url = self.version.value + DocsRoutes.SWAGGER_UI_OAUTH2_REDIRECT.value
+        name = self.version.name.lower()
+
+        async def openapi(req: Request) -> JSONResponse:
+            return JSONResponse(self.openapi(req.app))
+
+        async def swagger_ui_html(req: Request) -> HTMLResponse:
+            root_path = req.scope.get("root_path", "").rstrip("/")
+            return get_swagger_ui_html(
+                openapi_url=root_path + openapi_url,
+                title=f"{req.app.title} {name} - Swagger UI",
+                oauth2_redirect_url=root_path + oauth2_redirect_url,
+                init_oauth=req.app.swagger_ui_init_oauth,
+                swagger_ui_parameters=req.app.swagger_ui_parameters,
+            )
+
+        async def swagger_ui_redirect(req: Request) -> HTMLResponse:
+            return get_swagger_ui_oauth2_redirect_html()
+
+        async def redoc_html(req: Request) -> HTMLResponse:
+            root_path = req.scope.get("root_path", "").rstrip("/")
+            return get_redoc_html(openapi_url=root_path + openapi_url, title=f"{req.app.title} {name} - ReDoc")
+
+        for member, endpoint in ((DocsRoutes.OPENAPI_JSON, openapi), (DocsRoutes.SWAGGER_UI, swagger_ui_html),
+                                 (DocsRoutes.SWAGGER_UI_OAUTH2_REDIRECT, swagger_ui_redirect),
+                                 (DocsRoutes.REDOC, redoc_html)):
+            self.router.add_route(self.version.value + member.value, endpoint, include_in_schema=False)
+            self.templates.add(self.version.value + member.value)
+
+    def openapi(self, app: FastAPI) -> Dict[str, Any]:
+        """The OpenAPI document of this version in app: its routes and the unversioned ones (/health), built once"""
+        if app not in self._documents:
+            routes = [route for route in app.routes if not isinstance(route, APIRoute) or self.owns(route.path)
+                      or not any(version.owns(route.path) for version in self.published.values())]
+            self._documents[app] = openapi_document(app, routes)
+        return self._documents[app]
 
     def owns(self, path: str) -> bool:
         return path.startswith(self.version.value + "/")

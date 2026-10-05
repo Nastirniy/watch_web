@@ -10,14 +10,14 @@ from starlette.routing import Route
 
 from app.backend.api.versioning import PublishedVersion
 from app.backend.enums import routes as route_enums
-from app.backend.enums.routes import APIVersionRoutes, DocsRoutes, Routes, SystemRoutes
+from app.backend.enums.routes import APIVersionRoutes, Routes, SystemRoutes
 from app.main import fastapi_app
 
 PARAM = re.compile(r"{[^}]+}")
 API_DIR = Path(__file__).resolve().parent.parent / "app" / "backend" / "api"
 VERSION_FOLDER = re.compile(r"v\d+")
-# Groups outside any version: their values are full paths
-UNVERSIONED = {SystemRoutes, DocsRoutes}
+# Groups outside any version: their values are full paths (DocsRoutes is relative to each version)
+UNVERSIONED = {SystemRoutes}
 
 
 def test_versions_never_import_each_other():
@@ -130,7 +130,7 @@ def test_every_route_is_an_enum_member():
 
 
 def _registered_paths() -> set:
-    """Every path the app answers, /docs and /openapi.json included"""
+    """Every path the app answers, the documents and viewers of each version included"""
     return {route.path for route in fastapi_app.routes if isinstance(route, Route)}
 
 

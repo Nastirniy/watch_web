@@ -5,20 +5,26 @@ tools only: openapi-typescript 7, TypeScript 5 (strict) and openapi-fetch 0.17. 
 no custom checker: everything comes from the OpenAPI document FastAPI generates. Every command below was run
 on a clean project. Background on the error format: `API.md`.
 
-## 1. The contract: one file
+## 1. The contract: one file per API version
 
-`api-contract/openapi.json` in this repository is the OpenAPI document of the API, committed with every
+`api-contract/v1/openapi.json` in this repository is the OpenAPI document of API v1, committed with every
 change of the API (the backend tests fail until it matches the code). A running API serves the same
-document at `/openapi.json`.
+document at `/api/v1/openapi.json`. Every version has its own document (`api-contract/v2/openapi.json`,
+`/api/v2/openapi.json` once v2 exists): type names and operation ids are unique within a version, so a new
+version never renames a type of v1.
 
 ```bash
 # in the web project: take the contract of the backend version you build against
-curl -o api-contract/openapi.json https://<api-origin>/openapi.json
-# or copy api-contract/openapi.json from this repository
+curl -o api-contract/v1/openapi.json https://<api-origin>/api/v1/openapi.json
+# or copy api-contract/v1/openapi.json from this repository
 ```
 
 Commit it in the web project too: a diff of `openapi.json` in a pull request is the change of the API it
 adopts. To rewrite it in this repository without a server: `python -m app.backend.api_contract`.
+
+When the web client starts using v2 for some resources, generate its types into a second file
+(`openapi-typescript ./api-contract/v2/openapi.json -o ./src/api/schema-v2.ts`) and create a second
+openapi-fetch client from it; the calls that stay on v1 keep the first client.
 
 ## 2. Set up the web project once
 
@@ -41,7 +47,7 @@ Copy from `api-contract/web-kit/` of this repository:
 ```json
 {
   "scripts": {
-    "api:types": "openapi-typescript ./api-contract/openapi.json -o ./src/api/schema.ts",
+    "api:types": "openapi-typescript ./api-contract/v1/openapi.json -o ./src/api/schema.ts",
     "api:check": "tsc --noEmit -p tsconfig.json",
     "api:all": "npm run api:types && npm run api:check"
   }
@@ -51,7 +57,7 @@ Copy from `api-contract/web-kit/` of this repository:
 ## 3. Every time the API changes
 
 ```bash
-# 1. take the new api-contract/openapi.json (section 1)
+# 1. take the new api-contract/v1/openapi.json (section 1)
 # 2. then:
 npm run api:all
 ```
@@ -133,7 +139,7 @@ git diff --exit-code src/api/schema.ts   # the committed types match the committ
 ## 7. How the backend keeps the contract from changing by accident
 
 Every route declares the problems it answers on its decorator (`responses=problems(...)`), and the backend
-tests fail on any problem the app answers that its operation does not declare. `api-contract/openapi.json`
+tests fail on any problem the app answers that its operation does not declare. `api-contract/v1/openapi.json`
 is committed and `tests/test_api_contract.py` fails while the code and the file differ, naming the changed
 operations and schemas. An intended change is accepted by rewriting the file
 (`python -m app.backend.api_contract`), committed with the code, noted in `CHANGELOG.md` and announced to the
@@ -145,7 +151,7 @@ The API sends no CORS headers: in production the web client comes from the same 
 In development do the same with the dev server that `npm run dev` (or `npm start`) starts: let it proxy the API
 paths, and call the API with relative URLs (`/api/v1/...`), never `http://localhost:8000/...`.
 
-The API paths: `/api`, `/docs`, `/redoc`, `/openapi.json`, `/problems`, `/health`. Point the proxy at the API
+The API paths: `/api` (the documents included: `/api/v1/docs`), `/problems`, `/health`. Point the proxy at the API
 started in development mode (`environment = "development"`: the login takes the certificate fields from a JSON
 body, no client certificate needed).
 
@@ -155,7 +161,7 @@ Vite (`vite.config.ts`):
 export default defineConfig({
   server: {
     proxy: Object.fromEntries(
-      ["/api", "/docs", "/redoc", "/openapi.json", "/problems", "/health"]
+      ["/api", "/problems", "/health"]
         .map((path) => [path, { target: "http://127.0.0.1:60800", changeOrigin: true }]),
     ),
   },
@@ -168,7 +174,7 @@ webpack-dev-server (`webpack.config.js`):
 module.exports = {
   devServer: {
     proxy: [{
-      context: ["/api", "/docs", "/redoc", "/openapi.json", "/problems", "/health"],
+      context: ["/api", "/problems", "/health"],
       target: "http://127.0.0.1:60800",
       changeOrigin: true,
     }],

@@ -86,6 +86,13 @@ def test_every_api_route_reaches_the_api():
         assert any(_matches(header, path) for header in headers), f"no nginx location proxies {route.path} to the API"
 
 
+def test_every_api_location_serves_a_route():
+    """A location for a path the API no longer answers would hide that path from the web client"""
+    paths = [re.sub(r"\{[^}]+\}", "x", route.path) for route in fastapi_app.routes]
+    stale = [header for header, _ in _api_locations() if not any(_matches(header, path) for path in paths)]
+    assert not stale, f"nginx locations without an API route: {stale}"
+
+
 def test_production_server_requires_a_verified_client_certificate():
     servers = _blocks(SERVERS, "server")
     tls = [body for _, body in servers if "listen 443 ssl" in body]

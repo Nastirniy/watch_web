@@ -14,7 +14,7 @@ from app.backend.utils.logging_config import setup_logging, get_logger, get_main
 from app.backend.database import initialize_database_with_migrations
 from app.backend.error_handlers import register_error_handlers
 from app.backend.enums.errors import ErrorCode
-from app.backend.openapi_problems import install_openapi, problems
+from app.backend.openapi_problems import problems
 from app.backend.api.v1 import V1
 from app.backend.api.system import health, problems as problem_pages
 from app.backend.enums.routes import AuthRoutes, DocsRoutes, SystemRoutes
@@ -30,8 +30,9 @@ setup_logging(
 _logger = get_main_logger()
 
 API_DESCRIPTION = f"""
-Radio monitoring API. This page, `{DocsRoutes.REDOC.value}` and `{DocsRoutes.OPENAPI_JSON.value}` are generated
-from the code, errors included.
+Radio monitoring API. Every API version has its own OpenAPI document, generated from the code, errors included,
+with Swagger UI and ReDoc next to it: `{V1.path(DocsRoutes.OPENAPI_JSON)}`, `{V1.path(DocsRoutes.SWAGGER_UI)}`,
+`{V1.path(DocsRoutes.REDOC)}`.
 
 ## Authentication
 `Authorization: Bearer <access token>` from `POST {V1.path(AuthRoutes.LOGIN)}`. A 401 with `invalid_token` means:
@@ -60,8 +61,8 @@ Each problem type is a component schema `<Code>Problem` (`PostNotFoundProblem`);
 Item codes are `components.schemas.FieldErrorCode` plus pydantic's codes (`missing`, `string_too_short`, ...).
 
 ## Typed client
-`npx openapi-typescript <origin>{DocsRoutes.OPENAPI_JSON.value} -o src/api/schema.ts` generates the types; operation ids
-are the endpoint names (`update_post`).
+`npx openapi-typescript <origin>{V1.path(DocsRoutes.OPENAPI_JSON)} -o src/api/schema.ts` generates the types of v1;
+operation ids are the endpoint names (`update_post`).
 """
 
 
@@ -86,14 +87,15 @@ fastapi_app = FastAPI(
     version=settings.app.version,
     description=API_DESCRIPTION,
     lifespan=lifespan,
-    openapi_url=DocsRoutes.OPENAPI_JSON.value,
-    docs_url=DocsRoutes.SWAGGER_UI.value,
-    swagger_ui_oauth2_redirect_url=DocsRoutes.SWAGGER_UI_OAUTH2_REDIRECT.value,
-    redoc_url=DocsRoutes.REDOC.value,
+    # No document at the root: each API version serves its own (/api/v1/openapi.json, /docs, /redoc), so models
+    # of two versions never share or rename each other's components (api/versioning.py)
+    openapi_url=None,
+    docs_url=None,
+    redoc_url=None,
     # Any route may fail unexpectedly: 500 internal_error is documented once for all of them
     responses=problems(ErrorCode.INTERNAL_ERROR),
     # operationId = the endpoint function name (update_post), what client generators name their functions after;
-    # tests/test_openapi.py keeps them unique
+    # tests/test_openapi.py keeps them unique within a version
     generate_unique_id_function=lambda route: route.name,
 )
 
@@ -108,9 +110,6 @@ fastapi_app.include_router(health.router)
 fastapi_app.include_router(V1.router)
 # Documentation of the problem types (the "type" URI of every error); not part of the OpenAPI schema
 fastapi_app.include_router(problem_pages.router)
-
-# OpenAPI lists, per route and status, every problem type the route can answer (openapi_problems.py)
-install_openapi(fastapi_app)
 
 
 if __name__ == "__main__":

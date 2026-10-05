@@ -16,6 +16,7 @@ from sqlmodel import SQLModel
 
 import app.backend.models  # noqa: F401  registers every table on the metadata
 from app.main import fastapi_app
+from app.backend.api.versioning import PublishedVersion
 from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.database import get_session, seed_roles_and_permissions
 from app.backend.services.media.formats import seed_media_formats, invalidate_registry_cache
@@ -68,8 +69,9 @@ async def client(session_maker, db):
 def problems_are_declared():
     """Every problem a test makes the app answer must be declared on its operation (responses=problems(...)).
 
-    Records (operationId, code) at error_handlers.problem_response and checks them against /openapi.json
-    when the session ends. Framework problems belong to no operation and are not recorded."""
+    Records (method, path, code) at error_handlers.problem_response and checks them against the OpenAPI
+    document of each version when the session ends. Framework problems belong to no operation and are not
+    recorded."""
     from app.backend import error_handlers
     from app.backend.openapi_problems import FRAMEWORK_PROBLEMS, operation_problems
 
@@ -80,16 +82,19 @@ def problems_are_declared():
         route = request.scope.get("route")
         if request.scope.get("app") is fastapi_app and route is not None and getattr(route, "include_in_schema", False) \
                 and code not in FRAMEWORK_PROBLEMS:
-            recorded.add((route.unique_id, code.value))
+            recorded.add((request.method, route.path_format, code.value))
         return original(request, code, params, headers)
 
     error_handlers.problem_response = recording
     yield recorded
     error_handlers.problem_response = original
 
-    declared = {operation["operationId"]: {c for codes in operation_problems(operation).values() for c in codes}
-                for path_item in fastapi_app.openapi()["paths"].values() for operation in path_item.values()}
-    undeclared = sorted(f"{op}: {code}" for op, code in recorded if code not in declared.get(op, set()))
+    declared = {(method.upper(), path): {c for codes in operation_problems(operation).values() for c in codes}
+                for version in PublishedVersion.published.values()
+                for path, path_item in version.openapi(fastapi_app)["paths"].items()
+                for method, operation in path_item.items()}
+    undeclared = sorted(f"{method} {path}: {code}" for method, path, code in recorded
+                        if code not in declared.get((method, path), set()))
     assert not undeclared, "answered but not declared in responses=problems(...):\n" + "\n".join(undeclared)
 
 

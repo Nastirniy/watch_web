@@ -3,8 +3,8 @@
 GET /problems            index of every problem type (HTML)
 GET /problems/{code}     one problem type: status, title, detail template, params, routes that answer it
 
-Public and outside /api/v1 like /docs: it describes the API, never data. Not part of the OpenAPI
-schema; the same catalog is there as component schemas (see openapi_problems.py).
+Public and outside the versions: it describes the API, never data. Not part of the OpenAPI documents; the
+same catalog is there as component schemas (see openapi_problems.py).
 """
 import html
 from typing import Dict, List
@@ -12,6 +12,7 @@ from typing import Dict, List
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
+from app.backend.api.versioning import PublishedVersion
 from app.backend.enums.errors import PROBLEM_ENUMS, ErrorCode, ProblemType, problem_type
 from app.backend.enums.routes import SystemRoutes
 from app.backend.openapi_problems import operation_problems
@@ -38,13 +39,16 @@ def _type_name(annotation) -> str:
 
 
 def _routes_by_problem(request: Request) -> Dict[str, List[str]]:
-    """code -> "METHOD /path" of the operations that declare it in the OpenAPI document"""
+    """code -> "METHOD /path" of the operations that declare it in the OpenAPI document of any version"""
     found: Dict[str, List[str]] = {}
-    for path, path_item in request.app.openapi()["paths"].items():
-        for method, operation in path_item.items():
-            for codes in operation_problems(operation).values():
-                for code in codes:
-                    found.setdefault(code, []).append(f"{method.upper()} {path}")
+    for version in PublishedVersion.published.values():
+        for path, path_item in version.openapi(request.app)["paths"].items():
+            for method, operation in path_item.items():
+                for codes in operation_problems(operation).values():
+                    for code in codes:
+                        route = f"{method.upper()} {path}"
+                        if route not in found.setdefault(code, []):
+                            found[code].append(route)
     return found
 
 

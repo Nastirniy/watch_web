@@ -4,17 +4,20 @@ Everything below is generated from the code of the API, so it is always current 
 
 | URL | What |
 |-----|------|
-| `/docs` | Swagger UI: every operation, its request, every success response and every error it can answer |
-| `/redoc` | The same, as a reading-friendly page |
-| `/openapi.json` | OpenAPI 3.1 document for generators |
+| `/api/v1/docs` | Swagger UI of v1: every operation, its request, every success response and every error it can answer |
+| `/api/v1/redoc` | The same, as a reading-friendly page |
+| `/api/v1/openapi.json` | OpenAPI 3.1 document of v1 for generators |
 | `/problems` | Every error type (code, status, title, params) and the operations that answer it |
+
+Every API version has its own document next to its routes (`/api/v2/openapi.json` once v2 exists): a type
+name is unique within a version, so a new version never renames a type of v1.
 
 ## Typed client
 
 Setup, contract checks and translation checks step by step: `WEB_TOOLING.md` (starter files in `api-contract/web-kit/`).
 
 ```bash
-npx openapi-typescript https://<api-origin>/openapi.json -o src/api/schema.ts
+npx openapi-typescript https://<api-origin>/api/v1/openapi.json -o src/api/schema.ts
 ```
 
 With [openapi-fetch](https://openapi-ts.dev/openapi-fetch/) the paths, bodies, success responses and errors are typed:
@@ -72,7 +75,7 @@ Every error, whatever the status, answers `Content-Type: application/problem+jso
 
 The localization package needs one entry per code:
 
-- every problem code: the `code` constant of each component schema `<Code>Problem` in `/openapi.json` (`Problem["code"]` in TypeScript, see `WEB_TOOLING.md`);
+- every problem code: the `code` constant of each component schema `<Code>Problem` in `/api/v1/openapi.json` (`Problem["code"]` in TypeScript, see `WEB_TOOLING.md`);
 - `components.schemas.FieldErrorCode`: codes of invalid values inside `validation_error`;
 - pydantic's codes for built-in checks inside `validation_error` (`missing`, `string_too_short`, `string_too_long`, `int_parsing`, `enum`, `json_invalid`, ...; see https://docs.pydantic.dev/latest/errors/validation_errors/). Their params (`min_length`, `max_length`, `expected`, ...) are members of the item.
 

@@ -194,7 +194,7 @@ async def test_sort_by_lowest_matching_band_center(client, db, headers):
     assert await order(sort_order="ascending", frequency_kind="video") == [high_rc.id, low_rc.id], \
         "the sort uses the bands selected by the band filters"
     # The sortable fields are the enum of the sort_by query parameter in OpenAPI
-    parameters = fastapi_app.openapi()["paths"][LIST]["get"]["parameters"]
+    parameters = V1.openapi(fastapi_app)["paths"][LIST]["get"]["parameters"]
     sort_by = next(p for p in parameters if p["name"] == "sort_by")
     assert "frequency_center" in json.dumps(sort_by["schema"])
     rejected = await client.get(LIST, params={"sort_by": "no_such_field"}, headers=headers(user))

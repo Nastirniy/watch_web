@@ -4,7 +4,9 @@
 - Resource groups (AuthRoutes, UserRoutes, ...): BASE is the prefix of the resource router, every other
   member a path relative to it. A full path comes from the version that publishes the group:
   V1.path(UserRoutes.USER_BY_ID, user_id=1) (app/backend/api/versioning.py).
-- SystemRoutes, DocsRoutes: outside any version, the values are full paths.
+- DocsRoutes: the OpenAPI document of a version and its viewers, relative to the version prefix
+  (V1.path(DocsRoutes.OPENAPI_JSON) is /api/v1/openapi.json); every version serves its own.
+- SystemRoutes: outside any version, the values are full paths.
 """
 from enum import Enum
 
@@ -15,7 +17,7 @@ class APIVersionRoutes(str, Enum):
 
 
 class DocsRoutes(str, Enum):
-    """OpenAPI document and its viewers (FastAPI registers them from these values)"""
+    """OpenAPI document of a version and its viewers, relative to the version prefix (api/versioning.py)"""
     BASE = ""
     OPENAPI_JSON = "/openapi.json"
     SWAGGER_UI = "/docs"

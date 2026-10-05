@@ -1,4 +1,4 @@
-"""OpenAPI (/docs, /openapi.json) documents every response the API really gives.
+"""The OpenAPI document of v1 (/api/v1/openapi.json, /api/v1/docs) documents every response the API really gives.
 
 - every error response is application/problem+json and names its problem types (oneOf + discriminator on code);
 - the problem types of a route are those its decorator declares (responses=problems(...)), merged by FastAPI with
@@ -27,8 +27,7 @@ API_PREFIXES = tuple(version.value + "/" for version in APIVersionRoutes)
 @pytest.fixture(scope="module")
 def schema():
     from app.main import fastapi_app
-    fastapi_app.openapi_schema = None
-    return fastapi_app.openapi()
+    return V1.openapi(fastapi_app)
 
 
 def _operations(schema):

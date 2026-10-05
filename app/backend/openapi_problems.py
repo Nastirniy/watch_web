@@ -5,9 +5,10 @@
 - problems(*codes): the `responses=` of a route, a router or the app. A route declares the codes it answers
   on its decorator; generic ones are declared once: internal_error on the app, the 401 set and
   validation_error on each version router (FastAPI merges them per status).
-- install_openapi(): FastAPI's "Extending OpenAPI" hook, only for what FastAPI cannot express itself: error
-  content under application/problem+json, and the schemas of the problems no operation can declare
-  (framework errors: unknown route, wrong method, unparsable body, unknown problem page).
+- openapi_document(): FastAPI's get_openapi() over the routes of one API version (see versioning.py), finished
+  only for what FastAPI cannot express itself: error content under application/problem+json, and the schemas
+  of the problems no operation can declare (framework errors: unknown route, wrong method, unparsable body,
+  unknown problem page).
 
 tests/test_openapi.py checks the document; tests/conftest.py checks that every problem the test suite makes
 the app answer is declared on its operation.
@@ -16,6 +17,7 @@ from functools import lru_cache
 from typing import Annotated, Any, Dict, List, Literal, Optional, Set, Union, get_args, get_origin
 
 from fastapi import FastAPI
+from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from app.backend.enums.errors import (
@@ -222,13 +224,22 @@ def _finish(schema: Dict[str, Any]) -> None:
         _add_component(schemas, problem_models()[code])
 
 
-def install_openapi(app: FastAPI) -> None:
-    """FastAPI's "Extending OpenAPI": the document FastAPI builds, finished once and cached"""
-    build = app.openapi
-
-    def openapi() -> Dict[str, Any]:
-        if app.openapi_schema is None:
-            _finish(build())
-        return app.openapi_schema
-
-    app.openapi = openapi
+def openapi_document(app: FastAPI, routes: List[Any]) -> Dict[str, Any]:
+    """What app.openapi() builds, over the given routes only ("Extending OpenAPI"), then finished"""
+    document = get_openapi(
+        title=app.title,
+        version=app.version,
+        openapi_version=app.openapi_version,
+        summary=app.summary,
+        description=app.description,
+        terms_of_service=app.terms_of_service,
+        contact=app.contact,
+        license_info=app.license_info,
+        routes=routes,
+        webhooks=app.webhooks.routes,
+        tags=app.openapi_tags,
+        servers=app.servers,
+        separate_input_output_schemas=app.separate_input_output_schemas,
+    )
+    _finish(document)
+    return document

@@ -1,8 +1,9 @@
 """Two API versions served in parallel, the way CLAUDE.md "Routes and API versions" describes them.
 
 A throwaway second version publishes its own small module next to the real v1 on a test prefix: no shared
-router, no re-publishing. FastAPI keeps the operationIds unique, each handler builds URLs of its own
-version, /auth/route-access lists the routes of the caller's version only.
+router, no re-publishing. Each version has its own OpenAPI document (operation ids and component names are
+unique within a version), each handler builds URLs of its own version, /auth/route-access lists the routes of
+the caller's version only.
 """
 from enum import Enum
 from types import SimpleNamespace
@@ -18,7 +19,6 @@ from app.backend.database import get_session
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import APIVersionRoutes, AuthRoutes, TagRoutes, UserRoutes
 from app.backend.error_handlers import register_error_handlers
-from app.backend.openapi_problems import install_openapi
 from app.backend.services.auth_context import AuthContext
 from app.backend.services.permissions import require
 from tests.helpers import make_admin
@@ -49,8 +49,7 @@ async def two_versions(session_maker):
     app = FastAPI(generate_unique_id_function=lambda route: route.name)
     register_error_handlers(app)
     app.include_router(V1.router)
-    app.include_router(v2.router, generate_unique_id_function=lambda route: f"{route.name}_v2")
-    install_openapi(app)
+    app.include_router(v2.router)
 
     async def _session():
         async with session_maker() as session:
@@ -72,11 +71,14 @@ async def test_both_versions_answer_with_their_own_handler(two_versions, db, hea
     assert new.json() == {"version": ThrowawayVersions.V2.value, "self": v2.path(TagRoutes.LIST_ALL)}
 
 
-def test_operation_ids_stay_unique(two_versions):
-    app, _, _ = two_versions
-    ids = [op["operationId"] for item in app.openapi()["paths"].values() for op in item.values()]
-    assert len(ids) == len(set(ids))
-    assert {"list_tags", "list_tags_v2"} <= set(ids)
+def test_each_version_has_its_own_document(two_versions):
+    """Both versions name their operation list_tags: an operation id is unique within its version's document"""
+    app, v2, _ = two_versions
+    for version in (V1, v2):
+        document = version.openapi(app)
+        ids = [op["operationId"] for item in document["paths"].values() for op in item.values()]
+        assert len(ids) == len(set(ids)) and "list_tags" in ids
+        assert all(version.owns(path) for path in document["paths"])
 
 
 def test_a_version_gives_paths_of_what_it_publishes_only(two_versions):

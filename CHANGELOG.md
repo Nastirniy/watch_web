@@ -5,6 +5,32 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Each API version has its own OpenAPI document; the contract of a version lives in its folder
+
+### Breaking changes for API clients
+
+- The OpenAPI document and its viewers moved under the version: `/api/v1/openapi.json`, `/api/v1/docs`,
+  `/api/v1/redoc` (`/openapi.json`, `/docs`, `/redoc` are gone). Each later version serves its own document
+  (`/api/v2/openapi.json`); type names and operation ids are unique within a version, so a new version never
+  renames a type of v1 (one document for every version would have).
+- The committed contract moved to `api-contract/v1/openapi.json` (was `api-contract/openapi.json`). Its paths,
+  bodies, problems and schemas are unchanged; only the API description names the new document URLs. Web: point
+  `api:types` at the new file (WEB_TOOLING.md, section 2) and drop `/docs`, `/redoc`, `/openapi.json` from the dev
+  server proxy (section 8).
+
+### Backend (no change to the v1 contract)
+
+- Request, response and query models live in the version that publishes them:
+  `app/backend/api/v1/models/{request,response,query}/<resource>.py`, response builders next to their models
+  (`post_to_response`, the auth builders, `upload_result`). `api/shared` keeps version-neutral helpers only,
+  health models are in `api/system/health_checks.py`.
+- Services and filters never depend on the API: the observation counters return dataclasses, and every filter
+  service declares its criteria as a dataclass (`TagCriteria`, ..., `ObservationReportCriteria`) that the query
+  model of a version converts into. `filters/params/` is gone; `SortOrder` and `ObservationReportType` are in
+  `enums/general.py`.
+- Tests: no component name carries a module path, import rules of the API layers, every v1 query model converts
+  into its service's criteria, the document and viewers of each version, no nginx location without a route.
+
 ## Sessions live while used, bound to the client certificate; state computed when read; no CORS in the API
 
 ### Breaking changes for API clients
