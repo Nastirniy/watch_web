@@ -38,6 +38,52 @@ def test_versions_never_import_each_other():
     assert not offenders, offenders
 
 
+APP_DIR = API_DIR.parent.parent
+VERSION_MODULE = re.compile(r"app\.backend\.api\.v\d+(\.|$)")
+API_MODULE = re.compile(r"app\.backend\.api(\.|$)")
+# Wire the routers into the app and write the contract: the only modules outside api/ that know it
+API_WIRING = {APP_DIR / "main.py", APP_DIR / "backend" / "api_contract.py"}
+
+
+def _imported_modules(path: Path):
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8-sig"))):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            yield node.lineno, node.module
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                yield node.lineno, alias.name
+
+
+def test_shared_and_system_never_import_a_version():
+    """api/shared serves every version and api/system none: neither may depend on what one version publishes"""
+    offenders = [f"{path.relative_to(API_DIR)}:{line} imports {name}"
+                 for folder in ("shared", "system") for path in sorted((API_DIR / folder).rglob("*.py"))
+                 for line, name in _imported_modules(path) if VERSION_MODULE.match(name)]
+    assert not offenders, offenders
+
+
+def test_no_model_is_defined_in_api_shared():
+    """Request and response models are the contract of a version and live in api/vN/models"""
+    import importlib
+    from pydantic import BaseModel
+
+    offenders = []
+    for path in sorted((API_DIR / "shared").rglob("*.py")):
+        module = importlib.import_module(".".join(path.relative_to(APP_DIR.parent).with_suffix("").parts))
+        offenders += [f"{module.__name__}.{name}" for name, value in vars(module).items()
+                      if inspect.isclass(value) and issubclass(value, BaseModel) and value.__module__ == module.__name__]
+    assert not offenders, offenders
+
+
+def test_nothing_outside_api_imports_api():
+    """Services, filters, models and workers serve every version: they never depend on API models or routes"""
+    offenders = [f"{path.relative_to(APP_DIR.parent)}:{line} imports {name}"
+                 for path in sorted(APP_DIR.rglob("*.py"))
+                 if API_DIR not in path.parents and path not in API_WIRING
+                 for line, name in _imported_modules(path) if API_MODULE.match(name)]
+    assert not offenders, offenders
+
+
 def _groups() -> list:
     """Route groups: the enums of enums/routes.py with a BASE member"""
     return [cls for _, cls in inspect.getmembers(route_enums, inspect.isclass)
