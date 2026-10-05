@@ -8,6 +8,7 @@ from app.backend.models.media import MediaFile
 from app.backend.api.shared.models.response.user_response import UserPublicResponse
 from app.backend.utils.validators import PlainTextModel
 from app.backend.services.media.urls import thumbnail_urls
+from app.backend.api.shared.openapi_docs import header
 
 
 class ThumbnailUrls(BaseModel):
@@ -206,3 +207,25 @@ class MediaFormatsResponse(BaseModel):
     formats: Dict[str, List[MediaFormatInfo]]
     # Server ceiling (storage.max_file_size_gb); every per-format limit is at or below it
     max_file_size_bytes: int
+
+
+# Headers shared by the file and upload routes
+ORIGINAL_FILE_HEADERS = {
+    "Content-Disposition": header('attachment (download) or inline (stream), with filename="<original name>"'),
+    "ETag": header("sha256 of the file, quoted"),
+    "X-File-Hash": header("sha256 of the file"),
+    "Accept-Ranges": header("bytes: the file can be read in parts with Range"),
+    "Cache-Control": header("private, max-age=3600"),
+}
+UPLOAD_SESSION_HEADERS = {
+    "Upload-Offset": header("Bytes received so far: send the next chunk from here", "integer"),
+    "Upload-Length": header("expected_size of the session", "integer"),
+    "Upload-Expires": header("When the session expires", "string", "date-time"),
+    "Upload-Status": header("open, completed, aborted or expired"),
+    "Cache-Control": header("no-store"),
+}
+THUMBNAIL_PENDING_HEADERS = {
+    "Retry-After": header("Seconds to wait before asking again", "integer"),
+    "X-Thumbnail-Status": header("pending or processing"),
+    "Cache-Control": header("no-store"),
+}

@@ -28,7 +28,7 @@ from app.backend.api.shared.helpers.upload_helper import (
     format_rejected, store_rejected, too_large, validation_config_for,
 )
 from app.backend.api.shared.models.request.media_request import UploadSessionCreate
-from app.backend.api.shared.models.response.media_response import UploadResultResponse, UploadSessionResponse, upload_result
+from app.backend.api.shared.models.response.media_response import UPLOAD_SESSION_HEADERS, UploadResultResponse, UploadSessionResponse, upload_result
 from app.backend.services.access_control import AccessControlService
 from app.backend.services.access_errors import access_denied
 from app.backend.services.auth_context import AuthContext
@@ -39,7 +39,7 @@ from app.backend.services.permissions import Require, require
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.services.api_errors import ApiError, CodedError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
-from app.backend.api.shared.models.response.openapi_docs import UPLOAD_SESSION_HEADERS, empty_response, header, with_headers
+from app.backend.api.shared.openapi_docs import empty_response, header, with_headers
 from app.backend.openapi_problems import GUARDED, problems
 
 router = APIRouter(prefix=MediaRoutes.BASE.value, tags=[MediaRoutes.tag()])

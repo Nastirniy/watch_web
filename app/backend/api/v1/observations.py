@@ -48,7 +48,7 @@ from app.backend.filters.observation_report_filter import ObservationReportFilte
 from app.backend.services.observation_report_service import ObservationReportService
 from app.backend.services.api_errors import ApiError, field_problem
 from app.backend.enums.errors import AccessErrorCode, ErrorCode, FieldErrorCode
-from app.backend.api.shared.models.response.openapi_docs import file_response, header
+from app.backend.api.shared.openapi_docs import file_response, header
 from app.backend.openapi_problems import ADMIN, GUARDED, problems
 
 router = APIRouter(prefix=ObservationRoutes.BASE.value, tags=[ObservationRoutes.tag()])

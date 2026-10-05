@@ -40,6 +40,8 @@ from app.backend.api.shared.models.response.media_response import (
     StorageStatisticsResponse,
     UploadResultResponse,
     upload_result,
+    ORIGINAL_FILE_HEADERS,
+    THUMBNAIL_PENDING_HEADERS,
 )
 from app.backend.filters.params.media_params import MediaFilterParams
 from app.backend.filters.media_filter import MediaFilterService
@@ -55,9 +57,7 @@ from app.backend.api.shared.helpers.media_helper import (
 )
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.services.api_errors import ApiError, CodedError
-from app.backend.api.shared.models.response.openapi_docs import (
-    ORIGINAL_FILE_HEADERS, THUMBNAIL_PENDING_HEADERS, empty_response, file_response, header,
-)
+from app.backend.api.shared.openapi_docs import empty_response, file_response, header
 from app.backend.openapi_problems import ADMIN, GUARDED, problems
 
 router = APIRouter(prefix=MediaRoutes.BASE.value, tags=[MediaRoutes.tag()])
