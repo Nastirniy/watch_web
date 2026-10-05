@@ -160,9 +160,10 @@ async def get_post_observation_stats(
     AccessControlService.check_post_record_view(auth, post_id)
     if (await session.exec(select(Post.id).where(Post.id == post_id))).first() is None:
         raise ApiError(ErrorCode.POST_NOT_FOUND)
-    return await post_observation_stats(
+    stats = await post_observation_stats(
         session, post_id, date_from, date_to, group_by, tz or settings.timezone.timezone, include_archived,
     )
+    return PostObservationStatsResponse.model_validate(stats, from_attributes=True)
 
 
 @router.put(

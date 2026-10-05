@@ -6,6 +6,7 @@ Archived observations are never mixed into not_archived; they are counted
 separately on explicit request only. That request needs no observation.archive:
 it returns counts, never archived rows.
 """
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -19,15 +20,45 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.enums.general import StatsGroupBy
 from app.backend.models.observation import Observation
-from app.backend.api.shared.models.response.posts_response import (
-    ObservationCount, ObservationStatsBucket, ObservationStatsPeriod, PostObservationStatsResponse,
-)
 from app.backend.services.api_errors import ApiError
 from app.backend.enums.errors import ErrorCode
 
 LAST_24H = timedelta(hours=24)
 DEFAULT_STATS_PERIOD = timedelta(days=30)
 MAX_STATS_PERIOD = {StatsGroupBy.HOUR: timedelta(days=31), StatsGroupBy.DAY: timedelta(days=366)}
+
+
+@dataclass(frozen=True, kw_only=True)
+class ObservationCounts:
+    """Observations by created_at; the two figures never overlap. archived is None unless requested"""
+    not_archived: int
+    archived: Optional[int] = None
+
+
+@dataclass(frozen=True, kw_only=True)
+class StatsBucket(ObservationCounts):
+    start: datetime
+    end: datetime
+
+
+@dataclass(frozen=True, kw_only=True)
+class StatsPeriod(ObservationCounts):
+    date_from: datetime
+    date_to: datetime
+    group_by: str
+    tz: str
+    buckets: List[StatsBucket]
+
+
+@dataclass(frozen=True, kw_only=True)
+class PostObservationStats:
+    post_id: int
+    generated_at: datetime
+    last_observation_at: Optional[datetime]
+    days_without_observations: Optional[int]
+    all_time: ObservationCounts
+    last_24h: ObservationCounts
+    period: StatsPeriod
 
 
 class utc_hour_key(FunctionElement):
@@ -105,7 +136,7 @@ async def post_observation_stats(
         tz: str,
         include_archived: bool,
         now: Optional[datetime] = None,
-) -> PostObservationStatsResponse:
+) -> PostObservationStats:
     """All-time and last-24-hours figures in one query, then the period series.
     The database groups the period by UTC hour (at most 24 * 366 rows); the hours are
     then summed into buckets of the zone. Exact for zones with whole-hour offsets."""
@@ -157,21 +188,21 @@ async def post_observation_stats(
     def figures(values: dict) -> dict:
         return {"not_archived": values[False], "archived": values[True] if include_archived else None}
 
-    return PostObservationStatsResponse(
+    return PostObservationStats(
         post_id=post_id,
         generated_at=now,
         last_observation_at=last_observation_at,
         days_without_observations=_calendar_days_between(last_observation_at, now, zone) if last_observation_at else None,
-        all_time=ObservationCount(**figures(all_time)),
-        last_24h=ObservationCount(**figures(last_24h)),
-        period=ObservationStatsPeriod(
+        all_time=ObservationCounts(**figures(all_time)),
+        last_24h=ObservationCounts(**figures(last_24h)),
+        period=StatsPeriod(
             date_from=date_from,
             date_to=date_to,
             group_by=group_by.value,
             tz=tz,
             **figures({flag: sum(values) for flag, values in per_bucket.items()}),
             buckets=[
-                ObservationStatsBucket(
+                StatsBucket(
                     start=edges[i].astimezone(zone),
                     end=edges[i + 1].astimezone(zone),
                     **figures({flag: values[i] for flag, values in per_bucket.items()}),

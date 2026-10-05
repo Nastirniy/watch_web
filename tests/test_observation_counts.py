@@ -153,3 +153,19 @@ async def test_days_without_observations_are_calendar_days_of_the_zone(client, d
     assert kyiv.days_without_observations == 1
     utc = await post_observation_stats(db, post.id, None, None, StatsGroupBy.DAY, "UTC", False, now=now)
     assert utc.days_without_observations == 0
+
+
+@pytest.mark.asyncio
+async def test_the_service_returns_dataclasses_not_api_models(db):
+    """The counters belong to no API version: the route of each version converts them into its own model"""
+    import dataclasses
+    from pydantic import BaseModel
+    from app.backend.services.observation_counts import post_observation_stats
+    from app.backend.enums.general import StatsGroupBy
+
+    post = await make_post(db)
+    stats = await post_observation_stats(db, post.id, None, None, StatsGroupBy.DAY, "UTC", True)
+    for value in (stats, stats.all_time, stats.last_24h, stats.period, *stats.period.buckets):
+        assert dataclasses.is_dataclass(value) and not isinstance(value, BaseModel)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        stats.post_id = 0
