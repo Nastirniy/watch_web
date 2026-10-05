@@ -12,6 +12,7 @@ import pytest
 import pytest_asyncio
 from fastapi import APIRouter, Depends, FastAPI
 from httpx import ASGITransport, AsyncClient
+from pydantic import BaseModel
 
 from app.backend.api.v1 import V1
 from app.backend.api.versioning import PublishedVersion, request_version
@@ -29,6 +30,12 @@ class ThrowawayVersions(str, Enum):
     DUPLICATE = "/api/test-duplicate"
 
 
+class TagResponse(BaseModel):
+    """What api/v2/models/response/tags.py would define: the name of the v1 model, other fields"""
+    id: int
+    label: str
+
+
 def _tags_module() -> SimpleNamespace:
     """What api/v2/tags.py would be: a module of its own, same path as in v1, a different handler"""
     router = APIRouter(prefix=TagRoutes.BASE.value, tags=[TagRoutes.tag()])
@@ -39,6 +46,12 @@ def _tags_module() -> SimpleNamespace:
             auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW])),
     ) -> dict:
         return {"version": version.version.value, "self": version.path(TagRoutes.LIST_ALL)}
+
+    @router.post(TagRoutes.CREATE.value, response_model=TagResponse)
+    async def create_tag(
+            auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW, Permissions.TAG_CREATE], admin=True)),
+    ) -> TagResponse:
+        return TagResponse(id=1, label="new")
 
     return SimpleNamespace(router=router)
 
@@ -79,6 +92,17 @@ def test_each_version_has_its_own_document(two_versions):
         ids = [op["operationId"] for item in document["paths"].values() for op in item.values()]
         assert len(ids) == len(set(ids)) and "list_tags" in ids
         assert all(version.owns(path) for path in document["paths"])
+
+
+def test_a_model_named_like_a_v1_model_leaves_the_v1_types_alone(two_versions):
+    """v2 defines its own TagResponse with other fields: each document keeps its own, under the plain name"""
+    from app.main import fastapi_app
+    app, v2, _ = two_versions
+    v1_schemas = V1.openapi(app)["components"]["schemas"]
+    v2_schemas = v2.openapi(app)["components"]["schemas"]
+    assert v1_schemas["TagResponse"] == V1.openapi(fastapi_app)["components"]["schemas"]["TagResponse"]
+    assert set(v2_schemas["TagResponse"]["properties"]) == {"id", "label"}
+    assert [name for name in (*v1_schemas, *v2_schemas) if "__" in name] == []
 
 
 def test_a_version_gives_paths_of_what_it_publishes_only(two_versions):
