@@ -5,6 +5,25 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Tag filter: any or all of the tags
+
+### Added
+
+- `tag_match` next to `tag_ids` in `GET /observations/list-all`, `GET /search/observations` (query) and
+  `POST /observations/report` (body): `any` (default, the behaviour so far) keeps observations with at least one
+  of the tags, `all` keeps observations with every one of them (a repeated id counts once, archived tags count).
+  New component schema `TagMatch`. The Excel report header names the mode: "Теги (будь-який)" or "Теги (усі)".
+
+### Fixed
+
+- The descriptions of `tag_ids` said "all required" (list, search) and "ALL of these tag IDs" (report), while
+  every one of them matched any of the tags. They now describe `tag_match`.
+
+### Backend
+
+- One condition for lists, searches and reports: `filters/observation_tag_filter.py`
+  (`ObservationTagFilter.observation_has_tags`), instead of three copies.
+
 ## Each API version has its own OpenAPI document; the contract of a version lives in its folder
 
 ### Breaking changes for API clients

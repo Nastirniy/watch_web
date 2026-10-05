@@ -9,11 +9,11 @@ from decimal import Decimal
 from typing import Optional, Iterable, List
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql.selectable import Select
-from sqlmodel import select
 
-from app.backend.models.observation import Observation, ObservationTag
+from app.backend.models.observation import Observation
 from app.backend.filters.observation_frequency_filter import ObservationFrequencyFilter
-from app.backend.enums.general import FrequencyKind
+from app.backend.filters.observation_tag_filter import ObservationTagFilter
+from app.backend.enums.general import FrequencyKind, TagMatch
 from app.backend.filters.simple_engine import ListCriteria, SimpleFilterEngine
 
 
@@ -43,6 +43,7 @@ class ObservationCriteria(ListCriteria):
     duration_to: Optional[int] = None
     comment_contains: Optional[str] = None
     tag_ids: Optional[List[int]] = None
+    tag_match: TagMatch = TagMatch.ANY
     include_deleted: bool = False
 
 
@@ -141,16 +142,9 @@ class ObservationFilterService(SimpleFilterEngine):
         # === Comment Search ===
         query = cls._apply_contains(query, Observation.comment, params.comment_contains)
 
-        # === Tag Filters (OR logic - must have ANY of the tags) ===
+        # === Tags: any or all of them (tag_match) ===
         if params.tag_ids:
-            tag_id_list = params.tag_ids
-            if tag_id_list:
-                query = query.where(
-                    Observation.id.in_(
-                        select(ObservationTag.observation_id)
-                        .where(ObservationTag.tag_id.in_(tag_id_list))
-                    )
-                )
+            query = query.where(ObservationTagFilter.observation_has_tags(params.tag_ids, params.tag_match))
 
         # === Sorting & Pagination ===
         query = cls._apply_sorting(query, params)
@@ -214,13 +208,6 @@ class ObservationFilterService(SimpleFilterEngine):
         query = cls._apply_contains(query, Observation.comment, params.comment_contains)
 
         if params.tag_ids:
-            tag_id_list = params.tag_ids
-            if tag_id_list:
-                query = query.where(
-                    Observation.id.in_(
-                        select(ObservationTag.observation_id)
-                        .where(ObservationTag.tag_id.in_(tag_id_list))
-                    )
-                )
+            query = query.where(ObservationTagFilter.observation_has_tags(params.tag_ids, params.tag_match))
 
         return query

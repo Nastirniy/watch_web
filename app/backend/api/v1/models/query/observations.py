@@ -8,7 +8,7 @@ from datetime import datetime
 from decimal import Decimal
 from pydantic import BaseModel, Field
 
-from app.backend.enums.general import FrequencyKind
+from app.backend.enums.general import FrequencyKind, TagMatch
 from app.backend.api.v1.models.query.base import BaseFilterParams
 
 # Fields the results can be sorted by; sort_by accepts exactly these (another value answers 422)
@@ -61,7 +61,8 @@ class ObservationFilterParams(BaseFilterParams):
     comment_contains: Optional[str] = Field(default=None, max_length=100, description="Comment contains text")
 
     # --- Tags ---
-    tag_ids: Optional[List[int]] = Field(default=None, description="Tag ids, all required: ?tag_ids=1&tag_ids=2")
+    tag_ids: Optional[List[int]] = Field(default=None, description="Tag ids: ?tag_ids=1&tag_ids=2; tag_match says whether any or all of them")
+    tag_match: TagMatch = Field(default=TagMatch.ANY, description="any: observations with at least one of tag_ids; all: with every one of them")
 
     # --- Soft Delete ---
     include_deleted: bool = Field(default=False, description="Include archived records (requires observation.archive)")

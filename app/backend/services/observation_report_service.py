@@ -26,7 +26,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-from app.backend.enums.general import FrequencyKind, ObservationReportType
+from app.backend.enums.general import FrequencyKind, ObservationReportType, TagMatch
 from app.backend.models.observation import ObservationFrequency
 from app.backend.filters.observation_report_filter import ObservationReportCriteria
 from app.backend.filters.simple_engine import as_criteria
@@ -153,7 +153,8 @@ def _build_filter_rows(params: ObservationReportCriteria, tag_names: Optional[Di
     if params.confidence_level:
         rows.append(("Рівень впевненості:", params.confidence_level))
     if params.tag_ids:
-        rows.append(("Теги (будь-який):", ", ".join(_tag_filter_label(i, tag_names) for i in params.tag_ids)))
+        label = "Теги (усі):" if params.tag_match == TagMatch.ALL else "Теги (будь-який):"
+        rows.append((label, ", ".join(_tag_filter_label(i, tag_names) for i in params.tag_ids)))
     if params.frequency_center_from is not None:
         rows.append(("Частота центр від (МГц):", str(params.frequency_center_from)))
     if params.frequency_center_to is not None:

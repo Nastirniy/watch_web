@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from pydantic import BaseModel, Field, field_validator, model_validator, PositiveInt
 
-from app.backend.enums.general import ConfidenceLevel, FrequencyKind, ObservationReportType
+from app.backend.enums.general import ConfidenceLevel, FrequencyKind, ObservationReportType, TagMatch
 from app.backend.services.api_errors import invalid
 from app.backend.enums.errors import FieldErrorCode
 
@@ -237,7 +237,8 @@ class ObservationReportParams(BaseModel):
     duration_to: Optional[int] = Field(default=None, ge=0, description="Duration <= (seconds)")
 
     # --- Tag filter ---
-    tag_ids: Optional[List[int]] = Field(default=None, description="Include only observations that have ALL of these tag IDs")
+    tag_ids: Optional[List[int]] = Field(default=None, description="Include only observations with these tag IDs; tag_match says whether any or all of them")
+    tag_match: TagMatch = Field(default=TagMatch.ANY, description="any: observations with at least one of tag_ids; all: with every one of them")
 
     # --- Date range (observed_at) ---
     observed_at_from: Optional[datetime] = Field(

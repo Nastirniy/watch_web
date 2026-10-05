@@ -8797,10 +8797,21 @@
                   "type": "null"
                 }
               ],
-              "description": "Tag ids, all required: ?tag_ids=1&tag_ids=2",
+              "description": "Tag ids: ?tag_ids=1&tag_ids=2; tag_match says whether any or all of them",
               "title": "Tag Ids"
             },
-            "description": "Tag ids, all required: ?tag_ids=1&tag_ids=2"
+            "description": "Tag ids: ?tag_ids=1&tag_ids=2; tag_match says whether any or all of them"
+          },
+          {
+            "name": "tag_match",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/TagMatch",
+              "description": "any: observations with at least one of tag_ids; all: with every one of them",
+              "default": "any"
+            },
+            "description": "any: observations with at least one of tag_ids; all: with every one of them"
           },
           {
             "name": "include_deleted",
@@ -18060,10 +18071,21 @@
                   "type": "null"
                 }
               ],
-              "description": "Tag ids, all required: ?tag_ids=1&tag_ids=2",
+              "description": "Tag ids: ?tag_ids=1&tag_ids=2; tag_match says whether any or all of them",
               "title": "Tag Ids"
             },
-            "description": "Tag ids, all required: ?tag_ids=1&tag_ids=2"
+            "description": "Tag ids: ?tag_ids=1&tag_ids=2; tag_match says whether any or all of them"
+          },
+          {
+            "name": "tag_match",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/TagMatch",
+              "description": "any: observations with at least one of tag_ids; all: with every one of them",
+              "default": "any"
+            },
+            "description": "any: observations with at least one of tag_ids; all: with every one of them"
           },
           {
             "name": "include_deleted",
@@ -27340,7 +27362,12 @@
               }
             ],
             "title": "Tag Ids",
-            "description": "Include only observations that have ALL of these tag IDs"
+            "description": "Include only observations with these tag IDs; tag_match says whether any or all of them"
+          },
+          "tag_match": {
+            "$ref": "#/components/schemas/TagMatch",
+            "description": "any: observations with at least one of tag_ids; all: with every one of them",
+            "default": "any"
           },
           "observed_at_from": {
             "anyOf": [
@@ -31731,6 +31758,15 @@
           "name"
         ],
         "title": "TagCreate"
+      },
+      "TagMatch": {
+        "type": "string",
+        "enum": [
+          "any",
+          "all"
+        ],
+        "title": "TagMatch",
+        "description": "How a list of tags filters observations: at least one of the tags (any) or every one of them (all)"
       },
       "TagNameArchivedProblem": {
         "properties": {

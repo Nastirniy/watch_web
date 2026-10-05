@@ -12,11 +12,11 @@ from typing import Iterable, List, Optional
 
 from sqlalchemy.orm import contains_eager
 from sqlalchemy.sql.selectable import Select
-from sqlmodel import select as sa_select
 
-from app.backend.enums.general import FrequencyKind, ObservationReportType
-from app.backend.models.observation import Observation, ObservationFrequency, ObservationTag
+from app.backend.enums.general import FrequencyKind, ObservationReportType, TagMatch
+from app.backend.models.observation import Observation, ObservationFrequency
 from app.backend.filters.observation_frequency_filter import ObservationFrequencyFilter
+from app.backend.filters.observation_tag_filter import ObservationTagFilter
 from app.backend.filters.simple_engine import as_criteria
 
 REPORT_TYPE_KIND = {
@@ -42,6 +42,7 @@ class ObservationReportCriteria:
     duration_from: Optional[int] = None
     duration_to: Optional[int] = None
     tag_ids: Optional[List[int]] = None
+    tag_match: TagMatch = TagMatch.ANY
     observed_at_from: Optional[datetime] = None
     observed_at_to: Optional[datetime] = None
     created_at_from: Optional[datetime] = None
@@ -103,13 +104,9 @@ class ObservationReportFilter:
         if params.duration_to is not None:
             query = query.where(Observation.duration_seconds <= params.duration_to)
 
-        # Tag filter (observation must have ANY of the requested tags)
+        # Tags: any or all of them (tag_match)
         if params.tag_ids:
-            query = query.where(
-                Observation.id.in_(
-                    sa_select(ObservationTag.observation_id).where(ObservationTag.tag_id.in_(params.tag_ids))
-                )
-            )
+            query = query.where(ObservationTagFilter.observation_has_tags(params.tag_ids, params.tag_match))
 
         # Date range (observed_at)
         if params.observed_at_from is not None:

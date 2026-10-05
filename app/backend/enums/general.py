@@ -245,3 +245,9 @@ class ObservationReportType(str, Enum):
             {"value": m.value, "label": m.label, "description": m.description}
             for m in cls
         ]
+
+
+class TagMatch(str, Enum):
+    """How a list of tags filters observations: at least one of the tags (any) or every one of them (all)"""
+    ANY = "any"
+    ALL = "all"
