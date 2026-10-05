@@ -24,11 +24,11 @@ from app.backend.models.upload_session import UploadSession
 from app.backend.api.shared.helpers.media_helper import storage_root
 from app.backend.api.versioning import PublishedVersion, request_version
 from app.backend.api.shared.helpers.upload_helper import (
-    check_declared_format, finish_upload, load_observation_for_upload,
+    check_declared_format, load_observation_for_upload, record_upload,
     format_rejected, store_rejected, too_large, validation_config_for,
 )
 from app.backend.api.shared.models.request.media_request import UploadSessionCreate
-from app.backend.api.shared.models.response.media_response import UploadResultResponse, UploadSessionResponse
+from app.backend.api.shared.models.response.media_response import UploadResultResponse, UploadSessionResponse, upload_result
 from app.backend.services.access_control import AccessControlService
 from app.backend.services.access_errors import access_denied
 from app.backend.services.auth_context import AuthContext
@@ -339,7 +339,8 @@ async def complete_upload_session(
     """
     row = await _owned_session(session, auth, upload_id)
     if row.status == uploads.STATUS_COMPLETED and row.media_file_id:
-        return await finish_upload(request, session, auth, row.media_file_id, row.observation_id, row.original_filename, background_tasks, "resumable, already completed", upload_id=row.id)
+        media_file = await record_upload(request, session, auth, row.media_file_id, row.observation_id, row.original_filename, background_tasks, "resumable, already completed")
+        return upload_result(media_file, "resumable, already completed", upload_id=row.id)
     row = await _require_open(session, row)
     root = storage_root()
 
@@ -389,7 +390,8 @@ async def complete_upload_session(
         raise store_rejected(e, headers=_session_headers(row))
 
     await uploads.mark(session, row, uploads.STATUS_COMPLETED, media_file_id=media_file_id)
-    return await finish_upload(request, session, auth, media_file_id, row.observation_id, row.original_filename, background_tasks, "resumable", upload_id=row.id)
+    media_file = await record_upload(request, session, auth, media_file_id, row.observation_id, row.original_filename, background_tasks, "resumable")
+    return upload_result(media_file, "resumable", upload_id=row.id)
 
 
 @router.post(

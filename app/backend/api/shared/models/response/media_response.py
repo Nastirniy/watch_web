@@ -142,6 +142,20 @@ class UploadResultResponse(BaseModel):
     upload_id: Optional[str] = None
 
 
+def upload_result(media_file: MediaFile, transport: str, upload_id: Optional[str] = None) -> UploadResultResponse:
+    """The body every upload route answers once the file is stored and recorded"""
+    return UploadResultResponse(
+        message=f"File uploaded successfully ({transport})",
+        media_file_id=media_file.id,
+        original_filename=media_file.original_filename,
+        file_size=media_file.file_size,
+        mime_type=media_file.mime_type,
+        thumbnail_status=media_file.thumbnail_status,
+        thumbnail_urls=thumbnail_urls(media_file),
+        upload_id=upload_id,
+    )
+
+
 class StorageStatisticsResponse(BaseModel):
     """Counts and sizes of the stored media (administration)"""
     total_files: int

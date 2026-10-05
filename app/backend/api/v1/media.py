@@ -39,11 +39,12 @@ from app.backend.api.shared.models.response.media_response import (
     MediaFormatsResponse,
     StorageStatisticsResponse,
     UploadResultResponse,
+    upload_result,
 )
 from app.backend.filters.params.media_params import MediaFilterParams
 from app.backend.filters.media_filter import MediaFilterService
 from app.backend.api.shared.helpers.upload_helper import (
-    check_declared_format, finish_upload, format_rejected, load_observation_for_upload, store_rejected,
+    check_declared_format, format_rejected, load_observation_for_upload, record_upload, store_rejected,
     too_large, validation_config_for,
 )
 from app.backend.api.shared.helpers.media_helper import (
@@ -365,7 +366,8 @@ async def upload_complete_file(
     finally:
         temp_path.unlink(missing_ok=True)
 
-    return await finish_upload(request, session, auth, media_file_id, observation_id, original_filename, background_tasks, "multipart")
+    media_file = await record_upload(request, session, auth, media_file_id, observation_id, original_filename, background_tasks, "multipart")
+    return upload_result(media_file, "multipart")
 
 
 @router.post(
@@ -427,7 +429,8 @@ async def nginx_upload_file(
         _logger.warning(f"Nginx upload rejected: {e}")
         raise store_rejected(e)
 
-    return await finish_upload(request, session, auth, media_file_id, observation_id, original_filename, background_tasks, "nginx offload")
+    media_file = await record_upload(request, session, auth, media_file_id, observation_id, original_filename, background_tasks, "nginx offload")
+    return upload_result(media_file, "nginx offload")
 
 
 @router.post(

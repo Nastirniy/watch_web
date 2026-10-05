@@ -84,7 +84,7 @@ async def load_observation_for_upload(session: AsyncSession, auth: AuthContext, 
     return observation
 
 
-async def finish_upload(
+async def record_upload(
     request: Request,
     session: AsyncSession,
     auth: AuthContext,
@@ -93,39 +93,28 @@ async def finish_upload(
     original_filename: str,
     background_tasks: BackgroundTasks,
     transport: str,
-    upload_id: str = None,
-) -> dict:
-    """Probe video/audio headers, audit, commit, pre-warm the medium thumbnail and build the upload response"""
-    media_file = (await session.exec(select(MediaFile).where(MediaFile.id == media_file_id))).first()
+) -> MediaFile:
+    """Probe video/audio headers, audit, commit and pre-warm the medium thumbnail of a stored file"""
+    media_file = (await session.exec(select(MediaFile).where(MediaFile.id == media_file_id))).one()
 
-    if media_file is not None and media_file.media_type in (MediaType.VIDEO.value, MediaType.AUDIO.value):
+    if media_file.media_type in (MediaType.VIDEO.value, MediaType.AUDIO.value):
         metadata = await _probe_headers(media_file)
         for field_name, value in metadata.items():
             setattr(media_file, field_name, value)
 
     await create_audit_log(
         session=session, action="create", resource_type="media", resource_id=media_file_id,
-        user_id=auth.user.id, new_values=media_file.model_dump() if media_file else None,
+        user_id=auth.user.id, new_values=media_file.model_dump(),
         details={"message": f"User {auth.user.username} uploaded media file '{original_filename}' ({transport}) for observation #{observation_id}"},
         **client_info(request, auth),
     )
     await session.commit()
 
-    if media_file is not None and media_file.is_image and settings.storage.thumbnail.prewarm and settings.storage.enable_nginx:
+    if media_file.is_image and settings.storage.thumbnail.prewarm and settings.storage.enable_nginx:
         warm = thumb_urls.prewarm_url(media_file, ThumbnailSize.MEDIUM.value, ThumbnailFormat.AUTO.value)
         if warm:
             background_tasks.add_task(renderer.prewarm, warm)
-
-    return {
-        "message": f"File uploaded successfully ({transport})",
-        "media_file_id": media_file_id,
-        "original_filename": media_file.original_filename if media_file else None,
-        "file_size": media_file.file_size if media_file else None,
-        "mime_type": media_file.mime_type if media_file else None,
-        "thumbnail_status": media_file.thumbnail_status if media_file else None,
-        "thumbnail_urls": thumb_urls.thumbnail_urls(media_file) if media_file else None,
-        "upload_id": upload_id,
-    }
+    return media_file
 
 
 def _unsupported(registry: formats.FormatRegistry, code: ErrorCode, media_type: str = None, **params) -> ApiError:

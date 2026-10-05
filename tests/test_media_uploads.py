@@ -290,3 +290,21 @@ async def test_session_list_scope(client, db, headers, storage):
     assert await listed(user_a) == {id_a}
     assert await listed(manager) == {id_a}
     assert await listed(administrator) == {id_a, id_b}
+
+
+@pytest.mark.asyncio
+async def test_upload_result_is_built_from_the_stored_row(db, storage):
+    """Every upload route answers the same body, built by the v1 response module from the stored media row"""
+    from app.backend.api.shared.models.response.media_response import UploadResultResponse, upload_result
+    from tests.helpers import make_media
+
+    _, user, observation = await _scene(db)
+    media = await make_media(db, observation, user)
+    result = upload_result(media, "resumable", upload_id="abc")
+    assert isinstance(result, UploadResultResponse)
+    assert result.model_dump(exclude={"thumbnail_urls"}) == {
+        "message": "File uploaded successfully (resumable)", "media_file_id": media.id,
+        "original_filename": media.original_filename, "file_size": media.file_size, "mime_type": media.mime_type,
+        "thumbnail_status": media.thumbnail_status, "upload_id": "abc",
+    }
+    assert result.thumbnail_urls is not None
