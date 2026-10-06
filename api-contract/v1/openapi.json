@@ -14836,6 +14836,216 @@
         }
       }
     },
+    "/api/v1/media/{media_id}/storyboard": {
+      "get": {
+        "tags": [
+          "MEDIA"
+        ],
+        "summary": "Get Media Storyboard",
+        "description": "WebVTT of a video's seek previews: one cue per frame, each pointing at a tile of a signed sheet URL (#xywh).\n\n200: the WebVTT file. 202 + Retry-After: the worker has not produced the sheets yet. 409: generation failed.\n422: not a video, shorter than the threshold, or storyboards are turned off. No side effects.",
+        "operationId": "get_media_storyboard",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "media_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Media Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "WebVTT storyboard: one cue per frame, signed sheet URLs with #xywh",
+            "content": {
+              "text/vtt": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "description": "private, max-age=<lifetime of the signed sheet URLs inside>",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`storyboard_unsupported`: No storyboard for this media; `validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/StoryboardUnsupportedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ValidationErrorProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "storyboard_unsupported": "#/components/schemas/StoryboardUnsupportedProblem",
+                      "validation_error": "#/components/schemas/ValidationErrorProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The storyboard is not generated yet; ask again after Retry-After",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before asking again",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Storyboard-Status": {
+                "description": "pending or processing",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`no_post_assigned`: You are not assigned to any post. Please contact an administrator.; `permission_denied`: Insufficient permissions; `post_access_denied`: No access to the data of this post",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/NoPostAssignedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PostAccessDeniedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "no_post_assigned": "#/components/schemas/NoPostAssignedProblem",
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "post_access_denied": "#/components/schemas/PostAccessDeniedProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`media_not_found`: Media file not found; `media_observation_not_found`: Associated observation not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MediaNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MediaObservationNotFoundProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "media_not_found": "#/components/schemas/MediaNotFoundProblem",
+                      "media_observation_not_found": "#/components/schemas/MediaObservationNotFoundProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`storyboard_failed`: Storyboard generation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoryboardFailedProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/media/{media_id}/share": {
       "post": {
         "tags": [
@@ -24478,6 +24688,11 @@
             ],
             "title": "Poster Generated At"
           },
+          "storyboard_status": {
+            "type": "string",
+            "title": "Storyboard Status",
+            "default": "unsupported"
+          },
           "duration_seconds": {
             "anyOf": [
               {
@@ -31717,6 +31932,144 @@
         ],
         "title": "StorageStatisticsResponse",
         "description": "Counts and sizes of the stored media (administration)"
+      },
+      "StoryboardFailedProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Storyboard generation failed",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Storyboard generation failed"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "storyboard_failed",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code",
+          "attempts"
+        ],
+        "title": "StoryboardFailedProblem",
+        "description": "Storyboard generation failed (HTTP 409). Problem type storyboard_failed.",
+        "examples": [
+          {
+            "attempts": 1024,
+            "code": "storyboard_failed",
+            "detail": "Storyboard generation failed",
+            "instance": "/api/v1/...",
+            "status": 409,
+            "title": "Storyboard generation failed",
+            "type": "https://example.org/problems/storyboard_failed"
+          }
+        ]
+      },
+      "StoryboardUnsupportedProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "No storyboard for this media",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 422,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Storyboards exist for videos of at least {min_duration_seconds} s while they are turned on"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "storyboard_unsupported",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          },
+          "min_duration_seconds": {
+            "type": "integer",
+            "title": "Min Duration Seconds"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code",
+          "min_duration_seconds"
+        ],
+        "title": "StoryboardUnsupportedProblem",
+        "description": "No storyboard for this media (HTTP 422). Problem type storyboard_unsupported.",
+        "examples": [
+          {
+            "code": "storyboard_unsupported",
+            "detail": "Storyboards exist for videos of at least <min_duration_seconds> s while they are turned on",
+            "instance": "/api/v1/...",
+            "min_duration_seconds": "<min_duration_seconds>",
+            "status": 422,
+            "title": "No storyboard for this media",
+            "type": "https://example.org/problems/storyboard_unsupported"
+          }
+        ]
       },
       "TagBriefResponse": {
         "properties": {

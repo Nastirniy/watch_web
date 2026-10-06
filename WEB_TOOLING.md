@@ -37,7 +37,7 @@ Copy from `api-contract/web-kit/` of this repository:
 
 | File | What it does |
 |------|--------------|
-| `src/api/client.ts` | openapi-fetch client; the `Problem`, `ProblemCode`, `FieldErrorCode` types derived from the generated schema; `problemText()` and `fieldMessages()` (translation with English fallback, form field from `pointer`) |
+| `src/api/client.ts` | openapi-fetch client; the `Problem`, `ProblemCode`, `FieldErrorCode` types derived from the generated schema; `problemText()` and `fieldMessages()` (translation with English fallback, form field from `pointer`); `apiFailure()` and `infrastructureText()` (an error the API did not answer, see section 4) |
 | `src/api/contract-check.ts` | Compile-time checks of the contract (section 4); not imported by the app |
 | `src/i18n/messages.ts` | The `Messages` type a locale is checked against (section 5) |
 | `tsconfig.json` | `strict` and `noImplicitReturns` are required by the checks; merge into your own tsconfig |
@@ -80,6 +80,22 @@ if (error) {
 }
 ```
 
+The types cover what the API answers. An error the API did not answer (nginx: client certificate, request
+size, the API not reachable or too slow; API.md, "Errors") has no `application/problem+json` and is not one of
+these types, whatever the type of `error` says. Tell them apart first, by the response:
+
+```ts
+const { data, error, response } = await api.PUT(...);
+if (error) {
+  const failure = apiFailure(response, error);
+  if (failure.kind === "infrastructure") return infrastructureText(failure, t);   // by status only
+  switch (failure.problem.code) { ... }                                            // the API's problem
+}
+```
+
+A request that got no response at all makes openapi-fetch throw (the `fetch` rejection): catch it and show
+`infrastructure.network_error`.
+
 Every problem type is a component schema `<Code>Problem` (`PostNotFoundProblem`). `client.ts` joins them into
 the union of all problems with plain TypeScript:
 
@@ -113,6 +129,11 @@ export default {
   problems: { tag_name_taken: "Тег з назвою '{name}' уже існує", /* every problem code */ },
   field_errors: { username_reserved: "Це ім'я зарезервоване", /* every field error code */ },
   builtin_field_errors: { missing: "Обов'язкове поле", string_too_short: "Щонайменше {min_length} символів" },
+  infrastructure: {
+    http_error: "The server did not process the request (HTTP {status}). Request id: {request_id}",
+    network_error: "No connection to the server",
+    by_status: { 413: "The request is too large", 502: "The server is unavailable, try again later" },
+  },
 } satisfies Messages;
 ```
 
@@ -184,3 +205,29 @@ module.exports = {
 
 Other dev servers have the same option (Create React App: `"proxy"` in `package.json`; Angular: `proxy.conf.json`).
 The port is `server.port` of the API configuration.
+
+## 9. Seek previews in a player
+
+`storyboardTrack(mediaId, token)` in `api/client.ts` fetches `GET /api/v1/media/{media_id}/storyboard` and returns
+an object URL of the WebVTT, or `null` while it is not ready (`202`), failed (`409`) or unsupported (`422`). Any
+other answer (`401`, `403`, `404`, `5xx`, the infrastructure) comes back as an `ApiFailure`, handled like the
+failure of any other request. Use it when `storyboard_status` of the media is `ready` (read the media again while it
+is `pending` or `processing`). Revoke the URL with `URL.revokeObjectURL` when the player goes away. The cues hold
+absolute sheet URLs, so the track works from a blob URL.
+
+```ts
+const track = await storyboardTrack(media.id, token);
+if (track !== null && typeof track === "object") {
+  return showFailure(track); // an ApiFailure: track.kind is "problem" or "infrastructure"
+}
+const vtt = track; // the blob URL, or null: no previews
+
+// Plyr
+new Plyr(el, { previewThumbnails: { enabled: vtt !== null, src: vtt ?? "" } });
+
+// video.js with videojs-vtt-thumbnails
+player.vttThumbnails({ src: vtt });
+
+// Vidstack
+<media-player><media-provider /><media-video-layout thumbnails={vtt ?? undefined} /></media-player>
+```

@@ -13,6 +13,7 @@ from typing import Dict, Optional
 from app.backend.config import settings
 from app.backend.enums.general import ThumbnailFormat, ThumbnailSize, ThumbnailStatus
 from app.backend.models.media import MediaFile
+from app.backend.models.storyboard import storyboard_relative_dir
 from app.backend.services.media.imgproxy import ImgproxySigner, build_processing_path, signed_path
 
 
@@ -88,6 +89,34 @@ def prewarm_url(media: MediaFile, size: str, fmt: str) -> Optional[str]:
         return None
     built = public_url(media, size, fmt, settings.storage.thumbnail.url_ttl_seconds, base_url=origin)
     return built[0] if built else None
+
+
+def storyboard_sheet_url(
+    media_id: int,
+    sheet_index: int,
+    expires_at: datetime,
+    base_url: Optional[str] = None,
+    generated_at: Optional[datetime] = None,
+) -> str:
+    """Expiring public URL of one storyboard sheet, served unchanged (source size, JPEG) so #xywh stays valid.
+
+    base_url replaces public_base_url as the origin (the route passes the request origin when that is empty:
+    cue URLs must be absolute, a player resolves them against a blob: URL). generated_at (the row's) becomes
+    imgproxy's cache buster: a regenerated storyboard, maybe with another layout, gets new URLs, never the sheets
+    nginx cached from the previous one. Whole seconds, naive means UTC (MySQL DATETIME keeps no fraction).
+    """
+    cfg = settings.storage.imgproxy
+    source = f"{storyboard_relative_dir(media_id)}/sheet-{sheet_index:03d}.jpg"
+    cache_buster = None
+    if generated_at is not None:
+        if generated_at.tzinfo is None:
+            generated_at = generated_at.replace(tzinfo=timezone.utc)
+        cache_buster = str(int(generated_at.timestamp()))
+    path = build_processing_path(
+        source, 0, 0, fmt=ThumbnailFormat.JPEG.value, expires_at=expires_at, cache_buster=cache_buster,
+    )
+    origin = cfg.public_base_url if base_url is None else base_url
+    return f"{origin.rstrip('/')}{cfg.public_prefix.rstrip('/')}{signed_path(get_signer(), path)}"
 
 
 def thumbnail_urls(media: MediaFile) -> Optional[Dict[str, str]]:

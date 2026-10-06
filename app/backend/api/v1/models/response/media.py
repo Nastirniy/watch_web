@@ -7,6 +7,8 @@ from sqlalchemy import inspect as sa_inspect
 from app.backend.models.media import MediaFile
 from app.backend.api.v1.models.response.users import UserPublicResponse
 from app.backend.utils.validators import PlainTextModel
+from app.backend.config import settings
+from app.backend.services.media.storyboards import client_status
 from app.backend.services.media.urls import thumbnail_urls
 from app.backend.api.shared.openapi_docs import header
 
@@ -38,6 +40,7 @@ def media_info_payload(media: MediaFile) -> Dict[str, Any]:
         "is_deleted": media.is_deleted,
         "thumbnail_status": media.thumbnail_status,
         "thumbnail_urls": urls,
+        "storyboard_status": client_status(media, settings.storage.storyboard),
         "poster_generated_at": media.poster_generated_at,
         "duration_seconds": media.duration_seconds,
         "video_codec": media.video_codec,
@@ -69,6 +72,8 @@ class MediaFileInfo(PlainTextModel):
     thumbnail_urls: Optional[ThumbnailUrls] = None
     # Video only: when the poster frame was extracted
     poster_generated_at: Optional[datetime] = None
+    # ready | pending | processing | failed | unsupported (see StoryboardStatus); GET /media/{id}/storyboard serves it
+    storyboard_status: str = "unsupported"
 
     # Video and audio: container/codec metadata read from the file headers
     duration_seconds: Optional[float] = None
@@ -201,4 +206,12 @@ THUMBNAIL_PENDING_HEADERS = {
     "Retry-After": header("Seconds to wait before asking again", "integer"),
     "X-Thumbnail-Status": header("pending or processing"),
     "Cache-Control": header("no-store"),
+}
+STORYBOARD_PENDING_HEADERS = {
+    "Retry-After": header("Seconds to wait before asking again", "integer"),
+    "X-Storyboard-Status": header("pending or processing"),
+    "Cache-Control": header("no-store"),
+}
+STORYBOARD_HEADERS = {
+    "Cache-Control": header("private, max-age=<lifetime of the signed sheet URLs inside>"),
 }

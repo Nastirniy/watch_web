@@ -9,10 +9,11 @@ type Schemas = components["schemas"];
 type Unauthorized = paths["/api/v1/posts/{post_id}"]["put"]["responses"][401]["content"]["application/problem+json"];
 export function onUnauthorized(problem: Unauthorized): "refresh" | "login" {
   switch (problem.code) {
-    case "invalid_token":
-    case "session_expired":
+    case "invalid_token":            // only the access token expired: the session lives on
       return "refresh";
+    case "session_expired":          // the session itself ended: a refresh answers session_expired again
     case "credentials_required":
+    case "token_certificate_mismatch":
     case "account_not_found":
     case "account_deactivated":
     case "account_deleted":

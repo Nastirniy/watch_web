@@ -13,6 +13,7 @@ from app.backend.config import settings
 from app.backend.utils.logging_config import setup_logging, get_logger, get_main_logger
 from app.backend.database import initialize_database_with_migrations
 from app.backend.error_handlers import register_error_handlers
+from app.backend.request_id import RequestIdMiddleware
 from app.backend.enums.errors import ErrorCode
 from app.backend.openapi_problems import problems
 from app.backend.api.v1 import V1
@@ -101,6 +102,8 @@ fastapi_app = FastAPI(
 
 # Every error is an RFC 9457 problem (application/problem+json), FastAPI's own 422/404/405/500 included
 register_error_handlers(fastapi_app)
+# Added last, so the outermost: every response and every log line of a request carries its X-Request-ID
+fastapi_app.add_middleware(RequestIdMiddleware)
 
 # No CORS here: the web client is served by nginx from the same origin as the API, and a browser client on
 # another origin gets CORS at the nginx edge, where nginx's own errors get the headers too (DEPLOYMENT.md)
@@ -119,5 +122,8 @@ if __name__ == "__main__":
         host=settings.server.host,
         port=settings.server.port,
         reload=settings.server.reload,
-        log_level=settings.logging.level.lower()
+        log_level=settings.logging.level.lower(),
+        # Logging is already set up above (uvicorn's loggers go to loguru); uvicorn's default LOGGING_CONFIG would
+        # drop the handler of uvicorn.error and its startup messages (tests/test_server_logging.py)
+        log_config=None,
     )

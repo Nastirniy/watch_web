@@ -6,6 +6,8 @@ Usage:
     python -m app.backend.media_tools cleanup-legacy-thumbnails [--dry-run]
     python -m app.backend.media_tools reconcile-posters [--retry-failed]
     python -m app.backend.media_tools poster-status
+    python -m app.backend.media_tools reconcile-storyboards [--retry-failed]
+    python -m app.backend.media_tools storyboard-status
     python -m app.backend.media_tools probe-missing [--limit N]
     python -m app.backend.media_tools expire-uploads
 
@@ -84,6 +86,42 @@ async def poster_status() -> int:
     return 0
 
 
+async def reconcile_storyboards_command(retry_failed: bool) -> int:
+    from app.backend.database import get_session_maker, close_db
+    from app.backend.services.media.storyboard_jobs import reconcile_storyboards as reconcile
+
+    session_maker = await get_session_maker()
+    try:
+        async with session_maker() as session:
+            counts = await reconcile(session, _storage_root(), retry_failed=retry_failed)
+        for key, value in counts.items():
+            print(f"{key}: {value}")
+    finally:
+        await close_db()
+    return 0
+
+
+async def storyboard_status() -> int:
+    from app.backend.database import get_session_maker, close_db
+    from app.backend.services.media.storyboard_jobs import storyboard_counts, latest_storyboard_errors
+
+    session_maker = await get_session_maker()
+    try:
+        async with session_maker() as session:
+            counts = await storyboard_counts(session)
+            errors = await latest_storyboard_errors(session)
+        print("storyboards:")
+        for key, value in counts.items():
+            print(f"  {key}: {value}")
+        if errors:
+            print("latest errors:")
+            for media_id, status_value, attempts, error in errors:
+                print(f"  media {media_id} {status_value} attempts={attempts}: {error}")
+    finally:
+        await close_db()
+    return 0
+
+
 async def probe_missing(limit: int) -> int:
     """Fill duration/codec/playback_type for video and audio rows that have none (existing uploads)"""
     from sqlmodel import select
@@ -150,6 +188,11 @@ def main(argv=None) -> int:
 
     sub.add_parser("poster-status", help="queue depth and worker heartbeats")
 
+    reconcile_sb = sub.add_parser("reconcile-storyboards", help="repair storyboard state against the filesystem")
+    reconcile_sb.add_argument("--retry-failed", action="store_true", help="also re-queue videos whose storyboard generation failed")
+
+    sub.add_parser("storyboard-status", help="storyboard jobs by status")
+
     probe = sub.add_parser("probe-missing", help="fill duration, codecs and playback_type for existing video and audio rows")
     probe.add_argument("--limit", type=int, default=1000)
 
@@ -162,6 +205,10 @@ def main(argv=None) -> int:
         return asyncio.run(reconcile_posters(args.retry_failed))
     if args.command == "poster-status":
         return asyncio.run(poster_status())
+    if args.command == "reconcile-storyboards":
+        return asyncio.run(reconcile_storyboards_command(args.retry_failed))
+    if args.command == "storyboard-status":
+        return asyncio.run(storyboard_status())
     if args.command == "probe-missing":
         return asyncio.run(probe_missing(args.limit))
     if args.command == "expire-uploads":

@@ -5,6 +5,94 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Video storyboards: seek previews (route and field)
+
+### Added
+
+- `GET /media/{media_id}/storyboard` (`media.view` plus the post scope): WebVTT (`text/vtt`) with one cue per
+  frame, each pointing at a tile of a signed sheet URL (`#xywh=x,y,w,h`). `202` + `Retry-After` +
+  `X-Storyboard-Status` while the worker has not produced it, `409 storyboard_failed` (`attempts`; also for a ready
+  row whose layout or video duration is unusable, never a 500), `422 storyboard_unsupported`
+  (`min_duration_seconds`): not a video, too short, or storyboards turned off. The answer follows the
+  `video_storyboards` row the route loads. `Cache-Control: private, max-age` is at most the lifetime of the URLs
+  inside.
+- Sheet URLs are absolute: `storage.imgproxy.public_base_url`, else the request origin (behind nginx: the Host and
+  scheme nginx passes), because a player resolves cue URLs against the track, a `blob:` URL. They carry imgproxy's
+  cache buster `cb:` from the row's `generated_at`, so a regenerated storyboard never comes from the nginx cache of
+  the previous one.
+- `storyboard_status` (`ready`, `pending`, `processing`, `failed`, `unsupported`) in `MediaFileInfo` (media info,
+  lists, observation media). New problem codes `storyboard_failed`, `storyboard_unsupported` (web translations
+  need both). web-kit: `storyboardTrack()` in `client.ts` (`null` for `202`, `409`, `422`; an `ApiFailure` for any
+  other answer).
+- Media worker: builds the storyboards (an ffmpeg pass over the keyframes, a full decode only when that writes
+  nothing; adaptive frame step; both passes repeat the last decoded frame up to the duration and stop at the planned
+  frame count, so no cue points at a black tile) into `MEDIA_ROOT/_derived/storyboards/`, after the poster is
+  ready. Never delays a poster: a storyboard is claimed only when no poster was claimed, `storyboard.slots` (1, per
+  worker process) must stay below `poster.concurrency` or the worker refuses to start; the newest video is claimed
+  first. Stop cancels a running storyboard and gives the attempt back; at start it reconciles and removes leftover
+  temporary directories (a filesystem error there is logged, posters go on), and every
+  `upload.sweep_interval_seconds` it queues videos that became eligible meanwhile. State: new table
+  `video_storyboards` (migration `017_video_storyboards`).
+- Upgrade note: storyboards are on by default and need `poster.concurrency` of at least 2; a worker with
+  `MYSETTINGS_STORAGE__POSTER__CONCURRENCY=1` refuses to start. Raise it to `2` or set
+  `MYSETTINGS_STORAGE__STORYBOARD__ENABLED=false` (DEPLOYMENT.md, "Storyboards").
+- Operations: `media_tools storyboard-status` and `media_tools reconcile-storyboards [--retry-failed]`.
+- Configuration: `[storage.storyboard]` in `app/config.toml` (`enabled`, `slots`, `min_duration_seconds`,
+  `max_frames`, `min_step_seconds`, tile and grid, `jpeg_qscale`, `threads`, `nice`, timeouts, leases, retries,
+  `retry_after_seconds`). The sheets are served through `/media-images/`; nginx needs no change.
+- Docs: CLAUDE.md (media pipeline), DEPLOYMENT.md (worker resources, commands), API.md, WEB_TOOLING.md section 9.
+
+## API errors and infrastructure errors; one request id from nginx to the API log
+
+### Changed (API clients)
+
+- Errors come in two kinds, told apart by `Content-Type` (API.md, "Errors"): `application/problem+json` is the
+  API's, handled by `code`; any other error response comes from the infrastructure in front of the API (nginx:
+  client certificate, body size, API not reachable or too slow, file serving) and is handled by status only. The
+  OpenAPI document is unchanged. web-kit: `apiFailure()` and `infrastructureText()` in `client.ts`; `Messages`
+  gets a required `infrastructure` section (`http_error`, `network_error`, optional `by_status`), so every locale
+  needs those texts.
+- Every response carries `X-Request-ID` (behind nginx: nginx's `$request_id`, also in its access log), nginx's own
+  error pages included. The `error_id` of a 500 is the request id.
+
+### Breaking
+
+- Public image URLs (`thumbnail_urls` in media responses, `POST /media/{id}/share`) move from `/t/` to
+  `/media-images/` (`storage.imgproxy.public_prefix`, nginx `location ^~ /media-images/`): a name that says what
+  it serves (every image made from a media file, not only thumbnails) and that a route of the web client at the
+  same origin cannot take by accident. No transition: links issued before the deploy (at most 7 days for shared
+  ones) stop working; clients take the new URLs from the API.
+
+### Fixed
+
+- Public thumbnail links stop working at their `exp:`. Once rendered, nginx served them from its cache for 30 days
+  whatever their expiry: only imgproxy checks `exp:`, and the cache ignored the max-age imgproxy caps at it. The
+  `/media-images/` cache now follows imgproxy's `Cache-Control` and serves no stale copies. Thumbnail answers carry
+  one `Cache-Control` (imgproxy's own is hidden).
+- `GET /media/{id}/download` and `/stream` behind nginx: a file missing on disk is `media_file_missing` (404
+  problem), as without nginx; the API handed the path over unchecked and nginx answered its own HTML 404.
+- nginx `client_max_body_size` sits above the API's limits (65m for chunks of 64 MB, 11G for files of 10 GB):
+  at equal limits nginx answered its own HTML 413 first, and clients never got `upload_chunk_too_large` /
+  `media_file_too_large` with their params.
+- web-kit `contract-check.ts` handles the 401 `token_certificate_mismatch` (log in again): `npm run api:check`
+  failed since that code was added. `session_expired` now leads to a new login, as API.md says, not to a refresh:
+  a refresh of an ended session answers `session_expired` again.
+
+- An unhandled error was logged twice: once with its `error_id`, then again by uvicorn without it (Starlette
+  re-raises after the `Exception` handler answers). `UnhandledErrorMiddleware` answers the 500 and logs it once.
+- Tracebacks in the log carried the values of every variable (loguru's `diagnose`), request bodies with their
+  tokens included. Every log sink now has `diagnose=False`.
+- Started with `python app/main.py`, the server went silent after the migrations: Alembic's `fileConfig` disabled
+  uvicorn's loggers (`disable_existing_loggers=False` now), and uvicorn's default `log_config` dropped the handler
+  of `uvicorn.error` ("Uvicorn running on ..."; `log_config=None` now: uvicorn logs through the app's loguru).
+
+### Backend
+
+- `RequestIdMiddleware` (`request_id.py`): every log line carries the request id (`{extra[request_id]}`, "-"
+  outside a request). nginx passes `$request_id` (`nginx-proxy.conf`), answers it on every response and writes it
+  to `/var/log/nginx/watch_web.access.log` (`log_format watch_web` in nginx-http.conf).
+- The test client checks that every error the API answers is a problem (`errors_are_problems`).
+
 ## Tag filter: any or all of the tags
 
 ### Added

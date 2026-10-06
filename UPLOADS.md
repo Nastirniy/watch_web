@@ -118,7 +118,7 @@ Completing an already completed session returns 200 with the same `media_file_id
 
 | Item | Value | Where |
 |------|-------|-------|
-| Max chunk | 64 MB | `storage.upload.max_chunk_bytes`, nginx `client_max_body_size` on the uploads location |
+| Max chunk | 64 MB | `storage.upload.max_chunk_bytes`; nginx `client_max_body_size` on the uploads location stays above it, so the API answers an oversized chunk |
 | Recommended chunk | 8 MB | `storage.upload.recommended_chunk_bytes` |
 | Session lifetime | 24 h since creation | `storage.upload.session_ttl_hours` |
 | Per-format file limit | see `GET /media/formats` | `media_formats.max_file_size_bytes` |

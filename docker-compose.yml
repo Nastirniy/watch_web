@@ -2,7 +2,7 @@
 #
 # Topology (see DEPLOYMENT.md):
 #   host nginx  -> 127.0.0.1:8000 (api container)     entry point, TLS, upload offload, media and thumbnail cache
-#               -> 127.0.0.1:8080 (imgproxy container) through the internal /_thumb/ and public /t/ locations
+#               -> 127.0.0.1:8080 (imgproxy container) through the internal /_thumb/ and public /media-images/ locations
 #   host MySQL  <- api and media-worker on 127.0.0.1:3306
 #   MEDIA_ROOT  <- host directory (local disk or a mounted NFS/SMB share), bind-mounted at the SAME path
 #                  into every container, so nginx, the API, the worker and imgproxy agree on one path.

@@ -17,6 +17,11 @@ user_id_context: ContextVar[Optional[int]] = ContextVar('user_id', default=None)
 session_id_context: ContextVar[Optional[str]] = ContextVar('session_id', default=None)
 
 
+def _with_request_id(record) -> None:
+    """loguru patcher: the X-Request-ID of the current request (request_id.py), "-" outside a request"""
+    record["extra"]["request_id"] = request_id_context.get() or "-"
+
+
 class LoggingConfig:
     """Centralized logging configuration"""
     
@@ -55,27 +60,33 @@ class LoggingConfig:
         self.environment = environment.lower()
         self.enable_file_logging = log_file_path is not None
         
+        # Every record carries the X-Request-ID of the request it belongs to ("-" outside a request), the id nginx
+        # writes into its access log too (request_id.py)
+        logger.configure(patcher=_with_request_id)
+
         # Define log format based on environment
         if self.environment == AppEnvironment.DEVELOPMENT.value:
             format_string = (
                 "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-                "<level>{level: <8}</level> | "
+                "<level>{level: <8}</level> | {extra[request_id]} | "
                 "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
                 "<level>{message}</level>"
             )
         else:
             # Production format - structured logging
             format_string = (
-                "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | "
+                "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {extra[request_id]} | "
                 "{name}:{function}:{line} | {message}"
             )
         
-        # Add stdout handler
+        # Add stdout handler. Every sink has diagnose=False: loguru's default prints the value of every variable in
+        # a traceback, request bodies with their tokens included, which never belong in a log (tests/test_server_logging.py)
         logger.add(
             sys.stdout,
             format=format_string,
             level=self.log_level,
-            colorize=self.environment == AppEnvironment.DEVELOPMENT.value
+            colorize=self.environment == AppEnvironment.DEVELOPMENT.value,
+            diagnose=False,
         )
         
         # Add file handler if log path is provided
@@ -86,7 +97,7 @@ class LoggingConfig:
             
             # File format (always structured for easy parsing)
             file_format = (
-                "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | "
+                "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {extra[request_id]} | "
                 "{name}:{function}:{line} | {message}"
             )
             
@@ -96,7 +107,8 @@ class LoggingConfig:
                 level=self.log_level,
                 rotation="10 MB",
                 retention="30 days",
-                compression="gz"
+                compression="gz",
+                diagnose=False,
             )
         
             # Add error file handler for ERROR and CRITICAL levels
@@ -107,7 +119,8 @@ class LoggingConfig:
                 level="ERROR",
                 rotation="5 MB",
                 retention="60 days",
-                compression="gz"
+                compression="gz",
+                diagnose=False,
             )
         
         # Setup uvicorn logging integration

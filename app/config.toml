@@ -71,7 +71,7 @@ url = "http://127.0.0.1:8080"  # Used for proxying when enable_nginx = false; do
 key = ""  # Hex; generate with: python -c "import secrets; print(secrets.token_hex(32))". Empty = unsigned (dev only)
 salt = ""  # Hex, same generator. Must match IMGPROXY_KEY / IMGPROXY_SALT of the imgproxy service
 nginx_internal_prefix = "/_thumb"  # Internal nginx location used through X-Accel-Redirect
-public_prefix = "/t"  # Public nginx location for signed expiring URLs (list responses, share links)
+public_prefix = "/media-images"  # Public nginx location for signed expiring images made from media (thumbnails, previews)
 public_base_url = ""  # Origin for public URLs, e.g. "https://monitoring.example"; empty keeps them relative
 prewarm_base_url = ""  # Origin the API uses to pre-warm the nginx cache after uploads, e.g. "http://nginx"
 
@@ -100,6 +100,25 @@ concurrency = 2  # Parallel ffmpeg processes per worker
 heartbeat_seconds = 30
 stale_after_seconds = 120
 backoff_seconds = [30, 120, 480]
+
+[storage.storyboard]
+# Video storyboards (seek previews) made by the media worker, only while the poster queue is empty
+enabled = true  # Off: no claims, the API answers unsupported, existing files stay
+slots = 1  # Storyboards at once per worker process; must be below storage.poster.concurrency
+min_duration_seconds = 60  # Shorter videos get none
+max_frames = 300  # Upper bound of frames per video (the step grows with the duration)
+min_step_seconds = 2  # Lower bound of the frame step
+tile_width = 160  # Width of one frame in pixels
+columns = 10  # Frames per row of a sheet
+rows = 10  # Rows per sheet
+jpeg_qscale = 5  # ffmpeg -q:v (2 best, 31 worst)
+threads = 1  # ffmpeg threads
+nice = 10  # POSIX niceness of ffmpeg, 0 = unchanged
+timeout_seconds = 1800  # ffmpeg is killed after this
+lease_seconds = 300  # Claim lease, renewed while ffmpeg runs
+max_attempts = 3  # Failures before a storyboard is marked failed
+backoff_seconds = [60, 300, 1800]  # Retry delays after the 1st, 2nd, ... failure
+retry_after_seconds = 30  # Retry-After of the 202 answer
 
 [health]
 # Health endpoint security configuration

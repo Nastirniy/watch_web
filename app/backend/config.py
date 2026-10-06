@@ -172,6 +172,58 @@ class PosterSettings(BaseModel):
         return max(1, int(v))
 
 
+class StoryboardSettings(BaseModel):
+    """Video storyboards (seek previews): sprite sheets made by the media worker with ffmpeg.
+
+    They run only while the poster queue is empty and take at most `slots` places,
+    which must stay below poster.concurrency so a poster always has a free place.
+    """
+    # Off: no claims, the API answers unsupported, existing files stay
+    enabled: bool = True
+    slots: int = 1
+    # Shorter videos get none
+    min_duration_seconds: int = 60
+    # Bounds of the adaptive frame step
+    max_frames: int = 300
+    min_step_seconds: int = 2
+    tile_width: int = 160
+    columns: int = 10
+    rows: int = 10
+    # ffmpeg -q:v (2 best, 31 worst)
+    jpeg_qscale: int = 5
+    threads: int = 1
+    # POSIX niceness of ffmpeg, 0 = unchanged
+    nice: int = 10
+    timeout_seconds: int = 1800
+    lease_seconds: int = 300
+    max_attempts: int = 3
+    # Retry delays after the 1st, 2nd, ... failure
+    backoff_seconds: list[int] = [60, 300, 1800]
+    # Retry-After of the 202 answer
+    retry_after_seconds: int = 30
+
+    @field_validator('backoff_seconds', mode='before')
+    @classmethod
+    def parse_backoff(cls, v):
+        return _parse_json_sequence(v)
+
+    @field_validator('slots', 'max_attempts', 'max_frames', 'min_step_seconds', 'tile_width', 'columns', 'rows',
+                     'threads', 'timeout_seconds', 'lease_seconds', 'retry_after_seconds')
+    @classmethod
+    def validate_positive(cls, v):
+        return max(1, int(v))
+
+    @field_validator('jpeg_qscale')
+    @classmethod
+    def validate_qscale(cls, v):
+        return max(2, min(31, int(v)))
+
+    @field_validator('nice', 'min_duration_seconds')
+    @classmethod
+    def validate_not_negative(cls, v):
+        return max(0, int(v))
+
+
 class UploadSettings(BaseModel):
     """Resumable uploads (POST /media/uploads)"""
     # An open session that received nothing for this long is expired and its part file removed
@@ -201,7 +253,7 @@ class ImgproxySettings(BaseModel):
     # nginx internal location used through X-Accel-Redirect
     nginx_internal_prefix: str = "/_thumb"
     # nginx public location for signed, expiring URLs (list responses and share links)
-    public_prefix: str = "/t"
+    public_prefix: str = "/media-images"
     # Origin prepended to public URLs, e.g. https://monitoring.example; empty keeps them relative
     public_base_url: str = ""
     # Origin the API uses to pre-warm the nginx cache after an upload, e.g. http://nginx inside compose.
@@ -220,6 +272,7 @@ class StorageConfig(BaseModel):
     max_file_size_gb: int = 10
     thumbnail: ThumbnailSettings = Field(default_factory=ThumbnailSettings)
     poster: PosterSettings = Field(default_factory=PosterSettings)
+    storyboard: StoryboardSettings = Field(default_factory=StoryboardSettings)
     imgproxy: ImgproxySettings = Field(default_factory=ImgproxySettings)
     upload: UploadSettings = Field(default_factory=UploadSettings)
     # Single nginx flag -- enables all nginx offloading:

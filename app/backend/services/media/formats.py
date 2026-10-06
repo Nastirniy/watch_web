@@ -64,7 +64,7 @@ class FormatSpec:
 
 
 def hard_limit_bytes() -> int:
-    """Absolute ceiling for any format: storage.max_file_size_gb (nginx client_max_body_size must match)"""
+    """Absolute ceiling for any format: storage.max_file_size_gb (nginx client_max_body_size stays above it)"""
     return int(settings.storage.max_file_size_gb) * GB
 
 

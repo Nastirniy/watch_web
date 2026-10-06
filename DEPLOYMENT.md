@@ -8,7 +8,8 @@ Docker runs the application only. Everything stateful stays outside the containe
                      +----------------------- host --------------------------+
   clients  --443-->  |  nginx (entry point, TLS, upload offload, media,     |
                      |         thumbnail cache /var/cache/nginx/thumbs)      |
-                     |     |  proxy 127.0.0.1:8000        |  /_thumb/, /t/   |
+                     |     |  proxy 127.0.0.1:8000        |  /_thumb/,       |
+                     |     |                              |  /media-images/  |
                      |     v                              v                  |
                      |  [api container]            [imgproxy container]      |
                      |  [media-worker container]                             |
@@ -34,9 +35,9 @@ What the pipeline needs from the filesystem:
 
 | Need | Why |
 |------|-----|
-| POSIX rename on the same filesystem | uploads are moved from `MEDIA_ROOT/_tmp` into place; posters are written as `.tmp-xxxx` then renamed |
+| POSIX rename on the same filesystem | uploads are moved from `MEDIA_ROOT/_tmp` into place; posters are written as `.tmp-xxxx` then renamed, storyboards as a `.tmp-` directory renamed into place |
 | Readable by the nginx worker user | nginx serves originals with `alias`; imgproxy reads originals and posters |
-| Writable by `MEDIA_UID:MEDIA_GID` | the API writes uploads, the worker writes `MEDIA_ROOT/_derived/posters/` |
+| Writable by `MEDIA_UID:MEDIA_GID` | the API writes uploads, the worker writes `MEDIA_ROOT/_derived/posters/` and `MEDIA_ROOT/_derived/storyboards/` |
 | Reasonable read latency | imgproxy reads the whole original on a cache miss; the nginx cache keeps that to once per thumbnail |
 
 Notes for network shares:
@@ -75,17 +76,20 @@ Edit before reloading:
 | nginx.conf | `root /var/www/watch_web_client;` in `location /` | the web client build (`index.html` and assets) |
 | nginx-http.conf | `server 127.0.0.1:8000;` / `server 127.0.0.1:8080;` | `API_PORT` / `IMGPROXY_PORT` |
 | nginx-http.conf | `proxy_cache_path /var/cache/nginx/thumbs ... max_size=20g` | local disk, sized for the box |
-| nginx-app.conf | `client_max_body_size 64m;` in the `/api/v1/media/uploads` location | at least `storage.upload.max_chunk_bytes` |
+| nginx-app.conf | `client_max_body_size 65m;` in the `/api/v1/media/uploads` location | above `storage.upload.max_chunk_bytes`, never equal: the API answers an oversized chunk itself (`upload_chunk_too_large`) |
+| nginx-app.conf | `client_max_body_size 11G;` (server level) | above `storage.max_file_size_gb`, never equal: the API answers an oversized file itself (`media_file_too_large`) |
 
 The API container mounts `NGINX_UPLOAD_TEMP` at the same path, so the temp file nginx names in `X-File-Name` is the file the API moves. The directory must be writable by nginx and readable by `MEDIA_UID`; the simplest arrangement is `MEDIA_UID` = the nginx worker user (`www-data`).
 
 If another nginx or a load balancer sits in front of this host, keep this server block as is and pass TLS through to it (TCP, no TLS termination in front): this nginx must see the client certificate. The cache and the internal locations must live on the nginx that can read `MEDIA_ROOT`.
 
+nginx answers some requests itself, in its own format: no or an invalid client certificate, a body above its limits, the API not reachable or too slow, a file it cannot serve. Those are the infrastructure's errors; clients handle them by status (API.md, "Errors"). Every response carries `X-Request-ID` (nginx's `$request_id`): the access log `/var/log/nginx/watch_web.access.log` (format `watch_web` in nginx-http.conf; rotated with the other `/var/log/nginx/*.log` by the distribution's logrotate) records it, the API logs it on every line of the request and returns it as the `error_id` of a 500. `grep <id>` in both logs (`docker compose logs api`) finds both sides of a request.
+
 ### Web client and other clients
 
 - The web client is served by this server block at `/` (`location /` in `nginx.conf`, its `root` is deployment configuration); `nginx-app.conf` claims only the paths the API publishes (`/api/`, the OpenAPI document and viewers of each version included, `/problems`, `/health`). Same origin, so the API sends no CORS headers and needs none.
 - Integrations that call the API from their servers (another system's backend, scripts) need no CORS either: they connect with a client certificate issued by the CA in `ssl_client_certificate`, like users.
-- A browser application on another origin is the only case for CORS. Add it at this nginx, not in the API, so nginx's own responses (413, 502, 504) carry the headers too: an allowlist `map $http_origin $cors_origin` in the http context, `add_header Access-Control-Allow-Origin $cors_origin always`, `Access-Control-Allow-Credentials true` (the browser must present the client certificate), `Access-Control-Expose-Headers` for `Location, Retry-After, Upload-Offset, Upload-Length, Upload-Expires, X-Thumbnail-Status, Content-Disposition, Accept-Post, WWW-Authenticate`, and `Vary: Origin`. Browsers send the CORS preflight (`OPTIONS`) without a client certificate, which `ssl_verify_client on` refuses: such an origin needs `ssl_verify_client optional` with the certificate enforced per location for everything but `OPTIONS`. Design it with the first concrete integration.
+- A browser application on another origin is the only case for CORS. Add it at this nginx, not in the API, so nginx's own responses (413, 502, 504) carry the headers too: an allowlist `map $http_origin $cors_origin` in the http context, `add_header Access-Control-Allow-Origin $cors_origin always`, `Access-Control-Allow-Credentials true` (the browser must present the client certificate), `Access-Control-Expose-Headers` for `Location, Retry-After, Upload-Offset, Upload-Length, Upload-Expires, X-Thumbnail-Status, Content-Disposition, Accept-Post, WWW-Authenticate, X-Request-ID`, and `Vary: Origin`. Browsers send the CORS preflight (`OPTIONS`) without a client certificate, which `ssl_verify_client on` refuses: such an origin needs `ssl_verify_client optional` with the certificate enforced per location for everything but `OPTIONS`. Design it with the first concrete integration.
 
 ### Client certificates (mTLS)
 
@@ -116,7 +120,45 @@ Key and salt: `python3 -c "import secrets; print(secrets.token_hex(32))"` twice.
 
 Air-gapped hosts: build on a connected machine, `docker save watch-web ghcr.io/imgproxy/imgproxy:v3 | gzip > images.tgz`, copy, `docker load`. Nothing is downloaded at runtime.
 
-Upgrades: `docker compose build api && docker compose up -d api media-worker`. The API runs migrations on start; start the worker after the API has finished the first start.
+Upgrades: `docker compose build api && docker compose up -d api media-worker`. The API runs migrations on start; start the worker after the API has finished the first start. Upgrading to storyboards with `MYSETTINGS_STORAGE__POSTER__CONCURRENCY=1`: see the upgrade note under "Storyboards" (the worker refuses to start until the concurrency is 2 or storyboards are off).
+
+## Storyboards (seek previews)
+
+The media worker also builds a storyboard (sprite sheets, one ffmpeg pass over the keyframes with the last frame
+repeated up to the end; a second, full-decode pass only when that writes nothing, within the same time limit) for
+every video of at least `storage.storyboard.min_duration_seconds`, after its poster is ready. It is the heaviest job
+the worker does (a long video can take minutes of one CPU core and reads the whole file), so it is limited:
+
+- Upgrade note: storyboards are on by default and need `poster.concurrency` of at least 2. A worker configured with
+  `MYSETTINGS_STORAGE__POSTER__CONCURRENCY=1` refuses to start after this upgrade: raise it to `2`, or set
+  `MYSETTINGS_STORAGE__STORYBOARD__ENABLED=false`.
+- `storyboard.slots` (default 1) storyboards run at once per worker process (several worker containers run N x
+  `slots`), and the value must stay below `poster.concurrency`: the worker refuses to start otherwise. A poster is
+  always claimed first, a storyboard only when no poster was claimed, so a new upload gets its poster as fast as
+  without storyboards. Among storyboards the newest video goes first, so a backfill of old videos does not hold a
+  new upload back.
+- ffmpeg runs with `storyboard.threads` (default 1) threads and, on POSIX, `storyboard.nice` (default 10); it is
+  killed after `storyboard.timeout_seconds` (default 1800). Failures retry after `backoff_seconds`, and the
+  storyboard is `failed` after `max_attempts`.
+- Stopping the worker (`docker compose stop media-worker`) cancels a running storyboard and gives the attempt back; a
+  running poster is allowed to finish.
+- At start the worker reconciles: videos without a row get one, ready rows whose files are missing are queued again,
+  and `.tmp-` / `.old-` directories under `_derived/storyboards/` older than `timeout_seconds` are removed. A
+  filesystem error there (e.g. a wrong owner of `_derived/storyboards/`) is logged and the worker goes on: posters
+  never depend on storyboards. Every `upload.sweep_interval_seconds` the worker also queues videos that became
+  eligible while it runs (e.g. a duration filled in by `media_tools probe-missing`).
+- `storyboard.enabled = false` stops claiming and the API answers `unsupported`; existing files stay.
+- Disk: a 10 x 10 sheet of 160 px tiles is roughly 100-200 KB; a two-hour recording (3 sheets) takes about 0.5 MB.
+- The sheets are served like thumbnails: signed URLs under `/media-images/` (imgproxy, nginx cache); no nginx change.
+
+```bash
+docker compose exec media-worker python -m app.backend.media_tools storyboard-status
+docker compose exec media-worker python -m app.backend.media_tools reconcile-storyboards                 # queue missing, repair missing files
+docker compose exec media-worker python -m app.backend.media_tools reconcile-storyboards --retry-failed  # also re-queue failed ones
+```
+
+`storyboard-status` prints the counts per state (pending, processing, ready, failed) and the latest errors (media id, state, attempts, message). The worker heartbeat
+details include `storyboards=<n>` running.
 
 ## End-to-end test stack
 
@@ -147,13 +189,14 @@ curl -sI $CERT -H "Authorization: Bearer $TOKEN" https://host/api/v1/media/1/dow
 curl -sI $CERT -H "Authorization: Bearer $TOKEN" "https://host/api/v1/media/1/thumbnail?size=medium" | grep -i "x-cache\|content-type"
 
 # public URL from a list response loads without a token (the certificate is still required)
-curl -sI $CERT "https://host/t/<signature>/rs:fit:300:300:0:0/q:85/exp:.../<source>" | head -1
+curl -sI $CERT "https://host/media-images/<signature>/rs:fit:300:300:0:0/q:85/exp:.../<source>" | head -1
 
 # queue and worker
 docker compose exec media-worker python -m app.backend.media_tools poster-status
+docker compose exec media-worker python -m app.backend.media_tools storyboard-status
 ```
 
-`X-Cache: HIT` means nginx served from cache; `MISS` means imgproxy rendered. A 403 from `/t/` is an invalid or expired signature; a 422 from imgproxy usually means the source is missing under `MEDIA_ROOT` or exceeds `IMGPROXY_MAX_SRC_RESOLUTION`.
+`X-Cache: HIT` means nginx served from cache; `MISS` means imgproxy rendered. A 403 from `/media-images/` is an invalid or expired signature; a 422 from imgproxy usually means the source is missing under `MEDIA_ROOT` or exceeds `IMGPROXY_MAX_SRC_RESOLUTION`.
 
 ## Troubleshooting
 

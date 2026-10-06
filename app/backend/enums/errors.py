@@ -279,6 +279,11 @@ class ErrorCode(ProblemType):
     THUMBNAILS_UNSUPPORTED = ("thumbnails_unsupported", problem(422, "Thumbnails are not supported for this media type"))
     POSTER_FAILED = ("poster_failed", problem(
         409, "Poster extraction failed; an administrator can regenerate it", thumbnail_status=str, attempts=int))
+    STORYBOARD_FAILED = ("storyboard_failed", problem(409, "Storyboard generation failed", attempts=int))
+    STORYBOARD_UNSUPPORTED = ("storyboard_unsupported", problem(
+        422, "No storyboard for this media",
+        "Storyboards exist for videos of at least {min_duration_seconds} s while they are turned on",
+        min_duration_seconds=int))
     THUMBNAIL_RENDERER_ERROR = ("thumbnail_renderer_error", problem(502, "Thumbnail renderer returned an error"))
     THUMBNAIL_RENDERER_UNAVAILABLE = ("thumbnail_renderer_unavailable", problem(503, "Thumbnail renderer unavailable"))
 

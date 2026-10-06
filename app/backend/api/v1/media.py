@@ -17,13 +17,15 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.database import get_session
 from app.backend.models.media import MediaFile
 from app.backend.models.observation import Observation
+from app.backend.models.storyboard import VideoStoryboard
 from app.backend.services.auth_context import AuthContext
 from app.backend.services.permissions import require
 from app.backend.services.access_control import AccessControlService
 from app.backend.services.media.manager import get_media_manager
 from app.backend.services.media import formats, jobs, renderer, urls as thumb_urls
+from app.backend.services.media.storyboards import build_vtt, layout_usable, status_for
 from app.backend.services.media.formats import UnsupportedMediaFormat, FileTooLarge
-from app.backend.enums.general import Permissions, ThumbnailFormat, ThumbnailSize, ThumbnailStatus
+from app.backend.enums.general import Permissions, StoryboardStatus, ThumbnailFormat, ThumbnailSize, ThumbnailStatus
 from app.backend.enums.routes import MediaRoutes
 from app.backend.helpers.audit_helper import client_info, create_audit_log
 from app.backend.utils.logging_config import get_api_logger
@@ -42,6 +44,8 @@ from app.backend.api.v1.models.response.media import (
     upload_result,
     ORIGINAL_FILE_HEADERS,
     THUMBNAIL_PENDING_HEADERS,
+    STORYBOARD_HEADERS,
+    STORYBOARD_PENDING_HEADERS,
 )
 from app.backend.api.v1.models.query.media import MediaFilterParams
 from app.backend.filters.media_filter import MediaFilterService
@@ -544,6 +548,82 @@ async def get_media_thumbnail(
             },
         )
     return await _proxy_render(thumb_urls.renderer_url(media_file, size.value, format.value))
+
+
+@router.get(
+    MediaRoutes.MEDIA_STORYBOARD.value,
+    response_class=Response,
+    responses={
+        **file_response("WebVTT storyboard: one cue per frame, signed sheet URLs with #xywh", ["text/vtt"], STORYBOARD_HEADERS),
+        **empty_response(202, "The storyboard is not generated yet; ask again after Retry-After", STORYBOARD_PENDING_HEADERS),
+        **problems(
+            AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.MEDIA_NOT_FOUND,
+            ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.STORYBOARD_FAILED, ErrorCode.STORYBOARD_UNSUPPORTED, *GUARDED,
+        ),
+    },
+)
+async def get_media_storyboard(
+    request: Request,
+    media_id: int,
+    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW])),
+):
+    """
+    WebVTT of a video's seek previews: one cue per frame, each pointing at a tile of a signed sheet URL (#xywh).
+
+    200: the WebVTT file. 202 + Retry-After: the worker has not produced the sheets yet. 409: generation failed.
+    422: not a video, shorter than the threshold, or storyboards are turned off. No side effects.
+    """
+    media_file = await get_media_or_404(session, media_id)
+    observation = await get_observation_from_media(session, media_file)
+    AccessControlService.check_post_view(auth, observation.post_id, "media storyboard")
+
+    config = settings.storage.storyboard
+    # The row loaded here decides, not the job status read with the media row: it may have changed in between
+    layout = await session.get(VideoStoryboard, media_id)
+    status_value = status_for(media_file, config, layout.status if layout else None)
+    if status_value == StoryboardStatus.UNSUPPORTED.value:
+        raise ApiError(ErrorCode.STORYBOARD_UNSUPPORTED, min_duration_seconds=config.min_duration_seconds)
+    if status_value == StoryboardStatus.FAILED.value:
+        raise ApiError(
+            ErrorCode.STORYBOARD_FAILED,
+            headers={"X-Storyboard-Status": status_value},
+            attempts=layout.attempts if layout else 0,
+        )
+    if status_value == StoryboardStatus.READY.value and not layout_usable(layout, media_file.duration_seconds):
+        # A ready row the WebVTT cannot be built from (a layout field or the duration missing): failed, never a 500
+        _logger.error(f"storyboard of media {media_id} is ready without a usable layout or duration")
+        raise ApiError(
+            ErrorCode.STORYBOARD_FAILED,
+            headers={"X-Storyboard-Status": StoryboardStatus.FAILED.value},
+            attempts=layout.attempts,
+        )
+    if status_value != StoryboardStatus.READY.value:
+        return Response(
+            status_code=fapi_status.HTTP_202_ACCEPTED,
+            headers={
+                "Retry-After": str(config.retry_after_seconds),
+                "X-Storyboard-Status": status_value,
+                "Cache-Control": "no-store",
+            },
+        )
+
+    ttl = settings.storage.thumbnail.url_ttl_seconds
+    expires_at = thumb_urls.quantised_expiry(ttl)
+    # Absolute cue URLs: the client hands the track to the player as a blob: URL, which cannot resolve relative ones.
+    # The origin is public_base_url, else the request's (behind nginx: the Host and scheme nginx passed)
+    origin = settings.storage.imgproxy.public_base_url or f"{request.url.scheme}://{request.url.netloc}"
+    body = build_vtt(
+        layout, media_file.duration_seconds,
+        lambda index: thumb_urls.storyboard_sheet_url(
+            media_id, index, expires_at, base_url=origin, generated_at=layout.generated_at,
+        ),
+    )
+    return Response(
+        content=body,
+        media_type="text/vtt; charset=utf-8",
+        headers={"Cache-Control": f"private, max-age={ttl}"},
+    )
 
 
 @router.post(

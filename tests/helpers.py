@@ -4,10 +4,12 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Dict, Iterable, Optional
 
+import httpx
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.enums.general import Permissions
+from app.backend.services.api_errors import PROBLEM_JSON
 from app.backend.models.user import User
 from app.backend.models.role import Role, Permission, RolePermission, UserRole
 from app.backend.models.post import Post
@@ -16,6 +18,15 @@ from app.backend.models.observation import Observation, ObservationFrequency, Ca
 from app.backend.models.media import MediaFile
 
 _counter = itertools.count(1)
+
+
+async def errors_are_problems(response: httpx.Response) -> None:
+    """httpx response hook of the test client: every error the API answers is a problem (API.md)"""
+    if response.status_code >= 400:
+        content_type = response.headers.get("content-type", "")
+        assert content_type == PROBLEM_JSON, (
+            f"{response.request.method} {response.request.url.path} answered {response.status_code} "
+            f"without application/problem+json ({content_type or 'no content type'})")
 
 
 def _next() -> int:

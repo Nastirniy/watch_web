@@ -49,7 +49,19 @@ after them (orval, openapi-generator) produce readable names.
 
 ## Errors: RFC 9457 Problem Details
 
-Every error, whatever the status, answers `Content-Type: application/problem+json`:
+Two kinds of error reach the client, told apart by `Content-Type`:
+
+| Response | Who answered | Handle it by |
+|----------|--------------|--------------|
+| `Content-Type: application/problem+json` | the API | its `code` and params (below) |
+| any other content type with a 4xx / 5xx status | the infrastructure in front of the API (nginx: TLS client certificate, request size, the API not reachable or too slow, file serving) | the HTTP status only (RFC 9110): a generic message per status; never parse the body |
+| no response (the request failed) | the network | a generic connection message |
+
+Every error the API makes is a problem; the API never answers an error in another format, and the infrastructure never answers in this one. Where nginx and the API check the same thing (body size, whether a file exists), the API decides, so the client gets the problem with its params.
+
+Every response carries `X-Request-ID`, the infrastructure's own errors included: one id per request, in the nginx access log and in the API log. Show it with any error so a report can be matched; for a 500 it is also the `error_id` of the body.
+
+A problem looks like this:
 
 ```json
 {
@@ -119,15 +131,32 @@ The body adds `required` (`{all, any, admin}`) and `missing` (permissions the us
 
 ### Server errors (500 `internal_error`)
 
-The body carries `error_id`; the server log has the same id with the details. Show it to the user so a report can be matched.
-
+The body carries `error_id`, the request id of the response (`X-Request-ID`); the server log has it once, with the details. Show it to the user so a report can be matched.
 ## Responses that are not JSON
 
 | Operation | Response |
 |-----------|----------|
 | `GET /api/v1/media/{media_id}/download`, `/stream` | The file in its own Content-Type; `206` for a `Range` request |
 | `GET /api/v1/media/{media_id}/thumbnail` | The image; `202` with `Retry-After` while a video poster is being extracted |
+| `GET /api/v1/media/{media_id}/storyboard` | WebVTT (`text/vtt`) for seek previews; `202` with `Retry-After` and `X-Storyboard-Status` while the worker has not produced it |
 | `POST /api/v1/observations/report` | An `.xlsx` file |
 | `PATCH /api/v1/media/uploads/{upload_id}` | `204`, the result is in the `Upload-*` headers |
 
 Resumable uploads step by step: `UPLOADS.md`.
+
+### Seek previews (storyboards)
+
+Every media response (`MediaFileInfo`) carries `storyboard_status`: `ready`, `pending`, `processing`, `failed` or
+`unsupported` (not a video, shorter than `min_duration_seconds`, or storyboards are turned off). Ask for the
+track when it is `ready`; the route answers the same states:
+
+| Status | Answer |
+|--------|--------|
+| ready | `200` WebVTT, one cue per frame, each cue an absolute signed `https://<origin>/media-images/...jpg#xywh=x,y,w,h` URL of a sheet (`public_base_url`, else the origin of the request) |
+| pending, processing | `202`, `Retry-After`, `X-Storyboard-Status`, empty body |
+| failed | `409` problem `storyboard_failed` (param `attempts`) |
+| unsupported | `422` problem `storyboard_unsupported` (param `min_duration_seconds`) |
+
+The permission is `media.view` plus the post scope. The sheet URLs need no token (like thumbnails) and expire:
+`Cache-Control: private, max-age` of the track is no longer than their lifetime, so fetch the track again after
+it. Both problem codes need a text in the web translations.

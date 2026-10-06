@@ -8,9 +8,11 @@ import ast
 import re
 from pathlib import Path
 
+import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
 from httpx import AsyncClient, ASGITransport
 from pydantic import BaseModel, field_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -21,11 +23,13 @@ from app.backend.enums.errors import (
 )
 from app.backend.enums.routes import APIVersionRoutes, PostRoutes, SystemRoutes
 from app.backend.api.v1 import V1
-from app.backend.error_handlers import register_error_handlers
+from app.backend.error_handlers import UnhandledErrorMiddleware, register_error_handlers
+from app.backend.request_id import RequestIdMiddleware
 from app.backend.services.api_errors import (
     FIELD_MEMBERS, PROBLEM_JSON, RESERVED_MEMBERS, ApiError, invalid, is_optional,
 )
-from tests.helpers import make_admin
+from app.main import fastapi_app
+from tests.helpers import errors_are_problems, make_admin
 
 APP_DIR = Path(__file__).resolve().parent.parent / "app" / "backend"
 # The error machinery itself builds bodies directly
@@ -185,6 +189,13 @@ def _probe_app() -> FastAPI:
     async def boom():
         raise RuntimeError("secret path /srv/data/x.db")
 
+    @app.get("/broken-stream")
+    async def broken_stream():
+        async def chunks():
+            yield b"started"
+            raise RuntimeError("broke after the response started")
+        return StreamingResponse(chunks())
+
     @app.get("/coded")
     async def coded():
         raise ApiError(ErrorCode.TAG_NAME_TAKEN, name="radar")
@@ -292,7 +303,41 @@ async def test_unhandled_exception_hides_its_text(probe):
     assert body["error_id"] in body["detail"] and "secret" not in str(body)
 
 
+@pytest.mark.asyncio
+async def test_an_answered_error_does_not_reach_the_server():
+    """The 500 is the answer: Starlette's handler for Exception re-raised it after answering, and the server
+    logged the error a second time, without its error_id (tests/test_server_logging.py)"""
+    transport = ASGITransport(app=_probe_app(), raise_app_exceptions=True)
+    async with AsyncClient(transport=transport, base_url="http://probe") as client:
+        assert _problem(await client.get("/boom"), 500)["code"] == "internal_error"
+
+
+@pytest.mark.asyncio
+async def test_a_failure_after_the_response_started_goes_to_the_server():
+    """Nothing can be answered once the status line is sent: the server logs the error and drops the connection"""
+    transport = ASGITransport(app=_probe_app(), raise_app_exceptions=True)
+    async with AsyncClient(transport=transport, base_url="http://probe") as client:
+        with pytest.raises(RuntimeError, match="after the response started"):
+            await client.get("/broken-stream")
+
+
 # ------------------------------------------------------------------ the real app
+
+@pytest.mark.asyncio
+async def test_the_suite_rejects_an_api_error_without_a_problem_body():
+    """The `client` of every test checks each answer: an error of the API is always a problem (API.md). What the
+    infrastructure answers on its own (nginx, a proxy) is the client's to handle by status, never the API's"""
+    request = httpx.Request("GET", "http://test/anything")
+    with pytest.raises(AssertionError, match="without application/problem\\+json"):
+        await errors_are_problems(httpx.Response(404, headers={"content-type": "text/html"}, request=request))
+    await errors_are_problems(httpx.Response(404, headers={"content-type": PROBLEM_JSON}, request=request))
+    await errors_are_problems(httpx.Response(200, headers={"content-type": "text/html"}, request=request))
+
+def test_unhandled_errors_are_answered_by_the_outermost_middleware_but_the_request_id():
+    """A middleware added after register_error_handlers() would sit outside it: its errors would get Starlette's
+    plain-text 500 without an error_id. Only RequestIdMiddleware is outside: the 500 carries the request id too"""
+    assert [m.cls for m in fastapi_app.user_middleware[:2]] == [RequestIdMiddleware, UnhandledErrorMiddleware]
+
 
 @pytest.mark.asyncio
 async def test_real_app_answers_problems(client, db, headers):

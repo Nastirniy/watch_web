@@ -79,11 +79,14 @@ def build_processing_path(
     fmt: str = ThumbnailFormat.AUTO.value,
     quality: Optional[int] = None,
     expires_at: Optional[datetime] = None,
+    cache_buster: Optional[str] = None,
 ) -> str:
     """Options plus encoded source, starting with '/', without the signature.
 
     rs:fit keeps the aspect ratio inside the box and never enlarges.
     exp: makes imgproxy reject the URL after the timestamp (used for public links).
+    cb: is imgproxy's cache buster: it changes the URL, so the nginx cache key, without changing the image
+    (used when the source file is replaced under the same path). Letters, digits, '-' and '_' only.
     """
     options = [f"rs:fit:{int(width)}:{int(height)}:0:0"]
     if quality:
@@ -92,6 +95,8 @@ def build_processing_path(
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
         options.append(f"exp:{int(expires_at.timestamp())}")
+    if cache_buster:
+        options.append(f"cb:{cache_buster}")
     path = "/" + "/".join(options) + "/" + encode_source(source_relative_path)
     ext = _EXTENSIONS.get(fmt)
     if ext:

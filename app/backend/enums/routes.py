@@ -109,6 +109,7 @@ class MediaRoutes(str, Enum):
     MEDIA_DOWNLOAD = "/{media_id}/download"
     MEDIA_INFO = "/{media_id}/info"
     MEDIA_THUMBNAIL = "/{media_id}/thumbnail"
+    MEDIA_STORYBOARD = "/{media_id}/storyboard"
     MEDIA_THUMBNAIL_REGENERATE = "/{media_id}/thumbnail/regenerate"
     MEDIA_SHARE = "/{media_id}/share"
     POSTERS_STATUS = "/posters/status"

@@ -33,6 +33,7 @@ TABLES_OWNED_BY_LATER_REVISIONS = {
     "media_formats",  # 008_media_formats
     "upload_sessions",  # 011_upload_sessions
     "observation_frequencies",  # 012_observation_frequencies
+    "video_storyboards",  # 017_video_storyboards
 }
 down_revision = "001_relativize_media_paths"
 branch_labels = None

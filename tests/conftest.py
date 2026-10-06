@@ -21,6 +21,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.database import get_session, seed_roles_and_permissions
 from app.backend.services.media.formats import seed_media_formats, invalidate_registry_cache
 from app.backend.services.auth import AuthService
+from tests.helpers import errors_are_problems
 
 
 @pytest_asyncio.fixture
@@ -60,7 +61,8 @@ async def client(session_maker, db):
 
     fastapi_app.dependency_overrides[get_session] = _override_get_session
     transport = ASGITransport(app=fastapi_app, raise_app_exceptions=False)
-    async with AsyncClient(transport=transport, base_url="http://test") as async_client:
+    async with AsyncClient(transport=transport, base_url="http://test",
+                           event_hooks={"response": [errors_are_problems]}) as async_client:
         yield async_client
     fastapi_app.dependency_overrides.clear()
 

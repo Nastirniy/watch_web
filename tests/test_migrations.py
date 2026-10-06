@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-HEAD = "016_session_certificate_binding"
+HEAD = "017_video_storyboards"
 
 
 def run_migrate(db_file: Path, cwd: Path = PROJECT_ROOT) -> subprocess.CompletedProcess:
@@ -43,6 +43,30 @@ def test_migrate_from_another_directory_over_create_all_tables(tmp_path):
 
 
 @pytest.mark.slow
+def test_migrations_at_startup_keep_the_server_loggers(tmp_path):
+    """The app runs Alembic in its own process at startup (database._migrate_and_seed). env.py configured logging
+    from alembic.ini with fileConfig's default disable_existing_loggers=True, which turned off uvicorn's loggers:
+    the console stopped at the last migration, no 'Uvicorn running on ...' and no access log, the server looked hung."""
+    env = dict(os.environ)
+    env["WATCH_WEB_ALEMBIC_URL"] = f"sqlite+aiosqlite:///{(tmp_path / 'startup.db').as_posix()}"
+    env["PYTHONPATH"] = str(PROJECT_ROOT)
+    script = (
+        "import logging\n"
+        "from alembic import command\n"
+        "from alembic.config import Config\n"
+        "names = ('uvicorn', 'uvicorn.error', 'uvicorn.access', 'fastapi')\n"
+        "for name in names:\n"
+        "    logging.getLogger(name)\n"
+        f"command.upgrade(Config({str(PROJECT_ROOT / 'alembic.ini')!r}), 'head')\n"
+        "print('DISABLED=' + ','.join(n for n in names if logging.getLogger(n).disabled))\n"
+    )
+    result = subprocess.run([sys.executable, "-c", script], cwd=PROJECT_ROOT, env=env,
+                            capture_output=True, text=True, timeout=300)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "DISABLED=\n" in result.stdout, result.stdout
+
+
+@pytest.mark.slow
 def test_migration_chain_on_empty_database(tmp_path):
     db_file = tmp_path / "migrations.db"
 
@@ -52,7 +76,7 @@ def test_migration_chain_on_empty_database(tmp_path):
 
     conn = sqlite3.connect(db_file)
     tables = {row[0] for row in conn.execute("select name from sqlite_master where type='table'")}
-    assert {"users", "roles", "permissions", "observations", "media_files", "user_post_access", "worker_heartbeats", "media_formats", "upload_sessions", "observation_frequencies"} <= tables
+    assert {"users", "roles", "permissions", "observations", "media_files", "user_post_access", "worker_heartbeats", "media_formats", "upload_sessions", "observation_frequencies", "video_storyboards"} <= tables
     assert conn.execute("select version_num from alembic_version").fetchone()[0] == HEAD
     media_columns = {row[1] for row in conn.execute("pragma table_info(media_files)")}
     assert {"poster_status", "poster_attempts", "poster_locked_until", "poster_worker", "poster_generated_at", "poster_error"} <= media_columns
@@ -256,5 +280,31 @@ def test_015_moves_session_state_from_is_active_to_ended_at(tmp_path):
     assert ended_at["live"] is None
     assert ended_at["logged-out"].startswith("2026-09-02 10:00:00")
     assert ended_at["ended-without-time"].startswith("2026-09-02 09:00:00"), "last_activity becomes the end"
+    assert conn.execute("select version_num from alembic_version").fetchone()[0] == HEAD
+    conn.close()
+
+
+def test_017_creates_video_storyboards_on_upgrade(tmp_path):
+    """A database at 016 has no video_storyboards; 017 creates the table and its claim index."""
+    db_file = tmp_path / "storyboards.db"
+    first = run_migrate(db_file)
+    assert first.returncode == 0, first.stdout + first.stderr
+
+    conn = sqlite3.connect(db_file)
+    conn.execute("drop table video_storyboards")
+    conn.execute("update alembic_version set version_num = '016_session_certificate_binding'")
+    conn.commit()
+    conn.close()
+
+    second = run_migrate(db_file)
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert "creating video_storyboards" in second.stdout + second.stderr
+
+    conn = sqlite3.connect(db_file)
+    columns = {row[1] for row in conn.execute("pragma table_info(video_storyboards)")}
+    assert {"media_id", "status", "attempts", "locked_until", "worker", "error", "generated_at", "step_seconds",
+            "frame_count", "columns", "rows", "tile_width", "tile_height", "sheet_count"} <= columns
+    indexes = {row[1] for row in conn.execute("pragma index_list(video_storyboards)")}
+    assert "ix_video_storyboards_status_locked" in indexes
     assert conn.execute("select version_num from alembic_version").fetchone()[0] == HEAD
     conn.close()

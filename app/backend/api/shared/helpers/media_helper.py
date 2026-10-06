@@ -58,10 +58,16 @@ def original_file_response(media_file: MediaFile, disposition: str) -> Response:
         "ETag": f'"{media_file.file_hash}"',
         "X-File-Hash": media_file.file_hash,
     }
+    # The API decides whether the file is there, also before handing it to nginx: otherwise nginx answered its
+    # own 404 page instead of media_file_missing (tests/test_media_download.py)
+    root = storage_root()
+    path = media_file.resolve_path(root)
+    if not path.is_file():
+        raise ApiError(ErrorCode.MEDIA_FILE_MISSING)
+
     if settings.storage.enable_nginx:
-        root = storage_root()
         try:
-            relative = media_file.resolve_path(root).resolve().relative_to(root).as_posix()
+            relative = path.resolve().relative_to(root).as_posix()
         except ValueError:
             raise ApiError(ErrorCode.MEDIA_PATH_UNRESOLVED)
         headers.update({
@@ -71,8 +77,4 @@ def original_file_response(media_file: MediaFile, disposition: str) -> Response:
             "X-Accel-Buffering": "yes",
         })
         return Response(content=b"", status_code=200, headers=headers)
-
-    path = media_file.resolve_path(storage_root())
-    if not path.exists() or not path.is_file():
-        raise ApiError(ErrorCode.MEDIA_FILE_MISSING)
     return FileResponse(path=str(path), media_type=media_file.mime_type, headers=headers)

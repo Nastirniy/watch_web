@@ -5,7 +5,8 @@
   "errors" ({code, detail, pointer | parameter + location, **params}); the submitted value is never echoed.
 - Framework HTTP errors: unknown route, wrong method and unparsable body have problem types; any other
   status becomes "about:blank" with the status phrase as title (RFC 9457 section 4.2.1).
-- Any unhandled exception: 500 internal_error with an error_id that is logged with the traceback.
+- Any unhandled exception: 500 internal_error with an error_id that is logged once, with the traceback
+  (UnhandledErrorMiddleware).
 - A 401 always carries WWW-Authenticate (RFC 9110 section 15.5.2).
 """
 import uuid
@@ -15,8 +16,10 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.backend.enums.errors import ErrorCode, ProblemType
+from app.backend.request_id import current_request_id
 from app.backend.services.api_errors import (
     PROBLEM_JSON, ApiError, about_blank_body, field_item, problem_body,
 )
@@ -82,13 +85,43 @@ async def http_error_handler(request: Request, exc: StarletteHTTPException) -> R
                            headers=_headers(exc.status_code, headers))
 
 
-async def unhandled_error_handler(request: Request, exc: Exception) -> ProblemResponse:
-    error_id = uuid.uuid4().hex
-    _logger.opt(exception=exc).error(f"Unhandled error {error_id} on {request.method} {request.url.path}: {exc!r}")
-    return problem_response(request, ErrorCode.INTERNAL_ERROR, {"error_id": error_id})
+class UnhandledErrorMiddleware:
+    """500 internal_error for any exception the routes and the other middleware let through, logged once with
+    the error_id the body carries.
+
+    Not app.add_exception_handler(Exception): Starlette calls that handler from ServerErrorMiddleware and then
+    re-raises, so the server logged every error a second time, without the error_id. This middleware answers and
+    the error ends here. An error after the response started cannot be answered: it goes on to the server, which
+    logs it and drops the connection."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        started = False
+
+        async def tracking_send(message: Message) -> None:
+            nonlocal started
+            started = started or message["type"] == "http.response.start"
+            await send(message)
+
+        try:
+            await self.app(scope, receive, tracking_send)
+        except Exception as exc:
+            if started:
+                raise
+            request = Request(scope)
+            # The request id (X-Request-ID, nginx's $request_id behind nginx): one id for the user to quote
+            error_id = current_request_id() or uuid.uuid4().hex
+            _logger.opt(exception=exc).error(f"Unhandled error {error_id} on {request.method} {request.url.path}: {exc!r}")
+            await problem_response(request, ErrorCode.INTERNAL_ERROR, {"error_id": error_id})(scope, receive, send)
 
 
 def register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(RequestValidationError, validation_error_handler)
     app.add_exception_handler(StarletteHTTPException, http_error_handler)
-    app.add_exception_handler(Exception, unhandled_error_handler)
+    # Outermost but for RequestIdMiddleware (main.py): an error of any other middleware is answered too
+    app.add_middleware(UnhandledErrorMiddleware)

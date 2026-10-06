@@ -150,6 +150,23 @@ class PosterStatus(str, Enum):
     FAILED = "failed"
 
 
+class StoryboardJobStatus(str, Enum):
+    """Lifecycle of a video storyboard job (rows of video_storyboards)"""
+    PENDING = "pending"
+    PROCESSING = "processing"
+    READY = "ready"
+    FAILED = "failed"
+
+
+class StoryboardStatus(str, Enum):
+    """What a client can expect from GET /media/{id}/storyboard"""
+    READY = "ready"
+    PENDING = "pending"
+    PROCESSING = "processing"
+    FAILED = "failed"
+    UNSUPPORTED = "unsupported"
+
+
 class ThumbnailStatus(str, Enum):
     """What a client can expect from GET /media/{id}/thumbnail"""
     READY = "ready"

@@ -87,7 +87,7 @@ Variables marked `[REQUIRED in prod]` have an insecure or wrong default and must
 |----------|---------|-------------|
 | `MYSETTINGS_STORAGE__UPLOAD_PATH` | `uploads` | **[REQUIRED in prod]** Absolute path to media storage root. Relative paths in the DB are resolved against this value. Video posters live under `<upload_path>/_derived/posters/`. |
 | `MYSETTINGS_STORAGE__TEMP_PATH` | `temp` | Spool directory for multipart uploads |
-| `MYSETTINGS_STORAGE__MAX_FILE_SIZE_GB` | `10` | Server ceiling for uploads in gigabytes (1-1024). The effective limit is per format (`media_formats.max_file_size_bytes`, managed through `/media-formats`) and cannot exceed this; nginx `client_max_body_size` must match it |
+| `MYSETTINGS_STORAGE__MAX_FILE_SIZE_GB` | `10` | Server ceiling for uploads in gigabytes (1-1024). The effective limit is per format (`media_formats.max_file_size_bytes`, managed through `/media-formats`) and cannot exceed this; nginx `client_max_body_size` stays above it (11G for 10), so the API answers an oversized file itself |
 | `MYSETTINGS_STORAGE__FFMPEG_PATH` | `ffmpeg` | ffmpeg binary for the media worker (name on PATH or absolute path; falls back to the `imageio-ffmpeg` package) |
 | `MYSETTINGS_STORAGE__FFPROBE_PATH` | `ffprobe` | ffprobe binary; when missing, durations are read from ffmpeg output |
 
@@ -109,8 +109,8 @@ Thumbnails and previews are rendered on demand by [imgproxy](https://imgproxy.ne
 | `MYSETTINGS_STORAGE__IMGPROXY__KEY` | *(empty)* | **[REQUIRED in prod]** Hex signing key. Must equal `IMGPROXY_KEY`. Generate: `python3 -c "import secrets; print(secrets.token_hex(32))"` |
 | `MYSETTINGS_STORAGE__IMGPROXY__SALT` | *(empty)* | **[REQUIRED in prod]** Hex signing salt. Must equal `IMGPROXY_SALT`. Empty key and salt means unsigned URLs, which imgproxy only accepts when it runs without a key (development) |
 | `MYSETTINGS_STORAGE__IMGPROXY__NGINX_INTERNAL_PREFIX` | `/_thumb` | Internal nginx location used through X-Accel-Redirect. Must match nginx.conf |
-| `MYSETTINGS_STORAGE__IMGPROXY__PUBLIC_PREFIX` | `/t` | Public nginx location for signed, expiring thumbnail URLs. Must match nginx.conf |
-| `MYSETTINGS_STORAGE__IMGPROXY__PUBLIC_BASE_URL` | *(empty)* | Origin prepended to public URLs, e.g. `https://monitoring.example`. Empty keeps them relative to the API host |
+| `MYSETTINGS_STORAGE__IMGPROXY__PUBLIC_PREFIX` | `/media-images` | Public nginx location for signed, expiring images made from media (thumbnails, previews). Must match the location in nginx-app.conf |
+| `MYSETTINGS_STORAGE__IMGPROXY__PUBLIC_BASE_URL` | *(empty)* | Origin prepended to public URLs, e.g. `https://monitoring.example`. Empty keeps them relative to the API host, except the storyboard sheet URLs, which are always absolute: they then take the request origin as nginx passes it (`Host $host`, without a port), so set this when the site is not on the default port |
 | `MYSETTINGS_STORAGE__IMGPROXY__PREWARM_BASE_URL` | *(empty)* | Origin the API uses to pre-warm the nginx cache after an upload, e.g. `http://nginx` in compose. Falls back to `PUBLIC_BASE_URL`; empty disables pre-warming |
 
 ### Thumbnails
@@ -131,7 +131,7 @@ Thumbnails and previews are rendered on demand by [imgproxy](https://imgproxy.ne
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MYSETTINGS_STORAGE__UPLOAD__SESSION_TTL_HOURS` | `24` | Open sessions expire this long after creation; their part files are removed by the worker |
-| `MYSETTINGS_STORAGE__UPLOAD__MAX_CHUNK_BYTES` | `67108864` | Largest accepted `PATCH` body (nginx `client_max_body_size` on the uploads location must allow it) |
+| `MYSETTINGS_STORAGE__UPLOAD__MAX_CHUNK_BYTES` | `67108864` | Largest accepted `PATCH` body (nginx `client_max_body_size` on the uploads location stays above it, 65m for 64 MB) |
 | `MYSETTINGS_STORAGE__UPLOAD__RECOMMENDED_CHUNK_BYTES` | `8388608` | Chunk size suggested to clients |
 | `MYSETTINGS_STORAGE__UPLOAD__SWEEP_INTERVAL_SECONDS` | `600` | How often the media worker expires stale sessions |
 
@@ -153,6 +153,29 @@ Run the worker as its own process: `python -m app.backend.workers.media_worker` 
 | `MYSETTINGS_STORAGE__POSTER__HEARTBEAT_SECONDS` | `30` | Worker heartbeat interval |
 | `MYSETTINGS_STORAGE__POSTER__STALE_AFTER_SECONDS` | `120` | `GET /media/posters/status` reports a worker stale after this |
 | `MYSETTINGS_STORAGE__POSTER__BACKOFF_SECONDS` | `[30, 120, 480]` | Retry delays after the 1st, 2nd, ... failure |
+
+### Video storyboards (media worker)
+
+Seek previews (sprite sheets) made by the media worker with ffmpeg, only while the poster queue is empty.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MYSETTINGS_STORAGE__STORYBOARD__ENABLED` | `true` | Off: no claims, the API answers `unsupported`, existing files stay |
+| `MYSETTINGS_STORAGE__STORYBOARD__SLOTS` | `1` | Storyboards at once per worker process; must be below `MYSETTINGS_STORAGE__POSTER__CONCURRENCY` (the worker refuses to start otherwise: with a concurrency of 1, raise it to 2 or turn storyboards off) |
+| `MYSETTINGS_STORAGE__STORYBOARD__MIN_DURATION_SECONDS` | `60` | Shorter videos get none |
+| `MYSETTINGS_STORAGE__STORYBOARD__MAX_FRAMES` | `300` | Upper bound of frames per video; the step grows with the duration |
+| `MYSETTINGS_STORAGE__STORYBOARD__MIN_STEP_SECONDS` | `2` | Lower bound of the frame step |
+| `MYSETTINGS_STORAGE__STORYBOARD__TILE_WIDTH` | `160` | Width of one frame in pixels |
+| `MYSETTINGS_STORAGE__STORYBOARD__COLUMNS` | `10` | Frames per row of a sheet |
+| `MYSETTINGS_STORAGE__STORYBOARD__ROWS` | `10` | Rows per sheet |
+| `MYSETTINGS_STORAGE__STORYBOARD__JPEG_QSCALE` | `5` | ffmpeg `-q:v` (2 best, 31 worst) |
+| `MYSETTINGS_STORAGE__STORYBOARD__THREADS` | `1` | ffmpeg threads |
+| `MYSETTINGS_STORAGE__STORYBOARD__NICE` | `10` | POSIX niceness of ffmpeg, 0 = unchanged |
+| `MYSETTINGS_STORAGE__STORYBOARD__TIMEOUT_SECONDS` | `1800` | ffmpeg is killed after this |
+| `MYSETTINGS_STORAGE__STORYBOARD__LEASE_SECONDS` | `300` | Claim lease, renewed while ffmpeg runs |
+| `MYSETTINGS_STORAGE__STORYBOARD__MAX_ATTEMPTS` | `3` | Failures before a storyboard is marked `failed` |
+| `MYSETTINGS_STORAGE__STORYBOARD__BACKOFF_SECONDS` | `[60, 300, 1800]` | Retry delays after the 1st, 2nd, ... failure |
+| `MYSETTINGS_STORAGE__STORYBOARD__RETRY_AFTER_SECONDS` | `30` | `Retry-After` of the 202 answer of `GET /media/{id}/storyboard` |
 
 ---
 
