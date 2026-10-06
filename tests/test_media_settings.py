@@ -1,5 +1,26 @@
 """Media settings accept environment-style string values for list fields."""
-from app.backend.config import PosterSettings, StoryboardSettings, ThumbnailSettings, settings
+from pathlib import Path
+
+import yaml
+
+from app.backend.config import ImgproxySettings, PosterSettings, StoryboardSettings, ThumbnailSettings, settings
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_the_api_knows_the_resolution_limit_of_imgproxy():
+    """Above IMGPROXY_MAX_SRC_RESOLUTION imgproxy refuses every render: the API must mark such images unsupported
+    with the same limit, so both containers take it from one variable"""
+    default = ImgproxySettings().max_src_resolution_mp
+    assert default == 250
+    services = yaml.safe_load((PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8"))["services"]
+    shared = "${IMGPROXY_MAX_SRC_RESOLUTION:-250}"
+    assert services["imgproxy"]["environment"]["IMGPROXY_MAX_SRC_RESOLUTION"] == shared
+    assert services["api"]["environment"]["MYSETTINGS_STORAGE__IMGPROXY__MAX_SRC_RESOLUTION_MP"] == shared
+
+    e2e = yaml.safe_load((PROJECT_ROOT / "tests" / "docker" / "compose.test.yml").read_text(encoding="utf-8"))["services"]
+    assert float(e2e["imgproxy"]["environment"]["IMGPROXY_MAX_SRC_RESOLUTION"]) == default, "the e2e API runs with the default"
+    assert float(ImgproxySettings(max_src_resolution_mp="0.5").max_src_resolution_mp) == 0.5
 
 
 def test_sizes_and_backoff_parse_from_json_strings():

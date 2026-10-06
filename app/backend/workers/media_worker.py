@@ -36,7 +36,7 @@ from app.backend.models.media import MediaFile
 from app.backend.models.storyboard import VideoStoryboard, storyboard_relative_dir
 from app.backend.services.media import jobs, storyboard_jobs, uploads
 from app.backend.services.media.posters import PosterError, make_poster, resolve_binary
-from app.backend.services.media.probe import metadata_for, resolve_tools
+from app.backend.services.media.probe import has_no_video_stream, metadata_for, resolve_tools
 from app.backend.services.media.storyboards import (
     StoryboardCancelled,
     StoryboardError,
@@ -156,10 +156,16 @@ class MediaWorker:
             if target is None:
                 raise PosterError("row is not a video")
             _logger.info(f"poster job media={media.id} attempt={media.poster_attempts} source={source.name}")
-            await asyncio.to_thread(self.extractor, source, target)
             metadata = None
             if media.duration_seconds is None or media.playback_type is None:
                 metadata = await asyncio.to_thread(self._probe, source, media.mime_type)
+            if has_no_video_stream({"video_codec": media.video_codec, "audio_codec": media.audio_codec, **(metadata or {})}):
+                # Only audio in the file: no frame to extract, now or after any number of retries
+                async with self.session_maker() as session:
+                    owned = await jobs.mark_poster_unsupported(session, media.id, worker=self.name, metadata=metadata or None)
+                _logger.info(f"poster job media={media.id}: no video stream, unsupported{'' if owned else ' (lease lost)'}")
+                return False
+            await asyncio.to_thread(self.extractor, source, target)
             async with self.session_maker() as session:
                 owned = await jobs.complete_poster(session, media.id, self.name, metadata=metadata or None)
             if not owned:

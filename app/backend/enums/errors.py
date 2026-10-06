@@ -277,6 +277,11 @@ class ErrorCode(ProblemType):
     NGINX_UPLOAD_DISABLED = ("nginx_upload_disabled", problem(501, "Nginx upload offloading is not enabled"))
     NGINX_FILE_NAME_MISSING = ("nginx_file_name_missing", problem(400, "Missing X-File-Name header"))
     THUMBNAILS_UNSUPPORTED = ("thumbnails_unsupported", problem(422, "Thumbnails are not supported for this media type"))
+    IMAGE_TOO_LARGE_FOR_THUMBNAILS = ("image_too_large_for_thumbnails", problem(
+        422, "Image too large for thumbnails",
+        "The image has {megapixels} megapixels; thumbnails are rendered for images of at most {max_megapixels}",
+        megapixels=float, max_megapixels=float))
+    NO_VIDEO_STREAM = ("no_video_stream", problem(422, "The file has no video stream"))
     POSTER_FAILED = ("poster_failed", problem(
         409, "Poster extraction failed; an administrator can regenerate it", thumbnail_status=str, attempts=int))
     STORYBOARD_FAILED = ("storyboard_failed", problem(409, "Storyboard generation failed", attempts=int))

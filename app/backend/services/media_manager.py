@@ -18,6 +18,7 @@ from pydantic import BaseModel, field_validator
 from app.backend.models.media import MediaFile
 from app.backend.services.media.jobs import enqueue_poster
 from app.backend.services.media.formats import UnsupportedMediaFormat, FileTooLarge
+from app.backend.services.media.probe import image_dimensions
 from app.backend.enums.general import MediaType
 from app.backend.utils.logging_config import get_logger
 from app.backend.utils.mime_detector import mime_detector
@@ -444,16 +445,11 @@ class MediaManager:
         os.chmod(destination, 0o644)
 
     async def _extract_image_dimensions(self, file_path: Path) -> Optional[tuple[int, int]]:
-        """Width and height from the image header only (PIL is lazy: no pixel data is decoded)"""
-        def read_size() -> Optional[tuple[int, int]]:
-            try:
-                from PIL import Image
-                with Image.open(file_path) as img:
-                    return img.width, img.height
-            except Exception as exc:
-                _logger.warning(f"Could not read image dimensions from {file_path.name}: {exc}")
-                return None
-        return await asyncio.to_thread(read_size)
+        """Width and height as displayed, from the image header only (no pixel data is decoded)"""
+        dimensions = await asyncio.to_thread(image_dimensions, file_path)
+        if dimensions is None:
+            _logger.warning(f"Could not read image dimensions from {file_path.name}")
+        return dimensions
 
     async def spool_upload(self, upload, chunk_size: int = 1024 * 1024) -> Path:
         """Copy a Starlette UploadFile to a temp file in 1 MB chunks so the body never sits in memory.

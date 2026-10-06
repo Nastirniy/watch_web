@@ -13,8 +13,8 @@ from app.backend.models.observation import Observation
 from app.backend.services.auth_context import AuthContext
 from app.backend.services.access_control import AccessControlService
 from app.backend.services.media_manager import FileValidationConfig
-from app.backend.services.media import formats, renderer, urls as thumb_urls
-from app.backend.services.media.probe import metadata_for, resolve_tools
+from app.backend.services.media import formats, jobs, renderer, urls as thumb_urls
+from app.backend.services.media.probe import has_no_video_stream, metadata_for, resolve_tools
 from app.backend.enums.general import MediaType, ThumbnailFormat, ThumbnailSize
 from app.backend.helpers.audit_helper import client_info, create_audit_log
 from app.backend.utils.logging_config import get_api_logger
@@ -101,6 +101,10 @@ async def record_upload(
         metadata = await _probe_headers(media_file)
         for field_name, value in metadata.items():
             setattr(media_file, field_name, value)
+        if media_file.is_video and has_no_video_stream(metadata):
+            # Only audio in a video upload: no poster or storyboard can exist, the worker never tries
+            await jobs.mark_poster_unsupported(session, media_file.id)
+            await session.refresh(media_file)
 
     await create_audit_log(
         session=session, action="create", resource_type="media", resource_id=media_file_id,

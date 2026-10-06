@@ -5,6 +5,43 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Media that cannot be rendered; sizes as displayed (found by the live format matrix)
+
+### Added (API clients)
+
+- New problem codes (web translations need both): `image_too_large_for_thumbnails` (422, params `megapixels`,
+  `max_megapixels`) from `GET /media/{id}/thumbnail` and `POST /media/{id}/share`; `no_video_stream` (422) from
+  those two and from `GET /media/{id}/storyboard`. Contract rewritten on purpose (three operations, two schemas).
+
+### Fixed
+
+- Photos of 108 and 200 MP phone cameras got no thumbnails: imgproxy's resolution limit was 60 megapixels. It is now
+  250 (`IMGPROXY_MAX_SRC_RESOLUTION` in `.env`, one variable for imgproxy and the API's new
+  `storage.imgproxy.max_src_resolution_mp`); measured, a 200 MP source costs imgproxy 63 MB (JPEG) to 124 MB (PNG)
+  per render. The limit stays as the guard against small files holding gigapixels (a 274 KB PNG of 1.6 GP: 3.5 s of
+  CPU per render).
+- An image above that limit was reported `thumbnail_status: ready` with signed URLs that always answered
+  imgproxy's `422 text/plain`. It is now stored with `thumbnail_status: unsupported`, no `thumbnail_urls`, no
+  pre-warm, and the thumbnail and share routes answer `image_too_large_for_thumbnails`. The size is read from the
+  header at upload; images stored without a size are rendered as before.
+- A video upload with only audio was tried three times by the worker and ended `409 poster_failed` ("an
+  administrator can regenerate it", which never helps). The probe at upload, or the worker's own, now marks it
+  `poster_status = unsupported` (new value; never claimed): `thumbnail_status` and `storyboard_status` are
+  `unsupported`, the routes answer `no_video_stream`. Poster counts (`GET /media/posters/status`, `GET /statistics`)
+  get an `unsupported` key.
+- `width` and `height` of a vertical phone video (stored as a landscape frame plus a display rotation) and of an
+  EXIF-rotated photo were the stored frame size, so a player sized from them was landscape. They are now the size
+  as displayed, as posters, storyboards and browsers show it. Existing rows: `media_tools probe-missing --all`
+  (DEPLOYMENT.md, "Upgrades").
+- Every 4xx answered in a route with a database session was also logged as `ERROR Database session error`, and an
+  unhandled error got a second line without its `error_id`. `get_session` now only rolls back.
+
+### Backend
+
+- `tests/docker/formats.py`: live format matrix against the e2e stack (JPEG, PNG, WebP, GIF in their variants;
+  MP4 H.264 / H.265 / MPEG-4, WebM VP8 / VP9 / AV1, MOV H.264 / ProRes, MKV H.264 / HEVC / VP9; rotation, odd
+  sizes, 4K, sparse keyframes, multi-sheet storyboards, files without a video stream, truncated files).
+
 ## Video storyboards: seek previews (route and field)
 
 ### Added

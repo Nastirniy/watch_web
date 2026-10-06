@@ -140,6 +140,29 @@ async def complete_poster(
     return result.rowcount == 1
 
 
+async def mark_poster_unsupported(
+    session: AsyncSession, media_id: int, worker: Optional[str] = None, metadata: Optional[Dict] = None
+) -> bool:
+    """No poster can exist: a probe found no video stream in the file. Unsupported rows are never claimed.
+
+    Without worker it replaces a pending job (the upload that probed the file); a job a worker already claimed
+    belongs to that worker. With worker it ends the job this worker holds, storing what its probe found.
+    False when the job is not in that state.
+    """
+    if worker is None:
+        owned = (MediaFile.poster_status == PosterStatus.PENDING.value,)
+    else:
+        owned = (MediaFile.poster_worker == worker, MediaFile.poster_status == PosterStatus.PROCESSING.value)
+    result = await session.execute(
+        update(MediaFile)
+        .execution_options(synchronize_session=False)
+        .where(MediaFile.id == media_id, *owned)
+        .values(poster_status=PosterStatus.UNSUPPORTED.value, poster_locked_until=None, poster_error=None, **(metadata or {}))
+    )
+    await session.commit()
+    return result.rowcount == 1
+
+
 def backoff_for(attempts: int) -> timedelta:
     delays = settings.storage.poster.backoff_seconds or [30]
     index = max(0, min(attempts - 1, len(delays) - 1))

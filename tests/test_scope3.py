@@ -125,7 +125,7 @@ async def test_statistics_endpoint(client, db, headers):
     assert body["observations"]["by_status"] == {"active": 1}
     assert body["observations"]["by_post"] == [{"post_id": post.id, "post_name": post.name, "count": 1}]
     assert body["media"]["count"] == 1 and body["media"]["total_size_bytes"] == 123
-    assert body["media"]["posters"] == {"pending": 0, "processing": 0, "ready": 0, "failed": 0, "untracked": 0}
+    assert body["media"]["posters"] == {"pending": 0, "processing": 0, "ready": 0, "failed": 0, "unsupported": 0, "untracked": 0}
     assert body["period"]["date_from"] < body["period"]["date_to"]
 
     bad = await client.get(url, params={"date_from": "2030-01-01T00:00:00", "date_to": "2020-01-01T00:00:00"}, headers=headers(admin))

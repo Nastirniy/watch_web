@@ -2,6 +2,7 @@ from typing import Optional, TYPE_CHECKING
 from datetime import datetime
 from pathlib import Path
 from sqlmodel import Field, SQLModel, Relationship
+from app.backend.config import settings
 from app.backend.utils.datetime_utils import get_default_timezone_datetime
 from app.backend.enums.general import MediaType, PosterStatus, ThumbnailStatus
 
@@ -83,24 +84,41 @@ class MediaFile(SQLModel, table=True):
         return storage_root / rel if rel else None
 
     @property
+    def megapixels(self) -> Optional[float]:
+        """width x height in millions, one decimal; None while the size is unknown"""
+        if not (self.width and self.height):
+            return None
+        return round(self.width * self.height / 1_000_000, 1)
+
+    @property
+    def too_large_to_render(self) -> bool:
+        """An image above imgproxy's resolution limit (storage.imgproxy.max_src_resolution_mp): every render fails.
+        An image of unknown size is rendered as always."""
+        if not (self.is_image and self.width and self.height):
+            return False
+        return self.width * self.height > settings.storage.imgproxy.max_src_resolution_mp * 1_000_000
+
+    @property
     def thumbnail_source_path(self) -> Optional[str]:
         """Path (relative to the upload root) imgproxy renders thumbnails from, or None when nothing can be rendered"""
         if self.is_image:
-            return self.file_path
+            return None if self.too_large_to_render else self.file_path
         if self.is_video and self.poster_status == PosterStatus.READY.value:
             return self.poster_relative_path
         return None
 
     @property
     def thumbnail_status(self) -> str:
-        """Client-facing readiness, derived: images are always ready, videos follow the poster job"""
+        """Client-facing readiness, derived: images are ready unless above the render limit, videos follow the
+        poster job (unsupported: the file has no video stream)"""
         if self.is_image:
-            return ThumbnailStatus.READY.value
+            return ThumbnailStatus.UNSUPPORTED.value if self.too_large_to_render else ThumbnailStatus.READY.value
         if self.is_video:
             mapping = {
                 PosterStatus.READY.value: ThumbnailStatus.READY.value,
                 PosterStatus.PROCESSING.value: ThumbnailStatus.PROCESSING.value,
                 PosterStatus.FAILED.value: ThumbnailStatus.FAILED.value,
+                PosterStatus.UNSUPPORTED.value: ThumbnailStatus.UNSUPPORTED.value,
             }
             return mapping.get(self.poster_status or "", ThumbnailStatus.PENDING.value)
         return ThumbnailStatus.UNSUPPORTED.value

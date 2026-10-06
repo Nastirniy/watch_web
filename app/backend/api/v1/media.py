@@ -25,7 +25,7 @@ from app.backend.services.media.manager import get_media_manager
 from app.backend.services.media import formats, jobs, renderer, urls as thumb_urls
 from app.backend.services.media.storyboards import build_vtt, layout_usable, status_for
 from app.backend.services.media.formats import UnsupportedMediaFormat, FileTooLarge
-from app.backend.enums.general import Permissions, StoryboardStatus, ThumbnailFormat, ThumbnailSize, ThumbnailStatus
+from app.backend.enums.general import Permissions, PosterStatus, StoryboardStatus, ThumbnailFormat, ThumbnailSize, ThumbnailStatus
 from app.backend.enums.routes import MediaRoutes
 from app.backend.helpers.audit_helper import client_info, create_audit_log
 from app.backend.utils.logging_config import get_api_logger
@@ -471,6 +471,14 @@ async def list_media_for_observation(
 def _not_ready_response(media_file: MediaFile) -> Response:
     status_value = media_file.thumbnail_status
     if status_value == ThumbnailStatus.UNSUPPORTED.value:
+        if media_file.too_large_to_render:
+            raise ApiError(
+                ErrorCode.IMAGE_TOO_LARGE_FOR_THUMBNAILS,
+                megapixels=media_file.megapixels,
+                max_megapixels=float(settings.storage.imgproxy.max_src_resolution_mp),
+            )
+        if media_file.is_video:
+            raise ApiError(ErrorCode.NO_VIDEO_STREAM)
         raise ApiError(ErrorCode.THUMBNAILS_UNSUPPORTED)
     if status_value == ThumbnailStatus.FAILED.value:
         raise ApiError(
@@ -513,6 +521,7 @@ async def _proxy_render(url: str) -> Response:
         **problems(
             AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.MEDIA_NOT_FOUND,
             ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.POSTER_FAILED, ErrorCode.THUMBNAILS_UNSUPPORTED,
+            ErrorCode.IMAGE_TOO_LARGE_FOR_THUMBNAILS, ErrorCode.NO_VIDEO_STREAM,
             ErrorCode.THUMBNAIL_RENDERER_ERROR, ErrorCode.THUMBNAIL_RENDERER_UNAVAILABLE, *GUARDED,
         ),
     },
@@ -528,7 +537,8 @@ async def get_media_thumbnail(
     Thumbnail or preview of a media file, rendered on demand.
 
     200: image (nginx serves it from cache or imgproxy). 202 + Retry-After: the video
-    poster is not extracted yet. 409: poster extraction failed. 422: audio or documents.
+    poster is not extracted yet. 409: poster extraction failed. 422: audio, an image above the
+    renderer's resolution limit, or a video file without a video stream.
     """
     media_file = await get_media_or_404(session, media_id)
     observation = await get_observation_from_media(session, media_file)
@@ -558,7 +568,8 @@ async def get_media_thumbnail(
         **empty_response(202, "The storyboard is not generated yet; ask again after Retry-After", STORYBOARD_PENDING_HEADERS),
         **problems(
             AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.MEDIA_NOT_FOUND,
-            ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.STORYBOARD_FAILED, ErrorCode.STORYBOARD_UNSUPPORTED, *GUARDED,
+            ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.STORYBOARD_FAILED, ErrorCode.STORYBOARD_UNSUPPORTED,
+            ErrorCode.NO_VIDEO_STREAM, *GUARDED,
         ),
     },
 )
@@ -583,6 +594,8 @@ async def get_media_storyboard(
     layout = await session.get(VideoStoryboard, media_id)
     status_value = status_for(media_file, config, layout.status if layout else None)
     if status_value == StoryboardStatus.UNSUPPORTED.value:
+        if media_file.is_video and media_file.poster_status == PosterStatus.UNSUPPORTED.value:
+            raise ApiError(ErrorCode.NO_VIDEO_STREAM)
         raise ApiError(ErrorCode.STORYBOARD_UNSUPPORTED, min_duration_seconds=config.min_duration_seconds)
     if status_value == StoryboardStatus.FAILED.value:
         raise ApiError(
@@ -633,7 +646,8 @@ async def get_media_storyboard(
         **empty_response(202, "The video poster is not extracted yet; ask again after Retry-After", THUMBNAIL_PENDING_HEADERS),
         **problems(
             AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.MEDIA_NOT_FOUND,
-            ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.POSTER_FAILED, ErrorCode.THUMBNAILS_UNSUPPORTED, *GUARDED,
+            ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.POSTER_FAILED, ErrorCode.THUMBNAILS_UNSUPPORTED,
+            ErrorCode.IMAGE_TOO_LARGE_FOR_THUMBNAILS, ErrorCode.NO_VIDEO_STREAM, *GUARDED,
         ),
     },
 )

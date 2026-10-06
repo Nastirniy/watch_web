@@ -88,13 +88,16 @@ async def get_session_maker():
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency: one database session per request (connections are checked by pool_pre_ping)"""
+    """Dependency: one database session per request (connections are checked by pool_pre_ping).
+
+    Any error of the request rolls the session back and goes on unlogged: an ApiError is the answer, and an
+    unhandled error is logged once, with its error_id, by UnhandledErrorMiddleware.
+    """
     session_maker = await get_session_maker()
     async with session_maker() as session:
         try:
             yield session
-        except Exception as e:
-            _logger.error(f"Database session error: {e}")
+        except Exception:
             await session.rollback()
             raise
 

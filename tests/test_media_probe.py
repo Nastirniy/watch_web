@@ -1,4 +1,5 @@
 """Codec and duration probing: RFC 6381 strings, ffmpeg banner parsing, a real probe, and the API fields."""
+import json
 import subprocess
 from pathlib import Path
 
@@ -54,6 +55,134 @@ def test_banner_parsing(monkeypatch):
     assert (result.video_codec, result.video_profile, result.width, result.height) == ("h264", "High", 1920, 1080)
     assert (result.audio_codec, result.audio_profile) == ("aac", "LC")
     assert probe.playback_type("video/mp4", result) == 'video/mp4; codecs="avc1.64001F, mp4a.40.2"'
+
+
+def _json_probe(monkeypatch, stream: dict) -> probe.ProbeResult:
+    class Proc:
+        returncode = 0
+        stderr = b""
+        stdout = json.dumps({"format": {"duration": "2.0"}, "streams": [stream]}).encode()
+
+    monkeypatch.setattr(probe, "_run", lambda command, timeout: Proc())
+    return probe._probe_json("ffprobe", Path("clip.mp4"), 5)
+
+
+@pytest.mark.parametrize("rotation, size", [(90, (360, 640)), (-90, (360, 640)), (270, (360, 640)), (180, (640, 360)), (0, (640, 360))])
+def test_json_probe_reports_the_displayed_size(monkeypatch, rotation, size):
+    """A phone records a vertical video as a landscape frame plus a display matrix; clients size the player by width/height"""
+    stream = {"codec_type": "video", "codec_name": "h264", "width": 640, "height": 360, "side_data_list": [{"rotation": rotation}]}
+    result = _json_probe(monkeypatch, stream)
+    assert (result.width, result.height) == size
+
+
+def test_json_probe_reads_the_legacy_rotate_tag(monkeypatch):
+    """ffprobe before 5.0 reported the rotation as a stream tag"""
+    stream = {"codec_type": "video", "codec_name": "h264", "width": 1920, "height": 1080, "tags": {"rotate": "90"}}
+    result = _json_probe(monkeypatch, stream)
+    assert (result.width, result.height) == (1080, 1920)
+
+
+def test_banner_probe_reports_the_displayed_size(monkeypatch):
+    rotated = BANNER.replace(
+        "Stream #0:1[0x2]",
+        "    Side data:\n      displaymatrix: rotation of -90.00 degrees\n  Stream #0:1[0x2]",
+    )
+
+    class Proc:
+        returncode = 1
+        stdout = b""
+        stderr = rotated.encode()
+
+    monkeypatch.setattr(probe, "_run", lambda command, timeout: Proc())
+    result = probe._probe_banner("ffmpeg", Path("clip.mp4"), 5)
+    assert (result.width, result.height) == (1080, 1920)
+
+
+def test_no_video_stream_needs_a_probe_that_read_the_file():
+    """Only a probe that found another stream proves the picture is missing; an empty result proves nothing"""
+    assert probe.has_no_video_stream({"video_codec": None, "audio_codec": "aac", "duration_seconds": 12.0})
+    assert not probe.has_no_video_stream({"video_codec": "h264", "audio_codec": "aac"})
+    assert not probe.has_no_video_stream({}), "the probe failed: nothing is known"
+    assert not probe.has_no_video_stream({"video_codec": None, "audio_codec": None, "duration_seconds": None})
+
+
+def _jpeg(path: Path, size, orientation=None) -> Path:
+    from PIL import Image
+    exif = Image.Exif()
+    if orientation:
+        exif[0x0112] = orientation
+    Image.new("RGB", size, (200, 30, 30)).save(path, format="JPEG", exif=exif.tobytes())
+    return path
+
+
+@pytest.mark.parametrize("orientation, size", [(None, (40, 30)), (1, (40, 30)), (3, (40, 30)), (6, (30, 40)), (8, (30, 40)), (5, (30, 40))])
+def test_image_dimensions_are_the_displayed_size(tmp_path, orientation, size):
+    """EXIF orientation 5-8 turns the stored frame by 90 degrees; browsers and imgproxy show it turned"""
+    assert probe.image_dimensions(_jpeg(tmp_path / "photo.jpg", (40, 30), orientation)) == size
+
+
+def test_image_dimensions_of_an_unreadable_file(tmp_path):
+    broken = tmp_path / "broken.jpg"
+    broken.write_bytes(b"\xff\xd8\xff\xe0 not really a jpeg")
+    assert probe.image_dimensions(broken) is None
+    assert probe.image_dimensions(tmp_path / "missing.jpg") is None
+
+
+@pytest.mark.asyncio
+async def test_probe_missing_all_refreshes_the_size_of_existing_rows(db, session_maker, monkeypatch, tmp_path, capsys):
+    """Rows stored before sizes were reported as displayed keep the stored frame size until probed again"""
+    from app.backend import database, media_tools
+
+    async def maker():
+        return session_maker
+
+    async def no_close():
+        return None
+
+    monkeypatch.setattr(database, "get_session_maker", maker)
+    monkeypatch.setattr(database, "close_db", no_close)
+    monkeypatch.setattr(media_tools, "_storage_root", lambda: tmp_path)
+    monkeypatch.setattr(probe, "resolve_tools", lambda: ("ffmpeg", None))
+    monkeypatch.setattr(probe, "metadata_for", lambda source, mime_type, ffmpeg, ffprobe: {
+        "duration_seconds": 12.0, "video_codec": "h264", "audio_codec": "aac",
+        "playback_type": 'video/mp4; codecs="avc1.64001F, mp4a.40.2"', "width": 360, "height": 640,
+    })
+    post = await make_post(db)
+    ids = await make_dictionary(db)
+    user = await make_user(db, post_id=post.id)
+    observation = await make_observation(db, user, post, ids["signal_type_id"])
+    video = await make_media(db, observation, user, media_type="video", width=640, height=360, duration_seconds=12.0,
+                             playback_type='video/mp4; codecs="avc1.64001F, mp4a.40.2"')
+    photo = await make_media(db, observation, user, width=40, height=30)
+    (tmp_path / photo.file_path).parent.mkdir(parents=True, exist_ok=True)
+    _jpeg(tmp_path / photo.file_path, (40, 30), orientation=6)
+
+    assert await media_tools.probe_missing(limit=100) == 0
+    await db.refresh(video)
+    await db.refresh(photo)
+    assert (video.width, video.height) == (640, 360) and (photo.width, photo.height) == (40, 30), "only missing metadata"
+
+    assert await media_tools.probe_missing(limit=100, refresh=True) == 0
+    await db.refresh(video)
+    await db.refresh(photo)
+    assert (video.width, video.height) == (360, 640)
+    assert (photo.width, photo.height) == (30, 40)
+    assert "probed 2 file(s), 0 failed" in capsys.readouterr().out
+
+
+@pytest.mark.skipif(FFMPEG is None, reason="ffmpeg not available")
+def test_real_probe_of_a_rotated_and_an_audio_only_file(tmp_path):
+    plain, rotated, audio_only = tmp_path / "plain.mp4", tmp_path / "rotated.mp4", tmp_path / "audio.mp4"
+    run = lambda *args: subprocess.run([FFMPEG, "-hide_banner", "-loglevel", "error", "-y", *args], check=True, timeout=120)
+    run("-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=10", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(plain))
+    run("-display_rotation", "90", "-i", str(plain), "-c", "copy", str(rotated))
+    run("-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-c:a", "aac", str(audio_only))
+
+    values = probe.metadata_for(rotated, "video/mp4", FFMPEG, FFPROBE)
+    assert (values["width"], values["height"]) == (240, 320)
+    values = probe.metadata_for(audio_only, "video/mp4", FFMPEG, FFPROBE)
+    assert values["video_codec"] is None and values["audio_codec"] == "aac"
+    assert probe.has_no_video_stream(values)
 
 
 @pytest.mark.skipif(FFMPEG is None, reason="ffmpeg not available")

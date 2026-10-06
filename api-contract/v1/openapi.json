@@ -14572,7 +14572,7 @@
           "MEDIA"
         ],
         "summary": "Get Media Thumbnail",
-        "description": "Thumbnail or preview of a media file, rendered on demand.\n\n200: image (nginx serves it from cache or imgproxy). 202 + Retry-After: the video\nposter is not extracted yet. 409: poster extraction failed. 422: audio or documents.",
+        "description": "Thumbnail or preview of a media file, rendered on demand.\n\n200: image (nginx serves it from cache or imgproxy). 202 + Retry-After: the video\nposter is not extracted yet. 409: poster extraction failed. 422: audio, an image above the\nrenderer's resolution limit, or a video file without a video stream.",
         "operationId": "get_media_thumbnail",
         "security": [
           {
@@ -14705,11 +14705,17 @@
             }
           },
           "422": {
-            "description": "`thumbnails_unsupported`: Thumbnails are not supported for this media type; `validation_error`: Request validation failed",
+            "description": "`image_too_large_for_thumbnails`: Image too large for thumbnails; `no_video_stream`: The file has no video stream; `thumbnails_unsupported`: Thumbnails are not supported for this media type; `validation_error`: Request validation failed",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ImageTooLargeForThumbnailsProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/NoVideoStreamProblem"
+                    },
                     {
                       "$ref": "#/components/schemas/ThumbnailsUnsupportedProblem"
                     },
@@ -14720,6 +14726,8 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
+                      "image_too_large_for_thumbnails": "#/components/schemas/ImageTooLargeForThumbnailsProblem",
+                      "no_video_stream": "#/components/schemas/NoVideoStreamProblem",
                       "thumbnails_unsupported": "#/components/schemas/ThumbnailsUnsupportedProblem",
                       "validation_error": "#/components/schemas/ValidationErrorProblem"
                     }
@@ -14935,11 +14943,14 @@
             }
           },
           "422": {
-            "description": "`storyboard_unsupported`: No storyboard for this media; `validation_error`: Request validation failed",
+            "description": "`no_video_stream`: The file has no video stream; `storyboard_unsupported`: No storyboard for this media; `validation_error`: Request validation failed",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/NoVideoStreamProblem"
+                    },
                     {
                       "$ref": "#/components/schemas/StoryboardUnsupportedProblem"
                     },
@@ -14950,6 +14961,7 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
+                      "no_video_stream": "#/components/schemas/NoVideoStreamProblem",
                       "storyboard_unsupported": "#/components/schemas/StoryboardUnsupportedProblem",
                       "validation_error": "#/components/schemas/ValidationErrorProblem"
                     }
@@ -15146,11 +15158,17 @@
             }
           },
           "422": {
-            "description": "`thumbnails_unsupported`: Thumbnails are not supported for this media type; `validation_error`: Request validation failed",
+            "description": "`image_too_large_for_thumbnails`: Image too large for thumbnails; `no_video_stream`: The file has no video stream; `thumbnails_unsupported`: Thumbnails are not supported for this media type; `validation_error`: Request validation failed",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ImageTooLargeForThumbnailsProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/NoVideoStreamProblem"
+                    },
                     {
                       "$ref": "#/components/schemas/ThumbnailsUnsupportedProblem"
                     },
@@ -15161,6 +15179,8 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
+                      "image_too_large_for_thumbnails": "#/components/schemas/ImageTooLargeForThumbnailsProblem",
+                      "no_video_stream": "#/components/schemas/NoVideoStreamProblem",
                       "thumbnails_unsupported": "#/components/schemas/ThumbnailsUnsupportedProblem",
                       "validation_error": "#/components/schemas/ValidationErrorProblem"
                     }
@@ -23585,6 +23605,81 @@
         "title": "HealthResponse",
         "description": "Main health check response model"
       },
+      "ImageTooLargeForThumbnailsProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Image too large for thumbnails",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 422,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "The image has {megapixels} megapixels; thumbnails are rendered for images of at most {max_megapixels}"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "image_too_large_for_thumbnails",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          },
+          "megapixels": {
+            "type": "number",
+            "title": "Megapixels"
+          },
+          "max_megapixels": {
+            "type": "number",
+            "title": "Max Megapixels"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code",
+          "megapixels",
+          "max_megapixels"
+        ],
+        "title": "ImageTooLargeForThumbnailsProblem",
+        "description": "Image too large for thumbnails (HTTP 422). Problem type image_too_large_for_thumbnails.",
+        "examples": [
+          {
+            "code": "image_too_large_for_thumbnails",
+            "detail": "The image has <megapixels> megapixels; thumbnails are rendered for images of at most <max_megapixels>",
+            "instance": "/api/v1/...",
+            "max_megapixels": "<max_megapixels>",
+            "megapixels": "<megapixels>",
+            "status": 422,
+            "title": "Image too large for thumbnails",
+            "type": "https://example.org/problems/image_too_large_for_thumbnails"
+          }
+        ]
+      },
       "InternalErrorProblem": {
         "properties": {
           "type": {
@@ -26737,6 +26832,69 @@
             "status": 403,
             "title": "You are not assigned to any post. Please contact an administrator.",
             "type": "https://example.org/problems/no_post_assigned"
+          }
+        ]
+      },
+      "NoVideoStreamProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "The file has no video stream",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 422,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "The file has no video stream"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "no_video_stream",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "NoVideoStreamProblem",
+        "description": "The file has no video stream (HTTP 422). Problem type no_video_stream.",
+        "examples": [
+          {
+            "code": "no_video_stream",
+            "detail": "The file has no video stream",
+            "instance": "/api/v1/...",
+            "status": 422,
+            "title": "The file has no video stream",
+            "type": "https://example.org/problems/no_video_stream"
           }
         ]
       },

@@ -144,6 +144,21 @@ The body carries `error_id`, the request id of the response (`X-Request-ID`); th
 
 Resumable uploads step by step: `UPLOADS.md`.
 
+### Thumbnails
+
+Every media response carries `thumbnail_status` (`ready`, `pending`, `processing`, `failed`, `unsupported`) and,
+while it is `ready`, signed `thumbnail_urls`. `GET /media/{id}/thumbnail` and `POST /media/{id}/share` answer
+`unsupported` with a `422` problem that says why:
+
+| Code | When |
+|------|------|
+| `thumbnails_unsupported` | Audio: there is nothing to show |
+| `image_too_large_for_thumbnails` | An image above the renderer's resolution limit (params `megapixels`, `max_megapixels`); the original is stored and downloads as usual |
+| `no_video_stream` | A video upload with no video stream (only audio); also the answer of the storyboard route |
+
+`width` and `height` are the size as displayed: a vertical phone video or an EXIF-rotated photo reports the
+portrait size, so a player or an `<img>` box can be sized from them.
+
 ### Seek previews (storyboards)
 
 Every media response (`MediaFileInfo`) carries `storyboard_status`: `ready`, `pending`, `processing`, `failed` or
@@ -155,8 +170,8 @@ track when it is `ready`; the route answers the same states:
 | ready | `200` WebVTT, one cue per frame, each cue an absolute signed `https://<origin>/media-images/...jpg#xywh=x,y,w,h` URL of a sheet (`public_base_url`, else the origin of the request) |
 | pending, processing | `202`, `Retry-After`, `X-Storyboard-Status`, empty body |
 | failed | `409` problem `storyboard_failed` (param `attempts`) |
-| unsupported | `422` problem `storyboard_unsupported` (param `min_duration_seconds`) |
+| unsupported | `422` problem `storyboard_unsupported` (param `min_duration_seconds`), or `no_video_stream` for a video file with only audio |
 
 The permission is `media.view` plus the post scope. The sheet URLs need no token (like thumbnails) and expire:
 `Cache-Control: private, max-age` of the track is no longer than their lifetime, so fetch the track again after
-it. Both problem codes need a text in the web translations.
+it. Every problem code here needs a text in the web translations.

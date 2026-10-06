@@ -84,8 +84,8 @@ def client_status(media: MediaFile, config: StoryboardSettings) -> str:
 
 def status_for(media: MediaFile, config: StoryboardSettings, job_status: Optional[str]) -> str:
     """client_status for a given job status: the status of a video_storyboards row the caller loaded, None without one"""
-    if not media.is_video or not config.enabled:
-        return StoryboardStatus.UNSUPPORTED.value
+    if not media.is_video or not config.enabled or media.poster_status == PosterStatus.UNSUPPORTED.value:
+        return StoryboardStatus.UNSUPPORTED.value     # the last: the file has no video stream
     if job_status:
         return job_status
     # A known short duration comes first: such a video never gets a storyboard, whatever its poster does

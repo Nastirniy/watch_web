@@ -8,7 +8,7 @@ Usage:
     python -m app.backend.media_tools poster-status
     python -m app.backend.media_tools reconcile-storyboards [--retry-failed]
     python -m app.backend.media_tools storyboard-status
-    python -m app.backend.media_tools probe-missing [--limit N]
+    python -m app.backend.media_tools probe-missing [--limit N] [--all]
     python -m app.backend.media_tools expire-uploads
 
 cleanup-legacy-thumbnails removes the *_thumb_small|medium|large.jpg files the
@@ -122,29 +122,32 @@ async def storyboard_status() -> int:
     return 0
 
 
-async def probe_missing(limit: int) -> int:
-    """Fill duration/codec/playback_type for video and audio rows that have none (existing uploads)"""
-    from sqlmodel import select
-    from app.backend.database import get_session_maker, close_db
-    from app.backend.models.media import MediaFile
-    from app.backend.services.media.probe import metadata_for, resolve_tools
+async def probe_missing(limit: int, refresh: bool = False) -> int:
+    """Fill duration/codec/playback_type for video and audio rows that have none (existing uploads).
 
-    ffmpeg, ffprobe = resolve_tools()
+    refresh (--all) probes every video and audio row again and reads the size of every image again: rows stored
+    before sizes were reported as displayed (vertical phone videos, EXIF-rotated photos) get the displayed size.
+    """
+    from sqlmodel import select
+    from app.backend import database
+    from app.backend.models.media import MediaFile
+    from app.backend.services.media import probe
+
+    ffmpeg, ffprobe = probe.resolve_tools()
     if not ffmpeg and not ffprobe:
         print("neither ffprobe nor ffmpeg is available")
         return 1
     root = _storage_root()
-    session_maker = await get_session_maker()
+    session_maker = await database.get_session_maker()
     done = failed = 0
     try:
         async with session_maker() as session:
-            rows = (await session.exec(
-                select(MediaFile)
-                .where(MediaFile.is_deleted == False, MediaFile.media_type.in_(("video", "audio")), MediaFile.playback_type.is_(None))
-                .order_by(MediaFile.id).limit(limit)
-            )).all()
+            query = select(MediaFile).where(MediaFile.is_deleted == False, MediaFile.media_type.in_(("video", "audio")))
+            if not refresh:
+                query = query.where(MediaFile.playback_type.is_(None))
+            rows = (await session.exec(query.order_by(MediaFile.id).limit(limit))).all()
             for row in rows:
-                values = metadata_for(row.resolve_path(root), row.mime_type, ffmpeg, ffprobe)
+                values = probe.metadata_for(row.resolve_path(root), row.mime_type, ffmpeg, ffprobe)
                 if not values:
                     failed += 1
                     print(f"media {row.id}: probe failed ({row.stored_filename})")
@@ -152,10 +155,25 @@ async def probe_missing(limit: int) -> int:
                 for key, value in values.items():
                     setattr(row, key, value)
                 done += 1
-                print(f"media {row.id}: {values.get('playback_type')} duration={values.get('duration_seconds')}")
+                print(f"media {row.id}: {values.get('playback_type')} duration={values.get('duration_seconds')} "
+                      f"size={values.get('width')}x{values.get('height')}")
+            if refresh:
+                images = (await session.exec(
+                    select(MediaFile).where(MediaFile.is_deleted == False, MediaFile.media_type == "image")
+                    .order_by(MediaFile.id).limit(limit)
+                )).all()
+                for row in images:
+                    size = probe.image_dimensions(row.resolve_path(root))
+                    if size is None:
+                        failed += 1
+                        print(f"media {row.id}: image size unreadable ({row.stored_filename})")
+                        continue
+                    row.width, row.height = size
+                    done += 1
+                    print(f"media {row.id}: image {size[0]}x{size[1]}")
             await session.commit()
     finally:
-        await close_db()
+        await database.close_db()
     print(f"probed {done} file(s), {failed} failed")
     return 0
 
@@ -195,6 +213,8 @@ def main(argv=None) -> int:
 
     probe = sub.add_parser("probe-missing", help="fill duration, codecs and playback_type for existing video and audio rows")
     probe.add_argument("--limit", type=int, default=1000)
+    probe.add_argument("--all", action="store_true",
+                       help="probe every video and audio row again and re-read image sizes (sizes as displayed)")
 
     sub.add_parser("expire-uploads", help="expire abandoned resumable upload sessions")
 
@@ -210,7 +230,7 @@ def main(argv=None) -> int:
     if args.command == "storyboard-status":
         return asyncio.run(storyboard_status())
     if args.command == "probe-missing":
-        return asyncio.run(probe_missing(args.limit))
+        return asyncio.run(probe_missing(args.limit, refresh=args.all))
     if args.command == "expire-uploads":
         return asyncio.run(expire_uploads())
     return 1

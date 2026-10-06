@@ -148,6 +148,7 @@ class PosterStatus(str, Enum):
     PROCESSING = "processing"
     READY = "ready"
     FAILED = "failed"
+    UNSUPPORTED = "unsupported"     # the file has no video stream (a probe found only audio): never claimed
 
 
 class StoryboardJobStatus(str, Enum):

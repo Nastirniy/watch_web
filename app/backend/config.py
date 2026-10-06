@@ -259,6 +259,12 @@ class ImgproxySettings(BaseModel):
     # Origin the API uses to pre-warm the nginx cache after an upload, e.g. http://nginx inside compose.
     # Falls back to public_base_url; pre-warming is skipped when both are empty.
     prewarm_base_url: str = ""
+    # imgproxy's IMGPROXY_MAX_SRC_RESOLUTION (megapixels): imgproxy refuses every render of a larger image, so such
+    # images are stored but get thumbnail_status unsupported. docker-compose.yml gives both containers one variable.
+    # 250 covers 200 MP phone cameras; libvips decodes JPEG at a reduced scale and PNG line by line, so memory stays
+    # low (200 MP: 63 MB JPEG, 124 MB PNG), while the limit still stops a crafted image of a few hundred KB that holds
+    # gigapixels (1.6 GP: 3.5 s of CPU per render)
+    max_src_resolution_mp: float = 250
 
     @property
     def signing_enabled(self) -> bool:
