@@ -3,13 +3,14 @@ name = "Radio Monitoring System"
 version = "1.0.0"
 debug = true
 environment = "development"
+problem_base_url = ""  # Base of error "type" URIs, e.g. "https://monitoring.example/problems"; empty = request origin + /problems
 
 [database]
 host = "localhost"
 port = 3306
 name = "radio_monitoring"
 user = "root"
-password = "root"
+password = "pythops"
 echo = false
 pool_size = 20
 max_overflow = 40
@@ -18,15 +19,11 @@ max_overflow = 40
 secret_key = "your-secret-key-change-this-in-production"  # Use MYSETTINGS_SECURITY__SECRET_KEY env var in production
 algorithm = "HS256"
 access_token_expire_minutes = 30
-refresh_token_expire_days = 7
-session_expire_hours = 8
-password_min_length = 12
-max_login_attempts = 5
-lockout_duration_minutes = 30
-require_https = false
-#allowed_origins = ["https://localhost:60800"]
-allowed_origins = ["http://localhost:3000", "http://127.0.0.1:3000", "*"]
+session_idle_timeout_minutes = 30   # a session ends after this long without a request; requests move the end
+session_max_hours = 0               # optional hard limit since the login; 0: an active session never ends by itself
 jwt_leeway_seconds = 10
+online_threshold_seconds = 300
+activity_touch_interval_seconds = 60
 
 [server]
 host = "127.0.0.1"
@@ -51,11 +48,82 @@ enable_file_logging = false
 # Examples: "UTC", "Europe/Kyiv", "America/New_York", "Asia/Tokyo", "Europe/London"
 # System will fallback to UTC if timezone is not available
 timezone = "Europe/Kyiv"  # Ukraine timezone with automatic winter/summer time handling
-dst_handling = true
 
 [storage]
 # Media file storage configuration
-upload_path = "uploads"  # Base directory for uploaded files
-chunk_size_mb = 1  # Default chunk size in megabytes
-upload_timeout_minutes = 30  # Upload session timeout in minutes
+upload_path = "uploads"  # Base directory for uploaded files (absolute in production)
+temp_path = "temp"  # Spool directory for multipart uploads (same filesystem as upload_path is fastest)
 max_file_size_gb = 10  # Maximum file size in gigabytes
+# ffmpeg binaries for the media worker; bare names are looked up on PATH,
+# ffmpeg falls back to the imageio-ffmpeg package when installed (Windows development)
+ffmpeg_path = "ffmpeg"
+ffprobe_path = "ffprobe"
+
+# Nginx offloading: upload (client_body_in_file_only), download and stream (X-Accel-Redirect),
+# thumbnails (X-Accel-Redirect to imgproxy through the nginx cache). One switch for all of them.
+enable_nginx = false
+nginx_upload_temp_path = "/var/www/nginx_uploads"  # Must match nginx client_body_temp_path
+nginx_internal_uploads_prefix = "/protected_uploads"  # Must match the internal location in nginx.conf
+
+[storage.imgproxy]
+# imgproxy renders every thumbnail and preview on demand from the original (or the video poster).
+url = "http://127.0.0.1:8080"  # Used for proxying when enable_nginx = false; docker compose sets http://imgproxy:8080
+key = ""  # Hex; generate with: python -c "import secrets; print(secrets.token_hex(32))". Empty = unsigned (dev only)
+salt = ""  # Hex, same generator. Must match IMGPROXY_KEY / IMGPROXY_SALT of the imgproxy service
+nginx_internal_prefix = "/_thumb"  # Internal nginx location used through X-Accel-Redirect
+public_prefix = "/media-images"  # Public nginx location for signed expiring images made from media (thumbnails, previews)
+public_base_url = ""  # Origin for public URLs, e.g. "https://monitoring.example"; empty keeps them relative
+prewarm_base_url = ""  # Origin the API uses to pre-warm the nginx cache after uploads, e.g. "http://nginx"
+
+[storage.thumbnail]
+# Bounding boxes; imgproxy fits the image inside without enlarging. Nothing is precomputed.
+small_size = [150, 150]
+medium_size = [300, 300]
+large_size = [600, 600]
+preview_size = [1600, 1600]
+quality = 85
+url_ttl_seconds = 3600  # Lifetime of the signed URLs embedded in list responses
+share_max_ttl_seconds = 604800  # Upper bound for POST /media/{id}/share (7 days)
+prewarm = true  # Request the medium size once after an image upload
+
+[storage.poster]
+# Video poster extraction by the media worker (python -m app.backend.workers.media_worker)
+max_attempts = 3
+lease_seconds = 300
+timeout_seconds = 60  # ffmpeg is killed after this
+poll_interval_seconds = 1.0
+idle_poll_interval_seconds = 5.0
+frame_position = 0.1  # Fraction of the duration to seek to
+max_seek_seconds = 30
+max_width = 1920
+concurrency = 2  # Parallel ffmpeg processes per worker
+heartbeat_seconds = 30
+stale_after_seconds = 120
+backoff_seconds = [30, 120, 480]
+
+[storage.storyboard]
+# Video storyboards (seek previews) made by the media worker, only while the poster queue is empty
+enabled = true  # Off: no claims, the API answers unsupported, existing files stay
+slots = 1  # Storyboards at once per worker process; must be below storage.poster.concurrency
+min_duration_seconds = 60  # Shorter videos get none
+max_frames = 300  # Upper bound of frames per video (the step grows with the duration)
+min_step_seconds = 2  # Lower bound of the frame step
+tile_width = 160  # Width of one frame in pixels
+columns = 10  # Frames per row of a sheet
+rows = 10  # Rows per sheet
+jpeg_qscale = 5  # ffmpeg -q:v (2 best, 31 worst)
+threads = 1  # ffmpeg threads
+nice = 10  # POSIX niceness of ffmpeg, 0 = unchanged
+timeout_seconds = 1800  # ffmpeg is killed after this
+lease_seconds = 300  # Claim lease, renewed while ffmpeg runs
+max_attempts = 3  # Failures before a storyboard is marked failed
+backoff_seconds = [60, 300, 1800]  # Retry delays after the 1st, 2nd, ... failure
+retry_after_seconds = 30  # Retry-After of the 202 answer
+
+[health]
+# Health endpoint security configuration
+allowed_hosts = ["127.0.0.1", "localhost", "::1", "*"]  # Hosts allowed to access health endpoint. Use "*" to allow all
+rate_limit_requests = 10  # Maximum requests per window (1-1000)
+rate_limit_window_seconds = 60  # Rate limit window in seconds (10-3600)
+enable_rate_limit = true  # Enable rate limiting for health endpoint
+enable_host_check = false  # Enable host restrictions for health endpoint (set to true in production)

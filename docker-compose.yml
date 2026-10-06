@@ -1,0 +1,113 @@
+# Radio Monitoring System: application services only.
+#
+# Topology (see DEPLOYMENT.md):
+#   host nginx  -> 127.0.0.1:8000 (api container)     entry point, TLS, upload offload, media and thumbnail cache
+#               -> 127.0.0.1:8080 (imgproxy container) through the internal /_thumb/ and public /media-images/ locations
+#   host MySQL  <- api and media-worker on 127.0.0.1:3306
+#   MEDIA_ROOT  <- host directory (local disk or a mounted NFS/SMB share), bind-mounted at the SAME path
+#                  into every container, so nginx, the API, the worker and imgproxy agree on one path.
+#
+# Containers use the host network: no port mapping, the database and nginx are reached on 127.0.0.1,
+# and nothing has to be reconfigured on the host. See the "bridge network" note at the bottom for
+# Docker Desktop or hosts where host networking is not wanted.
+#
+#   cp .env.example .env            # database, secret key, imgproxy key/salt, MEDIA_ROOT, MEDIA_UID/GID
+#   docker compose up -d --build
+#
+# Air-gapped servers: `docker save watch-web ghcr.io/imgproxy/imgproxy:v3 | gzip > images.tgz`, then `docker load`.
+
+x-app: &app
+  image: watch-web
+  build: .
+  env_file: .env
+  network_mode: host
+  # Run as the owner of MEDIA_ROOT so files written by the containers stay readable by host nginx
+  user: "${MEDIA_UID:-10001}:${MEDIA_GID:-10001}"
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "50m", max-file: "5" }
+
+services:
+  api:
+    <<: *app
+    environment:
+      MYSETTINGS_SERVER__HOST: 127.0.0.1          # only host nginx talks to the API
+      MYSETTINGS_SERVER__PORT: ${API_PORT:-8000}
+      MYSETTINGS_STORAGE__UPLOAD_PATH: ${MEDIA_ROOT:?set MEDIA_ROOT in .env}
+      MYSETTINGS_STORAGE__TEMP_PATH: ${MEDIA_ROOT}/_tmp
+      MYSETTINGS_STORAGE__ENABLE_NGINX: "true"
+      MYSETTINGS_STORAGE__NGINX_UPLOAD_TEMP_PATH: ${NGINX_UPLOAD_TEMP:?set NGINX_UPLOAD_TEMP in .env}
+      MYSETTINGS_STORAGE__IMGPROXY__URL: http://127.0.0.1:${IMGPROXY_PORT:-8080}
+      MYSETTINGS_STORAGE__IMGPROXY__PREWARM_BASE_URL: http://127.0.0.1:${NGINX_HTTP_PORT:-80}
+    volumes:
+      - ${MEDIA_ROOT}:${MEDIA_ROOT}
+      - ${NGINX_UPLOAD_TEMP}:${NGINX_UPLOAD_TEMP}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:${API_PORT:-8000}/health', timeout=5).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  media-worker:
+    <<: *app
+    command: ["python", "-m", "app.backend.workers.media_worker"]
+    environment:
+      MYSETTINGS_STORAGE__UPLOAD_PATH: ${MEDIA_ROOT:?set MEDIA_ROOT in .env}
+      MYSETTINGS_STORAGE__TEMP_PATH: ${MEDIA_ROOT}/_tmp
+    volumes:
+      - ${MEDIA_ROOT}:${MEDIA_ROOT}
+    deploy:
+      resources:
+        limits:
+          memory: ${WORKER_MEMORY_LIMIT:-1g}
+    stop_grace_period: 90s
+
+  imgproxy:
+    image: ghcr.io/imgproxy/imgproxy:v3
+    network_mode: host
+    user: "${MEDIA_UID:-10001}:${MEDIA_GID:-10001}"
+    environment:
+      IMGPROXY_BIND: "127.0.0.1:${IMGPROXY_PORT:-8080}"
+      IMGPROXY_KEY: ${IMGPROXY_KEY:?set IMGPROXY_KEY in .env (hex)}
+      IMGPROXY_SALT: ${IMGPROXY_SALT:?set IMGPROXY_SALT in .env (hex)}
+      IMGPROXY_LOCAL_FILESYSTEM_ROOT: ${MEDIA_ROOT}
+      IMGPROXY_MAX_SRC_RESOLUTION: "60"
+      IMGPROXY_MAX_SRC_FILE_SIZE: "209715200"
+      IMGPROXY_TIMEOUT: "10"
+      IMGPROXY_READ_REQUEST_TIMEOUT: "10"
+      IMGPROXY_AUTO_ROTATE: "true"
+      IMGPROXY_AUTO_WEBP: "true"
+      IMGPROXY_QUALITY: "85"
+      IMGPROXY_USE_ETAG: "true"
+      IMGPROXY_TTL: "86400"
+      IMGPROXY_PROMETHEUS_BIND: "127.0.0.1:${IMGPROXY_METRICS_PORT:-8081}"
+      IMGPROXY_LOG_FORMAT: structured
+    volumes:
+      - ${MEDIA_ROOT}:${MEDIA_ROOT}:ro
+    deploy:
+      resources:
+        limits:
+          memory: ${IMGPROXY_MEMORY_LIMIT:-1g}
+    healthcheck:
+      test: ["CMD", "imgproxy", "health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "5" }
+
+# ---------------------------------------------------------------------------
+# Bridge network variant (Docker Desktop, or when host networking is not allowed)
+# ---------------------------------------------------------------------------
+# Replace `network_mode: host` on every service with:
+#   ports: ["127.0.0.1:8000:8000"]            (api)      / ["127.0.0.1:8080:8080"] (imgproxy)
+#   extra_hosts: ["host.docker.internal:host-gateway"]
+# and in .env set MYSETTINGS_DATABASE__HOST=host.docker.internal. MySQL must then listen on the
+# docker bridge address (bind-address = 0.0.0.0 or the docker0 IP) and grant the application user
+# from the bridge subnet ('radio_user'@'172.%'). Inside the api service use
+#   MYSETTINGS_STORAGE__IMGPROXY__URL=http://imgproxy:8080 and PREWARM_BASE_URL=http://host.docker.internal
+# with IMGPROXY_BIND=":8080".

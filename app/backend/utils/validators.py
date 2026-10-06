@@ -4,12 +4,12 @@ Following OWASP security guidelines and industry standards
 """
 
 import re
-import html
+from app.backend.utils.text import unescape_html, unescape_deep
 import bleach
-from typing import Any, Optional, List, Dict
-from datetime import datetime
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, field_validator
 from email_validator import validate_email, EmailNotValidError
+from app.backend.services.api_errors import invalid
+from app.backend.enums.errors import FieldErrorCode
 
 
 class SecurityValidators:
@@ -32,47 +32,53 @@ class SecurityValidators:
 
     @classmethod
     def sanitize_string(cls, value: str, max_length: int = 255, allow_html: bool = False) -> str:
-        """Sanitize string input with XSS protection"""
+        """Validate a plain-text value and return it as the characters the user typed.
+
+        The value is stored and returned as plain text: apostrophes, quotes and
+        ampersands stay as they are (the API is JSON, escaping belongs to the
+        renderer). Entities a client sends anyway ("&#x27;", "&amp;") are decoded
+        first so the checks below see the real text.
+        """
         if not isinstance(value, str):
-            raise ValueError("Input must be a string")
-        
-        # Trim whitespace
-        value = value.strip()
-        
+            raise invalid(FieldErrorCode.VALUE_NOT_STRING)
+
+        # Decode entities, then trim whitespace
+        value = unescape_html(value).strip()
+
         # Length validation
         if len(value) > max_length:
-            raise ValueError(f"String too long (max {max_length} characters)")
-        
+            raise invalid(FieldErrorCode.STRING_TOO_LONG, max_length=max_length)
+
         # Check for SQL injection patterns
         if cls.PATTERNS['sql_injection'].search(value):
-            raise ValueError("Potentially malicious SQL patterns detected")
-        
+            raise invalid(FieldErrorCode.TEXT_SQL_PATTERN)
+
         # Check for XSS patterns
         if cls.PATTERNS['xss_patterns'].search(value):
-            raise ValueError("Potentially malicious script patterns detected")
-        
-        if not allow_html:
-            # HTML encode to prevent XSS
-            value = html.escape(value)
-        else:
-            # Use bleach for safe HTML sanitization
+            raise invalid(FieldErrorCode.TEXT_SCRIPT_PATTERN)
+
+        if allow_html:
+            # Keep only harmless formatting tags
             allowed_tags = ['b', 'i', 'u', 'em', 'strong', 'p', 'br']
             value = bleach.clean(value, tags=allowed_tags, strip=True)
-        
+
         return value
 
     @classmethod
     def validate_username(cls, username: str) -> str:
-        """Validate username with security rules"""
+        """Validate username with security rules and keep the case the user typed.
+
+        Uniqueness is case-insensitive (see api/v1/users.py), so "Ivan" and "ivan" can't coexist.
+        """
         if not cls.PATTERNS['username'].match(username):
-            raise ValueError("Username must be 3-50 characters, alphanumeric with ._- allowed")
-        
+            raise invalid(FieldErrorCode.USERNAME_INVALID)
+
         # Check for reserved usernames
         reserved = ['admin', 'root', 'user', 'test', 'guest', 'anonymous', 'null', 'undefined']
         if username.lower() in reserved:
-            raise ValueError("Username is reserved")
-        
-        return username.lower()
+            raise invalid(FieldErrorCode.USERNAME_RESERVED)
+
+        return username
 
     @classmethod
     def validate_email(cls, email: str) -> str:
@@ -81,28 +87,28 @@ class SecurityValidators:
             valid = validate_email(email)
             return valid.email
         except EmailNotValidError:
-            raise ValueError("Invalid email format")
+            raise invalid(FieldErrorCode.EMAIL_INVALID)
 
     @classmethod
     def validate_ip_address(cls, ip: str) -> str:
         """Validate IPv4 address"""
         if not cls.PATTERNS['ip_address'].match(ip):
-            raise ValueError("Invalid IP address format")
+            raise invalid(FieldErrorCode.IP_ADDRESS_INVALID)
         return ip
 
     @classmethod
     def validate_filename(cls, filename: str) -> str:
         """Validate filename for security"""
         if not cls.PATTERNS['filename'].match(filename):
-            raise ValueError("Invalid filename - only alphanumeric, dots, dashes, underscores allowed")
+            raise invalid(FieldErrorCode.FILENAME_INVALID)
         
         # Check for path traversal
         if '..' in filename or '/' in filename or '\\' in filename:
-            raise ValueError("Path traversal detected in filename")
+            raise invalid(FieldErrorCode.FILENAME_TRAVERSAL)
         
         # Check length
         if len(filename) > 255:
-            raise ValueError("Filename too long")
+            raise invalid(FieldErrorCode.FILENAME_TOO_LONG)
             
         return filename
 
@@ -110,13 +116,13 @@ class SecurityValidators:
     def validate_integer_range(cls, value: int, min_val: int = None, max_val: int = None) -> int:
         """Validate integer within range"""
         if not isinstance(value, int):
-            raise ValueError("Value must be an integer")
+            raise invalid(FieldErrorCode.INTEGER_REQUIRED)
         
         if min_val is not None and value < min_val:
-            raise ValueError(f"Value must be at least {min_val}")
+            raise invalid(FieldErrorCode.VALUE_TOO_SMALL, min_value=min_val)
         
         if max_val is not None and value > max_val:
-            raise ValueError(f"Value must be at most {max_val}")
+            raise invalid(FieldErrorCode.VALUE_TOO_LARGE, max_value=max_val)
         
         return value
 
@@ -124,137 +130,38 @@ class SecurityValidators:
     def validate_coordinates(cls, lat: float, lon: float) -> tuple[float, float]:
         """Validate geographic coordinates"""
         if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
-            raise ValueError("Coordinates must be numeric")
+            raise invalid(FieldErrorCode.COORDINATES_NOT_NUMERIC)
         
         if not (-90 <= lat <= 90):
-            raise ValueError("Latitude must be between -90 and 90")
+            raise invalid(FieldErrorCode.LATITUDE_OUT_OF_RANGE)
         
         if not (-180 <= lon <= 180):
-            raise ValueError("Longitude must be between -180 and 180")
+            raise invalid(FieldErrorCode.LONGITUDE_OUT_OF_RANGE)
         
         return float(lat), float(lon)
 
 
-class SecureBaseModel(BaseModel):
+class PlainTextModel(BaseModel):
+    """Base for models whose string fields must reach the client as plain text.
+
+    Every string (also inside lists and dicts) is passed through unescape_html
+    after validation, so a database row still holding "O&#x27;Brien" from the
+    time the API escaped its input is returned as "O'Brien". Nested models clean
+    themselves when they inherit this class as well.
+    """
+
+    @field_validator("*", mode="after")
+    @classmethod
+    def _unescape_plain_text(cls, value):
+        return unescape_deep(value)
+
+
+class SecureBaseModel(PlainTextModel):
     """Base model with built-in security validations"""
-    
+
     model_config = {
         "str_strip_whitespace": True,
         "validate_assignment": True,
+        "from_attributes": True,
         "extra": "forbid"  # Reject unknown fields
     }
-
-
-class PaginationParams(SecureBaseModel):
-    """Secure pagination parameters"""
-    page: int = Field(default=1, ge=1, le=1000)
-    size: int = Field(default=20, ge=1, le=100)
-    
-    @field_validator('page', 'size')
-    @classmethod
-    def validate_positive(cls, v):
-        return SecurityValidators.validate_integer_range(v, 1, 1000)
-
-
-class SearchParams(SecureBaseModel):
-    """Secure search parameters"""
-    query: Optional[str] = Field(default=None, max_length=100)
-    
-    @field_validator('query')
-    @classmethod
-    def validate_search_query(cls, v):
-        if v is not None:
-            return SecurityValidators.sanitize_string(v, max_length=100)
-        return v
-
-
-class GeolocationParams(SecureBaseModel):
-    """Secure geolocation parameters"""
-    latitude: Optional[float] = Field(default=None, ge=-90, le=90)
-    longitude: Optional[float] = Field(default=None, ge=-180, le=180)
-    
-    @field_validator('latitude', 'longitude')
-    @classmethod
-    def validate_coordinates(cls, v):
-        if v is not None:
-            if not isinstance(v, (int, float)):
-                raise ValueError("Coordinate must be numeric")
-        return v
-
-
-class DateRangeParams(SecureBaseModel):
-    """Secure date range parameters"""
-    start_date: Optional[datetime] = None
-    end_date: Optional[datetime] = None
-    
-    @field_validator('end_date')
-    @classmethod
-    def validate_date_range(cls, v, info):
-        if v is not None and 'start_date' in info.data and info.data['start_date'] is not None:
-            if v < info.data['start_date']:
-                raise ValueError("End date must be after start date")
-        return v
-
-
-def create_secure_string_field(
-    max_length: int = 255,
-    min_length: int = 1,
-    pattern: Optional[str] = None,
-    allow_html: bool = False
-) -> Field:
-    """Factory function to create secure string fields"""
-    
-    def validator(v: str) -> str:
-        if v is not None:
-            v = SecurityValidators.sanitize_string(v, max_length, allow_html)
-            if pattern and not re.match(pattern, v):
-                raise ValueError(f"String does not match required pattern: {pattern}")
-        return v
-    
-    return Field(
-        ...,
-        min_length=min_length,
-        max_length=max_length,
-        description=f"Secure string field (max {max_length} chars)"
-    )
-
-
-def create_secure_id_field(max_value: int = 2147483647) -> Field:
-    """Factory function to create secure ID fields"""
-    return Field(
-        ...,
-        gt=0,
-        le=max_value,
-        description="Secure positive integer ID"
-    )
-
-
-class SecurityConfig:
-    """Runtime security configuration"""
-    
-    # Maximum file size (10MB)
-    MAX_FILE_SIZE = 10 * 1024 * 1024
-    
-    # Allowed file extensions
-    ALLOWED_EXTENSIONS = {'.pdf', '.doc', '.docx', '.txt', '.csv', '.xlsx', '.png', '.jpg', '.jpeg'}
-    
-    # Rate limiting
-    RATE_LIMIT_PER_MINUTE = 60
-    RATE_LIMIT_PER_HOUR = 1000
-    
-    # Input limits
-    MAX_STRING_LENGTH = 1000
-    MAX_TEXT_LENGTH = 10000
-    MAX_ARRAY_SIZE = 100
-    
-    @classmethod
-    def validate_file_extension(cls, filename: str) -> bool:
-        """Validate file extension"""
-        import os
-        _, ext = os.path.splitext(filename.lower())
-        return ext in cls.ALLOWED_EXTENSIONS
-    
-    @classmethod
-    def validate_file_size(cls, size: int) -> bool:
-        """Validate file size"""
-        return size <= cls.MAX_FILE_SIZE

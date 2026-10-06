@@ -1,17 +1,24 @@
-from typing import Optional, List, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 from datetime import datetime
+from pathlib import Path
 from sqlmodel import Field, SQLModel, Relationship
 from app.backend.utils.datetime_utils import get_default_timezone_datetime
+from app.backend.enums.general import MediaType, PosterStatus, ThumbnailStatus
 
 if TYPE_CHECKING:
     from app.backend.models.observation import Observation
+    from app.backend.models.user import User
+
+
+POSTER_DIR = "_derived/posters"
 
 
 class MediaFile(SQLModel, table=True):
     __tablename__ = "media_files"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    observation_id: int = Field(foreign_key="observations.id", index=True)
+    observation_id: Optional[int] = Field(default=None, foreign_key="observations.id", index=True)
+    user_id: Optional[int] = Field(default=None, foreign_key="users.id", index=True)
 
     original_filename: str = Field(max_length=255)
     stored_filename: str = Field(unique=True, max_length=255)
@@ -27,27 +34,73 @@ class MediaFile(SQLModel, table=True):
     width: Optional[int] = Field(default=None)
     height: Optional[int] = Field(default=None)
 
+    # Video and audio: from ffprobe at upload (API) or during poster extraction (worker)
+    duration_seconds: Optional[float] = Field(default=None)
+    video_codec: Optional[str] = Field(default=None, max_length=64)
+    audio_codec: Optional[str] = Field(default=None, max_length=64)
+    # RFC 6381 string for HTMLMediaElement.canPlayType(), e.g. video/mp4; codecs="avc1.64001F, mp4a.40.2"
+    playback_type: Optional[str] = Field(default=None, max_length=255)
+
+    # Video poster job state (null for every other media type). Thumbnails of
+    # images are rendered on demand and have no state at all.
+    poster_status: Optional[str] = Field(default=None, max_length=12, index=True)
+    poster_attempts: int = Field(default=0)
+    poster_locked_until: Optional[datetime] = Field(default=None)
+    poster_worker: Optional[str] = Field(default=None, max_length=64)
+    poster_generated_at: Optional[datetime] = Field(default=None)
+    poster_error: Optional[str] = Field(default=None, max_length=500)
+
     uploaded_at: datetime = Field(default_factory=get_default_timezone_datetime, index=True)
-    upload_complete: bool = Field(default=False)
-    upload_session_started: datetime = Field(default_factory=get_default_timezone_datetime, index=True)
-    upload_last_activity: datetime = Field(default_factory=get_default_timezone_datetime, index=True)
-    upload_timeout_minutes: int = Field(default=30)
+    is_deleted: bool = Field(default=False, index=True)
 
     # Relationships
-    observation: "Observation" = Relationship(back_populates="media_files")
-    file_chunks: List["FileChunk"] = Relationship(back_populates="media_file", cascade_delete=True)
+    observation: Optional["Observation"] = Relationship(back_populates="media_files")
+    user: Optional["User"] = Relationship()
 
+    def resolve_path(self, storage_root: Path) -> Path:
+        p = Path(self.file_path)
+        return p if p.is_absolute() else storage_root / p
 
-class FileChunk(SQLModel, table=True):
-    __tablename__ = "file_chunks"
+    # ---- derived files -------------------------------------------------
 
-    id: Optional[int] = Field(default=None, primary_key=True)
-    media_file_id: int = Field(foreign_key="media_files.id", index=True)
-    chunk_number: int = Field(index=True)
-    chunk_size: int
-    chunk_hash: str = Field(max_length=64)
-    chunk_file_path: str = Field(max_length=500)  # Path to chunk file on filesystem
-    uploaded_at: datetime = Field(default_factory=get_default_timezone_datetime)
+    @property
+    def is_image(self) -> bool:
+        return self.media_type.lower() == MediaType.IMAGE.value
 
-    # Relationships
-    media_file: MediaFile = Relationship(back_populates="file_chunks")
+    @property
+    def is_video(self) -> bool:
+        return self.media_type.lower() == MediaType.VIDEO.value
+
+    @property
+    def poster_relative_path(self) -> Optional[str]:
+        """Deterministic poster location relative to the upload root: _derived/posters/000/91.jpg"""
+        if self.id is None or not self.is_video:
+            return None
+        return f"{POSTER_DIR}/{self.id // 1000:03d}/{self.id}.jpg"
+
+    def resolve_poster_path(self, storage_root: Path) -> Optional[Path]:
+        rel = self.poster_relative_path
+        return storage_root / rel if rel else None
+
+    @property
+    def thumbnail_source_path(self) -> Optional[str]:
+        """Path (relative to the upload root) imgproxy renders thumbnails from, or None when nothing can be rendered"""
+        if self.is_image:
+            return self.file_path
+        if self.is_video and self.poster_status == PosterStatus.READY.value:
+            return self.poster_relative_path
+        return None
+
+    @property
+    def thumbnail_status(self) -> str:
+        """Client-facing readiness, derived: images are always ready, videos follow the poster job"""
+        if self.is_image:
+            return ThumbnailStatus.READY.value
+        if self.is_video:
+            mapping = {
+                PosterStatus.READY.value: ThumbnailStatus.READY.value,
+                PosterStatus.PROCESSING.value: ThumbnailStatus.PROCESSING.value,
+                PosterStatus.FAILED.value: ThumbnailStatus.FAILED.value,
+            }
+            return mapping.get(self.poster_status or "", ThumbnailStatus.PENDING.value)
+        return ThumbnailStatus.UNSUPPORTED.value
