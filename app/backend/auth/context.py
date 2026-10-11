@@ -64,16 +64,28 @@ class AuthContext:
         return None if self.has_post_access_all else sorted(self.readable_post_ids)
 
 
-async def load_auth_context(session: AsyncSession, user: User, session_id: Optional[str] = None) -> AuthContext:
-    """Two queries: roles with their permissions, and extra post access rows."""
-    role_rows = (await session.exec(
+def role_permission_rows(user_id: int):
+    """What a user holds: (role id, name, display name, permission name or None) for every role of the user that is
+    not archived. The one definition of a user's effective permissions (load_auth_context, privileges.py)."""
+    return (
         select(Role.id, Role.name, Role.display_name, Permission.name)
         .select_from(UserRole)
         .join(Role, Role.id == UserRole.role_id)
         .outerjoin(RolePermission, RolePermission.role_id == Role.id)
         .outerjoin(Permission, Permission.id == RolePermission.permission_id)
-        .where(UserRole.user_id == user.id, Role.is_deleted == False)
-    )).all()
+        .where(UserRole.user_id == user_id, Role.is_deleted == False)
+    )
+
+
+async def effective_permissions(session: AsyncSession, user_id: int) -> FrozenSet[str]:
+    """Permission names a user holds through roles that are not archived (AuthContext.permissions of that user)"""
+    rows = (await session.exec(role_permission_rows(user_id))).all()
+    return frozenset(permission_name for *_, permission_name in rows if permission_name)
+
+
+async def load_auth_context(session: AsyncSession, user: User, session_id: Optional[str] = None) -> AuthContext:
+    """Two queries: roles with their permissions, and extra post access rows."""
+    role_rows = (await session.exec(role_permission_rows(user.id))).all()
 
     roles: Dict[int, RoleBrief] = {}
     permissions: Set[str] = set()

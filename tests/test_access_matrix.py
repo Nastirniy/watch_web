@@ -6,11 +6,13 @@ a 403 carrying the expected code and missing list. Data scope is satisfied by
 building every referenced resource inside the persona's own post.
 """
 import pytest
+from sqlmodel import select
 
 from app.main import fastapi_app
 from app.backend.auth.route_access import route_access_map
 from app.backend.auth.context import AuthContext
 from app.backend.models.observation import ObservationFrequency
+from app.backend.models.role import Permission
 from tests.helpers import make_post, make_user, make_dictionary, make_observation, make_media, make_role
 
 ENTRIES = list(route_access_map(fastapi_app))
@@ -53,7 +55,9 @@ async def test_route_gate(client, db, headers, entry, persona):
         "frequency_id": (await db.exec(__import__("sqlmodel").select(ObservationFrequency.id).where(
             ObservationFrequency.observation_id == observation.id))).first(),
         "role_id": role_id,
-        "permission_id": 1,
+        # a permission the persona holds: granting or revoking one the caller lacks is refused past the gate
+        "permission_id": (await db.exec(select(Permission.id).where(
+            Permission.name.in_(perms)).order_by(Permission.id))).first() or 1,
         "format_id": 1,
         "upload_id": "0" * 32,
         "session_id": "0" * 32,

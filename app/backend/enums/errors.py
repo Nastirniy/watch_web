@@ -138,6 +138,13 @@ class AccessErrorCode(ProblemType):
     MEDIA_NOT_OWNER = ("media_not_owner", problem(403, "You can only archive or restore media files you uploaded", **_ACCESS))
     UPLOAD_SESSION_NOT_OWNER = ("upload_session_not_owner", problem(403, "You can only use upload sessions you opened", **_ACCESS))
     USER_SELF_ONLY = ("user_self_only", problem(403, "You can only view your own account or users of your assigned posts", **_ACCESS))
+    # Roles assigned to a user, permissions added to or removed from a role, a role archived or restored:
+    # missing lists the permissions of the change the caller does not hold
+    GRANT_EXCEEDS_OWN_PERMISSIONS = ("grant_exceeds_own_permissions", problem(
+        403, "You can only grant or revoke permissions you hold yourself", **_ACCESS))
+    # Roles, certificate, active or archive state of a user holding permissions the caller lacks (missing)
+    TARGET_USER_MORE_PRIVILEGED = ("target_user_more_privileged", problem(
+        403, "This user holds permissions you do not hold", **_ACCESS))
     OBSERVATION_NOT_ACTIVE = ("observation_not_active", problem(
         403, "Observation is no longer active",
         "Cannot archive or restore media of an observation that is no longer active (status: {observation_status})",
@@ -200,6 +207,9 @@ class ErrorCode(ProblemType):
         "Role with this name exists as an archived role ({role_id}); restore it or choose another name", role_id=int))
     ADMIN_ROLE_NOT_ARCHIVABLE = ("admin_role_not_archivable", problem(409, "The built-in admin role cannot be archived"))
     ADMIN_ROLE_NOT_DELETABLE = ("admin_role_not_deletable", problem(409, "The built-in admin role cannot be deleted"))
+    ADMIN_ROLE_NOT_RENAMABLE = ("admin_role_not_renamable", problem(409, "The built-in admin role cannot be renamed"))
+    LAST_ADMIN_REQUIRED = ("last_admin_required", problem(409, "This change would leave no active administrator"))
+    CANNOT_REMOVE_OWN_ADMIN = ("cannot_remove_own_admin", problem(409, "You cannot remove administrator access from yourself"))
     ROLE_DELETE_REQUIRES_ARCHIVE = ("role_delete_requires_archive", problem(409, "Role must be archived before it can be deleted permanently"))
     ROLE_HAS_ACTIVE_USERS = ("role_has_active_users", problem(
         409, "Role is still assigned to active users; unassign it before deleting permanently", assigned_users=List[UserRef]))

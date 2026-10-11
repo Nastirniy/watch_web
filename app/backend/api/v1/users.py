@@ -15,6 +15,9 @@ from app.backend.models.user_post_access import UserPostAccess
 from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
 from app.backend.auth.access_control import AccessControlService
+from app.backend.auth.privileges import (
+    check_admin_kept, check_an_admin_remains, check_grant, check_target_user, role_permission_names,
+)
 from app.backend.auth.service import AuthService
 from app.backend.auth.certificates import CertificateParser, hash_data, hash_pki_certificate_data
 from app.backend.enums.general import Permissions, SessionEndReason, SessionRevokeCause, SessionStatus
@@ -69,6 +72,11 @@ async def _assignable_roles(session: AsyncSession, role_ids: List[int]) -> List[
     return roles
 
 
+async def _assigned_role_ids(session: AsyncSession, user_id: int) -> List[int]:
+    """Role ids of every assignment row of the user (archived roles included), sorted"""
+    return sorted((await session.exec(select(UserRole.role_id).where(UserRole.user_id == user_id))).all())
+
+
 def _username_taken(username: str, exclude_user_id: Optional[int] = None):
     """Case-insensitive lookup: "Ivan" and "ivan" are the same username"""
     query = select(User).where(func.lower(User.username) == username.lower())
@@ -117,7 +125,7 @@ async def list_users(
         ErrorCode.CERTIFICATE_FILE_EMPTY, ErrorCode.CERTIFICATE_INVALID, ErrorCode.CERTIFICATE_TAKEN,
         ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, ErrorCode.USERNAME_OR_CERTIFICATE_TAKEN, ErrorCode.USERNAME_TAKEN,
         ErrorCode.POST_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.CERTIFICATE_FILE_TOO_LARGE,
-        ErrorCode.DATA_TOO_LONG, *ADMIN,
+        ErrorCode.DATA_TOO_LONG, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *ADMIN,
     ),
 )
 async def create_user(
@@ -136,7 +144,8 @@ async def create_user(
 
     These fields are hashed before storage for security.
 
-    The form fields are described by UserCreateForm; role_ids is repeated once per role.
+    The form fields are described by UserCreateForm; role_ids is repeated once per role. The caller must hold
+    every permission of the roles (403 grant_exceeds_own_permissions).
     """
     current_user = auth.user
     certificate = user_data.certificate
@@ -177,6 +186,7 @@ async def create_user(
         raise ApiError(ErrorCode.CERTIFICATE_INVALID)
 
     roles_to_assign = await _assignable_roles(session, user_data.role_ids)
+    check_grant(auth, await role_permission_names(session, (role.id for role in roles_to_assign)))
 
     # Hash PKI certificate data before storing
     pki_cn_hash, pki_serial_hash, pki_fingerprint_hash = await hash_pki_certificate_data(
@@ -223,7 +233,10 @@ async def create_user(
             resource_type="user",
             resource_id=user.id,
             user_id=current_user.id,
-            new_values=user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"}),
+            new_values={
+                **user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"}),
+                "role_ids": sorted(role.id for role in roles_to_assign),
+            },
             details={"message": f"User {current_user.username} created new user {user.username} with {len(roles_to_assign)} roles"},
             **client_info(request, auth)
         )
@@ -284,6 +297,8 @@ async def get_user(
         ErrorCode.CERTIFICATE_TAKEN, ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, ErrorCode.USERNAME_TAKEN,
         ErrorCode.POST_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.USER_NOT_FOUND,
         ErrorCode.CERTIFICATE_FILE_TOO_LARGE, ErrorCode.FORM_CONTENT_TYPE_REQUIRED,
+        ErrorCode.LAST_ADMIN_REQUIRED, ErrorCode.CANNOT_REMOVE_OWN_ADMIN,
+        AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, AccessErrorCode.TARGET_USER_MORE_PRIVILEGED,
         *ADMIN,
     ),
 )
@@ -308,6 +323,11 @@ async def update_user(
 
     Only provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).
     The fields are form fields: any other body (JSON included) answers 415 instead of being ignored.
+
+    Changing the roles, the certificate or the active state needs a user who holds no permission the caller lacks
+    (403 target_user_more_privileged), new roles only permissions the caller holds (403
+    grant_exceeds_own_permissions). A role change or a deactivation must leave an active administrator and the
+    caller's own admin.true (409 last_admin_required, cannot_remove_own_admin).
     """
     current_user = auth.user
     content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
@@ -335,6 +355,14 @@ async def update_user(
     certificate = update_data.certificate
     # Checked before any change: a refused role must not leave the other fields of the PATCH saved
     roles_to_assign = await _assignable_roles(session, update_data.role_ids) if update_data.role_ids is not None else None
+    old_role_ids = await _assigned_role_ids(session, user_id)
+    new_role_ids = sorted(role.id for role in roles_to_assign) if roles_to_assign is not None else old_role_ids
+    roles_change = new_role_ids != old_role_ids
+    active_change = update_data.is_active is not None and update_data.is_active != user.is_active
+    if roles_change or active_change or certificate is not None:
+        await check_target_user(session, auth, user)
+    if roles_change:
+        check_grant(auth, await role_permission_names(session, new_role_ids))
 
     if update_data.username is not None:
         existing_username = await session.exec(_username_taken(update_data.username, exclude_user_id=user_id))
@@ -435,7 +463,7 @@ async def update_user(
         )
 
     try:
-        if roles_to_assign is not None:
+        if roles_change:
             # Replace the role assignments in the same transaction as the other changes
             # By difference: the flush writes INSERTs before DELETEs, so a kept row must not be re-inserted
             wanted = {role.id for role in roles_to_assign}
@@ -449,6 +477,10 @@ async def update_user(
                 if role.id not in present:
                     session.add(UserRole(user_id=user_id, role_id=role.id))
             _logger.info(f"User {current_user.username} replaced the roles of user {user.username} with {len(roles_to_assign)} roles")
+        if roles_change:
+            await check_admin_kept(session, auth)
+        elif deactivating:
+            await check_an_admin_remains(session)
 
         await session.commit()
 
@@ -461,8 +493,12 @@ async def update_user(
             resource_type="user",
             resource_id=user.id,
             user_id=current_user.id,
-            old_values=old_values,
-            new_values=user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"}),
+            old_values={**old_values, "role_ids": old_role_ids},
+            new_values={
+                **user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"}),
+                "role_ids": new_role_ids,
+                "certificate_replaced": certificate_replaced,
+            },
             details={"message": f"User {current_user.username} updated user {user.username}"},
             **client_info(request, auth)
         )
@@ -658,7 +694,10 @@ async def delete_user_post_access(
 @router.post(
     UserRoutes.USER_ARCHIVE.value,
     response_model=UserResponse,
-    responses=problems(ErrorCode.CANNOT_ARCHIVE_SELF, ErrorCode.USER_NOT_FOUND, *ADMIN),
+    responses=problems(
+        ErrorCode.CANNOT_ARCHIVE_SELF, ErrorCode.USER_NOT_FOUND, ErrorCode.LAST_ADMIN_REQUIRED,
+        AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *ADMIN,
+    ),
 )
 async def archive_user(
         request: Request,
@@ -670,17 +709,20 @@ async def archive_user(
 
     Nothing is removed: observations, media and role assignments of the user stay. The user is hidden from
     lists unless include_deleted=true. Undo with POST /{user_id}/restore. Already archived or unknown: 404.
+    A user holding permissions the caller lacks: 403 target_user_more_privileged; the last administrator: 409.
     """
     current_user = auth.user
     user = await _get_active_user_or_404(session, user_id)
     if user.id == current_user.id:
         raise ApiError(ErrorCode.CANNOT_ARCHIVE_SELF)
+    await check_target_user(session, auth, user)
 
     old_values = user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"})
     user.is_deleted = True
     user.is_active = False
     user.updated_at = datetime.now(timezone.utc)
     session.add(user)
+    await check_an_admin_remains(session)
 
     invalidated = await AuthService.invalidate_all_user_sessions(
         session=session,
@@ -710,7 +752,9 @@ async def archive_user(
 @router.post(
     UserRoutes.USER_RESTORE.value,
     response_model=UserResponse,
-    responses=problems(ErrorCode.USER_NOT_FOUND, ErrorCode.USER_NOT_ARCHIVED, *ADMIN),
+    responses=problems(
+        ErrorCode.USER_NOT_FOUND, ErrorCode.USER_NOT_ARCHIVED, AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *ADMIN,
+    ),
 )
 async def restore_user(
         request: Request,
@@ -718,7 +762,8 @@ async def restore_user(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_ARCHIVE], admin=True))
 ):
-    """Restore an archived user (is_deleted=false, is_active=true): the account can log in again. Not archived: 409."""
+    """Restore an archived user (is_deleted=false, is_active=true): the account can log in again. Not archived: 409.
+    A user holding permissions the caller lacks: 403 target_user_more_privileged."""
     current_user = auth.user
     result = await session.exec(select(User).where(User.id == user_id))
     user = result.first()
@@ -726,6 +771,7 @@ async def restore_user(
         raise ApiError(ErrorCode.USER_NOT_FOUND)
     if not user.is_deleted:
         raise ApiError(ErrorCode.USER_NOT_ARCHIVED)
+    await check_target_user(session, auth, user)
 
     old_values = user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"})
     user.is_deleted = False

@@ -6,7 +6,7 @@ from app.backend.utils.logging_config import get_database_logger
 
 _logger = get_database_logger()
 
-ADMIN_ROLE_NAME = "admin"  # built-in role: seeded, cannot be archived or deleted
+ADMIN_ROLE_NAME = "admin"  # built-in role: seeded, cannot be renamed (the name is its key), archived or deleted
 
 PERMISSION_META = {
     "user.view": ("Перегляд користувачів", "Дозволяє переглядати інформацію та профілі користувачів"),

@@ -12,6 +12,7 @@ from app.backend.models.user import User
 from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
 from app.backend.auth.access_control import AccessControlService
+from app.backend.auth.privileges import check_admin_kept, check_grant, role_permission_names
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import RoleRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
@@ -61,7 +62,10 @@ async def list_roles(
     RoleRoutes.ROOT.value,
     response_model=RoleResponse,
     status_code=status.HTTP_201_CREATED,
-    responses=problems(ErrorCode.ROLE_NAME_TAKEN, ErrorCode.PERMISSION_NOT_FOUND, ErrorCode.ROLE_NAME_ARCHIVED, *ADMIN),
+    responses=problems(
+        ErrorCode.ROLE_NAME_TAKEN, ErrorCode.PERMISSION_NOT_FOUND, ErrorCode.ROLE_NAME_ARCHIVED,
+        AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *ADMIN,
+    ),
 )
 async def create_role(
         request: Request,
@@ -69,10 +73,12 @@ async def create_role(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW, Permissions.ROLE_CREATE], admin=True))
 ):
-    """Create new role"""
+    """Create new role. permission_ids may name only permissions the caller holds (403 grant_exceeds_own_permissions)."""
     current_user = auth.user
     # Preventive validation
     await check_role_name_exists(session, role_data.name)
+    permissions = [await get_permission_or_404(session, perm_id) for perm_id in role_data.permission_ids or []]
+    check_grant(auth, (permission.name for permission in permissions))
 
     role = Role(**role_data.model_dump(exclude={"permission_ids"}))
     session.add(role)
@@ -80,9 +86,8 @@ async def create_role(
 
     # Assign permissions if provided
     if role_data.permission_ids is not None:
-        for perm_id in role_data.permission_ids:
-            await get_permission_or_404(session, perm_id)
-            session.add(RolePermission(role_id=role.id, permission_id=perm_id))
+        for permission in permissions:
+            session.add(RolePermission(role_id=role.id, permission_id=permission.id))
 
         _logger.info(
             f"User {current_user.username} created role {role.name} with {len(role_data.permission_ids)} permissions"
@@ -151,7 +156,8 @@ async def get_role(
     response_model=RoleResponse,
     responses=problems(
         ErrorCode.ROLE_NAME_TAKEN, ErrorCode.PERMISSION_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND,
-        ErrorCode.ROLE_NAME_ARCHIVED, *ADMIN,
+        ErrorCode.ROLE_NAME_ARCHIVED, ErrorCode.ADMIN_ROLE_NOT_RENAMABLE, ErrorCode.LAST_ADMIN_REQUIRED,
+        ErrorCode.CANNOT_REMOVE_OWN_ADMIN, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *ADMIN,
     ),
 )
 async def update_role(
@@ -161,9 +167,24 @@ async def update_role(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW, Permissions.ROLE_UPDATE], admin=True))
 ):
-    """Update role and optionally replace all permissions. Archived roles answer 404 until restored (POST /{role_id}/restore)."""
+    """Update role and optionally replace all permissions. Archived roles answer 404 until restored (POST /{role_id}/restore).
+
+    The built-in admin role keeps its name (409). The caller must hold every permission permission_ids adds or
+    removes (403 grant_exceeds_own_permissions); removing admin.true must leave an active administrator and the
+    caller's own admin.true (409).
+    """
     current_user = auth.user
     role = await get_role_or_404(session, role_id)
+    if role.name == ADMIN_ROLE_NAME and role_update.name is not None and role_update.name != role.name:
+        raise ApiError(ErrorCode.ADMIN_ROLE_NOT_RENAMABLE)
+
+    # Checked before any change: a refused grant must not leave the other fields saved
+    removed = set()
+    if role_update.permission_ids is not None:
+        wanted_names = {(await get_permission_or_404(session, perm_id)).name for perm_id in role_update.permission_ids}
+        current_names = await role_permission_names(session, [role_id])
+        removed = current_names - wanted_names
+        check_grant(auth, (wanted_names - current_names) | removed)
 
     # Store old values for auditing
     old_values = role.model_dump()
@@ -180,12 +201,8 @@ async def update_role(
     role.updated_at = datetime.now(timezone.utc)
     session.add(role)
 
-    # Replace all permissions if provided
+    # Replace all permissions if provided (every id was found above)
     if role_update.permission_ids is not None:
-        # Validate all permissions exist
-        for perm_id in role_update.permission_ids:
-            await get_permission_or_404(session, perm_id)
-
         # Replace by difference: the flush writes INSERTs before DELETEs, so a kept row must not be re-inserted
         wanted = set(role_update.permission_ids)
         current = await session.exec(select(RolePermission).where(RolePermission.role_id == role_id))
@@ -198,6 +215,8 @@ async def update_role(
         for perm_id in role_update.permission_ids:
             if perm_id not in present:
                 session.add(RolePermission(role_id=role_id, permission_id=perm_id))
+        if Permissions.IS_ADMIN.value in removed:
+            await check_admin_kept(session, auth)
 
         _logger.info(
             f"User {current_user.username} updated role {role.name} with {len(role_update.permission_ids)} permissions"
@@ -228,7 +247,10 @@ async def update_role(
 @router.post(
     RoleRoutes.ROLE_ARCHIVE.value,
     response_model=RoleResponse,
-    responses=problems(ErrorCode.ROLE_NOT_FOUND, ErrorCode.ADMIN_ROLE_NOT_ARCHIVABLE, *ADMIN),
+    responses=problems(
+        ErrorCode.ROLE_NOT_FOUND, ErrorCode.ADMIN_ROLE_NOT_ARCHIVABLE, ErrorCode.LAST_ADMIN_REQUIRED,
+        ErrorCode.CANNOT_REMOVE_OWN_ADMIN, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *ADMIN,
+    ),
 )
 async def archive_role(
         request: Request,
@@ -240,16 +262,22 @@ async def archive_role(
 
     An archived role stops granting permissions immediately, cannot be assigned and is hidden from lists
     unless include_deleted=true. Undo with POST /{role_id}/restore. Already archived or unknown: 404.
+    The caller must hold every permission of the role (it is revoked from every holder, 403), and archiving
+    must leave an active administrator and the caller's own admin.true (409).
     """
     current_user = auth.user
     role = await get_role_or_404(session, role_id)
     if role.name == ADMIN_ROLE_NAME:
         raise ApiError(ErrorCode.ADMIN_ROLE_NOT_ARCHIVABLE)
+    granted = await role_permission_names(session, [role_id])
+    check_grant(auth, granted)
 
     old_values = role.model_dump()
     role.is_deleted = True
     role.updated_at = datetime.now(timezone.utc)
     session.add(role)
+    if Permissions.IS_ADMIN.value in granted:
+        await check_admin_kept(session, auth)
     await create_audit_log(
         session=session,
         action="archive",
@@ -270,7 +298,9 @@ async def archive_role(
 @router.post(
     RoleRoutes.ROLE_RESTORE.value,
     response_model=RoleResponse,
-    responses=problems(ErrorCode.ROLE_NOT_FOUND, ErrorCode.ROLE_NOT_ARCHIVED, *ADMIN),
+    responses=problems(
+        ErrorCode.ROLE_NOT_FOUND, ErrorCode.ROLE_NOT_ARCHIVED, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *ADMIN,
+    ),
 )
 async def restore_role(
         request: Request,
@@ -278,11 +308,13 @@ async def restore_role(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW, Permissions.ROLE_ARCHIVE], admin=True))
 ):
-    """Restore an archived role (is_deleted=false): it grants its permissions again and can be assigned. Not archived: 409."""
+    """Restore an archived role (is_deleted=false): it grants its permissions again and can be assigned. Not archived: 409.
+    The caller must hold every permission of the role (403 grant_exceeds_own_permissions)."""
     current_user = auth.user
     role = await get_role_or_404(session, role_id, include_deleted=True)
     if not role.is_deleted:
         raise ApiError(ErrorCode.ROLE_NOT_ARCHIVED)
+    check_grant(auth, await role_permission_names(session, [role_id]))
 
     old_values = role.model_dump()
     role.is_deleted = False
@@ -417,7 +449,9 @@ async def _role_permissions(session: AsyncSession, role_id: Annotated[int, Path(
 @router.put(
     RoleRoutes.ROLE_PERMISSION_BY_ID.value,
     response_model=List[PermissionResponse],
-    responses=problems(ErrorCode.PERMISSION_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, *ADMIN),
+    responses=problems(
+        ErrorCode.PERMISSION_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *ADMIN,
+    ),
 )
 async def add_role_permission(
         request: Request,
@@ -426,7 +460,8 @@ async def add_role_permission(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW, Permissions.ROLE_UPDATE], admin=True))
 ):
-    """Grant one permission to a role (idempotent). Returns the role's permissions."""
+    """Grant one permission to a role (idempotent). Returns the role's permissions.
+    Only a permission the caller holds can be granted (403 grant_exceeds_own_permissions)."""
     current_user = auth.user
     role = await get_role_or_404(session, role_id)
     permission = await get_permission_or_404(session, permission_id)
@@ -435,6 +470,7 @@ async def add_role_permission(
         select(RolePermission).where(RolePermission.role_id == role_id, RolePermission.permission_id == permission_id)
     )
     if not existing.first():
+        check_grant(auth, [permission.name])
         session.add(RolePermission(role_id=role_id, permission_id=permission_id))
         role.updated_at = datetime.now(timezone.utc)
         session.add(role)
@@ -459,7 +495,9 @@ async def add_role_permission(
     RoleRoutes.ROLE_PERMISSION_BY_ID.value,
     response_model=List[PermissionResponse],
     responses=problems(
-        ErrorCode.PERMISSION_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.ROLE_PERMISSION_NOT_ASSIGNED, *ADMIN,
+        ErrorCode.PERMISSION_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.ROLE_PERMISSION_NOT_ASSIGNED,
+        ErrorCode.LAST_ADMIN_REQUIRED, ErrorCode.CANNOT_REMOVE_OWN_ADMIN, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS,
+        *ADMIN,
     ),
 )
 async def remove_role_permission(
@@ -469,7 +507,9 @@ async def remove_role_permission(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW, Permissions.ROLE_UPDATE], admin=True))
 ):
-    """Revoke one permission from a role. Returns the role's remaining permissions."""
+    """Revoke one permission from a role. Returns the role's remaining permissions.
+    Only a permission the caller holds can be revoked (403); revoking admin.true must leave an active
+    administrator and the caller's own admin.true (409)."""
     current_user = auth.user
     role = await get_role_or_404(session, role_id)
     permission = await get_permission_or_404(session, permission_id)
@@ -480,10 +520,13 @@ async def remove_role_permission(
     row = existing.first()
     if not row:
         raise ApiError(ErrorCode.ROLE_PERMISSION_NOT_ASSIGNED)
+    check_grant(auth, [permission.name])
 
     await session.delete(row)
     role.updated_at = datetime.now(timezone.utc)
     session.add(role)
+    if permission.name == Permissions.IS_ADMIN.value:
+        await check_admin_kept(session, auth)
     await session.commit()
     await create_audit_log(
         session=session,

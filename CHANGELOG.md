@@ -17,6 +17,30 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - Repeated ids in `permission_ids` of `POST /roles/` and `PATCH /roles/{id}` answer 422 with the new field code
   `permission_ids_duplicate` (they answered 500). The `FieldErrorCode` schema in `api-contract/v1/openapi.json` gained
   that value.
+- The built-in admin role keeps its name: a new `name` for the role named `admin` in `PATCH /roles/{id}` answers 409
+  `admin_role_not_renamable` (the unchanged name and the other fields stay editable). After a rename the role could be
+  archived, every administrator lost access and seeding created a second, empty `admin` role.
+- Nobody grants more than they hold: assigning roles (`POST /users/`, `role_ids` of `PATCH /users/{id}`), creating a
+  role with `permission_ids`, adding or removing permissions of a role (`permission_ids` of `PATCH /roles/{id}`,
+  `PUT` and `DELETE /roles/{id}/permissions/{permission_id}`), archiving and restoring a role answer 403
+  `grant_exceeds_own_permissions` when the change grants or revokes a permission the caller does not hold; `missing`
+  lists them. Only what the change adds or removes counts: a permission the caller lacks may stay on a role they edit.
+  A holder of `user.update` or `role.update` with `admin.true` could give themselves the admin role or any permission.
+- Changing the roles, the certificate or the active state of a user (`PATCH /users/{id}`), archiving or restoring a
+  user answer 403 `target_user_more_privileged` when that user holds a permission the caller lacks (`missing` lists
+  them); the other fields stay editable. Holders of the seeded admin role hold every permission and are not affected.
+- An active administrator always remains: a role change or deactivation of a user, archiving a user, archiving a role
+  or removing `admin.true` from a role answer 409 `last_admin_required` when no active, non-archived user would hold
+  `admin.true` through a role that is not archived, and 409 `cannot_remove_own_admin` when the change takes
+  `admin.true` from the caller. The only administrator could remove their own `admin.true`.
+- The audit rows of `POST /users/` and `PATCH /users/{id}` record `role_ids` (before and after) and
+  `certificate_replaced`; a role change left no trace in the audit values.
+
+### Changed
+
+- New problem codes for the web localization package: `admin_role_not_renamable`, `last_admin_required`,
+  `cannot_remove_own_admin` (409) and `grant_exceeds_own_permissions`, `target_user_more_privileged` (403). The role and
+  user routes above declare them; `api-contract/v1/openapi.json` gained their schemas.
 
 ## Backend layout: auth, errors, bootstrap and cli packages
 
