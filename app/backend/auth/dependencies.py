@@ -21,7 +21,7 @@ security = HTTPBearer(auto_error=False)
 @dataclass(frozen=True)
 class TokenClaims:
     user_id: int
-    session_id: Optional[str]
+    session_id: str
 
 
 async def get_token_claims(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> TokenClaims:
@@ -37,7 +37,12 @@ async def get_token_claims(credentials: Optional[HTTPAuthorizationCredentials] =
     except (KeyError, TypeError, ValueError):
         logger.warning("Authentication failed: no valid user id in the token")
         raise ApiError(AuthErrorCode.INVALID_TOKEN)
-    return TokenClaims(user_id=user_id, session_id=payload.get("sid"))
+    # The login binds every token to its session (sid); a token without one would skip the session checks
+    session_id = payload.get("sid")
+    if not session_id or not isinstance(session_id, str):
+        logger.warning(f"Authentication failed: the token names no session, user_id={user_id}")
+        raise ApiError(AuthErrorCode.INVALID_TOKEN)
+    return TokenClaims(user_id=user_id, session_id=session_id)
 
 
 async def get_current_user(
@@ -69,19 +74,20 @@ async def get_current_user(
         raise ApiError(AuthErrorCode.ACCOUNT_DEACTIVATED)
 
     # The session of the token must be live (not ended, used within the idle timeout) and, when it was opened
-    # with a client certificate, this request must present the same certificate
-    if session_id:
-        user_session = await live_session(session, session_id, user_id)
-        if user_session is None:
-            raise ApiError(AuthErrorCode.SESSION_EXPIRED)
-        if not await certificate_matches(user_session, x_ssl_client_fingerprint):
-            logger.warning(f"Token presented with another client certificate: session_id={session_id}, user_id={user_id}")
-            raise ApiError(AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH)
-        if should_touch(user_session.last_activity):
-            # Activity moves the end of the session (and feeds presence), at most once per touch interval
-            touch(user_session)
-            session.add(user_session)
-            await session.commit()
+    # with a client certificate, bound to the user's current certificate and presented with that certificate
+    user_session = await live_session(session, session_id, user_id)
+    if user_session is None:
+        raise ApiError(AuthErrorCode.SESSION_EXPIRED)
+    if await AuthService.end_session_of_replaced_certificate(session, user_session, user):
+        raise ApiError(AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH)
+    if not await certificate_matches(user_session, x_ssl_client_fingerprint):
+        logger.warning(f"Token presented with another client certificate: session_id={session_id}, user_id={user_id}")
+        raise ApiError(AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH)
+    if should_touch(user_session.last_activity):
+        # Activity moves the end of the session (and feeds presence), at most once per touch interval
+        touch(user_session)
+        session.add(user_session)
+        await session.commit()
 
     logger.debug(f"User authenticated: user_id={user_id}, username={user.username}")
     return user

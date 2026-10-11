@@ -57,6 +57,25 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   as `foto.png` written in Cyrillic used to lose its extension and every upload path answered 415
   `media_extension_not_accepted`; it is now stored as `upload_<8 hex>.png` (`file_extension` `.png`). ASCII names are
   stored as before.
+- Production login reads the CN from nginx's `X-SSL-Client-DN` (`$ssl_client_s_dn`, OpenSSL RFC 2253 form) as OpenSSL
+  writes it: RDNs are split on unescaped `,` (attributes on unescaped `+`) and the value is unescaped (`\XX` bytes
+  decoded as UTF-8, `\,` and the other specials as the character). A certificate with a non-ASCII CN such as
+  `Іван Петренко` (sent as `CN=\D0\86\D0\B2...`) or a CN with an escaped comma answered 401
+  `certificate_not_recognized`. A DN whose escaped bytes are not UTF-8 answers `certificate_data_missing`. The
+  legacy `/C=.../CN=...` form is read as before.
+- A session bound to a client certificate that is no longer the user's ends on its next request or refresh (401
+  `token_certificate_mismatch`; the session is recorded `revoked` with `revoke_cause` `certificate_changed`, audit
+  `force_logout`). A login racing a certificate change could store its session after the change had revoked the old
+  certificate's sessions, and that session kept working with the old certificate.
+- `is_online` and `last_activity_at` of users (`UserResponse`, the nested `user` projections, `/auth/me`) and
+  `last_user_activity_at` of posts count live sessions only, the same condition as the `is_online` filter and
+  `online_user_count`: a session past its idle timeout or hard end no longer counts before anything records its end.
+  A user whose sessions all ended has `last_activity_at` `null`, as after a logout.
+- An access token without a session id (`sid`) answers 401 `invalid_token`; it used to skip every session and
+  certificate check. The login never issues one.
+- `GET /problems/{code}` for an unknown code no longer echoes the submitted value: `problem_type_not_found` has no
+  params (the `problem_code` member and the code in `detail` are gone from the body and from its schema in
+  `api-contract/v1/openapi.json`).
 
 ### Changed
 
@@ -68,6 +87,11 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `storage.nginx_upload_temp_path` (paths outside it, `..`, links leading out, directories, missing files); the file
   is not touched. The route declares the code and `api-contract/v1/openapi.json` gained it. New problem code for the
   web localization package.
+- `POST /auth/logout` has no request body: it ends the session of the access token. With only the Authorization header
+  it answered 422; a body that is still sent is ignored. The `session_id` member (used only for tokens without a
+  session, which are refused now) and the `LogoutRequest` schema are gone from `api-contract/v1/openapi.json`, and so
+  is the problem code `no_active_session` (it can no longer occur): remove its translation from the web localization
+  package.
 
 ### Changed (operators)
 

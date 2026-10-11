@@ -261,18 +261,8 @@
           "AUTHENTICATION"
         ],
         "summary": "Logout",
-        "description": "Logout user and invalidate session",
+        "description": "End the session of the access token (no body: the token names its session)",
         "operationId": "logout",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LogoutRequest"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -349,25 +339,11 @@
             }
           },
           "400": {
-            "description": "`no_active_session`: No active session found; `session_already_invalidated`: Session already invalidated",
+            "description": "`session_already_invalidated`: Session already invalidated",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/NoActiveSessionProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SessionAlreadyInvalidatedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "no_active_session": "#/components/schemas/NoActiveSessionProblem",
-                      "session_already_invalidated": "#/components/schemas/SessionAlreadyInvalidatedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/SessionAlreadyInvalidatedProblem"
                 }
               }
             }
@@ -24635,23 +24611,6 @@
         ],
         "title": "LoginResponse"
       },
-      "LogoutRequest": {
-        "properties": {
-          "session_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Session Id"
-          }
-        },
-        "type": "object",
-        "title": "LogoutRequest"
-      },
       "LogoutResponse": {
         "properties": {
           "message": {
@@ -27265,69 +27224,6 @@
             "status": 501,
             "title": "Nginx upload offloading is not enabled",
             "type": "https://example.org/problems/nginx_upload_disabled"
-          }
-        ]
-      },
-      "NoActiveSessionProblem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "title": "Type",
-            "description": "URI of the problem type; dereference it for its documentation"
-          },
-          "title": {
-            "type": "string",
-            "const": "No active session found",
-            "title": "Title",
-            "description": "Summary of the problem type"
-          },
-          "status": {
-            "type": "integer",
-            "const": 400,
-            "title": "Status",
-            "description": "HTTP status code"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "Explanation of this occurrence",
-            "examples": [
-              "No active session found"
-            ]
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "description": "Path of the request that failed"
-          },
-          "code": {
-            "type": "string",
-            "const": "no_active_session",
-            "title": "Code",
-            "description": "Key of exactly this problem in the localization package"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "code"
-        ],
-        "title": "NoActiveSessionProblem",
-        "description": "No active session found (HTTP 400). Problem type no_active_session.",
-        "examples": [
-          {
-            "code": "no_active_session",
-            "detail": "No active session found",
-            "instance": "/api/v1/...",
-            "status": 400,
-            "title": "No active session found",
-            "type": "https://example.org/problems/no_active_session"
           }
         ]
       },
@@ -36308,9 +36204,8 @@
         "examples": [
           {
             "code": "problem_type_not_found",
-            "detail": "No problem type has the code '<problem_code>'",
+            "detail": "Problem type not found",
             "instance": "/api/v1/...",
-            "problem_code": "<problem_code>",
             "status": 404,
             "title": "Problem type not found",
             "type": "https://example.org/problems/problem_type_not_found"
@@ -36338,7 +36233,7 @@
           "detail": {
             "description": "Explanation of this occurrence",
             "examples": [
-              "No problem type has the code '{problem_code}'"
+              "Problem type not found"
             ],
             "title": "Detail",
             "type": "string"
@@ -36353,10 +36248,6 @@
             "description": "Key of exactly this problem in the localization package",
             "title": "Code",
             "type": "string"
-          },
-          "problem_code": {
-            "title": "Problem Code",
-            "type": "string"
           }
         },
         "required": [
@@ -36365,8 +36256,7 @@
           "status",
           "detail",
           "instance",
-          "code",
-          "problem_code"
+          "code"
         ],
         "title": "ProblemTypeNotFoundProblem",
         "type": "object"

@@ -72,7 +72,7 @@ async def list_problem_types(request: Request) -> HTMLResponse:
 async def get_problem_type(code: str, request: Request) -> HTMLResponse:
     problem: ProblemType = problem_type(code)
     if problem is None:
-        raise ApiError(ErrorCode.PROBLEM_TYPE_NOT_FOUND, problem_code=code)
+        raise ApiError(ErrorCode.PROBLEM_TYPE_NOT_FOUND)
     params = "".join(
         f"<tr><td><code>{html.escape(name)}</code></td><td>{_type_name(annotation)}</td>"
         f"<td>{'optional' if is_optional(annotation) else 'always'}</td></tr>"

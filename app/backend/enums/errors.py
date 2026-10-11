@@ -160,8 +160,8 @@ class ErrorCode(ProblemType):
         422, "Request validation failed", "The request has {error_count} invalid value(s)",
         error_count=int, errors=List[Dict[str, Any]]))
     ROUTE_NOT_FOUND = ("route_not_found", problem(404, "Route not found"))
-    PROBLEM_TYPE_NOT_FOUND = ("problem_type_not_found", problem(
-        404, "Problem type not found", "No problem type has the code '{problem_code}'", problem_code=str))
+    # No params: the page answers for any path segment, which is never echoed back
+    PROBLEM_TYPE_NOT_FOUND = ("problem_type_not_found", problem(404, "Problem type not found"))
     METHOD_NOT_ALLOWED = ("method_not_allowed", problem(405, "Method not allowed"))
     BODY_PARSE_ERROR = ("body_parse_error", problem(400, "The request body could not be parsed"))
     INTERNAL_ERROR = ("internal_error", problem(
@@ -176,7 +176,6 @@ class ErrorCode(ProblemType):
 
     # ---------------------------------------------------------------- auth and sessions
     LOGIN_DATA_REQUIRED = ("login_data_required", problem(400, "JSON authentication data required in development mode"))
-    NO_ACTIVE_SESSION = ("no_active_session", problem(400, "No active session found"))
     SESSION_NOT_FOUND = ("session_not_found", problem(404, "Session not found"))
     SESSION_ALREADY_ENDED = ("session_already_ended", problem(409, "Session already ended", end_reason=Optional[str]))
     SESSION_ALREADY_INVALIDATED = ("session_already_invalidated", problem(400, "Session already invalidated"))

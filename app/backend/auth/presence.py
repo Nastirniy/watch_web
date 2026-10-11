@@ -6,9 +6,9 @@ dependencies.get_current_user on every authenticated request, at most once
 per security.activity_touch_interval_seconds.
 
 Presence is exposed through:
-- User.last_activity_at (column property, max last_activity of sessions not ended)
-- User.is_online (property comparing last_activity_at with the cutoff)
-- Post.online_user_count / Post.last_user_activity_at (column properties)
+- User.last_activity_at (column property, max last_activity of live sessions: sessions.live_clause)
+- User.is_online (property comparing last_activity_at with the cutoff; agrees with online_user_ids_select)
+- Post.online_user_count / Post.last_user_activity_at (column properties, live sessions only)
 """
 from datetime import datetime, timedelta, timezone
 from typing import Optional

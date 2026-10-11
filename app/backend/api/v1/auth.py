@@ -22,7 +22,6 @@ from app.backend.auth.certificates import parse_cn
 from app.backend.api.v1.models.request.auth import (
     LoginRequest,
     RefreshRequest,
-    LogoutRequest,
     PermissionCheckRequest,
 )
 from app.backend.api.v1.models.response.auth import (
@@ -194,6 +193,9 @@ async def refresh_token(
     if refresh_session is None:
         raise ApiError(AuthErrorCode.SESSION_EXPIRED)
 
+    # A session bound to a certificate that is no longer the user's ends here (a login that raced the change)
+    if await AuthService.end_session_of_replaced_certificate(session, refresh_session, user):
+        raise ApiError(AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH)
     if not await certificate_matches(refresh_session, x_ssl_client_fingerprint):
         _logger.warning(f"Refresh token presented with another client certificate: session_id={session_id}, user_id={user_id}")
         raise ApiError(AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH)
@@ -212,25 +214,19 @@ async def refresh_token(
 @router.post(
     AuthRoutes.LOGOUT.value,
     response_model=LogoutResponse,
-    responses=problems(ErrorCode.NO_ACTIVE_SESSION, ErrorCode.SESSION_ALREADY_INVALIDATED),
+    responses=problems(ErrorCode.SESSION_ALREADY_INVALIDATED),
 )
 async def logout(
         request: Request,
-        logout_request: LogoutRequest,
         auth: AuthContext = Depends(require()),
         session: AsyncSession = Depends(get_session)
 ):
-    """Logout user and invalidate session"""
+    """End the session of the access token (no body: the token names its session)"""
     current_user = auth.user
-    session_id = auth.session_id or logout_request.session_id
-
-    if not session_id:
-        _logger.warning(f"No active session found for user {current_user.username}")
-        raise ApiError(ErrorCode.NO_ACTIVE_SESSION)
 
     success = await AuthService.invalidate_session(
         session,
-        session_id,
+        auth.session_id,
         current_user.id,
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent")

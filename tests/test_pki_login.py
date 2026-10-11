@@ -10,10 +10,12 @@ from cryptography.x509.oid import NameOID
 from sqlmodel import select
 
 from app.backend.api.v1 import V1
+from app.backend.auth.certificates import hash_data, parse_cn
 from app.backend.config import settings
 from app.backend.enums.general import AppEnvironment
 from app.backend.enums.routes import AuthRoutes, UserRoutes
 from app.backend.models.role import Role
+from app.backend.models.user import User, UserSession
 from tests.helpers import make_admin
 
 LOGIN = V1.path(AuthRoutes.LOGIN)
@@ -40,13 +42,39 @@ def pem(cert: x509.Certificate) -> bytes:
     return cert.public_bytes(serialization.Encoding.PEM)
 
 
+_RFC2253_SPECIALS = ',+"\\<>;'
+
+
+def openssl_rfc2253(name: x509.Name) -> str:
+    """$ssl_client_s_dn as nginx writes it (OpenSSL X509_NAME_print_ex, XN_FLAG_RFC2253): RDNs last first, the
+    specials of RFC 2253 and a leading '#' or space escaped with a backslash, every byte of a character above 0x7F
+    (and every control character) as \\XX. rfc4514_string() leaves non-ASCII characters as they are."""
+    def escape(value: str) -> str:
+        out = []
+        for index, char in enumerate(value):
+            if ord(char) > 0x7E or ord(char) < 0x20:
+                out.extend(f"\\{byte:02X}" for byte in char.encode("utf-8"))
+            elif char in _RFC2253_SPECIALS or (index == 0 and char in "# ") or (index == len(value) - 1 and char == " "):
+                out.append("\\" + char)
+            else:
+                out.append(char)
+        return "".join(out)
+    return ",".join("+".join(f"{attribute.rfc4514_attribute_name}={escape(attribute.value)}" for attribute in rdn)
+                    for rdn in reversed(name.rdns))
+
+
+# openssl x509 -noout -subject -nameopt RFC2253 of a certificate with CN "Іван Петренко"
+CYRILLIC_CN = "Іван Петренко"
+CYRILLIC_DN = r"CN=\D0\86\D0\B2\D0\B0\D0\BD \D0\9F\D0\B5\D1\82\D1\80\D0\B5\D0\BD\D0\BA\D0\BE"
+
+
 def nginx_headers(cert: x509.Certificate) -> dict:
-    """What nginx sets after ssl_verify_client: $ssl_client_s_dn (RFC 2253), $ssl_client_serial (OpenSSL
+    """What nginx sets after ssl_verify_client: $ssl_client_s_dn (OpenSSL RFC 2253 form), $ssl_client_serial (OpenSSL
     i2a_ASN1_INTEGER: two upper-case hex digits per byte), $ssl_client_fingerprint (SHA-1 of the DER, lower case)"""
     serial = cert.serial_number
     return {
         "X-SSL-Client-Verify": "SUCCESS",
-        "X-SSL-Client-DN": cert.subject.rfc4514_string(),
+        "X-SSL-Client-DN": openssl_rfc2253(cert.subject),
         "X-SSL-Client-Serial": serial.to_bytes((serial.bit_length() + 7) // 8, "big").hex().upper(),
         "X-SSL-Client-Fingerprint": hashlib.sha1(cert.public_bytes(serialization.Encoding.DER)).hexdigest(),
     }
@@ -147,4 +175,72 @@ async def test_session_is_bound_to_its_certificate(client, db, headers, producti
     assert refresh.status_code == 200, refresh.text
     # a refused attempt does not end the session: the owner keeps working
     assert (await client.get(ME, headers={**nginx_headers(own), **bearer})).status_code == 200
+
+
+# ------------------------------------------------------------------ the subject DN as nginx writes it
+def test_the_test_helper_writes_the_dn_as_openssl_does():
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, CYRILLIC_CN)])
+    assert openssl_rfc2253(name) == CYRILLIC_DN
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dn, cn", [
+    (CYRILLIC_DN, CYRILLIC_CN),
+    (CYRILLIC_DN + r",O=\D0\A2\D0\9E\D0\92,C=UA", CYRILLIC_CN),
+    (r"CN=Doe\, John,OU=Unit\+One,O=Example", "Doe, John"),
+    (r"UID=7+CN=a\+b\; c\\d\"e\<f\>,O=x", 'a+b; c\\d"e<f>'),
+    (r"CN=\#hash and space\ ,O=x", "#hash and space "),
+    ("OU=Unit,CN=Plain Name,O=Org", "Plain Name"),
+    ("CN=a=b,O=x", "a=b"),
+    ("/C=UA/O=Org/CN=legacy-name", "legacy-name"),
+    ("O=Org,C=UA", None),
+    ("", None),
+])
+async def test_parse_cn_reads_the_openssl_rfc2253_form(dn, cn):
+    assert await parse_cn(dn) == cn
+
+
+@pytest.mark.asyncio
+async def test_parse_cn_refuses_bytes_that_are_not_utf8():
+    assert await parse_cn(r"CN=\D0\D0,O=x") is None
+
+
+@pytest.mark.asyncio
+async def test_login_with_a_cyrillic_common_name(client, db, headers, production):
+    """nginx escapes every byte above 0x7F: the login reads the CN the certificate upload stored"""
+    cert = make_certificate(CYRILLIC_CN, 0x6666)
+    await _create_user(client, db, headers, "cyrillic", cert)
+    assert nginx_headers(cert)["X-SSL-Client-DN"] == CYRILLIC_DN
+    me = await client.get(ME, headers=await _login(client, cert))
+    assert me.status_code == 200 and me.json()["username"] == "cyrillic"
+
+
+# ------------------------------------------------------------------ a session bound to a replaced certificate
+@pytest.mark.asyncio
+async def test_a_session_of_a_replaced_certificate_ends_on_its_next_request(client, db, headers, production):
+    """A login racing a certificate change: the revocation ran before the new session was stored, so the session
+    is bound to the old certificate. Its next request or refresh ends it (revoked, certificate_changed)."""
+    old = make_certificate("cn-race", 0x7777)
+    user_id = await _create_user(client, db, headers, "racer", old)
+    on_request = await _tokens(client, old)
+    on_refresh = await _tokens(client, old)
+
+    # the change as it lands after the logins: the user's certificate is another one, these sessions stayed live
+    new = make_certificate("cn-race-new", 0x8888)
+    user = (await db.exec(select(User).where(User.id == user_id))).one()
+    user.pki_certificate_fingerprint_hash = await hash_data(nginx_headers(new)["X-SSL-Client-Fingerprint"])
+    db.add(user)
+    await db.commit()
+
+    me = await client.get(ME, headers={**nginx_headers(old), "Authorization": f"Bearer {on_request['access_token']}"})
+    assert me.status_code == 401 and me.json()["code"] == "token_certificate_mismatch"
+    refresh = await client.post(REFRESH, json={"refresh_token": on_refresh["refresh_token"]}, headers=nginx_headers(old))
+    assert refresh.status_code == 401 and refresh.json()["code"] == "token_certificate_mismatch"
+
+    db.expire_all()
+    rows = (await db.exec(select(UserSession).where(UserSession.user_id == user_id))).all()
+    assert len(rows) == 2
+    assert all((row.end_reason, row.revoke_cause) == ("revoked", "certificate_changed") and row.ended_at for row in rows)
+    again = await client.get(ME, headers={**nginx_headers(old), "Authorization": f"Bearer {on_request['access_token']}"})
+    assert again.status_code == 401 and again.json()["code"] == "session_expired"
 

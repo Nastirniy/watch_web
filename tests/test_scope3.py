@@ -120,7 +120,8 @@ async def test_statistics_endpoint(client, db, headers):
     body = response.json()
     assert body["post_ids"] is None
     assert body["posts"] == {"total": 1, "active": 1, "online": 1}
-    assert body["users"]["total"] == 3 and body["users"]["online"] == 1 and body["users"]["deleted"] == 0
+    # online: user (its session) and the two callers (the sessions of their requests)
+    assert body["users"]["total"] == 3 and body["users"]["online"] == 3 and body["users"]["deleted"] == 0
     assert body["observations"]["total_in_period"] == 1
     assert body["observations"]["by_status"] == {"active": 1}
     assert body["observations"]["by_post"] == [{"post_id": post.id, "post_name": post.name, "count": 1}]

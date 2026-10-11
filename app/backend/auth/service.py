@@ -359,6 +359,35 @@ class AuthService:
         return count
 
     @staticmethod
+    async def end_session_of_replaced_certificate(session: AsyncSession, user_session: UserSession, user: User) -> bool:
+        """End a live session bound to a certificate that is no longer the user's (revoked, certificate_changed).
+
+        A certificate change revokes the live sessions of the old certificate in its own transaction; a login
+        that read the user before that change and stored its session after it leaves a session bound to the old
+        certificate. Called on every request and refresh of a bound session: True when it ended it (the caller
+        answers token_certificate_mismatch). Unbound sessions (development logins) are never ended here.
+        """
+        bound_to = user_session.certificate_fingerprint_hash
+        if not bound_to or bound_to == user.pki_certificate_fingerprint_hash:
+            return False
+        session_lifetimes.end(user_session, SessionEndReason.REVOKED, SessionRevokeCause.CERTIFICATE_CHANGED)
+        session.add(user_session)
+        await create_audit_log(
+            session=session,
+            user_id=user.id,
+            session_id=user_session.id,
+            action="force_logout",
+            resource_type="session",
+            resource_id=user.id,
+            details={"message": f"Session of a replaced certificate ended for user_id={user.id}",
+                     "cause": SessionRevokeCause.CERTIFICATE_CHANGED.value},
+            success=True
+        )
+        await session.commit()
+        _logger.warning(f"Session bound to a replaced certificate ended: user_id={user.id}")
+        return True
+
+    @staticmethod
     async def expire_sessions_of_inactive_user(session: AsyncSession, user: User) -> int:
         """End every live session of a user whose account is deactivated or archived.
 

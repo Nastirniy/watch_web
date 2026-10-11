@@ -20,12 +20,14 @@ def configure_presence_properties() -> None:
         return
     _configured = True
 
-    # User.last_activity_at: latest activity over the user's sessions not ended (logout or revocation)
+    # User.last_activity_at: latest activity over the user's live sessions (live_clause: not ended by logout or
+    # revocation, nor by the computation: idle timeout, hard end). User.is_online compares it with the online
+    # cutoff, so it agrees with the is_online filter (presence.online_user_ids_select)
     inspect(User).add_property(
         "last_activity_at",
         column_property(
             sa_select(func.max(UserSession.last_activity))
-            .where(UserSession.user_id == User.id, UserSession.ended_at.is_(None))
+            .where(UserSession.user_id == User.id, live_clause())
             .correlate_except(UserSession)
             .scalar_subquery()
         ),
@@ -59,14 +61,15 @@ def configure_presence_properties() -> None:
         ),
     )
 
-    # Post.last_user_activity_at: latest activity of any home user of the post
+    # Post.last_user_activity_at: latest activity of any home user of the post (the largest last_activity_at of
+    # its users: live sessions only)
     inspect(Post).add_property(
         "last_user_activity_at",
         column_property(
             sa_select(func.max(UserSession.last_activity))
             .select_from(UserSession)
             .join(User, User.id == UserSession.user_id)
-            .where(User.post_id == Post.id, UserSession.ended_at.is_(None))
+            .where(User.post_id == Post.id, live_clause())
             .correlate_except(UserSession, User)
             .scalar_subquery()
         ),

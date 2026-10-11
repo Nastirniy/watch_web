@@ -367,3 +367,12 @@ async def test_problem_type_uri_dereferences_to_its_documentation(client, db, he
 
     unknown = await client.get(SystemRoutes.PROBLEM_BY_CODE.value.format(code="nope"))
     assert _problem(unknown, 404)["code"] == "problem_type_not_found"
+
+
+@pytest.mark.asyncio
+async def test_unknown_problem_type_does_not_echo_the_submitted_code(client, db):
+    submitted = "no-such-code-4f2a"
+    body = _problem(await client.get(SystemRoutes.PROBLEM_BY_CODE.value.format(code=submitted)), 404)
+    assert body["code"] == "problem_type_not_found"
+    assert submitted not in body["detail"] and submitted not in body["title"]
+    assert set(body) == {"type", "title", "status", "detail", "instance", "code"}, "no params: nothing of the request"

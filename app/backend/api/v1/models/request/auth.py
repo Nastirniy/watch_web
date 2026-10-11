@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import List
 from pydantic import BaseModel, Field, field_validator
 import re
 
@@ -39,10 +39,6 @@ class LoginRequest(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_token: str = Field(..., min_length=1)
-
-
-class LogoutRequest(BaseModel):
-    session_id: Optional[str] = None
 
 
 class PermissionCheckRequest(BaseModel):

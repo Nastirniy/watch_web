@@ -181,6 +181,30 @@ async def test_logout_records_the_reason(client, db):
 
 
 @pytest.mark.asyncio
+async def test_logout_needs_no_body(client, db):
+    """The token names its session: the Authorization header is all a logout needs"""
+    user = await make_user(db)
+    session_row = await make_session(db, user)
+    response = await client.post(LOGOUT, headers=bearer(user, session_row))
+    assert response.status_code == 200, response.text
+    await db.refresh(session_row)
+    assert session_row.end_reason == "logout"
+
+
+@pytest.mark.asyncio
+async def test_headers_fixture_logs_in_with_a_real_session(client, db, headers):
+    """headers(user) of tests/conftest.py: a stored live session and a token bound to it, a new one per call"""
+    user = await make_user(db)
+    first, second = headers(user), headers(user)
+    sid = jwt.get_unverified_claims(first["Authorization"].removeprefix("Bearer "))["sid"]
+    body = (await client.get(OWN_SESSIONS, headers=first)).json()
+    assert sid in {s["id"] for s in body["sessions"]} and len(body["sessions"]) == 2
+    assert (await client.post(LOGOUT, headers=first)).status_code == 200
+    assert (await client.get(ME, headers=first)).json()["code"] == "session_expired"
+    assert (await client.get(ME, headers=second)).status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_own_sessions_list_only_live_ones(client, db):
     user = await make_user(db)
     live = await make_session(db, user)

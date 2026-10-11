@@ -50,6 +50,15 @@ async def test_refresh_token_is_rejected_as_bearer(client, db):
 
 
 @pytest.mark.asyncio
+async def test_access_token_without_session_is_refused(client, db):
+    """The login always binds a token to a session; one without sid would skip every session and certificate check"""
+    user = await make_user(db)
+    response = await client.get(ME, headers={"Authorization": f"Bearer {AuthService.create_access_token(user.id)}"})
+    assert response.status_code == 401
+    assert response.json()["code"] == "invalid_token"
+
+
+@pytest.mark.asyncio
 async def test_missing_credentials(client, db):
     response = await client.get(ME)
     assert response.status_code == 401

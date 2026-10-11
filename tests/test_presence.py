@@ -75,7 +75,8 @@ async def test_user_list_presence_and_filter(client, db, headers):
     offline = await make_user(db, post_id=post.id)
     never = await make_user(db, post_id=post.id)
     await make_session(db, online, datetime.now(timezone.utc))
-    await make_session(db, offline, datetime.now(timezone.utc) - timedelta(hours=2))
+    # live but quiet: past the online threshold, within the idle timeout
+    await make_session(db, offline, datetime.now(timezone.utc) - timedelta(seconds=settings.security.online_threshold_seconds + 60))
 
     listed = (await client.get(USERS, headers=headers(viewer))).json()
     by_id = {u["id"]: u for u in listed}
@@ -85,15 +86,40 @@ async def test_user_list_presence_and_filter(client, db, headers):
     assert by_id[offline.id]["last_activity_at"] is not None
     assert by_id[never.id]["is_online"] is False
     assert by_id[never.id]["last_activity_at"] is None
+    assert by_id[viewer.id]["is_online"] is True, "the viewer's own requests make them online"
 
     online_only = (await client.get(USERS, params={"is_online": "true"}, headers=headers(viewer))).json()
-    assert {u["id"] for u in online_only} == {online.id}
+    assert {u["id"] for u in online_only} == {online.id, viewer.id}
     offline_only = (await client.get(USERS, params={"is_online": "false"}, headers=headers(viewer))).json()
-    assert {u["id"] for u in offline_only} >= {offline.id, never.id, viewer.id}
-    assert online.id not in {u["id"] for u in offline_only}
+    assert {u["id"] for u in offline_only} >= {offline.id, never.id}
+    assert not {online.id, viewer.id} & {u["id"] for u in offline_only}
 
     sorted_list = await client.get(USERS, params={"sort_by": "last_activity_at", "sort_order": "descending"}, headers=headers(viewer))
     assert sorted_list.status_code == 200, sorted_list.text
+
+
+@pytest.mark.asyncio
+async def test_is_online_follows_the_liveness_of_the_session(client, db, headers, monkeypatch):
+    """A session ended by the computation (here its hard end, an hour after the login) no longer counts, even
+    though nothing has recorded the end and its last request was a minute ago: is_online and last_activity_at
+    agree with the is_online filter"""
+    monkeypatch.setattr(settings.security, "session_max_hours", 1)
+    post = await make_post(db)
+    viewer = await make_admin(db)
+    user = await make_user(db, post_id=post.id)
+    now = datetime.now(timezone.utc)
+    row = UserSession(id=uuid.uuid4().hex, user_id=user.id, created_at=now - timedelta(minutes=61),
+                      last_activity=now - timedelta(minutes=1), expires_at=now - timedelta(minutes=1))
+    db.add(row)
+    await db.commit()
+
+    listed = {u["id"]: u for u in (await client.get(USERS, headers=headers(viewer))).json()}
+    assert listed[user.id]["is_online"] is False
+    assert listed[user.id]["last_activity_at"] is None
+    online_only = (await client.get(USERS, params={"is_online": "true"}, headers=headers(viewer))).json()
+    assert user.id not in {u["id"] for u in online_only}
+    body = (await client.get(POST.format(post_id=post.id), headers=headers(viewer))).json()
+    assert body["online_user_count"] == 0 and body["last_user_activity_at"] is None
 
 
 @pytest.mark.asyncio
@@ -102,12 +128,13 @@ async def test_logout_makes_user_offline(client, db, headers):
     viewer = await make_user(db, perms=["user.view"], post_id=post.id)
     user = await make_user(db, post_id=post.id)
     user_session = await make_session(db, user, datetime.now(timezone.utc))
-    assert (await client.get(USERS, params={"is_online": "true"}, headers=headers(viewer))).json()[0]["id"] == user.id
+    online = (await client.get(USERS, params={"is_online": "true"}, headers=headers(viewer))).json()
+    assert {u["id"] for u in online} == {viewer.id, user.id}
 
-    logout = await client.post(V1.path(AuthRoutes.LOGOUT), json={"session_id": user_session.id},
-                               headers=session_headers(user, user_session))
+    logout = await client.post(V1.path(AuthRoutes.LOGOUT), headers=session_headers(user, user_session))
     assert logout.status_code == 200, logout.text
-    assert (await client.get(USERS, params={"is_online": "true"}, headers=headers(viewer))).json() == []
+    online = (await client.get(USERS, params={"is_online": "true"}, headers=headers(viewer))).json()
+    assert {u["id"] for u in online} == {viewer.id}
 
 
 @pytest.mark.asyncio
@@ -126,17 +153,17 @@ async def test_creator_projection_has_presence(client, db, headers):
 async def test_post_presence_is_derived_from_home_users(client, db, headers):
     post = await make_post(db)
     other = await make_post(db)
-    admin = await make_admin(db)
+    admin = await make_admin(db)  # home post of none: its own requests count for no post
     user = await make_user(db, perms=["post.view"], post_id=post.id)
 
-    body = (await client.get(POST.format(post_id=post.id), headers=headers(user))).json()
+    body = (await client.get(POST.format(post_id=post.id), headers=headers(admin))).json()
     assert body["online_user_count"] == 0
     assert body["user_count"] == 1
     for removed in ("connection_status", "stored_connection_status", "last_connection_at"):
         assert removed not in body
 
     await make_session(db, user, datetime.now(timezone.utc))
-    body = (await client.get(POST.format(post_id=post.id), headers=headers(user))).json()
+    body = (await client.get(POST.format(post_id=post.id), headers=headers(admin))).json()
     assert body["online_user_count"] == 1
     assert body["last_user_activity_at"] is not None
 

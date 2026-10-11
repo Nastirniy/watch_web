@@ -1,5 +1,6 @@
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 import hashlib
+import string
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -62,28 +63,68 @@ class CertificateParser:
         }
 
 
-async def parse_cn(dn: str) -> Optional[str]:
-    """Parse CN from Distinguished Name.
+def _split_unescaped(text: str, separator: str) -> List[str]:
+    """text split on every separator not escaped with a backslash; escapes stay in the parts"""
+    parts, current, index = [], [], 0
+    while index < len(text):
+        if text[index] == "\\" and index + 1 < len(text):
+            current.append(text[index:index + 2])
+            index += 2
+            continue
+        if text[index] == separator:
+            parts.append("".join(current))
+            current = []
+        else:
+            current.append(text[index])
+        index += 1
+    parts.append("".join(current))
+    return parts
 
-    Handles both RFC 2253 format (CN=value,O=...) used by newer nginx
-    and OpenSSL format (/CN=value/O=...) used by older nginx.
+
+def _unescape_rfc2253(value: str) -> Optional[str]:
+    """An attribute value of an RFC 2253 / 4514 DN: \\XX is one byte (OpenSSL writes every byte of a character above
+    0x7F so), \\<char> the character itself. None when the bytes are not UTF-8."""
+    raw = bytearray()
+    index = 0
+    while index < len(value):
+        char = value[index]
+        if char == "\\" and index + 1 < len(value):
+            pair = value[index + 1:index + 3]
+            if len(pair) == 2 and all(c in string.hexdigits for c in pair):
+                raw.append(int(pair, 16))
+                index += 3
+                continue
+            char = value[index + 1]
+            index += 1
+        raw.extend(char.encode("utf-8"))
+        index += 1
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+async def parse_cn(dn: str) -> Optional[str]:
+    """The CN of a subject DN as nginx forwards it ($ssl_client_s_dn).
+
+    RFC 2253 form (nginx 1.11.6 and later, OpenSSL XN_FLAG_RFC2253): RDNs separated by unescaped ',', attributes
+    of one RDN by unescaped '+'; the value is unescaped (\\D0\\86 is UTF-8 'І', \\, a comma). The legacy form
+    /C=UA/O=.../CN=value of older nginx is read as before.
     """
     if not dn:
         return None
 
-    # OpenSSL format: /CN=value/O=...
     if dn.startswith("/"):
-        parts = [p.strip() for p in dn.split("/") if p]
-        for p in parts:
-            if p.startswith("CN="):
-                return p[3:]
+        for part in (p.strip() for p in dn.split("/") if p):
+            if part.startswith("CN="):
+                return part[3:]
+        return None
 
-    # RFC 2253 format: CN=value,O=...
-    parts = [p.strip() for p in dn.split(",")]
-    for p in parts:
-        if p.startswith("CN="):
-            return p[3:]
-
+    for rdn in _split_unescaped(dn, ","):
+        for attribute in _split_unescaped(rdn, "+"):
+            name, separator, value = attribute.partition("=")
+            if separator and name.strip().upper() == "CN":
+                return _unescape_rfc2253(value)
     return None
 
 

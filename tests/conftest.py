@@ -4,6 +4,8 @@ The application lifespan (migrations + seed against MySQL) never runs under
 httpx ASGITransport, so tests need no external database.
 """
 import os
+import secrets
+from datetime import datetime, timezone
 
 os.environ.setdefault("MYSETTINGS_APP__ENVIRONMENT", "development")
 
@@ -21,7 +23,9 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.database import get_session
 from app.backend.bootstrap.permissions import seed_roles_and_permissions
 from app.backend.services.media.formats import seed_media_formats, invalidate_registry_cache
+from app.backend.auth import sessions as session_lifetimes
 from app.backend.auth.service import AuthService
+from app.backend.models.user import UserSession
 from tests.helpers import errors_are_problems
 
 
@@ -38,9 +42,30 @@ async def engine():
     await engine.dispose()
 
 
+class _TestSession(AsyncSession):
+    """Database session of the tests: on entering, it first stores the login sessions headers() issued since the
+    last one, so a token minted in the test names a stored session by the time a request reads it (the request's
+    database session comes from session_maker as well)"""
+
+    async def __aenter__(self):
+        issued = self.info.get("issued_sessions")
+        if issued:
+            self.add_all(issued)
+            issued.clear()
+            await self.commit()
+        return self
+
+
+@pytest.fixture
+def issued_sessions() -> list:
+    """UserSession rows headers() created and no database session has stored yet"""
+    return []
+
+
 @pytest_asyncio.fixture
-async def session_maker(engine):
-    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+async def session_maker(engine, issued_sessions):
+    return async_sessionmaker(engine, class_=_TestSession, expire_on_commit=False,
+                              info={"issued_sessions": issued_sessions})
 
 
 @pytest_asyncio.fixture
@@ -101,11 +126,15 @@ def problems_are_declared():
     assert not undeclared, "answered but not declared in responses=problems(...):\n" + "\n".join(undeclared)
 
 
-def auth_headers(user) -> dict:
-    """Bearer header for a user. No session id in the token, so no UserSession lookup happens."""
-    return {"Authorization": f"Bearer {AuthService.create_access_token(user.id)}"}
-
-
 @pytest.fixture
-def headers():
+def headers(issued_sessions):
+    """headers(user): a login of the user. Every call opens a live session (development: bound to no certificate,
+    no audit row) and returns the Bearer header of an access token bound to it, like POST /auth/login. The row is
+    stored when the next database session opens (_TestSession), i.e. before the request that sends the header."""
+    def auth_headers(user) -> dict:
+        now = datetime.now(timezone.utc)
+        row = UserSession(id=secrets.token_urlsafe(32), user_id=user.id, created_at=now, last_activity=now, expires_at=now)
+        session_lifetimes.touch(row, now)
+        issued_sessions.append(row)
+        return {"Authorization": f"Bearer {AuthService.create_access_token(user.id, session_id=row.id)}"}
     return auth_headers
