@@ -246,16 +246,18 @@ async def _set_media_archived(request: Request, session: AsyncSession, auth: Aut
     """Shared body of archive / restore: post write access, ownership (media.manage_any overrides), flag flip, audit row."""
     current_user = auth.user
     media_file = await get_media_or_404(session, media_id, include_deleted=True)
-    if archived and media_file.is_deleted:
-        raise ApiError(ErrorCode.MEDIA_NOT_FOUND)
-    if not archived and not media_file.is_deleted:
-        raise ApiError(ErrorCode.MEDIA_NOT_ARCHIVED)
 
     observation = None
     if media_file.observation_id:
         observation = await get_observation_from_media(session, media_file)
         AccessControlService.check_post_write(auth, observation.post_id, "media")
     AccessControlService.check_media_ownership(auth, media_file, observation)
+
+    # The state last: an outsider gets the same 403 whatever the row looks like
+    if archived and media_file.is_deleted:
+        raise ApiError(ErrorCode.MEDIA_NOT_FOUND)
+    if not archived and not media_file.is_deleted:
+        raise ApiError(ErrorCode.MEDIA_NOT_ARCHIVED)
 
     action = "archive" if archived else "restore"
     old_values = media_file.model_dump()

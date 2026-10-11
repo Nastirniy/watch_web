@@ -9,6 +9,15 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ### Fixed
 
+- Archive and restore of media and observations check the post scope and ownership before the state of the row:
+  an outsider gets the same 403 whatever the id is (archived, live), and only a caller in scope learns 404
+  (archive of an archived row) or 409 (restore of a live one). `POST /observations/create` checks write access to the
+  post before its existence: an unknown post id and a foreign one both answer 403 `post_access_denied` (or
+  `no_post_assigned`); a caller with `post.access_all` still gets 404 `post_not_found`.
+- `GET /users/{id}` answers like `GET /users/` for `post.access_all`: users without a post are visible (it was 403
+  `user_self_only`). An archived user answers 404 unless the caller holds `user.archive` or `admin.true`.
+- `PATCH /users/{id}` with a `post_id` the user already has a `user_post_access` row for deletes that row in the same
+  transaction; the audit row lists it as `removed_post_access` in `new_values`.
 - `PATCH /roles/{id}` with `permission_ids` and `PATCH /users/{id}` with `role_ids` replace the rows by difference: rows
   that stay are kept, removed ones are deleted, new ones are inserted. A set that kept an existing id used to answer
   500 (roles) or 400 `certificate_taken` (users) because the flush wrote the INSERTs before the DELETEs.

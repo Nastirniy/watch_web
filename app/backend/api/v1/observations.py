@@ -154,16 +154,14 @@ async def create_observation(
     Note: Field validation is handled by Pydantic model validators.
     """
     current_user = auth.user
-    # Validate post exists and user has access
+    # Access first: an unknown post id and a foreign one answer alike (403), only post.access_all learns 404
+    AccessControlService.check_post_write(auth, observation_data.post_id, "observation")
+
     post_result = await session.exec(
         select(Post).where(Post.id == observation_data.post_id)
     )
-    post = post_result.first()
-    if not post:
+    if not post_result.first():
         raise ApiError(ErrorCode.POST_NOT_FOUND, post_id=observation_data.post_id)
-
-    # Check if user has access to the post
-    AccessControlService.check_post_write(auth, observation_data.post_id, "observation")
 
     # Validate signal_type exists and is active
     signal_type_result = await session.exec(
@@ -465,13 +463,17 @@ async def _set_observation_archived(
     current_user = auth.user
     result = await session.exec(select(Observation).where(Observation.id == observation_id))
     observation = result.first()
-    if not observation or (archived and observation.is_deleted):
+    if not observation:
         raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
-    if not archived and not observation.is_deleted:
-        raise ApiError(ErrorCode.OBSERVATION_NOT_ARCHIVED)
 
     AccessControlService.check_post_write(auth, observation.post_id, "observation")
     AccessControlService.check_observation_ownership(auth, observation)
+
+    # The state after the scope and ownership checks: an outsider gets the same 403 whatever the row looks like
+    if archived and observation.is_deleted:
+        raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
+    if not archived and not observation.is_deleted:
+        raise ApiError(ErrorCode.OBSERVATION_NOT_ARCHIVED)
 
     if not archived:
         signal_type = (await session.exec(

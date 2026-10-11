@@ -278,7 +278,8 @@ async def get_user(
     )
     user = result.first()
 
-    if not user:
+    # Archived users are for those who manage the archive (and administrators, whose user.view is the route's)
+    if not user or (user.is_deleted and not (auth.is_admin or auth.has(Permissions.USER_ARCHIVE))):
         raise ApiError(ErrorCode.USER_NOT_FOUND)
 
     AccessControlService.check_user_visibility(auth, user)
@@ -359,6 +360,7 @@ async def update_user(
     if roles_change:
         check_grant(auth, await role_permission_names(session, new_role_ids))
 
+    removed_post_access = []
     if update_data.username is not None:
         existing_username = await session.exec(_username_taken(update_data.username, exclude_user_id=user_id))
         if existing_username.first():
@@ -372,6 +374,12 @@ async def update_user(
         if not post_result.first():
             raise ApiError(ErrorCode.POST_NOT_FOUND, post_id=update_data.post_id)
         user.post_id = update_data.post_id
+        # The home post already grants full access: an extra access row for it would be stale
+        for row in (await session.exec(
+            select(UserPostAccess).where(UserPostAccess.user_id == user_id, UserPostAccess.post_id == update_data.post_id)
+        )).all():
+            removed_post_access.append({"post_id": row.post_id, "can_write": row.can_write})
+            await session.delete(row)
 
     if update_data.username_alias is not None:
         user.username_alias = update_data.username_alias
@@ -493,6 +501,7 @@ async def update_user(
                 **user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"}),
                 "role_ids": new_role_ids,
                 "certificate_replaced": certificate_replaced,
+                **({"removed_post_access": removed_post_access} if removed_post_access else {}),
             },
             details={"message": f"User {current_user.username} updated user {user.username}"},
             **client_info(request, auth)

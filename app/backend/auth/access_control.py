@@ -140,9 +140,9 @@ class AccessControlService:
 
     @staticmethod
     def check_user_visibility(auth: AuthContext, target: User) -> None:
-        """A user record is visible to the user itself, to administrators (admin.true with user.view on the route)
-        and to callers whose post scope covers the target's post"""
-        if target.id == auth.user.id or auth.is_admin:
+        """A user record is visible to the user itself, to administrators (admin.true with user.view on the route),
+        to post.access_all (like the list, users without a post included) and to callers whose post scope covers the target's post"""
+        if target.id == auth.user.id or auth.is_admin or auth.has_post_access_all:
             return
         if target.post_id is not None and auth.can_view_post(target.post_id):
             return
