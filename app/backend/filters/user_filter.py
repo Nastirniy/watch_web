@@ -8,7 +8,7 @@ from typing import Optional, Iterable
 from sqlalchemy.sql.selectable import Select
 
 from app.backend.models.user import User
-from app.backend.services.presence import online_user_ids_select
+from app.backend.auth.presence import online_user_ids_select
 from app.backend.filters.simple_engine import ListCriteria, SimpleFilterEngine
 
 

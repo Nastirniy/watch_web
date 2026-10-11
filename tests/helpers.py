@@ -9,7 +9,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.enums.general import Permissions
-from app.backend.services.api_errors import PROBLEM_JSON
+from app.backend.errors.problems import PROBLEM_JSON
 from app.backend.models.user import User
 from app.backend.models.role import Role, Permission, RolePermission, UserRole
 from app.backend.models.post import Post

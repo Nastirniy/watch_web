@@ -20,9 +20,9 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.config import settings
 from app.backend.enums.general import SessionEndReason, SessionRevokeCause, SessionStatus
-from app.backend.helpers.certeficates_helper import hash_data
+from app.backend.auth.certificates import hash_data
 from app.backend.models.user import UserSession
-from app.backend.services.presence import is_recent
+from app.backend.auth.presence import is_recent
 from app.backend.utils.logging_config import get_auth_logger
 
 _logger = get_auth_logger()

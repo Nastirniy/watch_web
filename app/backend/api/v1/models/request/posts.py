@@ -3,7 +3,7 @@ from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 
 from app.backend.utils.validators import SecurityValidators
-from app.backend.services.api_errors import invalid
+from app.backend.errors.coded import invalid
 from app.backend.enums.errors import FieldErrorCode
 
 

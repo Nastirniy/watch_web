@@ -5,9 +5,9 @@ from pydantic import BaseModel, Field
 from app.backend.enums.errors import RequiredPermissions
 from app.backend.enums.general import SessionEndReason, SessionRevokeCause, SessionStatus
 from app.backend.models.user import UserSession
-from app.backend.services.auth_context import AuthContext
-from app.backend.services.presence import online_threshold_seconds
-from app.backend.services.sessions import SessionState, utc
+from app.backend.auth.context import AuthContext
+from app.backend.auth.presence import online_threshold_seconds
+from app.backend.auth.sessions import SessionState, utc
 from app.backend.utils.validators import PlainTextModel
 
 

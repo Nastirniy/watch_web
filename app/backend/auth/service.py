@@ -11,8 +11,8 @@ from app.backend.utils.logging_config import get_auth_logger
 from app.backend.models.user import User, UserSession
 from app.backend.enums.errors import AuthErrorCode
 from app.backend.enums.general import SessionEndReason, SessionRevokeCause, SessionStatus
-from app.backend.services import sessions as session_lifetimes
-from app.backend.helpers.certeficates_helper import (
+from app.backend.auth import sessions as session_lifetimes
+from app.backend.auth.certificates import (
     validate_pki_certificate_data,
     hash_pki_certificate_data,
     serial_hashes,

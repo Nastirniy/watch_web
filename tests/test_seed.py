@@ -2,7 +2,7 @@
 import pytest
 from sqlmodel import select
 
-from app.backend.database import seed_roles_and_permissions
+from app.backend.bootstrap.permissions import seed_roles_and_permissions
 from app.backend.enums.general import Permissions
 from app.backend.models.role import Role, Permission, RolePermission
 

@@ -44,7 +44,7 @@ def test_migrate_from_another_directory_over_create_all_tables(tmp_path):
 
 @pytest.mark.slow
 def test_migrations_at_startup_keep_the_server_loggers(tmp_path):
-    """The app runs Alembic in its own process at startup (database._migrate_and_seed). env.py configured logging
+    """The app runs Alembic in its own process at startup (bootstrap.startup._migrate_and_seed). env.py configured logging
     from alembic.ini with fileConfig's default disable_existing_loggers=True, which turned off uvicorn's loggers:
     the console stopped at the last migration, no 'Uvicorn running on ...' and no access log, the server looked hung."""
     env = dict(os.environ)

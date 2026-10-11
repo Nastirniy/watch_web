@@ -3,14 +3,14 @@ from fastapi import APIRouter, Depends, Header, Request
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.database import get_session
-from app.backend.services.auth import AuthService
-from app.backend.services.sessions import certificate_matches, live_clause, live_session, session_state, touch
+from app.backend.auth.service import AuthService
+from app.backend.auth.sessions import certificate_matches, live_clause, live_session, session_state, touch
 from datetime import datetime, timezone
 from sqlmodel import select
-from app.backend.services.permissions import require
-from app.backend.services.auth_context import AuthContext, load_auth_context
-from app.backend.services.permissions import Require
-from app.backend.services.route_access import route_access_map, routes_allowed_for
+from app.backend.auth.require import require
+from app.backend.auth.context import AuthContext, load_auth_context
+from app.backend.auth.require import Require
+from app.backend.auth.route_access import route_access_map, routes_allowed_for
 from app.backend.enums.errors import AuthErrorCode, ErrorCode, RequiredPermissions
 from app.backend.models.user import User, UserSession
 from app.backend.enums.routes import AuthRoutes
@@ -18,7 +18,7 @@ from app.backend.api.versioning import PublishedVersion, request_version
 from app.backend.enums.general import AppEnvironment
 from app.backend.utils.logging_config import get_auth_logger
 from app.backend.config import settings
-from app.backend.helpers.certeficates_helper import parse_cn
+from app.backend.auth.certificates import parse_cn
 from app.backend.api.v1.models.request.auth import (
     LoginRequest,
     RefreshRequest,
@@ -37,8 +37,8 @@ from app.backend.api.v1.models.response.auth import (
     build_login_response,
     build_session_response,
 )
-from app.backend.services.api_errors import ApiError
-from app.backend.openapi_problems import problems
+from app.backend.errors.problems import ApiError
+from app.backend.errors.openapi import problems
 
 router = APIRouter(prefix=AuthRoutes.BASE.value, tags=[AuthRoutes.tag()])
 _logger = get_auth_logger()

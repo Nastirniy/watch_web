@@ -9,7 +9,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.models.media import MediaFile
 from app.backend.models.observation import Observation
 from app.backend.config import settings
-from app.backend.services.api_errors import ApiError
+from app.backend.errors.problems import ApiError
 from app.backend.enums.errors import ErrorCode
 
 

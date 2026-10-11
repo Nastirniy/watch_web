@@ -8,7 +8,7 @@ from app.backend.utils.text import unescape_html, unescape_deep
 import bleach
 from pydantic import BaseModel, field_validator
 from email_validator import validate_email, EmailNotValidError
-from app.backend.services.api_errors import invalid
+from app.backend.errors.coded import invalid
 from app.backend.enums.errors import FieldErrorCode
 
 

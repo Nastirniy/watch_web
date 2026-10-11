@@ -1,6 +1,6 @@
 """User presence (online / offline).
 
-A user is online when one of their live sessions (services/sessions.py) was touched within
+A user is online when one of their live sessions (auth/sessions.py) was touched within
 security.online_threshold_seconds. Sessions are touched by
 dependencies.get_current_user on every authenticated request, at most once
 per security.activity_touch_interval_seconds.
@@ -58,5 +58,5 @@ def online_cutoff_param():
 def online_user_ids_select():
     """SELECT user_id FROM user_sessions WHERE live AND touched within the threshold."""
     from app.backend.models.user import UserSession
-    from app.backend.services.sessions import live_clause
+    from app.backend.auth.sessions import live_clause
     return sa_select(UserSession.user_id).where(live_clause(), UserSession.last_activity >= online_cutoff_param())

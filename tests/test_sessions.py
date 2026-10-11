@@ -12,8 +12,8 @@ from app.backend.enums.general import SessionEndReason, SessionRevokeCause, Sess
 from app.backend.enums.routes import AuthRoutes, UserRoutes
 from app.backend.models.role import Role
 from app.backend.models.user import User, UserSession
-from app.backend.services import sessions as session_lifetimes
-from app.backend.services.auth import AuthService
+from app.backend.auth import sessions as session_lifetimes
+from app.backend.auth.service import AuthService
 from tests.helpers import make_admin, make_user
 
 ME = V1.path(AuthRoutes.ME)

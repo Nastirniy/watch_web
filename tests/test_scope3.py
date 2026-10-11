@@ -11,7 +11,7 @@ from app.backend.enums.routes import (
 from app.backend.api.v1 import V1
 from app.backend.models.user import UserSession
 from app.backend.models.role import Permission
-from app.backend.services.auth import AuthService
+from app.backend.auth.service import AuthService
 from tests.helpers import make_post, make_user, make_admin, make_role, make_dictionary, make_observation, make_media
 
 ME = V1.path(AuthRoutes.ME)

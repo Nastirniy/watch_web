@@ -19,9 +19,9 @@ from loguru import logger
 
 from app.backend.enums.general import Permissions
 from app.backend.enums.errors import AccessErrorCode
-from app.backend.dependencies import get_auth_context
-from app.backend.services.auth_context import AuthContext
-from app.backend.services.access_errors import access_denied
+from app.backend.auth.dependencies import get_auth_context
+from app.backend.auth.context import AuthContext
+from app.backend.auth.access_errors import access_denied
 
 
 def _permission_name(permission: Union[Permissions, str]) -> str:

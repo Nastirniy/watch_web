@@ -23,7 +23,7 @@ from app.backend.config import settings
 from app.backend.enums.general import MediaType
 from app.backend.enums.errors import ErrorCode
 from app.backend.models.media_format import MediaFormat
-from app.backend.services.api_errors import CodedError
+from app.backend.errors.coded import CodedError
 
 # Declared Content-Type values that mean "detect from the bytes"; never stored
 OPAQUE_CONTENT_TYPES = {"application/octet-stream", "binary/octet-stream"}

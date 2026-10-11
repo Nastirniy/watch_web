@@ -5,10 +5,10 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.database import get_session
-from app.backend.services.access_control import AccessControlService
+from app.backend.auth.access_control import AccessControlService
 from app.backend.models.observation import Category, SignalType
-from app.backend.services.auth_context import AuthContext
-from app.backend.services.permissions import require
+from app.backend.auth.context import AuthContext
+from app.backend.auth.require import require
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import CategoryRoutes
 from app.backend.helpers.audit_helper import client_info, create_audit_log
@@ -17,9 +17,9 @@ from app.backend.api.v1.models.response.categories import CategoryResponse
 from app.backend.api.v1.models.response.signal_types import SignalTypeResponse
 from app.backend.api.v1.models.query.categories import CategoryFilterParams
 from app.backend.filters.category_filter import CategoryFilterService
-from app.backend.services.api_errors import ApiError
+from app.backend.errors.problems import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
-from app.backend.openapi_problems import ADMIN, GUARDED, problems
+from app.backend.errors.openapi import ADMIN, GUARDED, problems
 
 router = APIRouter(prefix=CategoryRoutes.BASE.value, tags=[CategoryRoutes.tag()])
 

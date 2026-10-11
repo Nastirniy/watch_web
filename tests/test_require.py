@@ -1,7 +1,7 @@
 """Unit tests of the Require evaluation (no database)."""
 from app.backend.enums.general import Permissions
-from app.backend.services.auth_context import AuthContext
-from app.backend.services.permissions import Require
+from app.backend.auth.context import AuthContext
+from app.backend.auth.require import Require
 
 
 def ctx(*perms: str) -> AuthContext:

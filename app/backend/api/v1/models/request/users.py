@@ -3,7 +3,7 @@ from fastapi import UploadFile
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt, field_validator
 
 from app.backend.utils.validators import SecureBaseModel, SecurityValidators
-from app.backend.services.api_errors import invalid
+from app.backend.errors.coded import invalid
 from app.backend.enums.errors import FieldErrorCode
 
 

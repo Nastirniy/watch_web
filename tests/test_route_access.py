@@ -3,7 +3,7 @@ import pytest
 from fastapi.routing import APIRoute
 
 from app.main import fastapi_app
-from app.backend.services.route_access import route_access_map
+from app.backend.auth.route_access import route_access_map
 from app.backend.enums.routes import APIVersionRoutes, AuthRoutes
 from app.backend.api.v1 import V1
 from tests.helpers import make_user, make_admin

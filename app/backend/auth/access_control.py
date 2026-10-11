@@ -6,9 +6,9 @@ from app.backend.enums.errors import AccessErrorCode
 from app.backend.models.user import User
 from app.backend.models.observation import Observation
 from app.backend.models.media import MediaFile
-from app.backend.services.auth_context import AuthContext
-from app.backend.services.access_errors import access_denied
-from app.backend.services.permissions import Require
+from app.backend.auth.context import AuthContext
+from app.backend.auth.access_errors import access_denied
+from app.backend.auth.require import Require
 
 
 class AccessControlService:

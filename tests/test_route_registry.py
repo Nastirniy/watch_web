@@ -101,6 +101,36 @@ def test_nothing_outside_api_imports_api():
     assert not offenders, offenders
 
 
+# Code that runs without a request; HTTP lives in api/, auth/ (require, dependencies, ...) and errors/ (but coded.py)
+FRAMEWORK_FREE = ("services", "filters", "models", "workers", "enums", "bootstrap", "utils")
+FRAMEWORK = re.compile(r"(fastapi|starlette)(\.|$)")
+
+
+def _module_file(name: str):
+    """File of an app module or package, None for anything else (third-party, or a name inside a module)"""
+    base = APP_DIR.parent.joinpath(*name.split("."))
+    return next((path for path in (base.with_suffix(".py"), base / "__init__.py") if path.is_file()), None)
+
+
+def test_domain_code_never_reaches_the_web_framework():
+    """Services, filters, models, workers, enums, seeding and utils import neither FastAPI nor Starlette, directly
+    or through another app module: they raise CodedError (errors/coded.py) and the route answers
+    ApiError.from_coded(exc)"""
+    offenders = {}
+    for folder in FRAMEWORK_FREE:
+        for start in sorted((APP_DIR / "backend" / folder).rglob("*.py")):
+            chains, seen = [(start, (start.relative_to(APP_DIR.parent).as_posix(),))], {start}
+            while chains and start not in offenders:
+                path, chain = chains.pop(0)
+                for _, name in _imported_modules(path):
+                    if FRAMEWORK.match(name):
+                        offenders.setdefault(start, " -> ".join(chain + (name,)))
+                    elif name.startswith("app.") and (target := _module_file(name)) and target not in seen:
+                        seen.add(target)
+                        chains.append((target, chain + (name,)))
+    assert not offenders, "\n".join(offenders.values())
+
+
 def _groups() -> list:
     """Route groups: the enums of enums/routes.py with a BASE member"""
     return [cls for _, cls in inspect.getmembers(route_enums, inspect.isclass)

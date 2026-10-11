@@ -31160,7 +31160,7 @@
           "ended"
         ],
         "title": "SessionStatus",
-        "description": "State of a login session, computed when it is read (services/sessions.py), never stored"
+        "description": "State of a login session, computed when it is read, never stored"
       },
       "SessionsEndedResponse": {
         "properties": {

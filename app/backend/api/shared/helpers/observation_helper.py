@@ -5,9 +5,9 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.models.observation import Observation, ObservationFrequency
-from app.backend.services.access_control import AccessControlService
-from app.backend.services.auth_context import AuthContext
-from app.backend.services.api_errors import ApiError
+from app.backend.auth.access_control import AccessControlService
+from app.backend.auth.context import AuthContext
+from app.backend.errors.problems import ApiError
 from app.backend.enums.errors import ErrorCode
 
 

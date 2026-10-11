@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field, field_validator
 import re
 
 from app.backend.enums.general import Permissions
-from app.backend.services.api_errors import invalid
+from app.backend.errors.coded import invalid
 from app.backend.enums.errors import FieldErrorCode
 
 

@@ -3,7 +3,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 
 from app.backend.models.role import Role, Permission
-from app.backend.services.api_errors import ApiError
+from app.backend.errors.problems import ApiError
 from app.backend.enums.errors import ErrorCode
 
 

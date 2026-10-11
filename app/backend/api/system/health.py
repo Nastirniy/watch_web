@@ -18,9 +18,9 @@ from app.backend.api.system.health_checks import (
     ServicesHealthModel,
     ServiceStatusModel
 )
-from app.backend.services.api_errors import ApiError
+from app.backend.errors.problems import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
-from app.backend.openapi_problems import problems
+from app.backend.errors.openapi import problems
 
 router = APIRouter(tags=[SystemRoutes.tag()])
 

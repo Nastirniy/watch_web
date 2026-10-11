@@ -3,7 +3,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
-from app.backend.database import seed_roles_and_permissions
+from app.backend.bootstrap.permissions import seed_roles_and_permissions
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import RoleRoutes, TagRoutes, UserRoutes, AuthRoutes
 from app.backend.api.v1 import V1

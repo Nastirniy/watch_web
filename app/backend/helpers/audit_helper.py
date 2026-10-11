@@ -7,7 +7,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.models.audit import AuditLog
 
 if TYPE_CHECKING:
-    from app.backend.services.auth_context import AuthContext
+    from app.backend.auth.context import AuthContext
 
 
 def client_info(request: Request, auth: Optional["AuthContext"] = None) -> Dict[str, Optional[str]]:

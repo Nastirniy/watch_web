@@ -3,9 +3,9 @@
 Init User Utility - Create the first user from the server machine.
 
 Usage:
-    python app/backend/init_user.py /path/to/cert.pem
-    python app/backend/init_user.py /path/to/cert.pem --username admin --alias "Admin" --role-ids 1,2
-    python app/backend/init_user.py --list-roles
+    python -m app.backend.init_user /path/to/cert.pem
+    python -m app.backend.init_user /path/to/cert.pem --username admin --alias "Admin" --role-ids 1,2
+    python -m app.backend.init_user --list-roles
 """
 
 import asyncio
@@ -13,16 +13,12 @@ import sys
 import argparse
 from pathlib import Path
 
-# Add project root to sys.path so `app.*` imports work when run directly
-_project_root = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(_project_root))
-
 from loguru import logger
 
 from app.backend.database import get_session_maker, create_database_if_not_exists
 from app.backend.models.user import User
 from app.backend.models.role import Role, UserRole
-from app.backend.helpers.certeficates_helper import CertificateParser, hash_pki_certificate_data
+from app.backend.auth.certificates import CertificateParser, hash_pki_certificate_data
 from app.backend.helpers.audit_helper import create_audit_log
 
 from sqlmodel import select

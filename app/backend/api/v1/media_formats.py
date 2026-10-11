@@ -16,10 +16,10 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.database import get_session
-from app.backend.services.access_control import AccessControlService
+from app.backend.auth.access_control import AccessControlService
 from app.backend.models.media_format import MediaFormat
-from app.backend.services.auth_context import AuthContext
-from app.backend.services.permissions import require
+from app.backend.auth.context import AuthContext
+from app.backend.auth.require import require
 from app.backend.services.media.formats import hard_limit_bytes, invalidate_registry_cache
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import MediaFormatRoutes
@@ -29,9 +29,9 @@ from app.backend.api.v1.models.request.media_formats import MediaFormatCreate, M
 from app.backend.api.v1.models.response.media_formats import MediaFormatResponse
 from app.backend.api.v1.models.query.media_formats import MediaFormatFilterParams
 from app.backend.filters.media_format_filter import MediaFormatFilterService
-from app.backend.services.api_errors import ApiError
+from app.backend.errors.problems import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
-from app.backend.openapi_problems import ADMIN, GUARDED, problems
+from app.backend.errors.openapi import ADMIN, GUARDED, problems
 
 router = APIRouter(prefix=MediaFormatRoutes.BASE.value, tags=[MediaFormatRoutes.tag()])
 

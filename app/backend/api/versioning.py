@@ -23,7 +23,7 @@ from fastapi.routing import APIRoute
 
 from app.backend.enums.errors import ErrorCode
 from app.backend.enums.routes import APIVersionRoutes, DocsRoutes
-from app.backend.openapi_problems import AUTHENTICATED, openapi_document, problems
+from app.backend.errors.openapi import AUTHENTICATED, openapi_document, problems
 
 
 class PublishedVersion:

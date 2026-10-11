@@ -1,21 +1,13 @@
-import asyncio
-import sys
-import os
-from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
-# Add project root to Python path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-
 from app.backend.config import settings
 from app.backend.utils.logging_config import setup_logging, get_logger, get_main_logger
-from app.backend.database import initialize_database_with_migrations
-from app.backend.error_handlers import register_error_handlers
+from app.backend.bootstrap.startup import initialize_database_with_migrations
+from app.backend.errors.handlers import register_error_handlers
 from app.backend.request_id import RequestIdMiddleware
 from app.backend.enums.errors import ErrorCode
-from app.backend.openapi_problems import problems
+from app.backend.errors.openapi import problems
 from app.backend.api.v1 import V1
 from app.backend.api.system import health, problems as problem_pages
 from app.backend.enums.routes import AuthRoutes, DocsRoutes, SystemRoutes

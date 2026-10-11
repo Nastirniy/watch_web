@@ -43,7 +43,7 @@ class User(SQLModel, table=True):
     # last_activity_at is a column property attached in models/presence_properties.py
     @property
     def is_online(self) -> bool:
-        from app.backend.services.presence import is_recent
+        from app.backend.auth.presence import is_recent
         return is_recent(getattr(self, "last_activity_at", None))
 
 
@@ -55,13 +55,13 @@ class UserSession(SQLModel, table=True):
     ip_address: Optional[str] = Field(default=None, max_length=45)
     user_agent: Optional[str] = Field(default=None)
     last_activity: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
-    # When the session ends unless a request comes: every request moves it (services/sessions.touch)
+    # When the session ends unless a request comes: every request moves it (auth/sessions.touch)
     expires_at: datetime = Field(index=True)
     # SHA-256 of the client certificate fingerprint the session was opened with (production login through nginx);
     # every request must present the same certificate. Empty for development logins.
     certificate_fingerprint_hash: Optional[str] = Field(default=None, max_length=64)
     # Set when the server knows the session ended. The state (online / idle / ended) is computed when the row is
-    # read (services/sessions.py): a session past expires_at or its idle timeout is ended even before these are set.
+    # read (auth/sessions.py): a session past expires_at or its idle timeout is ended even before these are set.
     ended_at: Optional[datetime] = Field(default=None, index=True)
     end_reason: Optional[str] = Field(default=None, max_length=20)     # SessionEndReason
     revoke_cause: Optional[str] = Field(default=None, max_length=32)   # SessionRevokeCause, with end_reason revoked

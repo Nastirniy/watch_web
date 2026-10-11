@@ -13,8 +13,9 @@ A code names exactly one message, never a category: a new message is a new code.
 defines its status, title and params here (RFC 9457 section 4), so /problems/<code>, the OpenAPI schemas
 and the checks in tests/test_error_contract.py all come from this file.
 
-Raise with ApiError(ErrorCode.X, **params) (services/api_errors.py), access_denied() for 403, and
-invalid(FieldErrorCode.X, **params) inside request model validators (items of a validation_error).
+Raise with ApiError(ErrorCode.X, **params) (errors/problems.py), access_denied() for 403, and
+invalid(FieldErrorCode.X, **params) inside request model validators (items of a validation_error);
+services raise CodedError(ErrorCode.X, **params) (errors/coded.py).
 """
 import string
 from enum import Enum

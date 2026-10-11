@@ -6,7 +6,7 @@ class Permissions(Enum):
 
     X.archive hides a record (is_deleted=true) and restores it; nothing is ever removed.
     role.delete is the single permanent delete: it removes an archived role row and
-    its assignments for good. Human-readable names live in PERMISSION_META (database.py).
+    its assignments for good. Human-readable names live in PERMISSION_META (bootstrap/permissions.py).
     """
     # User permissions
     USER_VIEW = "user.view"
@@ -178,7 +178,7 @@ class ThumbnailStatus(str, Enum):
 
 
 class SessionStatus(str, Enum):
-    """State of a login session, computed when it is read (services/sessions.py), never stored"""
+    """State of a login session, computed when it is read, never stored"""
     ONLINE = "online"  # live, a request within security.online_threshold_seconds
     IDLE = "idle"      # live, the client is quiet; ends after security.session_idle_timeout_minutes
     ENDED = "ended"    # why: SessionEndReason
