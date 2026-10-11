@@ -131,7 +131,8 @@ def test_image_dimensions_of_an_unreadable_file(tmp_path):
 @pytest.mark.asyncio
 async def test_probe_missing_all_refreshes_the_size_of_existing_rows(db, session_maker, monkeypatch, tmp_path, capsys):
     """Rows stored before sizes were reported as displayed keep the stored frame size until probed again"""
-    from app.backend import database, media_tools
+    from app.backend import database
+    from app.backend.cli import media_tools
 
     async def maker():
         return session_maker

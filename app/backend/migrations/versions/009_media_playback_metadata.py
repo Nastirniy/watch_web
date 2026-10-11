@@ -3,7 +3,7 @@
 Adds media_files.duration_seconds, video_codec, audio_codec and playback_type
 (the RFC 6381 string for HTMLMediaElement.canPlayType). Filled at upload by
 the API, by the media worker while it extracts posters, and for existing rows
-by `python -m app.backend.media_tools probe-missing`.
+by `python -m app.backend.cli.media_tools probe-missing`.
 
 Guarded with inspector checks because 002_sync_schema adds the columns on
 fresh installs.

@@ -3,13 +3,13 @@
 Database Migration Management Utility
 
 Usage:
-    python -m app.backend.migrations_manager init       - Initialize migrations (create first migration)
-    python -m app.backend.migrations_manager migrate    - Apply all pending migrations
-    python -m app.backend.migrations_manager revision   - Create new migration from model changes
-    python -m app.backend.migrations_manager downgrade  - Downgrade to previous migration
-    python -m app.backend.migrations_manager current    - Show current migration
-    python -m app.backend.migrations_manager history    - Show migration history
-    python -m app.backend.migrations_manager seed       - Run database seeding
+    python -m app.backend.cli.migrations_manager init       - Initialize migrations (create first migration)
+    python -m app.backend.cli.migrations_manager migrate    - Apply all pending migrations
+    python -m app.backend.cli.migrations_manager revision   - Create new migration from model changes
+    python -m app.backend.cli.migrations_manager downgrade  - Downgrade to previous migration
+    python -m app.backend.cli.migrations_manager current    - Show current migration
+    python -m app.backend.cli.migrations_manager history    - Show migration history
+    python -m app.backend.cli.migrations_manager seed       - Run database seeding
 """
 
 import asyncio
@@ -29,7 +29,7 @@ _logger = get_logger("migrations")
 def get_alembic_config():
     """Get alembic configuration"""
     # Get the project root directory (where alembic.ini is located)
-    project_root_dir = Path(__file__).parent.parent.parent
+    project_root_dir = Path(__file__).resolve().parents[3]
     alembic_ini_path = project_root_dir / "alembic.ini"
     alembic_cfg = Config(str(alembic_ini_path))
     return alembic_cfg

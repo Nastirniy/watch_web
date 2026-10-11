@@ -16,7 +16,7 @@ def run_migrate(db_file: Path, cwd: Path = PROJECT_ROOT) -> subprocess.Completed
     env["WATCH_WEB_ALEMBIC_URL"] = f"sqlite+aiosqlite:///{db_file.as_posix()}"
     env["PYTHONPATH"] = str(PROJECT_ROOT)
     return subprocess.run(
-        [sys.executable, "-m", "app.backend.migrations_manager", "migrate"],
+        [sys.executable, "-m", "app.backend.cli.migrations_manager", "migrate"],
         cwd=cwd, env=env, capture_output=True, text=True, timeout=300,
     )
 

@@ -3,9 +3,9 @@
 Init User Utility - Create the first user from the server machine.
 
 Usage:
-    python -m app.backend.init_user /path/to/cert.pem
-    python -m app.backend.init_user /path/to/cert.pem --username admin --alias "Admin" --role-ids 1,2
-    python -m app.backend.init_user --list-roles
+    python -m app.backend.cli.init_user /path/to/cert.pem
+    python -m app.backend.cli.init_user /path/to/cert.pem --username admin --alias "Admin" --role-ids 1,2
+    python -m app.backend.cli.init_user --list-roles
 """
 
 import asyncio
@@ -35,8 +35,8 @@ async def list_roles():
 
         if not roles:
             logger.warning("No roles found in database. Run migrations and seed first:")
-            logger.info("  python -m app.backend.migrations_manager migrate")
-            logger.info("  python -m app.backend.migrations_manager seed")
+            logger.info("  python -m app.backend.cli.migrations_manager migrate")
+            logger.info("  python -m app.backend.cli.migrations_manager seed")
             return []
 
         logger.info(f"Available roles ({len(roles)}):")

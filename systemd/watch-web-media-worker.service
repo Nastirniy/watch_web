@@ -16,7 +16,7 @@
 #   journalctl -u watch-web-media-worker -f
 #
 # Status of the queue:
-#   /opt/watch_web/venv/bin/python -m app.backend.media_tools poster-status
+#   /opt/watch_web/venv/bin/python -m app.backend.cli.media_tools poster-status
 # ============================================================================
 
 [Unit]

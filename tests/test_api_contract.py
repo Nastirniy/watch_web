@@ -1,13 +1,13 @@
 """The API contract of the web client (api-contract/<vN>/openapi.json) changes only on purpose.
 
 Fails while the document of a version and its committed file differ and names what differs. Accept an intended
-change with: python -m app.backend.api_contract (then add a CHANGELOG.md entry; the web team regenerates its types).
+change with: python -m app.backend.cli.api_contract (then add a CHANGELOG.md entry; the web team regenerates its types).
 """
 import json
 
 import pytest
 
-from app.backend.api_contract import contract_path
+from app.backend.cli.api_contract import contract_path
 from app.backend.api.versioning import PublishedVersion
 from app.backend.enums.routes import MediaRoutes
 from app.backend.api.v1 import V1
@@ -44,7 +44,7 @@ def test_openapi_matches_the_committed_contract(version):
     committed = json.loads(path.read_text(encoding="utf-8"))
     differences = _differences(committed, version.openapi(fastapi_app))
     assert not differences, (f"{path.relative_to(path.parents[2])} differs from the code:\n  " + "\n  ".join(differences)
-                             + "\nIf intended: python -m app.backend.api_contract, commit the file, add a CHANGELOG entry.")
+                             + "\nIf intended: python -m app.backend.cli.api_contract, commit the file, add a CHANGELOG entry.")
 
 
 @pytest.mark.asyncio

@@ -26,32 +26,32 @@ pip install alembic  # Required for migrations
 ### Commands:
 ```bash
 # Initialize migrations (first time only)
-python -m app.backend.migrations_manager init
+python -m app.backend.cli.migrations_manager init
 
 # Create new migration after model changes
-python -m app.backend.migrations_manager revision -m "Add new field to User"
+python -m app.backend.cli.migrations_manager revision -m "Add new field to User"
 
 # Apply all pending migrations  
-python -m app.backend.migrations_manager migrate
+python -m app.backend.cli.migrations_manager migrate
 
 # Show current migration
-python -m app.backend.migrations_manager current
+python -m app.backend.cli.migrations_manager current
 
 # Show migration history
-python -m app.backend.migrations_manager history
+python -m app.backend.cli.migrations_manager history
 
 # Downgrade to previous migration
-python -m app.backend.migrations_manager downgrade
+python -m app.backend.cli.migrations_manager downgrade
 
 # Run database seeding only
-python -m app.backend.migrations_manager seed
+python -m app.backend.cli.migrations_manager seed
 ```
 
 ### Workflow:
 1. **Modify models** in `app/backend/models/`
-2. **Create migration**: `python -m app.backend.migrations_manager revision -m "Description"`
+2. **Create migration**: `python -m app.backend.cli.migrations_manager revision -m "Description"`
 3. **Review generated migration** in `app/backend/migrations/versions/`
-4. **Apply migration**: `python -m app.backend.migrations_manager migrate`
+4. **Apply migration**: `python -m app.backend.cli.migrations_manager migrate`
 5. **Commit both model and migration files**
 
 ### Important:
@@ -100,7 +100,7 @@ python -m app.backend.migrations_manager seed
 - Every route declares the problems it answers on its decorator: `responses=problems(ErrorCode.POST_NOT_FOUND, ErrorCode.POST_CODE_TAKEN, *ADMIN)` (`app/backend/errors/openapi.py`; `*GUARDED` / `*ADMIN` are the 403 of `require(all=...)` / `require(..., admin=True)`). Generic ones are declared once and merged by FastAPI: `internal_error` on the app, the 401 set (`AUTHENTICATED`) and `validation_error` on the version router; login and refresh declare their own 401 set. With success helpers: `responses={**file_response(...), **problems(...)}`. A new `raise ApiError(Code.X)` needs `Code.X` in the route's `problems(...)`: the session fixture in `tests/conftest.py` fails on any problem the tests make the app answer that its operation does not declare. `openapi_document()` (FastAPI's `get_openapi` per version) only moves error content to `application/problem+json` and adds the schemas of framework problems; `/problems` and `/problems/{code}` (`api/system/problems.py`) read the document of every version. operationId = endpoint function name (unique within its version).
 - A success response that is not a JSON model (file, image, empty body, headers) is declared with `responses=` from `api/shared/openapi_docs.py` (`file_response`, `empty_response`, `with_headers`; header sets of a version, such as `ORIGINAL_FILE_HEADERS`, live in its response modules); a JSON response always has a `response_model`.
 - Client contract for the web team: `API.md` (errors, localization keys, openapi-typescript) and `WEB_TOOLING.md` (stock tools only: `openapi.json` -> openapi-typescript -> `tsc`, translations typed with `satisfies Messages`; starter files in `api-contract/web-kit/`). Never add a catalog, export format or checker of our own: whatever the web client needs must be in the OpenAPI document FastAPI generates.
-- The contract is one file per version, `api-contract/v1/openapi.json` (the document `GET /api/v1/openapi.json` serves), committed. `tests/test_api_contract.py` fails on any difference and names the changed operations and schemas. Never rewrite it (`python -m app.backend.api_contract`) just to silence the test: first decide whether the change is intended (a renamed code or param breaks the web translations and types; a code gone from an operation means it was dropped from a `problems(...)` declaration). If intended: rewrite, commit the file with the change, add a CHANGELOG entry.
+- The contract is one file per version, `api-contract/v1/openapi.json` (the document `GET /api/v1/openapi.json` serves), committed. `tests/test_api_contract.py` fails on any difference and names the changed operations and schemas. Never rewrite it (`python -m app.backend.cli.api_contract`) just to silence the test: first decide whether the change is intended (a renamed code or param breaks the web translations and types; a code gone from an operation means it was dropped from a `problems(...)` declaration). If intended: rewrite, commit the file with the change, add a CHANGELOG entry.
 - `tests/test_error_contract.py` checks the catalog against RFC 9457, forbids hand-made error bodies and plain `ValueError` in validators, and checks every raise passes exactly the declared params; `tests/test_openapi.py` checks the generated document (problem+json errors, 401/403 follow `require()`, no JSON response without a schema, real bodies validate against their problem schema).
 
 ## Observation counters
@@ -130,7 +130,7 @@ python -m app.backend.migrations_manager seed
 - Accepted upload formats are rows of `media_formats` (model `MediaFormat`), managed through `/media-formats` (permissions `media_format.*`, administration) and read through `services/media/formats.py` (`load_registry`, cached 15 s, `invalidate_registry_cache()` after every write). `DEFAULT_FORMATS` there only seeds missing rows; never hard-code a format in a route. Uploads answer 415 (format, with `Accept-Post`) or 413 (size, per-format `max_file_size_bytes`, capped by `storage.max_file_size_gb`). Keep defaults limited to what imgproxy renders, ffmpeg decodes and browsers play.
 - Video and audio metadata (`duration_seconds`, `video_codec`, `audio_codec`, `playback_type`, `width`, `height`) come from `services/media/probe.py` (ffprobe, ffmpeg banner fallback): at upload in `record_upload` (`api/shared/helpers/upload_helper.py`), in the worker when missing, and via `media_tools probe-missing` (`--all` probes every row again). `playback_type` is the RFC 6381 string for `canPlayType`; never guess codecs from the MIME type. `width` and `height` are the size as displayed: the display rotation of a video and the EXIF orientation of an image (`image_dimensions`, header only) swap them.
 - Resumable uploads (`api/v1/media_uploads.py`, `services/media/uploads.py`, table `upload_sessions`): progress is `received_bytes`, one writer per session via `writer_token`, chunks must arrive at `received_bytes` exactly, a failed chunk truncates the part file back. Completion goes through `store_file_from_path` like every other upload; never add a second storage path. Client contract in `UPLOADS.md`; keep it in sync with the status codes.
-- Media maintenance commands: `python -m app.backend.media_tools {cleanup-legacy-thumbnails,reconcile-posters,poster-status,reconcile-storyboards,storyboard-status,probe-missing}`.
+- Media maintenance commands: `python -m app.backend.cli.media_tools {cleanup-legacy-thumbnails,reconcile-posters,poster-status,reconcile-storyboards,storyboard-status,probe-missing}`.
 - Formats are checked live by `tests/docker/formats.py` against the e2e stack (every accepted image and video format plus edge cases through nginx); run it after a change to the probe, the worker, imgproxy or nginx settings.
 - Deployment topology (`DEPLOYMENT.md`): Docker runs only api, media-worker and imgproxy on the host network. MySQL, the entry nginx and the media directory (local disk or a mounted network share) stay on the host; the media directory is bind-mounted at the same absolute path into every container. Do not add nginx or a database to docker-compose.yml.
 - nginx is the control point for client certificates (`nginx.conf`: 443 with `ssl_verify_client on`, `ssl_client_certificate`, `ssl_crl`; 80 only redirects). Locations live in `nginx-app.conf` (shared with the e2e stack), the API proxy headers in `nginx-proxy.conf`. `POST /auth/login` trusts `X-SSL-Client-*` only because nginx sets them there: every location with `proxy_pass http://watch_web_api` includes that snippet (`tests/test_nginx_conf.py`). Login matches a serial in nginx's form (`0A1B`) and the stored one (`a1b`), `serial_hashes()` in `auth/certificates.py`. `nginx-app.conf` claims only the paths the API publishes (`tests/test_nginx_conf.py` checks every route); `/` is the web client, configured in `nginx.conf`. The API has no CORS: the web client is same origin (dev: the dev server's proxy, WEB_TOOLING.md section 8); a browser client on another origin gets CORS at nginx, never in the app.

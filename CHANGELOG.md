@@ -5,7 +5,17 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
-## Backend layout: auth, errors and bootstrap packages
+## Backend layout: auth, errors, bootstrap and cli packages
+
+### Changed (operators)
+
+- The command-line tools moved to `app/backend/cli/`; the old module paths are gone, update scripts, cron jobs and
+  runbooks (DEPLOYMENT.md, `systemd/` and WEB_TOOLING.md already use the new ones):
+  `python -m app.backend.migrations_manager` -> `python -m app.backend.cli.migrations_manager`,
+  `python -m app.backend.media_tools` -> `python -m app.backend.cli.media_tools`,
+  `python -m app.backend.init_user` -> `python -m app.backend.cli.init_user`,
+  `python -m app.backend.api_contract` -> `python -m app.backend.cli.api_contract`.
+  The API and the media worker (`python -m app.backend.workers.media_worker`) start as before.
 
 ### Changed
 

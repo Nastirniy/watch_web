@@ -42,7 +42,7 @@ APP_DIR = API_DIR.parent.parent
 VERSION_MODULE = re.compile(r"app\.backend\.api\.v\d+(\.|$)")
 API_MODULE = re.compile(r"app\.backend\.api(\.|$)")
 # Wire the routers into the app and write the contract: the only modules outside api/ that know it
-API_WIRING = {APP_DIR / "main.py", APP_DIR / "backend" / "api_contract.py"}
+API_WIRING = {APP_DIR / "main.py", APP_DIR / "backend" / "cli" / "api_contract.py"}
 
 
 def _imported_modules(path: Path, root: Path = APP_DIR.parent):

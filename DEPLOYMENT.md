@@ -122,7 +122,7 @@ Air-gapped hosts: build on a connected machine, `docker save watch-web ghcr.io/i
 
 Upgrades: `docker compose build api && docker compose up -d api media-worker`. The API runs migrations on start; start the worker after the API has finished the first start. Upgrading to storyboards with `MYSETTINGS_STORAGE__POSTER__CONCURRENCY=1`: see the upgrade note under "Storyboards" (the worker refuses to start until the concurrency is 2 or storyboards are off).
 
-Upgrading to sizes as displayed (vertical phone videos, EXIF-rotated photos): rows stored before keep the stored frame size until probed again. `docker compose exec media-worker python -m app.backend.media_tools probe-missing --all` probes every video and audio file again and re-reads every image size (headers only; `--limit N` per run, default 1000). Video uploads that failed only because they have no video stream become `unsupported` after `media_tools reconcile-posters --retry-failed`: the worker sees the probed metadata and stops trying.
+Upgrading to sizes as displayed (vertical phone videos, EXIF-rotated photos): rows stored before keep the stored frame size until probed again. `docker compose exec media-worker python -m app.backend.cli.media_tools probe-missing --all` probes every video and audio file again and re-reads every image size (headers only; `--limit N` per run, default 1000). Video uploads that failed only because they have no video stream become `unsupported` after `media_tools reconcile-posters --retry-failed`: the worker sees the probed metadata and stops trying.
 
 ## Storyboards (seek previews)
 
@@ -154,9 +154,9 @@ the worker does (a long video can take minutes of one CPU core and reads the who
 - The sheets are served like thumbnails: signed URLs under `/media-images/` (imgproxy, nginx cache); no nginx change.
 
 ```bash
-docker compose exec media-worker python -m app.backend.media_tools storyboard-status
-docker compose exec media-worker python -m app.backend.media_tools reconcile-storyboards                 # queue missing, repair missing files
-docker compose exec media-worker python -m app.backend.media_tools reconcile-storyboards --retry-failed  # also re-queue failed ones
+docker compose exec media-worker python -m app.backend.cli.media_tools storyboard-status
+docker compose exec media-worker python -m app.backend.cli.media_tools reconcile-storyboards                 # queue missing, repair missing files
+docker compose exec media-worker python -m app.backend.cli.media_tools reconcile-storyboards --retry-failed  # also re-queue failed ones
 ```
 
 `storyboard-status` prints the counts per state (pending, processing, ready, failed) and the latest errors (media id, state, attempts, message). The worker heartbeat
@@ -195,8 +195,8 @@ curl -sI $CERT -H "Authorization: Bearer $TOKEN" "https://host/api/v1/media/1/th
 curl -sI $CERT "https://host/media-images/<signature>/rs:fit:300:300:0:0/q:85/exp:.../<source>" | head -1
 
 # queue and worker
-docker compose exec media-worker python -m app.backend.media_tools poster-status
-docker compose exec media-worker python -m app.backend.media_tools storyboard-status
+docker compose exec media-worker python -m app.backend.cli.media_tools poster-status
+docker compose exec media-worker python -m app.backend.cli.media_tools storyboard-status
 ```
 
 `X-Cache: HIT` means nginx served from cache; `MISS` means imgproxy rendered. A 403 from `/media-images/` is an invalid or expired signature; a 422 from imgproxy usually means the source is missing under `MEDIA_ROOT` or exceeds `IMGPROXY_MAX_SRC_RESOLUTION`. Images above that limit get `thumbnail_status: unsupported` from the API (it reads the size from the header at upload), as long as the API has the same limit: docker-compose.yml passes `IMGPROXY_MAX_SRC_RESOLUTION` from `.env` (default 250 megapixels, enough for 200 MP phone cameras) to both containers. The limit bounds CPU time, not memory: libvips decodes a JPEG at a reduced scale and a PNG line by line, so a 200 MP source peaked at 63 MB (JPEG) and 124 MB (PNG) per render, and four 1600 px previews of a 200 MP PNG at once at 431 MB, under the 1 GB container limit. What it stops is a crafted file: a 274 KB PNG holding 1.6 gigapixels took 3.5 s of CPU and 305 MB per render, and the per-format file size limit cannot catch it.
