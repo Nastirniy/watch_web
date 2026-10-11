@@ -5,7 +5,7 @@ files. Thumbnails are now rendered on demand (images) or derived from the
 poster tracked by the poster_* columns (videos), so nothing reads these
 columns any more. The files themselves are removed with:
 
-    python -m app.backend.media_tools cleanup-legacy-thumbnails
+    python -m app.backend.cli.media_tools cleanup-legacy-thumbnails
 
 Revision ID: 006_drop_legacy_thumbnails
 Revises: 005_video_posters

@@ -3,13 +3,13 @@
 Media maintenance commands.
 
 Usage:
-    python -m app.backend.media_tools cleanup-legacy-thumbnails [--dry-run]
-    python -m app.backend.media_tools reconcile-posters [--retry-failed]
-    python -m app.backend.media_tools poster-status
-    python -m app.backend.media_tools reconcile-storyboards [--retry-failed]
-    python -m app.backend.media_tools storyboard-status
-    python -m app.backend.media_tools probe-missing [--limit N] [--all]
-    python -m app.backend.media_tools expire-uploads
+    python -m app.backend.cli.media_tools cleanup-legacy-thumbnails [--dry-run]
+    python -m app.backend.cli.media_tools reconcile-posters [--retry-failed]
+    python -m app.backend.cli.media_tools poster-status
+    python -m app.backend.cli.media_tools reconcile-storyboards [--retry-failed]
+    python -m app.backend.cli.media_tools storyboard-status
+    python -m app.backend.cli.media_tools probe-missing [--limit N] [--all]
+    python -m app.backend.cli.media_tools expire-uploads
 
 cleanup-legacy-thumbnails removes the *_thumb_small|medium|large.jpg files the
 old pipeline wrote next to the originals. Thumbnails are now rendered on

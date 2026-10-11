@@ -4,7 +4,7 @@ GET /problems            index of every problem type (HTML)
 GET /problems/{code}     one problem type: status, title, detail template, params, routes that answer it
 
 Public and outside the versions: it describes the API, never data. Not part of the OpenAPI documents; the
-same catalog is there as component schemas (see openapi_problems.py).
+same catalog is there as component schemas (see errors/openapi.py).
 """
 import html
 from typing import Dict, List
@@ -15,8 +15,9 @@ from fastapi.responses import HTMLResponse
 from app.backend.api.versioning import PublishedVersion
 from app.backend.enums.errors import PROBLEM_ENUMS, ErrorCode, ProblemType, problem_type
 from app.backend.enums.routes import SystemRoutes
-from app.backend.openapi_problems import operation_problems
-from app.backend.services.api_errors import ApiError, is_optional
+from app.backend.errors.openapi import operation_problems
+from app.backend.errors.problems import ApiError
+from app.backend.errors.coded import is_optional
 
 router = APIRouter(include_in_schema=False)
 

@@ -1,6 +1,6 @@
 """The API contract of the web client is the OpenAPI document of each version: api-contract/<vN>/openapi.json.
 
-    python -m app.backend.api_contract [directory]      write every version's document (default: api-contract/)
+    python -m app.backend.cli.api_contract [directory]      write every version's document (default: api-contract/)
 
 The files are committed. tests/test_api_contract.py fails while the code and a file differ, so every change of
 the API (paths, bodies, problem codes and their params) is a reviewable diff of these files. An intended change
@@ -11,7 +11,7 @@ import json
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 CONTRACT_DIR = REPO_ROOT / "api-contract"
 
 

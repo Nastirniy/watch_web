@@ -11,17 +11,14 @@ from app.backend.utils.logging_config import get_auth_logger
 from app.backend.models.user import User, UserSession
 from app.backend.enums.errors import AuthErrorCode
 from app.backend.enums.general import SessionEndReason, SessionRevokeCause, SessionStatus
-from app.backend.services import sessions as session_lifetimes
-from app.backend.helpers.certeficates_helper import (
+from app.backend.auth import sessions as session_lifetimes
+from app.backend.auth.certificates import (
     validate_pki_certificate_data,
     hash_pki_certificate_data,
     serial_hashes,
     create_pki_auth_audit_details
 )
-from app.backend.helpers.audit_helper import (
-    create_audit_log,
-    truncate_for_logging
-)
+from app.backend.services.audit import create_audit_log
 
 # Get authentication logger
 _logger = get_auth_logger()
@@ -31,6 +28,22 @@ _pwd_context = CryptContext(
     deprecated="auto",
     bcrypt__rounds=12  # Higher security rounds
 )
+
+
+def truncate_for_logging(value: str, length: int = 16) -> str:
+    """
+    Truncate sensitive value for logging purposes
+
+    Args:
+        value: Value to truncate
+        length: Number of characters to keep
+
+    Returns:
+        Truncated string with ellipsis
+    """
+    if not value:
+        return ""
+    return f"{value[:length]}..." if len(value) > length else value
 
 
 class AuthService:

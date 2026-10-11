@@ -24,7 +24,8 @@ from app.backend.enums.errors import (
     PROBLEM_ENUMS, AccessErrorCode, AuthErrorCode, ErrorCode, FieldErrorCode, ProblemType,
 )
 from app.backend.enums.routes import APIVersionRoutes
-from app.backend.services.api_errors import PROBLEM_JSON, is_optional
+from app.backend.errors.problems import PROBLEM_JSON
+from app.backend.errors.coded import is_optional
 
 # Answered by the framework outside any operation; their schemas are added to the components by the hook
 FRAMEWORK_PROBLEMS = (ErrorCode.ROUTE_NOT_FOUND, ErrorCode.METHOD_NOT_ALLOWED, ErrorCode.BODY_PARSE_ERROR,

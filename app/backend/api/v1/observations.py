@@ -11,12 +11,13 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.database import get_session
 from app.backend.models.observation import Observation, SignalType, Tag
 from app.backend.models.post import Post
-from app.backend.services.auth_context import AuthContext
-from app.backend.services.permissions import require
-from app.backend.services.access_control import AccessControlService
+from app.backend.auth.context import AuthContext
+from app.backend.auth.require import require
+from app.backend.auth.access_control import AccessControlService
 from app.backend.enums.general import Permissions, ObservationStatus, ObservationReportType
 from app.backend.enums.routes import ObservationRoutes
-from app.backend.helpers.audit_helper import client_info, create_audit_log
+from app.backend.api.shared.helpers.audit_helper import client_info
+from app.backend.services.audit import create_audit_log
 from app.backend.api.v1.models.request.observations import (
     ObservationCreate,
     ObservationUpdate,
@@ -45,10 +46,10 @@ from app.backend.api.v1.models.query.observations import ObservationFilterParams
 from app.backend.filters.observation_filter import ObservationFilterService
 from app.backend.filters.observation_report_filter import ObservationReportFilter
 from app.backend.services.observation_report_service import ObservationReportService
-from app.backend.services.api_errors import ApiError, field_problem
+from app.backend.errors.problems import ApiError, field_problem
 from app.backend.enums.errors import AccessErrorCode, ErrorCode, FieldErrorCode
 from app.backend.api.shared.openapi_docs import file_response, header
-from app.backend.openapi_problems import ADMIN, GUARDED, problems
+from app.backend.errors.openapi import ADMIN, GUARDED, problems
 
 router = APIRouter(prefix=ObservationRoutes.BASE.value, tags=[ObservationRoutes.tag()])
 

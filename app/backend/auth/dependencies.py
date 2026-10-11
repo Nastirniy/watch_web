@@ -9,11 +9,11 @@ from loguru import logger
 from app.backend.database import get_session
 from app.backend.models.user import User
 from app.backend.enums.errors import AuthErrorCode
-from app.backend.services.auth import AuthService
-from app.backend.services.auth_context import AuthContext, load_auth_context
-from app.backend.services.presence import should_touch
-from app.backend.services.sessions import certificate_matches, live_session, touch
-from app.backend.services.api_errors import ApiError
+from app.backend.auth.service import AuthService
+from app.backend.auth.context import AuthContext, load_auth_context
+from app.backend.auth.presence import should_touch
+from app.backend.auth.sessions import certificate_matches, live_session, touch
+from app.backend.errors.problems import ApiError
 
 security = HTTPBearer(auto_error=False)
 
@@ -53,7 +53,7 @@ async def get_current_user(
     # Account status first: a deactivated or archived account is rejected whatever the state of its sessions,
     # and any session still live is ended here so the token stops working even when the flag was changed
     # outside the API.
-    result = await session.exec(select(User).where(User.id == int(user_id)))
+    result = await session.exec(select(User).where(User.id == user_id))
     user = result.first()
 
     if not user:
@@ -71,7 +71,7 @@ async def get_current_user(
     # The session of the token must be live (not ended, used within the idle timeout) and, when it was opened
     # with a client certificate, this request must present the same certificate
     if session_id:
-        user_session = await live_session(session, session_id, int(user_id))
+        user_session = await live_session(session, session_id, user_id)
         if user_session is None:
             raise ApiError(AuthErrorCode.SESSION_EXPIRED)
         if not await certificate_matches(user_session, x_ssl_client_fingerprint):
@@ -83,7 +83,7 @@ async def get_current_user(
             session.add(user_session)
             await session.commit()
 
-    logger.info(f"User authenticated successfully: user_id={user_id}, username={user.username}")
+    logger.debug(f"User authenticated: user_id={user_id}, username={user.username}")
     return user
 
 

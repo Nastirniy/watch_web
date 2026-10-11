@@ -19,9 +19,9 @@ from app.backend.api.versioning import PublishedVersion, request_version
 from app.backend.database import get_session
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import APIVersionRoutes, AuthRoutes, TagRoutes, UserRoutes
-from app.backend.error_handlers import register_error_handlers
-from app.backend.services.auth_context import AuthContext
-from app.backend.services.permissions import require
+from app.backend.errors.handlers import register_error_handlers
+from app.backend.auth.context import AuthContext
+from app.backend.auth.require import require
 from tests.helpers import make_admin
 
 

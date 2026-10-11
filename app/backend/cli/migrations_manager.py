@@ -3,13 +3,13 @@
 Database Migration Management Utility
 
 Usage:
-    python migrations.py init          - Initialize migrations (create first migration)
-    python migrations.py migrate       - Apply all pending migrations
-    python migrations.py revision      - Create new migration from model changes
-    python migrations.py downgrade     - Downgrade to previous migration
-    python migrations.py current       - Show current migration
-    python migrations.py history       - Show migration history
-    python migrations.py seed          - Run database seeding
+    python -m app.backend.cli.migrations_manager init       - Initialize migrations (create first migration)
+    python -m app.backend.cli.migrations_manager migrate    - Apply all pending migrations
+    python -m app.backend.cli.migrations_manager revision   - Create new migration from model changes
+    python -m app.backend.cli.migrations_manager downgrade  - Downgrade to previous migration
+    python -m app.backend.cli.migrations_manager current    - Show current migration
+    python -m app.backend.cli.migrations_manager history    - Show migration history
+    python -m app.backend.cli.migrations_manager seed       - Run database seeding
 """
 
 import asyncio
@@ -17,13 +17,10 @@ import sys
 import argparse
 from pathlib import Path
 
-# Add project root to path
-project_root = Path(__file__).parent
-sys.path.insert(0, str(project_root))
-
 from alembic.config import Config
 from alembic import command
-from app.backend.database import seed_database, create_database_if_not_exists
+from app.backend.bootstrap.seed import seed_database
+from app.backend.database import create_database_if_not_exists
 from app.backend.utils.logging_config import get_logger
 
 _logger = get_logger("migrations")
@@ -32,7 +29,7 @@ _logger = get_logger("migrations")
 def get_alembic_config():
     """Get alembic configuration"""
     # Get the project root directory (where alembic.ini is located)
-    project_root_dir = Path(__file__).parent.parent.parent
+    project_root_dir = Path(__file__).resolve().parents[3]
     alembic_ini_path = project_root_dir / "alembic.ini"
     alembic_cfg = Config(str(alembic_ini_path))
     return alembic_cfg

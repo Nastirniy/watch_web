@@ -4,7 +4,7 @@ from loguru import logger
 
 from app.backend import database
 from app.backend.enums.errors import ErrorCode
-from app.backend.services.api_errors import ApiError
+from app.backend.errors.problems import ApiError
 
 
 class FakeSession:

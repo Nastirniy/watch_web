@@ -18,7 +18,7 @@ def run_manager(db_file, *args) -> subprocess.CompletedProcess:
     env = dict(os.environ)
     env["WATCH_WEB_ALEMBIC_URL"] = f"sqlite+aiosqlite:///{db_file.as_posix()}"
     return subprocess.run(
-        [sys.executable, "-m", "app.backend.migrations_manager", *args],
+        [sys.executable, "-m", "app.backend.cli.migrations_manager", *args],
         cwd=PROJECT_ROOT, env=env, capture_output=True, text=True, timeout=300,
     )
 

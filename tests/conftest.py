@@ -18,9 +18,10 @@ import app.backend.models  # noqa: F401  registers every table on the metadata
 from app.main import fastapi_app
 from app.backend.api.versioning import PublishedVersion
 from sqlmodel.ext.asyncio.session import AsyncSession
-from app.backend.database import get_session, seed_roles_and_permissions
+from app.backend.database import get_session
+from app.backend.bootstrap.permissions import seed_roles_and_permissions
 from app.backend.services.media.formats import seed_media_formats, invalidate_registry_cache
-from app.backend.services.auth import AuthService
+from app.backend.auth.service import AuthService
 from tests.helpers import errors_are_problems
 
 
@@ -74,8 +75,8 @@ def problems_are_declared():
     Records (method, path, code) at error_handlers.problem_response and checks them against the OpenAPI
     document of each version when the session ends. Framework problems belong to no operation and are not
     recorded."""
-    from app.backend import error_handlers
-    from app.backend.openapi_problems import FRAMEWORK_PROBLEMS, operation_problems
+    from app.backend.errors import handlers as error_handlers
+    from app.backend.errors.openapi import FRAMEWORK_PROBLEMS, operation_problems
 
     recorded = set()
     original = error_handlers.problem_response

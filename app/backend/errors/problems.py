@@ -8,40 +8,22 @@
 The status, the title and the allowed params come from the problem type; a param that the type does
 not declare, or a missing required one, is a programming error (TypeError). Inside a request model
 validator raise invalid(FieldErrorCode.X, **params) instead: pydantic turns it into an item of the
-validation_error problem. Params are values for the translation of the code; never put exception text,
+validation_error problem; a service raises CodedError (errors/coded.py) and the route converts it with
+ApiError.from_coded. Params are values for the translation of the code; never put exception text,
 file paths, SQL or other server internals in them.
 """
 from http import HTTPStatus
-from typing import Any, Dict, Optional, Union, get_args, get_origin
+from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, Request
 from fastapi.encoders import jsonable_encoder
-from pydantic_core import PydanticCustomError
 
 from app.backend.config import settings
 from app.backend.enums.errors import ErrorCode, FieldCode, ProblemType
 from app.backend.enums.routes import SystemRoutes
+from app.backend.errors.coded import FIELD_MEMBERS, CodedError, check_params, is_optional
 
 PROBLEM_JSON = "application/problem+json"
-# RFC 9457 members and the localization key; params never use these names
-RESERVED_MEMBERS = frozenset({"type", "title", "status", "detail", "instance", "code"})
-# Members of an item of a validation_error besides its params
-FIELD_MEMBERS = frozenset({"code", "detail", "pointer", "parameter", "location"})
-
-
-def is_optional(annotation: Any) -> bool:
-    return get_origin(annotation) is Union and type(None) in get_args(annotation)
-
-
-def check_params(code: Union[ProblemType, FieldCode], params: Dict[str, Any], partial: bool = False) -> None:
-    """Params must be exactly the ones the code declares (required ones present unless partial)"""
-    reserved = FIELD_MEMBERS if isinstance(code, FieldCode) else RESERVED_MEMBERS
-    unknown = set(params) - set(code.params)
-    clash = reserved.intersection(params)
-    missing = set() if partial else {name for name, annotation in code.params.items()
-                                     if not is_optional(annotation) and name not in params}
-    if unknown or clash or missing:
-        raise TypeError(f"{code.value}: unknown params {sorted(unknown)}, reserved {sorted(clash)}, missing {sorted(missing)}")
 
 
 class ApiError(HTTPException):
@@ -55,26 +37,10 @@ class ApiError(HTTPException):
         self.params = params
         super().__init__(status_code=code.status, detail=code.render(params), headers=headers)
 
-
-class CodedError(ValueError):
-    """Domain failure raised by a service with its problem type; the route may add the params only it knows.
-    A ValueError so callers that only know "rejected input" keep working."""
-
-    def __init__(self, code: ProblemType, **params: Any):
-        check_params(code, params, partial=True)
-        self.code = code
-        self.params = params
-        super().__init__(f"{code.value}: {params}")
-
-    def to_api_error(self, headers: Optional[Dict[str, str]] = None, **extra: Any) -> ApiError:
-        return ApiError(self.code, headers=headers, **self.params, **extra)
-
-
-def invalid(code: FieldCode, **params: Any) -> PydanticCustomError:
-    """Item of a validation_error, for request model validators: raise invalid(FieldErrorCode.USERNAME_RESERVED)"""
-    check_params(code, params)
-    # The detail is rendered here so lists read like in ApiError; pydantic only fills {key} left in a template
-    return PydanticCustomError(code.value, code.render(params), params)
+    @classmethod
+    def from_coded(cls, error: CodedError, headers: Optional[Dict[str, str]] = None, **extra: Any) -> "ApiError":
+        """The answer to a CodedError of a service, plus the params only the route knows"""
+        return cls(error.code, headers=headers, **error.params, **extra)
 
 
 def field_item(code: str, detail: str, loc: tuple, params: Dict[str, Any]) -> Dict[str, Any]:

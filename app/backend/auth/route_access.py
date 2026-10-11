@@ -11,8 +11,8 @@ from typing import List, Optional, Tuple
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 
-from app.backend.services.auth_context import AuthContext
-from app.backend.services.permissions import Require
+from app.backend.auth.context import AuthContext
+from app.backend.auth.require import Require
 
 
 @dataclass(frozen=True)

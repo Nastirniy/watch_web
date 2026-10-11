@@ -14,9 +14,9 @@ import pytest
 from app.backend.enums.errors import PROBLEM_ENUMS, AccessErrorCode, AuthErrorCode, ErrorCode, FieldErrorCode
 from app.backend.enums.routes import APIVersionRoutes, PostRoutes, TagRoutes
 from app.backend.api.v1 import V1
-from app.backend.openapi_problems import FRAMEWORK_PROBLEMS, problem_models, schema_name
-from app.backend.services.api_errors import PROBLEM_JSON
-from app.backend.services.permissions import Require
+from app.backend.errors.openapi import FRAMEWORK_PROBLEMS, problem_models, schema_name
+from app.backend.errors.problems import PROBLEM_JSON
+from app.backend.auth.require import Require
 from tests.helpers import make_admin, make_user
 
 # Answered by the framework outside any operation

@@ -3,10 +3,10 @@ from fastapi import status
 
 from app.backend.enums.errors import AccessErrorCode
 from app.backend.enums.errors import RequiredPermissions
-from app.backend.services.api_errors import ApiError
+from app.backend.errors.problems import ApiError
 
 if TYPE_CHECKING:
-    from app.backend.services.permissions import Require
+    from app.backend.auth.require import Require
 
 
 def access_denied(

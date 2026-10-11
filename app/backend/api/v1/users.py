@@ -12,24 +12,25 @@ from app.backend.models.user import User, UserSession
 from app.backend.models.role import Role, UserRole
 from app.backend.models.post import Post
 from app.backend.models.user_post_access import UserPostAccess
-from app.backend.services.auth_context import AuthContext
-from app.backend.services.permissions import require
-from app.backend.services.access_control import AccessControlService
-from app.backend.services.auth import AuthService
-from app.backend.helpers.certeficates_helper import CertificateParser, hash_data, hash_pki_certificate_data
+from app.backend.auth.context import AuthContext
+from app.backend.auth.require import require
+from app.backend.auth.access_control import AccessControlService
+from app.backend.auth.service import AuthService
+from app.backend.auth.certificates import CertificateParser, hash_data, hash_pki_certificate_data
 from app.backend.enums.general import Permissions, SessionEndReason, SessionRevokeCause, SessionStatus
-from app.backend.services import sessions as session_lifetimes
+from app.backend.auth import sessions as session_lifetimes
 from app.backend.api.v1.models.response.auth import SessionsEndedResponse, UserSessionResponse, build_session_response
 from app.backend.enums.routes import UserRoutes
-from app.backend.helpers.audit_helper import client_info, create_audit_log
+from app.backend.api.shared.helpers.audit_helper import client_info
+from app.backend.services.audit import create_audit_log
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.api.v1.models.request.users import UserCreateForm, UserUpdateForm, UserPostAccessUpsert
 from app.backend.api.v1.models.response.users import UserResponse, UserRoleResponse, UserPostAccessResponse
 from app.backend.api.v1.models.query.users import UserFilterParams
 from app.backend.filters.user_filter import UserFilterService
-from app.backend.services.api_errors import ApiError
+from app.backend.errors.problems import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
-from app.backend.openapi_problems import ADMIN, GUARDED, problems
+from app.backend.errors.openapi import ADMIN, GUARDED, problems
 
 router = APIRouter(prefix=UserRoutes.BASE.value, tags=[UserRoutes.tag()])
 _logger = get_api_logger()

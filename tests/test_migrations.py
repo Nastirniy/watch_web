@@ -16,7 +16,7 @@ def run_migrate(db_file: Path, cwd: Path = PROJECT_ROOT) -> subprocess.Completed
     env["WATCH_WEB_ALEMBIC_URL"] = f"sqlite+aiosqlite:///{db_file.as_posix()}"
     env["PYTHONPATH"] = str(PROJECT_ROOT)
     return subprocess.run(
-        [sys.executable, "-m", "app.backend.migrations_manager", "migrate"],
+        [sys.executable, "-m", "app.backend.cli.migrations_manager", "migrate"],
         cwd=cwd, env=env, capture_output=True, text=True, timeout=300,
     )
 
@@ -44,7 +44,7 @@ def test_migrate_from_another_directory_over_create_all_tables(tmp_path):
 
 @pytest.mark.slow
 def test_migrations_at_startup_keep_the_server_loggers(tmp_path):
-    """The app runs Alembic in its own process at startup (database._migrate_and_seed). env.py configured logging
+    """The app runs Alembic in its own process at startup (bootstrap.startup._migrate_and_seed). env.py configured logging
     from alembic.ini with fileConfig's default disable_existing_loggers=True, which turned off uvicorn's loggers:
     the console stopped at the last migration, no 'Uvicorn running on ...' and no access log, the server looked hung."""
     env = dict(os.environ)

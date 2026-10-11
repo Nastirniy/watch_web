@@ -5,7 +5,7 @@ from pydantic import Field, field_validator, model_validator
 
 from app.backend.enums.general import MediaType
 from app.backend.utils.validators import SecureBaseModel, SecurityValidators
-from app.backend.services.api_errors import invalid
+from app.backend.errors.coded import invalid
 from app.backend.enums.errors import FieldErrorCode
 
 ACCEPTED_MEDIA_TYPES = (MediaType.IMAGE.value, MediaType.VIDEO.value, MediaType.AUDIO.value)

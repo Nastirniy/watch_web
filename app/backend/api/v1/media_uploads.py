@@ -19,7 +19,8 @@ from app.backend.config import settings
 from app.backend.database import get_session
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import MediaRoutes
-from app.backend.helpers.audit_helper import client_info, create_audit_log
+from app.backend.api.shared.helpers.audit_helper import client_info
+from app.backend.services.audit import create_audit_log
 from app.backend.models.upload_session import UploadSession
 from app.backend.api.shared.helpers.media_helper import storage_root
 from app.backend.api.versioning import PublishedVersion, request_version
@@ -30,18 +31,19 @@ from app.backend.api.shared.helpers.upload_helper import (
 from app.backend.api.v1.models.request.media_uploads import UploadSessionCreate
 from app.backend.api.v1.models.response.media_uploads import UPLOAD_SESSION_HEADERS, UploadSessionResponse
 from app.backend.api.v1.models.response.media import UploadResultResponse, upload_result
-from app.backend.services.access_control import AccessControlService
-from app.backend.services.access_errors import access_denied
-from app.backend.services.auth_context import AuthContext
+from app.backend.auth.access_control import AccessControlService
+from app.backend.auth.access_errors import access_denied
+from app.backend.auth.context import AuthContext
 from app.backend.services.media import formats, uploads
 from app.backend.services.media.formats import FileTooLarge, UnsupportedMediaFormat
 from app.backend.services.media.manager import get_media_manager
-from app.backend.services.permissions import Require, require
+from app.backend.auth.require import Require, require
 from app.backend.utils.logging_config import get_api_logger
-from app.backend.services.api_errors import ApiError, CodedError
+from app.backend.errors.problems import ApiError
+from app.backend.errors.coded import CodedError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.api.shared.openapi_docs import empty_response, header, with_headers
-from app.backend.openapi_problems import GUARDED, problems
+from app.backend.errors.openapi import GUARDED, problems
 
 router = APIRouter(prefix=MediaRoutes.BASE.value, tags=[MediaRoutes.tag()])
 _logger = get_api_logger()
@@ -300,7 +302,7 @@ async def append_upload_chunk(
     try:
         new_offset = await uploads.append_chunk(session, row, token, storage_root(), request.stream(), offset, max_chunk)
     except uploads.ChunkTooLarge as exc:
-        raise exc.to_api_error(headers=_session_headers(row), offset=offset)
+        raise ApiError.from_coded(exc, headers=_session_headers(row), offset=offset)
     except (ClientDisconnect, OSError) as exc:
         # The transfer broke (client gone) or the disk refused the bytes: append_chunk truncated the part
         # file back to `offset`, so the client resends from there. Anything else is a bug: a plain 500.

@@ -5,6 +5,40 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Backend layout: auth, errors, bootstrap and cli packages
+
+### Changed (operators)
+
+- The command-line tools moved to `app/backend/cli/`; the old module paths are gone, update scripts, cron jobs and
+  runbooks (DEPLOYMENT.md, `systemd/` and WEB_TOOLING.md already use the new ones):
+  `python -m app.backend.migrations_manager` -> `python -m app.backend.cli.migrations_manager`,
+  `python -m app.backend.media_tools` -> `python -m app.backend.cli.media_tools`,
+  `python -m app.backend.init_user` -> `python -m app.backend.cli.init_user`,
+  `python -m app.backend.api_contract` -> `python -m app.backend.cli.api_contract`.
+  The API and the media worker (`python -m app.backend.workers.media_worker`) start as before.
+
+### Changed
+
+- Code only, no route, status or field changes: the authentication chain moved into `app/backend/auth/`
+  (`dependencies.py`, `require.py` from `services/permissions.py`, `context.py` from `services/auth_context.py`,
+  `service.py` from `services/auth.py`, `certificates.py` from `helpers/certeficates_helper.py`, plus
+  `access_control.py`, `access_errors.py`, `route_access.py`, `sessions.py`, `presence.py` from `services/`).
+- Contract rewritten on purpose for one description: the `SessionStatus` schema no longer names a source file.
+- `app/main.py`, `init_user.py` and `migrations_manager.py` no longer add the project root to `sys.path`: run them
+  as modules from the project root (`python -m app.main`, `python -m app.backend.init_user ...`).
+- A successful authentication logs at DEBUG instead of INFO (one line per request).
+- Code only: the error machinery moved into `app/backend/errors/`: `coded.py` (`CodedError`, `invalid()`, no FastAPI),
+  `problems.py` (`ApiError`, from `services/api_errors.py`), `handlers.py` (from `error_handlers.py`), `openapi.py`
+  (from `openapi_problems.py`). A route converts a service failure with `ApiError.from_coded(exc, ...)`, which replaces
+  `exc.to_api_error(...)`. `services/observation_counts.py` raised `ApiError` and now raises `CodedError` (same codes and
+  statuses). A test keeps services, filters, models, workers, enums, `bootstrap/` and `utils/` away from FastAPI and
+  Starlette, also through other modules.
+- Code only: startup and seeding moved out of `database.py` into `app/backend/bootstrap/` (`startup.py` schema lock and
+  migrations, `seed.py`, `permissions.py` with `PERMISSION_META` and `ADMIN_ROLE_NAME`); `database.py` keeps the engine
+  and sessions.
+- Code only: `helpers/` is gone. `create_audit_log` moved to `services/audit.py`, `client_info(request, auth)` (used by
+  routes only) to `api/shared/helpers/audit_helper.py`, `truncate_for_logging` to its one user, `auth/service.py`.
+
 ## Media that cannot be rendered; sizes as displayed (found by the live format matrix)
 
 ### Added (API clients)

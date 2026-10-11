@@ -20,7 +20,7 @@ curl -o api-contract/v1/openapi.json https://<api-origin>/api/v1/openapi.json
 ```
 
 Commit it in the web project too: a diff of `openapi.json` in a pull request is the change of the API it
-adopts. To rewrite it in this repository without a server: `python -m app.backend.api_contract`.
+adopts. To rewrite it in this repository without a server: `python -m app.backend.cli.api_contract`.
 
 When the web client starts using v2 for some resources, generate its types into a second file
 (`openapi-typescript ./api-contract/v2/openapi.json -o ./src/api/schema-v2.ts`) and create a second
@@ -163,7 +163,7 @@ Every route declares the problems it answers on its decorator (`responses=proble
 tests fail on any problem the app answers that its operation does not declare. `api-contract/v1/openapi.json`
 is committed and `tests/test_api_contract.py` fails while the code and the file differ, naming the changed
 operations and schemas. An intended change is accepted by rewriting the file
-(`python -m app.backend.api_contract`), committed with the code, noted in `CHANGELOG.md` and announced to the
+(`python -m app.backend.cli.api_contract`), committed with the code, noted in `CHANGELOG.md` and announced to the
 web team; the web project's `npm run api:all` then shows exactly what it has to adapt.
 
 ## 8. Development server: one origin through its proxy

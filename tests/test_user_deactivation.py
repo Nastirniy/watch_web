@@ -5,7 +5,7 @@ from sqlmodel import select
 from app.backend.enums.routes import AuthRoutes, UserRoutes
 from app.backend.api.v1 import V1
 from app.backend.models.user import UserSession
-from app.backend.services.auth import AuthService
+from app.backend.auth.service import AuthService
 from tests.helpers import make_user, make_admin
 
 ME = V1.path(AuthRoutes.ME)

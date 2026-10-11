@@ -4,7 +4,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from pydantic import BaseModel, Field, field_validator, model_validator, PositiveInt
 
 from app.backend.enums.general import ConfidenceLevel, FrequencyKind, ObservationReportType, TagMatch
-from app.backend.services.api_errors import invalid
+from app.backend.errors.coded import invalid
 from app.backend.enums.errors import FieldErrorCode
 
 FREQUENCY_QUANTUM = Decimal("0.001")

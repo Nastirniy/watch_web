@@ -11,7 +11,6 @@ from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import status
 from sqlalchemy import case, func, String
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql.functions import FunctionElement
@@ -20,7 +19,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.enums.general import StatsGroupBy
 from app.backend.models.observation import Observation
-from app.backend.services.api_errors import ApiError
+from app.backend.errors.coded import CodedError
 from app.backend.enums.errors import ErrorCode
 
 LAST_24H = timedelta(hours=24)
@@ -89,14 +88,14 @@ def as_utc(value: Optional[datetime]) -> Optional[datetime]:
 
 def check_period(date_from: Optional[datetime], date_to: Optional[datetime], names: str) -> None:
     if date_from is not None and date_to is not None and date_from > date_to:
-        raise ApiError(ErrorCode.PERIOD_REVERSED, fields=names)
+        raise CodedError(ErrorCode.PERIOD_REVERSED, fields=names)
 
 
 def _zone(name: str) -> ZoneInfo:
     try:
         return ZoneInfo(name)
     except (ZoneInfoNotFoundError, ValueError):
-        raise ApiError(ErrorCode.UNKNOWN_TIME_ZONE, time_zone=name)
+        raise CodedError(ErrorCode.UNKNOWN_TIME_ZONE, time_zone=name)
 
 
 def _bucket_starts(date_from: datetime, date_to: datetime, group_by: StatsGroupBy, zone: ZoneInfo) -> List[datetime]:
@@ -146,7 +145,7 @@ async def post_observation_stats(
     date_from = as_utc(date_from) or date_to - DEFAULT_STATS_PERIOD
     check_period(date_from, date_to, "date_from / date_to")
     if date_to - date_from > MAX_STATS_PERIOD[group_by]:
-        raise ApiError(
+        raise CodedError(
             ErrorCode.PERIOD_TOO_LONG, max_days=MAX_STATS_PERIOD[group_by].days, group_by=group_by.value,
         )
     of_post = [Observation.post_id == post_id]

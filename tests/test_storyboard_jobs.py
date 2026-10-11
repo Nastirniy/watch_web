@@ -869,7 +869,8 @@ async def test_stop_lets_a_running_poster_finish(
 
 @pytest.mark.asyncio
 async def test_media_tools_storyboard_commands(db, session_maker, storyboard_settings, monkeypatch, tmp_path, capsys):
-    from app.backend import database, media_tools
+    from app.backend import database
+    from app.backend.cli import media_tools
 
     async def maker():
         return session_maker

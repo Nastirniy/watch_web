@@ -23,17 +23,16 @@ from app.backend.enums.errors import (
 )
 from app.backend.enums.routes import APIVersionRoutes, PostRoutes, SystemRoutes
 from app.backend.api.v1 import V1
-from app.backend.error_handlers import UnhandledErrorMiddleware, register_error_handlers
+from app.backend.errors.handlers import UnhandledErrorMiddleware, register_error_handlers
 from app.backend.request_id import RequestIdMiddleware
-from app.backend.services.api_errors import (
-    FIELD_MEMBERS, PROBLEM_JSON, RESERVED_MEMBERS, ApiError, invalid, is_optional,
-)
+from app.backend.errors.coded import FIELD_MEMBERS, RESERVED_MEMBERS, invalid, is_optional
+from app.backend.errors.problems import PROBLEM_JSON, ApiError
 from app.main import fastapi_app
 from tests.helpers import errors_are_problems, make_admin
 
 APP_DIR = Path(__file__).resolve().parent.parent / "app" / "backend"
 # The error machinery itself builds bodies directly
-EXEMPT = {"services/api_errors.py", "error_handlers.py"}
+EXEMPT = {"errors/coded.py", "errors/problems.py", "errors/handlers.py"}
 CODE_ENUMS = {cls.__name__: cls for cls in ALL_CODE_ENUMS}
 # RFC 9457 section 3.2: extension member names
 MEMBER_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]{2,}")

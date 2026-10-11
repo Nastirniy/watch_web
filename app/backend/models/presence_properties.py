@@ -8,8 +8,8 @@ from sqlalchemy.orm import column_property
 
 from app.backend.models.user import User, UserSession
 from app.backend.models.post import Post
-from app.backend.services.presence import online_cutoff_param
-from app.backend.services.sessions import live_clause
+from app.backend.auth.presence import online_cutoff_param
+from app.backend.auth.sessions import live_clause
 
 _configured = False
 

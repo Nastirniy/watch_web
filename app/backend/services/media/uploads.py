@@ -28,7 +28,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.config import settings
 from app.backend.enums.errors import ErrorCode
 from app.backend.models.upload_session import UploadSession
-from app.backend.services.api_errors import CodedError
+from app.backend.errors.coded import CodedError
 
 PART_DIR = "_tmp/uploads"
 WRITER_STALE_SECONDS = 180

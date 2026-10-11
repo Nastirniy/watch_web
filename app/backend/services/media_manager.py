@@ -22,7 +22,7 @@ from app.backend.services.media.probe import image_dimensions
 from app.backend.enums.general import MediaType
 from app.backend.utils.logging_config import get_logger
 from app.backend.utils.mime_detector import mime_detector
-from app.backend.services.api_errors import CodedError
+from app.backend.errors.coded import CodedError
 from app.backend.enums.errors import ErrorCode
 
 _logger = get_logger("media_manager")

@@ -5,15 +5,17 @@ from sqlmodel import select
 from sqlalchemy import delete as sa_delete
 from datetime import datetime, timezone
 
-from app.backend.database import get_session, ADMIN_ROLE_NAME
+from app.backend.database import get_session
+from app.backend.bootstrap.permissions import ADMIN_ROLE_NAME
 from app.backend.models.role import Role, Permission, RolePermission, UserRole
 from app.backend.models.user import User
-from app.backend.services.auth_context import AuthContext
-from app.backend.services.permissions import require
-from app.backend.services.access_control import AccessControlService
+from app.backend.auth.context import AuthContext
+from app.backend.auth.require import require
+from app.backend.auth.access_control import AccessControlService
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import RoleRoutes
-from app.backend.helpers.audit_helper import client_info, create_audit_log
+from app.backend.api.shared.helpers.audit_helper import client_info
+from app.backend.services.audit import create_audit_log
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.api.v1.models.query.roles import RoleFilterParams
 from app.backend.filters.role_filter import RoleFilterService
@@ -24,9 +26,9 @@ from app.backend.api.shared.helpers.roles_helper import (
 )
 from app.backend.api.v1.models.request.roles import RoleCreate, RoleUpdate
 from app.backend.api.v1.models.response.roles import RoleResponse, PermissionResponse
-from app.backend.services.api_errors import ApiError
+from app.backend.errors.problems import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
-from app.backend.openapi_problems import ADMIN, problems
+from app.backend.errors.openapi import ADMIN, problems
 
 router = APIRouter(prefix=RoleRoutes.BASE.value, tags=[RoleRoutes.tag()])
 _logger = get_api_logger()

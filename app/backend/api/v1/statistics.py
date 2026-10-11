@@ -21,10 +21,10 @@ from app.backend.models.user import User
 from app.backend.models.observation import Observation
 from app.backend.models.media import MediaFile
 from app.backend.services.media.jobs import poster_counts
-from app.backend.services.auth_context import AuthContext
-from app.backend.services.access_control import AccessControlService
-from app.backend.services.permissions import require
-from app.backend.services.presence import online_user_ids_select
+from app.backend.auth.context import AuthContext
+from app.backend.auth.access_control import AccessControlService
+from app.backend.auth.require import require
+from app.backend.auth.presence import online_user_ids_select
 from app.backend.api.v1.models.response.statistics import (
     StatisticsResponse,
     StatisticsPeriod,
@@ -34,9 +34,9 @@ from app.backend.api.v1.models.response.statistics import (
     ObservationsByPost,
     MediaStatistics,
 )
-from app.backend.services.api_errors import ApiError
+from app.backend.errors.problems import ApiError
 from app.backend.enums.errors import ErrorCode
-from app.backend.openapi_problems import GUARDED, problems
+from app.backend.errors.openapi import GUARDED, problems
 
 router = APIRouter(prefix=StatisticsRoutes.BASE.value, tags=[StatisticsRoutes.tag()])
 

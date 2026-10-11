@@ -1,26 +1,10 @@
-from typing import Optional, Dict, Any, TYPE_CHECKING
+"""The audit log: one AuditLog row per audited action, added to the session of the change."""
+from typing import Optional, Dict, Any
 from pydantic_core import to_jsonable_python
 
-from fastapi import Request
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.models.audit import AuditLog
-
-if TYPE_CHECKING:
-    from app.backend.services.auth_context import AuthContext
-
-
-def client_info(request: Request, auth: Optional["AuthContext"] = None) -> Dict[str, Optional[str]]:
-    """Who made the request, for create_audit_log(**client_info(request, auth)).
-
-    The client address is request.client.host: behind nginx uvicorn runs with --proxy-headers
-    (Dockerfile, DEPLOYMENT.md), so it is already the real client, no X-Forwarded-For parsing here."""
-    return {
-        "session_id": auth.session_id if auth is not None else None,
-        "ip_address": request.client.host if request.client else None,
-        "user_agent": request.headers.get("user-agent"),
-        "request_url": str(request.url),
-    }
 
 
 def serialize_for_audit(obj: Any) -> Any:
@@ -88,19 +72,3 @@ async def create_audit_log(
     )
     session.add(audit)
     return audit
-
-
-def truncate_for_logging(value: str, length: int = 16) -> str:
-    """
-    Truncate sensitive value for logging purposes
-
-    Args:
-        value: Value to truncate
-        length: Number of characters to keep
-
-    Returns:
-        Truncated string with ellipsis
-    """
-    if not value:
-        return ""
-    return f"{value[:length]}..." if len(value) > length else value

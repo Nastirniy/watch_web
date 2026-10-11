@@ -18,16 +18,17 @@ from app.backend.database import get_session
 from app.backend.models.media import MediaFile
 from app.backend.models.observation import Observation
 from app.backend.models.storyboard import VideoStoryboard
-from app.backend.services.auth_context import AuthContext
-from app.backend.services.permissions import require
-from app.backend.services.access_control import AccessControlService
+from app.backend.auth.context import AuthContext
+from app.backend.auth.require import require
+from app.backend.auth.access_control import AccessControlService
 from app.backend.services.media.manager import get_media_manager
 from app.backend.services.media import formats, jobs, renderer, urls as thumb_urls
 from app.backend.services.media.storyboards import build_vtt, layout_usable, status_for
 from app.backend.services.media.formats import UnsupportedMediaFormat, FileTooLarge
 from app.backend.enums.general import Permissions, PosterStatus, StoryboardStatus, ThumbnailFormat, ThumbnailSize, ThumbnailStatus
 from app.backend.enums.routes import MediaRoutes
-from app.backend.helpers.audit_helper import client_info, create_audit_log
+from app.backend.api.shared.helpers.audit_helper import client_info
+from app.backend.services.audit import create_audit_log
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.config import settings
 from app.backend.api.v1.models.request.media import ListAttachedMediaRequest, ShareLinkRequest, PosterReconcileRequest
@@ -60,9 +61,10 @@ from app.backend.api.shared.helpers.media_helper import (
     storage_root,
 )
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
-from app.backend.services.api_errors import ApiError, CodedError
+from app.backend.errors.problems import ApiError
+from app.backend.errors.coded import CodedError
 from app.backend.api.shared.openapi_docs import empty_response, file_response, header
-from app.backend.openapi_problems import ADMIN, GUARDED, problems
+from app.backend.errors.openapi import ADMIN, GUARDED, problems
 
 router = APIRouter(prefix=MediaRoutes.BASE.value, tags=[MediaRoutes.tag()])
 _logger = get_api_logger()

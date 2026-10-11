@@ -20,9 +20,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.backend.enums.errors import ErrorCode, ProblemType
 from app.backend.request_id import current_request_id
-from app.backend.services.api_errors import (
-    PROBLEM_JSON, ApiError, about_blank_body, field_item, problem_body,
-)
+from app.backend.errors.problems import PROBLEM_JSON, ApiError, about_blank_body, field_item, problem_body
 from app.backend.utils.logging_config import get_api_logger
 
 _logger = get_api_logger()

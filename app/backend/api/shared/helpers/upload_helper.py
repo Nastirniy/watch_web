@@ -10,18 +10,20 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.models.media import MediaFile
 from app.backend.models.observation import Observation
-from app.backend.services.auth_context import AuthContext
-from app.backend.services.access_control import AccessControlService
+from app.backend.auth.context import AuthContext
+from app.backend.auth.access_control import AccessControlService
 from app.backend.services.media_manager import FileValidationConfig
 from app.backend.services.media import formats, jobs, renderer, urls as thumb_urls
 from app.backend.services.media.probe import has_no_video_stream, metadata_for, resolve_tools
 from app.backend.enums.general import MediaType, ThumbnailFormat, ThumbnailSize
-from app.backend.helpers.audit_helper import client_info, create_audit_log
+from app.backend.api.shared.helpers.audit_helper import client_info
+from app.backend.services.audit import create_audit_log
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.config import settings
 from app.backend.api.shared.helpers.media_helper import storage_root
 from app.backend.enums.errors import ErrorCode
-from app.backend.services.api_errors import ApiError, CodedError
+from app.backend.errors.problems import ApiError
+from app.backend.errors.coded import CodedError
 
 _logger = get_api_logger()
 
@@ -45,7 +47,7 @@ def format_rejected(registry: formats.FormatRegistry, exc: formats.UnsupportedMe
 
 def store_rejected(exc: CodedError, headers: dict = None) -> ApiError:
     """A file refused by MediaManager.store_file_from_path; the status comes with its problem type"""
-    return exc.to_api_error(headers=headers)
+    return ApiError.from_coded(exc, headers=headers)
 
 
 def too_large(spec: formats.FormatSpec, actual: int = None) -> ApiError:

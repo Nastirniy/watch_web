@@ -9,7 +9,7 @@ from app.backend.config import settings
 from app.backend.enums.routes import AuthRoutes, UserRoutes, PostRoutes, ObservationRoutes
 from app.backend.api.v1 import V1
 from app.backend.models.user import UserSession
-from app.backend.services.auth import AuthService
+from app.backend.auth.service import AuthService
 from tests.helpers import make_post, make_user, make_admin, make_dictionary, make_observation
 
 ME = V1.path(AuthRoutes.ME)
