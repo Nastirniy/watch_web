@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator, Positiv
 
 from app.backend.enums.general import ConfidenceLevel, FrequencyKind, ObservationReportType, TagMatch
 from app.backend.errors.coded import invalid
+from app.backend.utils.validators import not_null
 from app.backend.enums.errors import FieldErrorCode
 
 FREQUENCY_QUANTUM = Decimal("0.001")
@@ -54,13 +55,8 @@ class ObservationFrequencyUpdate(BaseModel):
     frequency_center: Optional[Decimal] = Field(None, gt=0, max_digits=12, decimal_places=3, description="Center frequency in MHz")
     link_group: Optional[int] = Field(None, ge=1, description="Emitter group inside the observation; null clears it")
 
-    @model_validator(mode='after')
-    def validate_not_null(self):
-        """Only link_group may be cleared with null"""
-        for name in ("kind", "frequency_min", "frequency_max", "frequency_center"):
-            if name in self.model_fields_set and getattr(self, name) is None:
-                raise invalid(FieldErrorCode.VALUE_NULL)
-        return self
+    # Only link_group may be cleared with null
+    refuse_null = not_null("kind", "frequency_min", "frequency_max", "frequency_center")
 
 
 class ObservationCreate(BaseModel):
@@ -74,7 +70,10 @@ class ObservationCreate(BaseModel):
         description="Frequency bands of the observation, at least one (any kind)"
     )
 
-    observed_at: Optional[datetime] = None
+    observed_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="When the signal was observed; the current UTC time when omitted"
+    )
     duration_seconds: Optional[int] = Field(None, ge=0, description="Duration must be non-negative")
     comment: Optional[str] = Field(None, max_length=1000, description="Comment limited to 1000 characters")
     confidence_level: Optional[str] = Field(
@@ -133,6 +132,8 @@ class ObservationUpdate(BaseModel):
         None,
         description="List of tag IDs to set on the observation (replaces existing tags, duplicates removed automatically)"
     )
+
+    refuse_null = not_null("signal_type_id", "observed_at", "confidence_level")
 
     @field_validator('tag_ids')
     @classmethod

@@ -165,3 +165,19 @@ class SecureBaseModel(PlainTextModel):
         "from_attributes": True,
         "extra": "forbid"  # Reject unknown fields
     }
+
+
+def _refuse_null(cls, value):
+    if value is None:
+        raise invalid(FieldErrorCode.VALUE_NULL)
+    return value
+
+
+def not_null(*fields: str):
+    """Field validator for an update model: an explicit null for a NOT NULL column answers 422 `value_null`.
+
+    The fields of an update model default to None ("not sent"), and validators do not run on a default, so a None
+    that reaches this validator was sent. Use it as a class attribute: `refuse_null = not_null("name", "code")`.
+    The check runs before the type and format validators of the field.
+    """
+    return field_validator(*fields, mode="before")(classmethod(_refuse_null))

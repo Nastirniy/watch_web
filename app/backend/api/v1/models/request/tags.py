@@ -1,6 +1,6 @@
 from typing import Optional
 from pydantic import Field, field_validator
-from app.backend.utils.validators import SecureBaseModel, SecurityValidators
+from app.backend.utils.validators import SecureBaseModel, SecurityValidators, not_null
 
 
 class TagCreate(SecureBaseModel):
@@ -14,6 +14,8 @@ class TagCreate(SecureBaseModel):
 
 class TagUpdate(SecureBaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
+
+    refuse_null = not_null('name')
 
     @field_validator('name')
     @classmethod

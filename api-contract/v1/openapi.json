@@ -27451,16 +27451,10 @@
             "description": "Frequency bands of the observation, at least one (any kind)"
           },
           "observed_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Observed At"
+            "type": "string",
+            "format": "date-time",
+            "title": "Observed At",
+            "description": "When the signal was observed; the current UTC time when omitted"
           },
           "duration_seconds": {
             "anyOf": [

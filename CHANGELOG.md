@@ -43,6 +43,16 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `admin.true` from the caller. The only administrator could remove their own `admin.true`.
 - The audit rows of `POST /users/` and `PATCH /users/{id}` record `role_ids` (before and after) and
   `certificate_replaced`; a role change left no trace in the audit values.
+- An explicit `null` for a NOT NULL column answers 422 `validation_error` with field code `value_null` (pointer on the
+  field) instead of 500 (or a misleading 400 for `media_type`): `PUT /observations/{id}` (`signal_type_id`,
+  `observed_at`, `confidence_level`), `PUT /tags/{id}` (`name`), `PUT /categories/{id}` (`name`, `alias`),
+  `PUT /signal-types/{id}` (`code`, `name`, `is_active`, `sort_order`), `PUT /media-formats/{id}` (`media_type`,
+  `content_type`, `label`, `extensions`, `aliases`, `max_file_size_bytes`, `is_active`, `sort_order`) and
+  `PUT /observations/{id}/frequencies/{frequency_id}` (`kind`, `frequency_min`, `frequency_max`, `frequency_center`;
+  the pointer used to be the body). Nullable fields keep accepting `null`. One shared validator, `not_null()` in
+  `utils/validators.py`.
+- `POST /observations/create` without `observed_at` stores the current UTC time (it answered 500). `observed_at` of
+  the request is no longer nullable in `api-contract/v1/openapi.json`; an explicit `null` there answers 422.
 
 ### Changed
 

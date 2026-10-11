@@ -1,6 +1,6 @@
 from typing import Optional
 from pydantic import Field, field_validator
-from app.backend.utils.validators import SecureBaseModel, SecurityValidators
+from app.backend.utils.validators import SecureBaseModel, SecurityValidators, not_null
 
 
 class CategoryCreate(SecureBaseModel):
@@ -16,6 +16,8 @@ class CategoryCreate(SecureBaseModel):
 class CategoryUpdate(SecureBaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     alias: Optional[str] = Field(None, min_length=1, max_length=255)
+
+    refuse_null = not_null('name', 'alias')
 
     @field_validator('name', 'alias')
     @classmethod

@@ -1,6 +1,6 @@
 from typing import Optional
 from pydantic import Field, field_validator
-from app.backend.utils.validators import SecureBaseModel, SecurityValidators
+from app.backend.utils.validators import SecureBaseModel, SecurityValidators, not_null
 
 
 class SignalTypeCreate(SecureBaseModel):
@@ -31,6 +31,8 @@ class SignalTypeUpdate(SecureBaseModel):
     description: Optional[str] = Field(None, max_length=1000)
     is_active: Optional[bool] = None
     sort_order: Optional[int] = Field(None, ge=0)
+
+    refuse_null = not_null('code', 'name', 'is_active', 'sort_order')
 
     @field_validator('code')
     @classmethod

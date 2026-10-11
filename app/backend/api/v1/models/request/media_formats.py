@@ -4,7 +4,7 @@ from typing import List, Optional
 from pydantic import Field, field_validator, model_validator
 
 from app.backend.enums.general import MediaType
-from app.backend.utils.validators import SecureBaseModel, SecurityValidators
+from app.backend.utils.validators import SecureBaseModel, SecurityValidators, not_null
 from app.backend.errors.coded import invalid
 from app.backend.enums.errors import FieldErrorCode
 
@@ -100,6 +100,10 @@ class MediaFormatUpdate(SecureBaseModel):
     max_file_size_bytes: Optional[int] = Field(None, ge=1)
     is_active: Optional[bool] = None
     sort_order: Optional[int] = Field(None, ge=0)
+
+    refuse_null = not_null(
+        "media_type", "content_type", "label", "extensions", "aliases", "max_file_size_bytes", "is_active", "sort_order"
+    )
 
     @field_validator("media_type")
     @classmethod
