@@ -171,6 +171,23 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   network share blocked every other request. `GET /media/statistics` counts and sums in SQL instead of loading every
   media row; the response is unchanged.
 - Startup seeding of the default media formats skips a default whose extensions or MIME spellings already belong to a live row (the conflict check of `/media-formats`), so a renamed default is not added again next to it and two active rows never own `.jpg`; the skip is logged. The registry cache no longer stores a read that began before an invalidate, so a disabled format stops being accepted at once in the process that disabled it. The server ceiling `storage.max_file_size_gb` caps every format limit when it is read, not only when a row is written: session create, upload validation, the 413 answer and `GET /media/formats` all use min(format limit, ceiling).
+- Video poster URLs carry imgproxy's cache buster `cb:` from `poster_generated_at` (as storyboard sheets carry
+  `generated_at`): after `POST /media/{id}/thumbnail/regenerate` the new poster has new URLs and nginx no longer serves
+  the render of the old one until its max-age. Image URLs are unchanged.
+- A share link (`POST /media/{id}/share`) never expires later than now + `ttl_seconds` (itself capped by
+  `storage.thumbnail.share_max_ttl_seconds`). It used to reach up to twice that. The expiry is
+  floor(now / w) * w + ttl with w = max(60, ttl // 10), so links issued in one window are byte-identical (stable nginx
+  cache key) and live at least ttl - w. The thumbnail URLs in media responses keep `quantised_expiry`.
+- Without nginx (`enable_nginx` off) `GET /media/{id}/download` and `/stream` follow RFC 9110 for `Range`: a single
+  range `a-b`, `a-` or the suffix `-n` answers 206 with `Content-Range`; an invalid header, another unit or several
+  ranges are ignored (200, whole file); an unsatisfiable range answers 416 `range_not_satisfiable` as a problem with
+  `Content-Range: bytes */size` (Starlette answered text/plain 400/416 and refused suffix ranges). The file is
+  streamed in chunks. New problem code `range_not_satisfiable` (416, param `size_bytes`) for the web localization
+  package, declared on both routes; `api-contract/v1/openapi.json` gained it and the schema
+  `RangeNotSatisfiableProblem`.
+- `GET /media/{id}/thumbnail` behind nginx checks that the source (the original image or the poster) is on disk and
+  answers 404 `media_file_missing` otherwise (declared on the route; it handed the path to imgproxy and nginx cached
+  imgproxy's 404).
 
 ### Changed
 

@@ -58,6 +58,7 @@ from app.backend.api.shared.helpers.media_helper import (
     get_observation_from_media,
     get_media_or_404,
     original_file_response,
+    source_file_exists,
     storage_root,
 )
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
@@ -197,11 +198,13 @@ async def get_media_info(
         **file_response("The requested byte range (Range header)", ["*/*"], {"Content-Range": header("bytes start-end/size")}, status=206),
         **problems(
             AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.MEDIA_FILE_MISSING,
-            ErrorCode.MEDIA_NOT_FOUND, ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_PATH_UNRESOLVED, *GUARDED,
+            ErrorCode.MEDIA_NOT_FOUND, ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_PATH_UNRESOLVED,
+            ErrorCode.RANGE_NOT_SATISFIABLE, *GUARDED,
         ),
     },
 )
 async def download_media_file(
+    request: Request,
     media_id: int,
     session: AsyncSession = Depends(get_session),
     auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW]))
@@ -210,7 +213,7 @@ async def download_media_file(
     media_file = await get_media_or_404(session, media_id)
     observation = await get_observation_from_media(session, media_file)
     AccessControlService.check_post_view(auth, observation.post_id, "media")
-    return original_file_response(media_file, "attachment")
+    return original_file_response(media_file, "attachment", request.headers.get("range"))
 
 
 @router.get(
@@ -221,11 +224,13 @@ async def download_media_file(
         **file_response("The requested byte range (Range header)", ["*/*"], {"Content-Range": header("bytes start-end/size")}, status=206),
         **problems(
             AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.MEDIA_FILE_MISSING,
-            ErrorCode.MEDIA_NOT_FOUND, ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_PATH_UNRESOLVED, *GUARDED,
+            ErrorCode.MEDIA_NOT_FOUND, ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_PATH_UNRESOLVED,
+            ErrorCode.RANGE_NOT_SATISFIABLE, *GUARDED,
         ),
     },
 )
 async def stream_media_file(
+    request: Request,
     media_id: int,
     session: AsyncSession = Depends(get_session),
     auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW]))
@@ -234,7 +239,7 @@ async def stream_media_file(
     media_file = await get_media_or_404(session, media_id)
     observation = await get_observation_from_media(session, media_file)
     AccessControlService.check_post_view(auth, observation.post_id, "media")
-    return original_file_response(media_file, "inline")
+    return original_file_response(media_file, "inline", request.headers.get("range"))
 
 
 async def _set_media_archived(request: Request, session: AsyncSession, auth: AuthContext, media_id: int, archived: bool) -> MediaFileInfo:
@@ -537,7 +542,8 @@ async def _proxy_render(url: str) -> Response:
             AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.MEDIA_NOT_FOUND,
             ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.POSTER_FAILED, ErrorCode.THUMBNAILS_UNSUPPORTED,
             ErrorCode.IMAGE_TOO_LARGE_FOR_THUMBNAILS, ErrorCode.NO_VIDEO_STREAM,
-            ErrorCode.THUMBNAIL_RENDERER_ERROR, ErrorCode.THUMBNAIL_RENDERER_UNAVAILABLE, *GUARDED,
+            ErrorCode.THUMBNAIL_RENDERER_ERROR, ErrorCode.THUMBNAIL_RENDERER_UNAVAILABLE, ErrorCode.MEDIA_FILE_MISSING,
+            *GUARDED,
         ),
     },
 )
@@ -563,6 +569,9 @@ async def get_media_thumbnail(
         return _not_ready_response(media_file)
 
     if settings.storage.enable_nginx:
+        # nginx would pass a missing source to imgproxy and cache its 404; the API answers the problem instead
+        if not source_file_exists(media_file):
+            raise ApiError(ErrorCode.MEDIA_FILE_MISSING)
         internal = thumb_urls.internal_url(media_file, size.value, format.value)
         return Response(
             status_code=200,
@@ -682,7 +691,10 @@ async def share_media_thumbnail(
         return _not_ready_response(media_file)
 
     ttl = min(body.ttl_seconds, settings.storage.thumbnail.share_max_ttl_seconds)
-    url, expires_at = thumb_urls.public_url(media_file, body.size.value, body.format.value, ttl)
+    # Never later than now + ttl (quantised_expiry may be up to twice that), still stable inside a window
+    url, expires_at = thumb_urls.public_url(
+        media_file, body.size.value, body.format.value, ttl, expires_at=thumb_urls.share_expiry(ttl),
+    )
 
     await create_audit_log(
         session=session, action="share", resource_type="media", resource_id=media_id,

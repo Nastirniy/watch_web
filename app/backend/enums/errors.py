@@ -271,6 +271,9 @@ class ErrorCode(ProblemType):
     MEDIA_NOT_ARCHIVED = ("media_not_archived", problem(409, "Media file is not archived"))
     MEDIA_OBSERVATION_NOT_FOUND = ("media_observation_not_found", problem(404, "Associated observation not found"))
     MEDIA_FILE_MISSING = ("media_file_missing", problem(404, "File is missing on disk"))
+    RANGE_NOT_SATISFIABLE = ("range_not_satisfiable", problem(
+        416, "Range not satisfiable", "No byte of the requested range exists in the file of {size_bytes} bytes",
+        size_bytes=int))
     MEDIA_PATH_UNRESOLVED = ("media_path_unresolved", problem(500, "Cannot resolve file path relative to storage root"))
     MEDIA_TYPE_UNKNOWN = ("media_type_unknown", problem(415, "Unknown media type", "Unknown media type '{media_type}'", **_FORMATS))
     MEDIA_EXTENSION_NOT_ACCEPTED = ("media_extension_not_accepted", problem(

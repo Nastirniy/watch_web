@@ -136,7 +136,7 @@ The body carries `error_id`, the request id of the response (`X-Request-ID`); th
 
 | Operation | Response |
 |-----------|----------|
-| `GET /api/v1/media/{media_id}/download`, `/stream` | The file in its own Content-Type; `206` for a `Range` request |
+| `GET /api/v1/media/{media_id}/download`, `/stream` | The file in its own Content-Type; `206` for a single `Range`; an unsatisfiable one is `416` `range_not_satisfiable` with `Content-Range: bytes */size` |
 | `GET /api/v1/media/{media_id}/thumbnail` | The image; `202` with `Retry-After` while a video poster is being extracted |
 | `GET /api/v1/media/{media_id}/storyboard` | WebVTT (`text/vtt`) for seek previews; `202` with `Retry-After` and `X-Storyboard-Status` while the worker has not produced it |
 | `POST /api/v1/observations/report` | An `.xlsx` file |

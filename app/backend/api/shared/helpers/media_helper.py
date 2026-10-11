@@ -1,8 +1,10 @@
 """Helpers shared by the media routes: lookups, access checks and file responses."""
+import re
 from pathlib import Path
+from typing import Iterator, Optional, Tuple
 
 from fastapi import Response
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -49,8 +51,54 @@ def accel_redirect_path(relative_path: str) -> str:
     return f"{prefix}/{relative_path.replace(chr(92), '/').lstrip('/')}"
 
 
-def original_file_response(media_file: MediaFile, disposition: str) -> Response:
-    """Serve the original file: X-Accel-Redirect behind nginx, FileResponse (Range, sendfile) otherwise"""
+_SINGLE_RANGE = re.compile(r"^bytes\s*=\s*(\d*)\s*-\s*(\d*)$", re.IGNORECASE)
+_CHUNK = 256 * 1024
+
+
+def parse_byte_range(header: Optional[str], size: int) -> Optional[Tuple[int, int]]:
+    """Inclusive (first, last) byte of the one range a Range header asks for (RFC 9110, section 14).
+
+    None: serve the whole file with 200, because there is no header, its unit is not bytes, the syntax is invalid
+    (also a last byte before the first) or it lists several ranges (a multipart answer is not offered, which the
+    RFC allows). Unsatisfiable (first byte past the end, an empty suffix, an empty file): ApiError 416.
+    """
+    if not header:
+        return None
+    match = _SINGLE_RANGE.match(header.strip())
+    if not match or (not match.group(1) and not match.group(2)):
+        return None
+    first, last = match.group(1), match.group(2)
+    unsatisfiable = ApiError(
+        ErrorCode.RANGE_NOT_SATISFIABLE, headers={"Content-Range": f"bytes */{size}"}, size_bytes=size,
+    )
+    if not first:  # suffix: the last N bytes
+        count = int(last)
+        if count == 0 or size == 0:
+            raise unsatisfiable
+        return max(0, size - count), size - 1
+    start = int(first)
+    if last and int(last) < start:
+        return None
+    if start >= size:
+        raise unsatisfiable
+    return start, min(int(last), size - 1) if last else size - 1
+
+
+def _read_range(path: Path, start: int, length: int) -> Iterator[bytes]:
+    """Chunks of a file part; the file is never read whole into memory"""
+    with open(path, "rb") as handle:
+        handle.seek(start)
+        while length > 0:
+            chunk = handle.read(min(_CHUNK, length))
+            if not chunk:
+                return
+            length -= len(chunk)
+            yield chunk
+
+
+def original_file_response(media_file: MediaFile, disposition: str, range_header: Optional[str] = None) -> Response:
+    """Serve the original file: X-Accel-Redirect behind nginx (which handles Range), otherwise the API streams it
+    and answers a single byte range itself (parse_byte_range)"""
     filename = media_file.original_filename.replace('"', "")
     headers = {
         "Content-Disposition": f'{disposition}; filename="{filename}"',
@@ -77,4 +125,23 @@ def original_file_response(media_file: MediaFile, disposition: str) -> Response:
             "X-Accel-Buffering": "yes",
         })
         return Response(content=b"", status_code=200, headers=headers)
-    return FileResponse(path=str(path), media_type=media_file.mime_type, headers=headers)
+
+    size = path.stat().st_size
+    byte_range = parse_byte_range(range_header, size)
+    headers["Accept-Ranges"] = "bytes"
+    if byte_range is None:
+        start, length, status_code = 0, size, 200
+    else:
+        start, last = byte_range
+        length, status_code = last - start + 1, 206
+        headers["Content-Range"] = f"bytes {start}-{last}/{size}"
+    headers["Content-Length"] = str(length)
+    return StreamingResponse(
+        _read_range(path, start, length), status_code=status_code, media_type=media_file.mime_type, headers=headers,
+    )
+
+
+def source_file_exists(media_file: MediaFile) -> bool:
+    """The file imgproxy renders the thumbnail from (the image or the poster) is on disk"""
+    source = media_file.thumbnail_source_path
+    return bool(source) and (storage_root() / source).is_file()

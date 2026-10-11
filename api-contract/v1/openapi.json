@@ -13621,6 +13621,16 @@
                 }
               }
             }
+          },
+          "416": {
+            "description": "`range_not_satisfiable`: Range not satisfiable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RangeNotSatisfiableProblem"
+                }
+              }
+            }
           }
         }
       }
@@ -13842,6 +13852,16 @@
                       "media_observation_not_found": "#/components/schemas/MediaObservationNotFoundProblem"
                     }
                   }
+                }
+              }
+            }
+          },
+          "416": {
+            "description": "`range_not_satisfiable`: Range not satisfiable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RangeNotSatisfiableProblem"
                 }
               }
             }
@@ -15080,11 +15100,14 @@
             }
           },
           "404": {
-            "description": "`media_not_found`: Media file not found; `media_observation_not_found`: Associated observation not found",
+            "description": "`media_file_missing`: File is missing on disk; `media_not_found`: Media file not found; `media_observation_not_found`: Associated observation not found",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MediaFileMissingProblem"
+                    },
                     {
                       "$ref": "#/components/schemas/MediaNotFoundProblem"
                     },
@@ -15095,6 +15118,7 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
+                      "media_file_missing": "#/components/schemas/MediaFileMissingProblem",
                       "media_not_found": "#/components/schemas/MediaNotFoundProblem",
                       "media_observation_not_found": "#/components/schemas/MediaObservationNotFoundProblem"
                     }
@@ -30395,6 +30419,75 @@
         ],
         "title": "PosterStatusResponse",
         "description": "Queue depth by poster status plus every worker's last heartbeat"
+      },
+      "RangeNotSatisfiableProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Range not satisfiable",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 416,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "No byte of the requested range exists in the file of {size_bytes} bytes"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "range_not_satisfiable",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code",
+          "size_bytes"
+        ],
+        "title": "RangeNotSatisfiableProblem",
+        "description": "Range not satisfiable (HTTP 416). Problem type range_not_satisfiable.",
+        "examples": [
+          {
+            "code": "range_not_satisfiable",
+            "detail": "No byte of the requested range exists in the file of <size_bytes> bytes",
+            "instance": "/api/v1/...",
+            "size_bytes": "<size_bytes>",
+            "status": 416,
+            "title": "Range not satisfiable",
+            "type": "https://example.org/problems/range_not_satisfiable"
+          }
+        ]
       },
       "RefreshRequest": {
         "properties": {

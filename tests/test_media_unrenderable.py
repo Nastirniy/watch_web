@@ -55,7 +55,7 @@ async def _reload(db, media_id: int) -> MediaFile:
 # ----------------------------------------------------------------- images above the render limit
 
 @pytest.mark.asyncio
-async def test_an_image_above_the_render_limit_is_unsupported(client, db, headers, monkeypatch):
+async def test_an_image_above_the_render_limit_is_unsupported(client, db, headers, monkeypatch, storage):
     monkeypatch.setattr(settings.storage, "enable_nginx", True)
     monkeypatch.setattr(settings.storage.imgproxy, "max_src_resolution_mp", 60)
     monkeypatch.setattr(settings.storage.imgproxy, "prewarm_base_url", "http://nginx")
@@ -63,6 +63,9 @@ async def test_an_image_above_the_render_limit_is_unsupported(client, db, header
     huge = await make_media(db, observation, user, width=8000, height=8000)
     at_limit = await make_media(db, observation, user, width=7500, height=8000)
     unknown = await make_media(db, observation, user)
+    for media in (at_limit, unknown):  # the route checks the source is on disk before handing it to nginx
+        (storage / media.file_path).parent.mkdir(parents=True, exist_ok=True)
+        (storage / media.file_path).write_bytes(b"jpeg")
 
     info = (await client.get(info_url(huge.id), headers=headers(user))).json()
     assert info["thumbnail_status"] == "unsupported" and info["thumbnail_urls"] is None

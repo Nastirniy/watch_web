@@ -36,6 +36,13 @@ def storage(tmp_path, monkeypatch):
     return tmp_path
 
 
+def _write(root, relative: str) -> None:
+    """The source file must exist: the thumbnail route checks it before X-Accel-Redirect"""
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"jpeg")
+
+
 async def _scene(db):
     post = await make_post(db)
     ids = await make_dictionary(db)
@@ -47,10 +54,11 @@ async def _scene(db):
 # ----------------------------------------------------------------- images
 
 @pytest.mark.asyncio
-async def test_image_thumbnail_behind_nginx_redirects_to_imgproxy(client, db, headers, monkeypatch):
+async def test_image_thumbnail_behind_nginx_redirects_to_imgproxy(client, db, headers, monkeypatch, storage):
     monkeypatch.setattr(settings.storage, "enable_nginx", True)
     _, user, observation = await _scene(db)
     media = await make_media(db, observation, user)
+    _write(storage, media.file_path)
 
     response = await client.get(thumb_url(media.id), headers=headers(user))
     assert response.status_code == 200, response.text
@@ -111,13 +119,14 @@ async def test_thumbnail_respects_post_scope(client, db, headers, monkeypatch):
 # ----------------------------------------------------------------- videos and audio
 
 @pytest.mark.asyncio
-async def test_video_states(client, db, headers, monkeypatch):
+async def test_video_states(client, db, headers, monkeypatch, storage):
     monkeypatch.setattr(settings.storage, "enable_nginx", True)
     _, user, observation = await _scene(db)
     pending = await make_media(db, observation, user, media_type="video")
     failed = await make_media(db, observation, user, media_type="video", poster_status="failed", poster_attempts=3)
     ready = await make_media(db, observation, user, media_type="video", poster_status="ready")
     audio = await make_media(db, observation, user, media_type="audio")
+    _write(storage, ready.poster_relative_path)
 
     response = await client.get(thumb_url(pending.id), headers=headers(user))
     assert response.status_code == 202

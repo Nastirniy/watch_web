@@ -22,13 +22,28 @@ def get_signer() -> ImgproxySigner:
     return ImgproxySigner.from_hex(cfg.key, cfg.salt)
 
 
+def cache_buster_for(generated_at: Optional[datetime]) -> Optional[str]:
+    """imgproxy cache buster from a row's generation time: whole seconds, naive means UTC (MySQL DATETIME keeps no
+    fraction). None while the time is unknown."""
+    if generated_at is None:
+        return None
+    if generated_at.tzinfo is None:
+        generated_at = generated_at.replace(tzinfo=timezone.utc)
+    return str(int(generated_at.timestamp()))
+
+
 def processing_path_for(
     media: MediaFile,
     size: str = ThumbnailSize.MEDIUM.value,
     fmt: str = ThumbnailFormat.AUTO.value,
     expires_at: Optional[datetime] = None,
 ) -> Optional[str]:
-    """Signed imgproxy path for the media's thumbnail source, or None when nothing can be rendered yet"""
+    """Signed imgproxy path for the media's thumbnail source, or None when nothing can be rendered yet.
+
+    A poster carries cb: from poster_generated_at: a regenerated poster is a new file under the same path, and
+    without it nginx would keep serving the render of the old one until its max-age. Image paths have no cb:
+    (the original is never replaced under its path).
+    """
     source = media.thumbnail_source_path
     if not source:
         return None
@@ -37,6 +52,7 @@ def processing_path_for(
         source, width, height, fmt=fmt,
         quality=settings.storage.thumbnail.quality,
         expires_at=expires_at,
+        cache_buster=cache_buster_for(media.poster_generated_at) if media.is_video else None,
     )
     return signed_path(get_signer(), path)
 
@@ -69,9 +85,27 @@ def quantised_expiry(ttl_seconds: int, now: Optional[datetime] = None) -> dateti
     return datetime.fromtimestamp((now_ts // ttl + 2) * ttl, tz=timezone.utc)
 
 
-def public_url(media: MediaFile, size: str, fmt: str, ttl_seconds: int, base_url: Optional[str] = None) -> Optional[tuple[str, datetime]]:
-    """Expiring URL a browser can load without a bearer token. Returns (url, expires_at)."""
-    expires_at = quantised_expiry(ttl_seconds)
+def share_expiry(ttl_seconds: int, now: Optional[datetime] = None) -> datetime:
+    """Expiry of a share link: stable inside a window and never later than now + ttl.
+
+    Window w = max(60, ttl // 10), expires_at = floor(now / w) * w + ttl, which lies in (now + ttl - w, now + ttl].
+    Links issued in the same window are byte-identical (nginx cache key); the link lives at least ttl - w.
+    """
+    ttl = int(ttl_seconds)
+    window = max(60, ttl // 10)
+    now_ts = int((now or datetime.now(timezone.utc)).timestamp())
+    return datetime.fromtimestamp(now_ts // window * window + ttl, tz=timezone.utc)
+
+
+def public_url(
+    media: MediaFile, size: str, fmt: str, ttl_seconds: int, base_url: Optional[str] = None,
+    expires_at: Optional[datetime] = None,
+) -> Optional[tuple[str, datetime]]:
+    """Expiring URL a browser can load without a bearer token. Returns (url, expires_at).
+
+    The expiry is quantised_expiry(ttl) (between ttl and 2 * ttl ahead) unless the caller passes one."""
+    if expires_at is None:
+        expires_at = quantised_expiry(ttl_seconds)
     path = processing_path_for(media, size, fmt, expires_at=expires_at)
     if path is None:
         return None
@@ -107,13 +141,9 @@ def storyboard_sheet_url(
     """
     cfg = settings.storage.imgproxy
     source = f"{storyboard_relative_dir(media_id)}/sheet-{sheet_index:03d}.jpg"
-    cache_buster = None
-    if generated_at is not None:
-        if generated_at.tzinfo is None:
-            generated_at = generated_at.replace(tzinfo=timezone.utc)
-        cache_buster = str(int(generated_at.timestamp()))
     path = build_processing_path(
-        source, 0, 0, fmt=ThumbnailFormat.JPEG.value, expires_at=expires_at, cache_buster=cache_buster,
+        source, 0, 0, fmt=ThumbnailFormat.JPEG.value, expires_at=expires_at,
+        cache_buster=cache_buster_for(generated_at),
     )
     origin = cfg.public_base_url if base_url is None else base_url
     return f"{origin.rstrip('/')}{cfg.public_prefix.rstrip('/')}{signed_path(get_signer(), path)}"
