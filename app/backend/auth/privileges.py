@@ -5,15 +5,16 @@ admin.true opens the administration area; these rules keep it from being a way t
 - check_grant: the caller holds every permission a change grants or revokes (roles assigned to a user,
   permissions added to or removed from a role, a role archived or restored for its holders). 403
   grant_exceeds_own_permissions with the permissions the caller lacks.
-- check_target_user: the caller changes the roles, certificate, active state or archive state of a user only
+- check_target_user: the caller writes to another user (any field, post access, archive state, sessions) only
   when that user holds no permission the caller lacks. 403 target_user_more_privileged.
 - check_an_admin_remains / check_admin_kept: run after the change is written to the session (flushed here,
   committed by the route): an active, non-archived user still holds admin.true through a role that is not
   archived (409 last_admin_required), and the caller has not taken admin.true from themselves (409
   cannot_remove_own_admin).
 
-The seeded admin role holds every permission, so its holders pass every grant and target check. A user's
-permissions are their effective permissions (context.role_permission_rows), the same as their AuthContext.
+The seeded admin role holds every permission (its name and permission set are fixed, the role routes refuse to
+change them), so its holders pass every grant and target check. What a user holds is context.held_permissions,
+the same definition as their AuthContext.
 """
 from typing import FrozenSet, Iterable
 
@@ -22,11 +23,11 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.auth.access_errors import access_denied
-from app.backend.auth.context import AuthContext, effective_permissions
+from app.backend.auth.context import AuthContext, effective_permissions, held_permissions
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.enums.general import Permissions
 from app.backend.errors.problems import ApiError
-from app.backend.models.role import Permission, Role, RolePermission, UserRole
+from app.backend.models.role import Permission, RolePermission, UserRole
 from app.backend.models.user import User
 
 
@@ -65,13 +66,9 @@ async def check_an_admin_remains(session: AsyncSession) -> None:
     """After the change: an active, non-archived user holds admin.true through a role that is not archived"""
     await session.flush()
     admin = (await session.exec(
-        select(User.id)
-        .join(UserRole, UserRole.user_id == User.id)
-        .join(Role, Role.id == UserRole.role_id)
-        .join(RolePermission, RolePermission.role_id == Role.id)
-        .join(Permission, Permission.id == RolePermission.permission_id)
-        .where(User.is_active == True, User.is_deleted == False, Role.is_deleted == False,
-               Permission.name == Permissions.IS_ADMIN.value)
+        held_permissions(UserRole.user_id)
+        .join(User, User.id == UserRole.user_id)
+        .where(User.is_active == True, User.is_deleted == False, Permission.name == Permissions.IS_ADMIN.value)
         .limit(1)
     )).first()
     if admin is None:

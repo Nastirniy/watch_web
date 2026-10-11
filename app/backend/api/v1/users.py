@@ -324,8 +324,8 @@ async def update_user(
     Only provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).
     The fields are form fields: any other body (JSON included) answers 415 instead of being ignored.
 
-    Changing the roles, the certificate or the active state needs a user who holds no permission the caller lacks
-    (403 target_user_more_privileged), new roles only permissions the caller holds (403
+    Changing another user needs a user who holds no permission the caller lacks (403
+    target_user_more_privileged), new roles only permissions the caller holds (403
     grant_exceeds_own_permissions). A role change or a deactivation must leave an active administrator and the
     caller's own admin.true (409 last_admin_required, cannot_remove_own_admin).
     """
@@ -348,6 +348,7 @@ async def update_user(
         raise ApiError(ErrorCode.USER_NOT_FOUND)
     if user.is_deleted:
         raise ApiError(ErrorCode.USER_NOT_FOUND)
+    await check_target_user(session, auth, user)
 
     # Store old values for auditing
     old_values = user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"})
@@ -358,9 +359,6 @@ async def update_user(
     old_role_ids = await _assigned_role_ids(session, user_id)
     new_role_ids = sorted(role.id for role in roles_to_assign) if roles_to_assign is not None else old_role_ids
     roles_change = new_role_ids != old_role_ids
-    active_change = update_data.is_active is not None and update_data.is_active != user.is_active
-    if roles_change or active_change or certificate is not None:
-        await check_target_user(session, auth, user)
     if roles_change:
         check_grant(auth, await role_permission_names(session, new_role_ids))
 
@@ -592,7 +590,10 @@ async def list_user_post_access(
 @router.put(
     UserRoutes.USER_POST_ACCESS_BY_POST.value,
     response_model=UserPostAccessResponse,
-    responses=problems(ErrorCode.POST_ACCESS_HOME_POST, ErrorCode.POST_NOT_FOUND, ErrorCode.USER_NOT_FOUND, *ADMIN),
+    responses=problems(
+        ErrorCode.POST_ACCESS_HOME_POST, ErrorCode.POST_NOT_FOUND, ErrorCode.USER_NOT_FOUND,
+        AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *ADMIN,
+    ),
 )
 async def upsert_user_post_access(
         request: Request,
@@ -602,9 +603,11 @@ async def upsert_user_post_access(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE, Permissions.POST_VIEW], admin=True))
 ):
-    """Grant a user read (can_write=false) or read+write (can_write=true) access to an additional post"""
+    """Grant a user read (can_write=false) or read+write (can_write=true) access to an additional post.
+    A user holding permissions the caller lacks: 403 target_user_more_privileged."""
     current_user = auth.user
     user = await _get_active_user_or_404(session, user_id)
+    await check_target_user(session, auth, user)
 
     post = await session.get(Post, post_id)
     if not post:
@@ -650,7 +653,9 @@ async def upsert_user_post_access(
 @router.delete(
     UserRoutes.USER_POST_ACCESS_BY_POST.value,
     status_code=status.HTTP_204_NO_CONTENT,
-    responses=problems(ErrorCode.POST_ACCESS_NOT_FOUND, ErrorCode.USER_NOT_FOUND, *ADMIN),
+    responses=problems(
+        ErrorCode.POST_ACCESS_NOT_FOUND, ErrorCode.USER_NOT_FOUND, AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *ADMIN,
+    ),
 )
 async def delete_user_post_access(
         request: Request,
@@ -659,9 +664,11 @@ async def delete_user_post_access(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE, Permissions.POST_VIEW], admin=True))
 ):
-    """Revoke access of a user to an additional post"""
+    """Revoke access of a user to an additional post.
+    A user holding permissions the caller lacks: 403 target_user_more_privileged."""
     current_user = auth.user
     user = await _get_active_user_or_404(session, user_id)
+    await check_target_user(session, auth, user)
 
     result = await session.exec(
         select(UserPostAccess).where(UserPostAccess.user_id == user_id, UserPostAccess.post_id == post_id)
@@ -822,7 +829,7 @@ async def list_user_sessions(
 @router.post(
     UserRoutes.USER_SESSIONS_END.value,
     response_model=SessionsEndedResponse,
-    responses=problems(ErrorCode.USER_NOT_FOUND, *ADMIN),
+    responses=problems(ErrorCode.USER_NOT_FOUND, AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *ADMIN),
 )
 async def end_user_sessions(
         request: Request,
@@ -831,8 +838,9 @@ async def end_user_sessions(
         auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE], admin=True))
 ):
     """Revoke every live session of a user (revoke_cause ended_by_admin); the account stays as it is and can log
-    in again. The caller's own session ends too when user_id is the caller. Archived users: 404."""
-    await _get_active_user_or_404(session, user_id)
+    in again. The caller's own session ends too when user_id is the caller. Archived users: 404.
+    A user holding permissions the caller lacks: 403 target_user_more_privileged."""
+    await check_target_user(session, auth, await _get_active_user_or_404(session, user_id))
     ended = await AuthService.invalidate_all_user_sessions(
         session=session,
         user_id=user_id,
@@ -848,7 +856,10 @@ async def end_user_sessions(
 @router.post(
     UserRoutes.USER_SESSION_END.value,
     response_model=UserSessionResponse,
-    responses=problems(ErrorCode.USER_NOT_FOUND, ErrorCode.SESSION_NOT_FOUND, ErrorCode.SESSION_ALREADY_ENDED, *ADMIN),
+    responses=problems(
+        ErrorCode.USER_NOT_FOUND, ErrorCode.SESSION_NOT_FOUND, ErrorCode.SESSION_ALREADY_ENDED,
+        AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *ADMIN,
+    ),
 )
 async def end_user_session(
         request: Request,
@@ -857,8 +868,9 @@ async def end_user_session(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE], admin=True))
 ):
-    """Revoke one live session of a user (revoke_cause ended_by_admin). Ended already: 409 with its end_reason."""
-    await _get_active_user_or_404(session, user_id)
+    """Revoke one live session of a user (revoke_cause ended_by_admin). Ended already: 409 with its end_reason.
+    A user holding permissions the caller lacks: 403 target_user_more_privileged."""
+    await check_target_user(session, auth, await _get_active_user_or_404(session, user_id))
     row = (await session.exec(
         select(UserSession).where(UserSession.id == session_id, UserSession.user_id == user_id)
     )).first()

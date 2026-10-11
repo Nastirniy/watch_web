@@ -20,15 +20,23 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - The built-in admin role keeps its name: a new `name` for the role named `admin` in `PATCH /roles/{id}` answers 409
   `admin_role_not_renamable` (the unchanged name and the other fields stay editable). After a rename the role could be
   archived, every administrator lost access and seeding created a second, empty `admin` role.
+- The built-in admin role keeps its permissions: `permission_ids` of `PATCH /roles/{id}` that differ from its current
+  set, `PUT /roles/{id}/permissions/{permission_id}` of a permission it lacks and `DELETE` of one it holds answer 409
+  `admin_role_permissions_fixed`; seeding still grants it every permission at start. A limited administrator could
+  remove `admin.true` (or any permission they hold) from the admin role and lock every full administrator out until
+  the next restart.
 - Nobody grants more than they hold: assigning roles (`POST /users/`, `role_ids` of `PATCH /users/{id}`), creating a
   role with `permission_ids`, adding or removing permissions of a role (`permission_ids` of `PATCH /roles/{id}`,
   `PUT` and `DELETE /roles/{id}/permissions/{permission_id}`), archiving and restoring a role answer 403
   `grant_exceeds_own_permissions` when the change grants or revokes a permission the caller does not hold; `missing`
   lists them. Only what the change adds or removes counts: a permission the caller lacks may stay on a role they edit.
   A holder of `user.update` or `role.update` with `admin.true` could give themselves the admin role or any permission.
-- Changing the roles, the certificate or the active state of a user (`PATCH /users/{id}`), archiving or restoring a
-  user answer 403 `target_user_more_privileged` when that user holds a permission the caller lacks (`missing` lists
-  them); the other fields stay editable. Holders of the seeded admin role hold every permission and are not affected.
+- Every write to another user answers 403 `target_user_more_privileged` when that user holds a permission the caller
+  lacks (`missing` lists them): `PATCH /users/{id}` (any field), archiving and restoring a user, `PUT` and
+  `DELETE /users/{id}/post-access/{post_id}`, `POST /users/{id}/sessions/end` and
+  `POST /users/{id}/sessions/{session_id}/end`. A caller acting on their own account is not limited by it. Holders of
+  the seeded admin role hold every permission and are not affected. A limited administrator could replace a full
+  administrator's certificate, deactivate, archive or log them out.
 - An active administrator always remains: a role change or deactivation of a user, archiving a user, archiving a role
   or removing `admin.true` from a role answer 409 `last_admin_required` when no active, non-archived user would hold
   `admin.true` through a role that is not archived, and 409 `cannot_remove_own_admin` when the change takes
@@ -38,9 +46,10 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ### Changed
 
-- New problem codes for the web localization package: `admin_role_not_renamable`, `last_admin_required`,
-  `cannot_remove_own_admin` (409) and `grant_exceeds_own_permissions`, `target_user_more_privileged` (403). The role and
-  user routes above declare them; `api-contract/v1/openapi.json` gained their schemas.
+- New problem codes for the web localization package: `admin_role_not_renamable`, `admin_role_permissions_fixed`,
+  `last_admin_required`, `cannot_remove_own_admin` (409) and `grant_exceeds_own_permissions`,
+  `target_user_more_privileged` (403). The role and user routes above declare them; `api-contract/v1/openapi.json`
+  gained their schemas.
 
 ## Backend layout: auth, errors, bootstrap and cli packages
 

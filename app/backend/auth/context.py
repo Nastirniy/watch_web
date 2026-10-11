@@ -64,17 +64,24 @@ class AuthContext:
         return None if self.has_post_access_all else sorted(self.readable_post_ids)
 
 
-def role_permission_rows(user_id: int):
-    """What a user holds: (role id, name, display name, permission name or None) for every role of the user that is
-    not archived. The one definition of a user's effective permissions (load_auth_context, privileges.py)."""
+def held_permissions(*columns):
+    """The one definition of what users hold: select(*columns) over every role assignment (UserRole) of a role that
+    is not archived, one row per permission of the role (Permission columns None for a role without any).
+    load_auth_context, effective_permissions and privileges.py add their own columns and filters."""
     return (
-        select(Role.id, Role.name, Role.display_name, Permission.name)
+        select(*columns)
         .select_from(UserRole)
         .join(Role, Role.id == UserRole.role_id)
         .outerjoin(RolePermission, RolePermission.role_id == Role.id)
         .outerjoin(Permission, Permission.id == RolePermission.permission_id)
-        .where(UserRole.user_id == user_id, Role.is_deleted == False)
+        .where(Role.is_deleted == False)
     )
+
+
+def role_permission_rows(user_id: int):
+    """What a user holds: (role id, name, display name, permission name or None) for every role of the user that is
+    not archived"""
+    return held_permissions(Role.id, Role.name, Role.display_name, Permission.name).where(UserRole.user_id == user_id)
 
 
 async def effective_permissions(session: AsyncSession, user_id: int) -> FrozenSet[str]:

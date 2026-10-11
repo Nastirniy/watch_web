@@ -1539,7 +1539,7 @@
           "USERS"
         ],
         "summary": "Update User",
-        "description": "Update user fields - all fields are optional\n\nSupports updating:\n- username: Unique username (3-50 characters)\n- username_alias: User's display name (1-255 characters)\n- post_id: User's post/position ID\n- is_active: User's active status (boolean)\n- role_ids: Replace all user roles, one form field per role (role_ids=1&role_ids=2)\n- certificate: Update PKI certificate authentication data (file upload). A different certificate ends every\n  session of the user, like deactivation: the old certificate's tokens stop working.\n\nOnly provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).\nThe fields are form fields: any other body (JSON included) answers 415 instead of being ignored.\n\nChanging the roles, the certificate or the active state needs a user who holds no permission the caller lacks\n(403 target_user_more_privileged), new roles only permissions the caller holds (403\ngrant_exceeds_own_permissions). A role change or a deactivation must leave an active administrator and the\ncaller's own admin.true (409 last_admin_required, cannot_remove_own_admin).",
+        "description": "Update user fields - all fields are optional\n\nSupports updating:\n- username: Unique username (3-50 characters)\n- username_alias: User's display name (1-255 characters)\n- post_id: User's post/position ID\n- is_active: User's active status (boolean)\n- role_ids: Replace all user roles, one form field per role (role_ids=1&role_ids=2)\n- certificate: Update PKI certificate authentication data (file upload). A different certificate ends every\n  session of the user, like deactivation: the old certificate's tokens stop working.\n\nOnly provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).\nThe fields are form fields: any other body (JSON included) answers 415 instead of being ignored.\n\nChanging another user needs a user who holds no permission the caller lacks (403\ntarget_user_more_privileged), new roles only permissions the caller holds (403\ngrant_exceeds_own_permissions). A role change or a deactivation must leave an active administrator and the\ncaller's own admin.true (409 last_admin_required, cannot_remove_own_admin).",
         "operationId": "update_user",
         "security": [
           {
@@ -2077,7 +2077,7 @@
           "USERS"
         ],
         "summary": "Upsert User Post Access",
-        "description": "Grant a user read (can_write=false) or read+write (can_write=true) access to an additional post",
+        "description": "Grant a user read (can_write=false) or read+write (can_write=true) access to an additional post.\nA user holding permissions the caller lacks: 403 target_user_more_privileged.",
         "operationId": "upsert_user_post_access",
         "security": [
           {
@@ -2200,7 +2200,7 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2210,13 +2210,17 @@
                     },
                     {
                       "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TargetUserMorePrivilegedProblem"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
                       "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "target_user_more_privileged": "#/components/schemas/TargetUserMorePrivilegedProblem"
                     }
                   }
                 }
@@ -2254,7 +2258,7 @@
           "USERS"
         ],
         "summary": "Delete User Post Access",
-        "description": "Revoke access of a user to an additional post",
+        "description": "Revoke access of a user to an additional post.\nA user holding permissions the caller lacks: 403 target_user_more_privileged.",
         "operationId": "delete_user_post_access",
         "security": [
           {
@@ -2350,7 +2354,7 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2360,13 +2364,17 @@
                     },
                     {
                       "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TargetUserMorePrivilegedProblem"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
                       "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "target_user_more_privileged": "#/components/schemas/TargetUserMorePrivilegedProblem"
                     }
                   }
                 }
@@ -2883,7 +2891,7 @@
           "USERS"
         ],
         "summary": "End User Sessions",
-        "description": "Revoke every live session of a user (revoke_cause ended_by_admin); the account stays as it is and can log\nin again. The caller's own session ends too when user_id is the caller. Archived users: 404.",
+        "description": "Revoke every live session of a user (revoke_cause ended_by_admin); the account stays as it is and can log\nin again. The caller's own session ends too when user_id is the caller. Archived users: 404.\nA user holding permissions the caller lacks: 403 target_user_more_privileged.",
         "operationId": "end_user_sessions",
         "security": [
           {
@@ -2978,7 +2986,7 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2988,13 +2996,17 @@
                     },
                     {
                       "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TargetUserMorePrivilegedProblem"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
                       "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "target_user_more_privileged": "#/components/schemas/TargetUserMorePrivilegedProblem"
                     }
                   }
                 }
@@ -3020,7 +3032,7 @@
           "USERS"
         ],
         "summary": "End User Session",
-        "description": "Revoke one live session of a user (revoke_cause ended_by_admin). Ended already: 409 with its end_reason.",
+        "description": "Revoke one live session of a user (revoke_cause ended_by_admin). Ended already: 409 with its end_reason.\nA user holding permissions the caller lacks: 403 target_user_more_privileged.",
         "operationId": "end_user_session",
         "security": [
           {
@@ -3125,7 +3137,7 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3135,13 +3147,17 @@
                     },
                     {
                       "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TargetUserMorePrivilegedProblem"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
                       "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "target_user_more_privileged": "#/components/schemas/TargetUserMorePrivilegedProblem"
                     }
                   }
                 }
@@ -3951,7 +3967,7 @@
           "ROLES"
         ],
         "summary": "Update Role",
-        "description": "Update role and optionally replace all permissions. Archived roles answer 404 until restored (POST /{role_id}/restore).\n\nThe built-in admin role keeps its name (409). The caller must hold every permission permission_ids adds or\nremoves (403 grant_exceeds_own_permissions); removing admin.true must leave an active administrator and the\ncaller's own admin.true (409).",
+        "description": "Update role and optionally replace all permissions. Archived roles answer 404 until restored (POST /{role_id}/restore).\n\nThe built-in admin role keeps its name and its permissions (409). The caller must hold every permission\npermission_ids adds or removes (403 grant_exceeds_own_permissions); removing admin.true must leave an active\nadministrator and the caller's own admin.true (409).",
         "operationId": "update_role",
         "security": [
           {
@@ -4118,13 +4134,16 @@
             }
           },
           "409": {
-            "description": "`admin_role_not_renamable`: The built-in admin role cannot be renamed; `cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no active administrator; `role_name_archived`: Role name belongs to an archived role",
+            "description": "`admin_role_not_renamable`: The built-in admin role cannot be renamed; `admin_role_permissions_fixed`: The permissions of the built-in admin role cannot be changed; `cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no active administrator; `role_name_archived`: Role name belongs to an archived role",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
                     {
                       "$ref": "#/components/schemas/AdminRoleNotRenamableProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AdminRolePermissionsFixedProblem"
                     },
                     {
                       "$ref": "#/components/schemas/CannotRemoveOwnAdminProblem"
@@ -4140,6 +4159,7 @@
                     "propertyName": "code",
                     "mapping": {
                       "admin_role_not_renamable": "#/components/schemas/AdminRoleNotRenamableProblem",
+                      "admin_role_permissions_fixed": "#/components/schemas/AdminRolePermissionsFixedProblem",
                       "cannot_remove_own_admin": "#/components/schemas/CannotRemoveOwnAdminProblem",
                       "last_admin_required": "#/components/schemas/LastAdminRequiredProblem",
                       "role_name_archived": "#/components/schemas/RoleNameArchivedProblem"
@@ -4775,7 +4795,7 @@
           "ROLES"
         ],
         "summary": "Add Role Permission",
-        "description": "Grant one permission to a role (idempotent). Returns the role's permissions.\nOnly a permission the caller holds can be granted (403 grant_exceeds_own_permissions).",
+        "description": "Grant one permission to a role (idempotent). Returns the role's permissions.\nOnly a permission the caller holds can be granted (403 grant_exceeds_own_permissions); the admin role gains\npermissions only by seeding (409 admin_role_permissions_fixed).",
         "operationId": "add_role_permission",
         "security": [
           {
@@ -4934,6 +4954,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "`admin_role_permissions_fixed`: The permissions of the built-in admin role cannot be changed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRolePermissionsFixedProblem"
+                }
+              }
+            }
           }
         }
       },
@@ -4942,7 +4972,7 @@
           "ROLES"
         ],
         "summary": "Remove Role Permission",
-        "description": "Revoke one permission from a role. Returns the role's remaining permissions.\nOnly a permission the caller holds can be revoked (403); revoking admin.true must leave an active\nadministrator and the caller's own admin.true (409).",
+        "description": "Revoke one permission from a role. Returns the role's remaining permissions.\nOnly a permission the caller holds can be revoked (403); the admin role keeps every permission (409);\nrevoking admin.true must leave an active administrator and the caller's own admin.true (409).",
         "operationId": "remove_role_permission",
         "security": [
           {
@@ -5107,11 +5137,14 @@
             }
           },
           "409": {
-            "description": "`cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no active administrator",
+            "description": "`admin_role_permissions_fixed`: The permissions of the built-in admin role cannot be changed; `cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no active administrator",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AdminRolePermissionsFixedProblem"
+                    },
                     {
                       "$ref": "#/components/schemas/CannotRemoveOwnAdminProblem"
                     },
@@ -5122,6 +5155,7 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
+                      "admin_role_permissions_fixed": "#/components/schemas/AdminRolePermissionsFixedProblem",
                       "cannot_remove_own_admin": "#/components/schemas/CannotRemoveOwnAdminProblem",
                       "last_admin_required": "#/components/schemas/LastAdminRequiredProblem"
                     }
@@ -22153,6 +22187,69 @@
             "status": 409,
             "title": "The built-in admin role cannot be renamed",
             "type": "https://example.org/problems/admin_role_not_renamable"
+          }
+        ]
+      },
+      "AdminRolePermissionsFixedProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "The permissions of the built-in admin role cannot be changed",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "The permissions of the built-in admin role cannot be changed"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "admin_role_permissions_fixed",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "AdminRolePermissionsFixedProblem",
+        "description": "The permissions of the built-in admin role cannot be changed (HTTP 409). Problem type admin_role_permissions_fixed.",
+        "examples": [
+          {
+            "code": "admin_role_permissions_fixed",
+            "detail": "The permissions of the built-in admin role cannot be changed",
+            "instance": "/api/v1/...",
+            "status": 409,
+            "title": "The permissions of the built-in admin role cannot be changed",
+            "type": "https://example.org/problems/admin_role_permissions_fixed"
           }
         ]
       },

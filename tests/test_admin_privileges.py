@@ -1,9 +1,10 @@
 """The built-in admin role, grants within the caller's own permissions, the last administrator, audit of user changes.
 
-- The admin role's name is immutable (it is the stable key of the archive, delete and seeding guards).
+- The admin role's name and permission set are immutable through the API (the name is the stable key of the archive,
+  delete and seeding guards; seeding grants it every permission).
 - A caller grants or revokes only permissions they hold: roles assigned to a user, permissions added to or removed
   from a role, a role archived or restored (its permissions are granted to or revoked from every holder).
-- A caller changes the roles, certificate, active state or archive state of a user only when that user holds no
+- A caller writes to another user (any field, post access, archive state, sessions) only when that user holds no
   permission the caller lacks.
 - No change may leave no active administrator, and nobody removes admin.true from themselves.
 """
@@ -12,13 +13,16 @@ from sqlmodel import select
 
 from app.backend.api.v1 import V1
 from app.backend.auth.privileges import check_an_admin_remains
+from app.backend.auth.service import AuthService
+from app.backend.bootstrap.permissions import seed_roles_and_permissions
 from app.backend.enums.errors import ErrorCode
 from app.backend.enums.routes import RoleRoutes, UserRoutes
 from app.backend.errors.problems import ApiError
 from app.backend.models.audit import AuditLog
 from app.backend.models.role import Permission, Role, RolePermission, UserRole
-from app.backend.models.user import User
-from tests.helpers import make_admin, make_role, make_user
+from app.backend.models.user import User, UserSession
+from app.backend.models.user_post_access import UserPostAccess
+from tests.helpers import make_admin, make_post, make_role, make_user
 from tests.test_username_validation import make_certificate
 
 ROLES = V1.path(RoleRoutes.ROOT)
@@ -30,6 +34,9 @@ USERS = V1.path(UserRoutes.ROOT)
 USER = V1.path(UserRoutes.USER_BY_ID)
 USER_ARCHIVE = V1.path(UserRoutes.USER_ARCHIVE)
 USER_RESTORE = V1.path(UserRoutes.USER_RESTORE)
+USER_POST_ACCESS = V1.path(UserRoutes.USER_POST_ACCESS_BY_POST)
+USER_SESSIONS_END = V1.path(UserRoutes.USER_SESSIONS_END)
+USER_SESSION_END = V1.path(UserRoutes.USER_SESSION_END)
 
 
 async def admin_role(db) -> Role:
@@ -81,6 +88,51 @@ async def test_admin_role_cannot_be_renamed(client, db, headers):
                               json={"name": "admin", "display_name": "Administrators"})
     assert same.status_code == 200, same.text
     assert same.json()["display_name"] == "Administrators"
+
+
+@pytest.mark.asyncio
+async def test_admin_role_permissions_cannot_be_changed(client, db, headers):
+    """Review: a limited admin removed admin.true from the admin role and every full administrator lost the area"""
+    admin = await make_admin(db)
+    editor = await make_user(db, perms=["admin.true", "role.view", "role.update"])
+    role = await admin_role(db)
+    before = await stored_permissions(db, role.id)
+    is_admin = await permission_id(db, "admin.true")
+    every = sorted((await db.exec(select(Permission.id))).all())
+
+    for caller in (editor, admin):
+        problem(await client.delete(ROLE_PERMISSION.format(role_id=role.id, permission_id=is_admin), headers=headers(caller)),
+                409, "admin_role_permissions_fixed")
+        problem(await client.patch(ROLE.format(role_id=role.id), headers=headers(caller),
+                                   json={"permission_ids": [pid for pid in every if pid != is_admin]}),
+                409, "admin_role_permissions_fixed")
+    assert await stored_permissions(db, role.id) == before
+
+    # the same set (in any order) and the other fields stay editable
+    same = await client.patch(ROLE.format(role_id=role.id), headers=headers(admin),
+                              json={"permission_ids": list(reversed(every)), "display_name": "Administrators"})
+    assert same.status_code == 200, same.text
+    assert await stored_permissions(db, role.id) == before
+
+
+@pytest.mark.asyncio
+async def test_admin_role_gains_permissions_only_by_seeding(client, db, headers):
+    admin = await make_admin(db)
+    role = await admin_role(db)
+    audit_view = await permission_id(db, "audit.view")
+    await db.execute(RolePermission.__table__.delete().where(
+        RolePermission.role_id == role.id, RolePermission.permission_id == audit_view))
+    await db.commit()
+
+    problem(await client.put(ROLE_PERMISSION.format(role_id=role.id, permission_id=audit_view), headers=headers(admin)),
+            409, "admin_role_permissions_fixed")
+    assert "audit.view" not in await stored_permissions(db, role.id)
+
+    await seed_roles_and_permissions(db)
+    assert "audit.view" in await stored_permissions(db, role.id)
+    # granting what it already holds stays an idempotent 200
+    held = await client.put(ROLE_PERMISSION.format(role_id=role.id, permission_id=audit_view), headers=headers(admin))
+    assert held.status_code == 200, held.text
 
 
 # ----------------------------------------------------------------- grants within the caller's own permissions
@@ -206,10 +258,12 @@ async def test_archive_and_restore_of_a_role_need_every_permission_of_the_role(c
 # ----------------------------------------------------------------- users holding more than the caller
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("change", ["role_ids", "certificate", "is_active"])
+@pytest.mark.parametrize("change", ["role_ids", "certificate", "is_active", "username", "username_alias", "post_id"])
 async def test_limited_admin_cannot_change_a_more_privileged_user(client, db, headers, change):
+    post = await make_post(db)
     admin = await make_admin(db)
-    admin_id, fingerprint = admin.id, admin.pki_certificate_fingerprint_hash
+    admin_id = admin.id
+    stored_before = (admin.username, admin.username_alias, admin.post_id, admin.is_active, admin.pki_certificate_fingerprint_hash)
     manager = await make_user(db, perms=["admin.true", "user.view", "user.update"])
     manager_role = (await stored_roles(db, manager.id))[0]
     roles_before = await stored_roles(db, admin_id)
@@ -217,24 +271,68 @@ async def test_limited_admin_cannot_change_a_more_privileged_user(client, db, he
         "role_ids": {"data": {"role_ids": [manager_role]}},
         "certificate": {"files": certificate_file("cn-taken-over")},
         "is_active": {"data": {"is_active": "false"}},
+        "username": {"data": {"username": "renamed_chief"}},
+        "username_alias": {"data": {"username_alias": "Chief"}},
+        "post_id": {"data": {"post_id": str(post.id)}},
     }[change]
 
     body = problem(await client.patch(USER.format(user_id=admin_id), headers=headers(manager), **request),
                    403, "target_user_more_privileged")
     assert "audit.view" in body["missing"]
-    row = (await db.exec(select(User.is_active, User.pki_certificate_fingerprint_hash).where(User.id == admin_id))).one()
-    assert tuple(row) == (True, fingerprint)
+    row = (await db.exec(select(User.username, User.username_alias, User.post_id, User.is_active,
+                                User.pki_certificate_fingerprint_hash).where(User.id == admin_id))).one()
+    assert tuple(row) == stored_before
     assert await stored_roles(db, admin_id) == roles_before
 
 
 @pytest.mark.asyncio
-async def test_fields_outside_the_rule_stay_editable_on_a_more_privileged_user(client, db, headers):
-    admin = await make_admin(db)
+async def test_a_limited_admin_edits_their_own_account(client, db, headers):
+    """The caller acting on themselves is not a more privileged target"""
+    await make_admin(db)
     manager = await make_user(db, perms=["admin.true", "user.view", "user.update"])
-    response = await client.patch(USER.format(user_id=admin.id), headers=headers(manager),
-                                  data={"username_alias": "Chief", "is_active": "true"})
+    response = await client.patch(USER.format(user_id=manager.id), headers=headers(manager), data={"username_alias": "Me"})
     assert response.status_code == 200, response.text
-    assert response.json()["username_alias"] == "Chief"
+    assert response.json()["username_alias"] == "Me"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route", ["put_post_access", "delete_post_access", "end_sessions", "end_session"])
+async def test_limited_admin_cannot_touch_post_access_or_sessions_of_a_more_privileged_user(client, db, headers, route):
+    post = await make_post(db)
+    admin = await make_admin(db)
+    peer = await make_user(db, perms=["user.view"])
+    manager = await make_user(db, perms=["admin.true", "user.view", "user.update", "post.view"])
+    for target in (admin, peer):
+        db.add(UserPostAccess(user_id=target.id, post_id=post.id, can_write=False))
+    await db.commit()
+    sessions = {target.id: await AuthService.create_session(db, target) for target in (admin, peer)}
+
+    async def call(target):
+        if route == "put_post_access":
+            return await client.put(USER_POST_ACCESS.format(user_id=target.id, post_id=post.id),
+                                    headers=headers(manager), json={"can_write": True})
+        if route == "delete_post_access":
+            return await client.delete(USER_POST_ACCESS.format(user_id=target.id, post_id=post.id), headers=headers(manager))
+        if route == "end_sessions":
+            return await client.post(USER_SESSIONS_END.format(user_id=target.id), headers=headers(manager))
+        return await client.post(USER_SESSION_END.format(user_id=target.id, session_id=sessions[target.id].id),
+                                 headers=headers(manager))
+
+    async def state(target):
+        access = (await db.exec(select(UserPostAccess.can_write).where(
+            UserPostAccess.user_id == target.id, UserPostAccess.post_id == post.id))).all()
+        ended = (await db.exec(select(UserSession.ended_at).where(UserSession.id == sessions[target.id].id))).one()
+        return access, ended
+
+    before = await state(admin)
+    body = problem(await call(admin), 403, "target_user_more_privileged")
+    assert "audit.view" in body["missing"]
+    assert await state(admin) == before
+
+    peer_before = await state(peer)
+    allowed = await call(peer)
+    assert allowed.status_code in (200, 204), allowed.text
+    assert await state(peer) != peer_before
 
 
 @pytest.mark.asyncio
