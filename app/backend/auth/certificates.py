@@ -108,7 +108,7 @@ async def parse_cn(dn: str) -> Optional[str]:
     """The CN of a subject DN as nginx forwards it ($ssl_client_s_dn).
 
     RFC 2253 form (nginx 1.11.6 and later, OpenSSL XN_FLAG_RFC2253): RDNs separated by unescaped ',', attributes
-    of one RDN by unescaped '+'; the value is unescaped (\\D0\\86 is UTF-8 'І', \\, a comma). The legacy form
+    of one RDN by unescaped '+'; the value is unescaped (\\D0\\86 is the UTF-8 of U+0406, \\, a comma). The legacy form
     /C=UA/O=.../CN=value of older nginx is read as before.
     """
     if not dn:

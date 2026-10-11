@@ -59,8 +59,8 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   stored as before.
 - Production login reads the CN from nginx's `X-SSL-Client-DN` (`$ssl_client_s_dn`, OpenSSL RFC 2253 form) as OpenSSL
   writes it: RDNs are split on unescaped `,` (attributes on unescaped `+`) and the value is unescaped (`\XX` bytes
-  decoded as UTF-8, `\,` and the other specials as the character). A certificate with a non-ASCII CN such as
-  `Іван Петренко` (sent as `CN=\D0\86\D0\B2...`) or a CN with an escaped comma answered 401
+  decoded as UTF-8, `\,` and the other specials as the character). A certificate with a non-ASCII CN, such as a
+  Cyrillic name (sent as `CN=\D0\86\D0\B2...`), or a CN with an escaped comma answered 401
   `certificate_not_recognized`. A DN whose escaped bytes are not UTF-8 answers `certificate_data_missing`. The
   legacy `/C=.../CN=...` form is read as before.
 - A session bound to a client certificate that is no longer the user's ends on its next request or refresh (401

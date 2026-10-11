@@ -63,8 +63,8 @@ def openssl_rfc2253(name: x509.Name) -> str:
                     for rdn in reversed(name.rdns))
 
 
-# openssl x509 -noout -subject -nameopt RFC2253 of a certificate with CN "Іван Петренко"
-CYRILLIC_CN = "Іван Петренко"
+# openssl x509 -noout -subject -nameopt RFC2253 of a certificate with CN "Ivan Petrenko" written in Cyrillic
+CYRILLIC_CN = "\u0406\u0432\u0430\u043d \u041f\u0435\u0442\u0440\u0435\u043d\u043a\u043e"
 CYRILLIC_DN = r"CN=\D0\86\D0\B2\D0\B0\D0\BD \D0\9F\D0\B5\D1\82\D1\80\D0\B5\D0\BD\D0\BA\D0\BE"
 
 
