@@ -6,6 +6,7 @@ from sqlalchemy.orm import selectinload
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.backend.api.shared.helpers.db_errors import unique_violation_as
 from app.backend.database import get_session
 from app.backend.auth.access_control import AccessControlService
 from app.backend.models.observation import Category, SignalType, Observation
@@ -96,7 +97,9 @@ async def create_signal_type(
 
     session.add(signal_type)
 
-    await session.commit()
+    # Two creates pass the SELECT check together; the unique index decides, the loser is a plain code clash
+    async with unique_violation_as(session, ErrorCode.SIGNAL_TYPE_CODE_TAKEN, signal_type_code=signal_type_data.code):
+        await session.commit()
     await session.refresh(signal_type)
 
     # Create audit log
@@ -203,7 +206,11 @@ async def update_signal_type(
 
     session.add(signal_type)
 
-    await session.commit()
+    if "code" in update_data:
+        async with unique_violation_as(session, ErrorCode.SIGNAL_TYPE_CODE_TAKEN, signal_type_code=signal_type_data.code):
+            await session.commit()
+    else:
+        await session.commit()
     await session.refresh(signal_type)
 
     # Create audit log

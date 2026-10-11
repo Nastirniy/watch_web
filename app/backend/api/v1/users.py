@@ -216,16 +216,13 @@ async def create_user(
     session.add(user)
 
     try:
+        # The user and its roles are written by one commit: a refused role row must not leave a user without roles
+        await session.flush()
+        for role in roles_to_assign:
+            session.add(UserRole(user_id=user.id, role_id=role.id))
         await session.commit()
         await session.refresh(user)
 
-        # Assign roles
-        for role in roles_to_assign:
-            user_role = UserRole(user_id=user.id, role_id=role.id)
-            session.add(user_role)
-
-        await session.commit()
-        
         # Create audit log
         await create_audit_log(
             session=session,
@@ -616,21 +613,33 @@ async def upsert_user_post_access(
     if user.post_id == post_id:
         raise ApiError(ErrorCode.POST_ACCESS_HOME_POST)
 
-    result = await session.exec(
-        select(UserPostAccess).where(UserPostAccess.user_id == user_id, UserPostAccess.post_id == post_id)
-    )
-    row = result.first()
-    old_values = None
-    if row:
-        old_values = row.model_dump()
-        row.can_write = access_data.can_write
-        action = "update"
-    else:
-        row = UserPostAccess(user_id=user_id, post_id=post_id, can_write=access_data.can_write)
-        session.add(row)
-        action = "create"
+    # A rollback expires every loaded object: keep what is needed afterwards as plain values
+    actor_id, actor_name, target_name = current_user.id, current_user.username, user.username
 
-    await session.commit()
+    for attempt in (1, 2):
+        result = await session.exec(
+            select(UserPostAccess).where(UserPostAccess.user_id == user_id, UserPostAccess.post_id == post_id)
+        )
+        row = result.first()
+        old_values = None
+        if row:
+            old_values = row.model_dump()
+            row.can_write = access_data.can_write
+            action = "update"
+        else:
+            row = UserPostAccess(user_id=user_id, post_id=post_id, can_write=access_data.can_write)
+            session.add(row)
+            action = "create"
+
+        try:
+            await session.commit()
+            break
+        except IntegrityError as exc:
+            # A concurrent request created the row between the check and the insert: the PUT is idempotent,
+            # so read the row it made and apply this request on top, as if it had existed
+            await session.rollback()
+            if attempt == 2 or not is_unique_violation(exc):
+                raise
     await session.refresh(row)
 
     await create_audit_log(
@@ -638,15 +647,15 @@ async def upsert_user_post_access(
         action=action,
         resource_type="user_post_access",
         resource_id=row.id,
-        user_id=current_user.id,
+        user_id=actor_id,
         old_values=old_values,
         new_values=row.model_dump(),
-        details={"message": f"User {current_user.username} granted post {post_id} access to user {user.username} (can_write={row.can_write})"},
+        details={"message": f"User {actor_name} granted post {post_id} access to user {target_name} (can_write={row.can_write})"},
         **client_info(request, auth)
     )
     await session.commit()
 
-    _logger.info(f"User {current_user.username} set post access user={user_id} post={post_id} can_write={row.can_write}")
+    _logger.info(f"User {actor_name} set post access user={user_id} post={post_id} can_write={row.can_write}")
     return UserPostAccessResponse.model_validate(row)
 
 

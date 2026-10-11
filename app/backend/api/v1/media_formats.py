@@ -12,9 +12,11 @@ pick the change up within REGISTRY_CACHE_TTL_SECONDS.
 from typing import List, Optional, Annotated
 
 from fastapi import APIRouter, Depends, Request, Query
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.backend.api.shared.helpers.db_errors import is_unique_violation
 from app.backend.database import get_session
 from app.backend.auth.access_control import AccessControlService
 from app.backend.models.media_format import MediaFormat
@@ -54,6 +56,21 @@ async def _check_conflicts(session: AsyncSession, media_type: str, extensions: L
         if clash_mime:
             raise ApiError(ErrorCode.MEDIA_FORMAT_CONTENT_TYPE_CLASH,
                            content_types=clash_mime, format_content_type=row.content_type, format_id=row.id)
+
+
+async def _commit_content_type(session: AsyncSession, content_type: str) -> None:
+    """Commit; a unique violation on content_type (two requests passed the existence check together) answers
+    media_format_exists with the row the other request made"""
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        if not is_unique_violation(exc):
+            raise
+        other = (await session.exec(select(MediaFormat).where(MediaFormat.content_type == content_type))).first()
+        if other is None:
+            raise
+        raise ApiError(ErrorCode.MEDIA_FORMAT_EXISTS, content_type=content_type, format_id=other.id) from exc
 
 
 def _check_size(max_file_size_bytes: int) -> None:
@@ -129,7 +146,7 @@ async def create_media_format(
         action = "create"
 
     session.add(row)
-    await session.commit()
+    await _commit_content_type(session, data.content_type)
     await session.refresh(row)
     invalidate_registry_cache()
 
@@ -204,7 +221,7 @@ async def update_media_format(
         setattr(row, field_name, value)
     row.updated_at = get_default_timezone_datetime()
     session.add(row)
-    await session.commit()
+    await _commit_content_type(session, content_type)
     await session.refresh(row)
     invalidate_registry_cache()
 

@@ -4,6 +4,7 @@ from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.backend.api.shared.helpers.db_errors import unique_violation_as
 from app.backend.database import get_session
 from app.backend.auth.access_control import AccessControlService
 from app.backend.models.observation import Category, SignalType
@@ -75,7 +76,9 @@ async def create_category(
 
     session.add(category)
 
-    await session.commit()
+    # Two creates pass the SELECT check together; the unique index decides, the loser is a plain name clash
+    async with unique_violation_as(session, ErrorCode.CATEGORY_NAME_TAKEN, name=category_data.name):
+        await session.commit()
     await session.refresh(category)
 
     # Create audit log
@@ -168,7 +171,11 @@ async def update_category(
 
     session.add(category)
 
-    await session.commit()
+    if "name" in update_data:
+        async with unique_violation_as(session, ErrorCode.CATEGORY_NAME_TAKEN, name=category_data.name):
+            await session.commit()
+    else:
+        await session.commit()
     await session.refresh(category)
 
     # Create audit log

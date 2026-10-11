@@ -127,6 +127,7 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `ResponseDatetime`. The session times (`GET /auth/sessions`, `GET /users/{id}/sessions`) now end in `Z` instead of
   `+00:00`, and `last_login_at` / `last_activity_at` of `GET /auth/me` have the offset they lacked; these fields are
   `format: date-time` in `api-contract/v1/openapi.json` now (the type stays a string).
+- Unique-violation races: a double click (two requests passing the same uniqueness check) answered 500 on tag, category, signal type, role and media format writes and on user creation. A unique violation at the commit now answers the code the check gives (`tag_name_taken`, `category_name_taken`, `signal_type_code_taken`, `role_name_taken`, `media_format_exists`, `username_or_certificate_taken`). `PUT /users/{id}/post-access/{post_id}` and `PUT /roles/{id}/permissions/{permission_id}` are idempotent: when a concurrent request created the row first they answer 200 with the stored row. `POST /users/` writes the user and its roles in one commit, so a failed role insert no longer leaves a user without roles. No new codes; the OpenAPI contract is unchanged.
 
 ### Changed
 

@@ -3,8 +3,10 @@ from fastapi import APIRouter, Depends, status, Request, Query, Path
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 from sqlalchemy import delete as sa_delete
+from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timezone
 
+from app.backend.api.shared.helpers.db_errors import is_unique_violation, unique_violation_as
 from app.backend.database import get_session
 from app.backend.bootstrap.permissions import ADMIN_ROLE_NAME
 from app.backend.models.role import Role, Permission, RolePermission, UserRole
@@ -82,20 +84,21 @@ async def create_role(
 
     role = Role(**role_data.model_dump(exclude={"permission_ids"}))
     session.add(role)
-    await session.flush()
+    async with unique_violation_as(session, ErrorCode.ROLE_NAME_TAKEN):
+        await session.flush()
 
-    # Assign permissions if provided
-    if role_data.permission_ids is not None:
-        for permission in permissions:
-            session.add(RolePermission(role_id=role.id, permission_id=permission.id))
+        # Assign permissions if provided
+        if role_data.permission_ids is not None:
+            for permission in permissions:
+                session.add(RolePermission(role_id=role.id, permission_id=permission.id))
 
-        _logger.info(
-            f"User {current_user.username} created role {role.name} with {len(role_data.permission_ids)} permissions"
-        )
-    else:
-        _logger.info(f"User {current_user.username} created role {role.name}")
+            _logger.info(
+                f"User {current_user.username} created role {role.name} with {len(role_data.permission_ids)} permissions"
+            )
+        else:
+            _logger.info(f"User {current_user.username} created role {role.name}")
 
-    await session.commit()
+        await session.commit()
     await session.refresh(role)
 
     # Create audit log
@@ -227,7 +230,12 @@ async def update_role(
     else:
         _logger.info(f"User {current_user.username} updated role {role.name}")
 
-    await session.commit()
+    if role_update.name is not None:
+        # Two renames to one name pass check_role_name_exists together; the unique index decides
+        async with unique_violation_as(session, ErrorCode.ROLE_NAME_TAKEN):
+            await session.commit()
+    else:
+        await session.commit()
     await session.refresh(role)
 
     # Create audit log
@@ -478,22 +486,32 @@ async def add_role_permission(
         if role.name == ADMIN_ROLE_NAME:
             raise ApiError(ErrorCode.ADMIN_ROLE_PERMISSIONS_FIXED)
         check_grant(auth, [permission.name])
+        # A rollback expires every loaded object: keep what is needed afterwards as plain values
+        actor_id, actor_name, role_name, permission_name = current_user.id, current_user.username, role.name, permission.name
         session.add(RolePermission(role_id=role_id, permission_id=permission_id))
         role.updated_at = datetime.now(timezone.utc)
         session.add(role)
-        await session.commit()
-        await create_audit_log(
-            session=session,
-            action="update",
-            resource_type="role",
-            resource_id=role.id,
-            user_id=current_user.id,
-            new_values={"permission_added": permission.name},
-            details={"message": f"User {current_user.username} granted '{permission.name}' to role '{role.name}'"},
-            **client_info(request, auth)
-        )
-        await session.commit()
-        _logger.info(f"User {current_user.username} granted {permission.name} to role {role.name}")
+        try:
+            await session.commit()
+        except IntegrityError as exc:
+            # A concurrent request granted it between the check and the insert: the PUT is idempotent, so answer
+            # as if the permission had been there (the other request wrote the audit row)
+            await session.rollback()
+            if not is_unique_violation(exc):
+                raise
+        else:
+            await create_audit_log(
+                session=session,
+                action="update",
+                resource_type="role",
+                resource_id=role_id,
+                user_id=actor_id,
+                new_values={"permission_added": permission_name},
+                details={"message": f"User {actor_name} granted '{permission_name}' to role '{role_name}'"},
+                **client_info(request, auth)
+            )
+            await session.commit()
+            _logger.info(f"User {actor_name} granted {permission_name} to role {role_name}")
 
     return await _role_permissions(session, role_id)
 
