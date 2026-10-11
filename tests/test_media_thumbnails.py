@@ -223,6 +223,6 @@ async def test_regenerate_and_poster_administration(client, db, headers, storage
     assert (await client.post(reconcile_url, json={}, headers=headers(user))).status_code == 403
     response = await client.post(reconcile_url, json={"retry_failed": False}, headers=headers(admin))
     assert response.status_code == 200, response.text
-    assert response.json() == {"queued_untracked": 0, "requeued_missing": 1, "retried_failed": 0}
+    assert response.json() == {"failed_abandoned": 0, "queued_untracked": 0, "requeued_missing": 1, "retried_failed": 0}
     await db.refresh(missing)
     assert missing.poster_status == "pending"

@@ -5,7 +5,8 @@ UPDATE (two workers may pick the same candidate, only one update matches, the
 other selects again), which needs no SKIP LOCKED and works on MySQL, MariaDB and
 the sqlite of the test suite. Every completion or failure is guarded by
 worker = <claimant> and status = processing, so a worker whose lease expired
-cannot overwrite a newer result.
+cannot overwrite a newer result. An expired claim is taken again only while
+attempts are left; fail_exhausted_storyboards fails the others.
 """
 from __future__ import annotations
 
@@ -25,7 +26,7 @@ from app.backend.config import settings
 from app.backend.enums.general import MediaType, PosterStatus, StoryboardJobStatus
 from app.backend.models.media import MediaFile
 from app.backend.models.storyboard import STORYBOARD_DIR, VideoStoryboard, storyboard_relative_dir
-from app.backend.services.media.jobs import utcnow
+from app.backend.services.media.jobs import WORKER_STOPPED_ERROR, utcnow
 from app.backend.services.media.storyboards import StoryboardPlan, StoryboardResult
 
 DEFAULT_BACKOFF_SECONDS = 60
@@ -64,19 +65,36 @@ async def enqueue_storyboard(session: AsyncSession, media: MediaFile) -> bool:
     return await _insert_pending(session, media.id)
 
 
+def _expired(now: datetime):
+    return and_(VideoStoryboard.status == StoryboardJobStatus.PROCESSING.value, VideoStoryboard.locked_until < now)
+
+
 def _claimable(now: datetime):
     pending = and_(
         VideoStoryboard.status == StoryboardJobStatus.PENDING.value,
         or_(VideoStoryboard.locked_until.is_(None), VideoStoryboard.locked_until < now),
     )
-    expired = and_(
-        VideoStoryboard.status == StoryboardJobStatus.PROCESSING.value,
-        VideoStoryboard.locked_until < now,
-    )
+    retry = and_(_expired(now), VideoStoryboard.attempts < settings.storage.storyboard.max_attempts)
     live_video = VideoStoryboard.media_id.in_(
         select(MediaFile.id).where(MediaFile.is_deleted == False, MediaFile.media_type == MediaType.VIDEO.value)
     )
-    return and_(live_video, or_(pending, expired))
+    return and_(live_video, or_(pending, retry))
+
+
+async def fail_exhausted_storyboards(session: AsyncSession, now: Optional[datetime] = None) -> int:
+    """Mark failed every expired claim on its last attempt: its worker stopped during processing (commits).
+
+    _claimable never takes such a row again; this records why. The worker calls it before it claims, reconcile too.
+    """
+    now = now or utcnow()
+    result = await session.execute(
+        update(VideoStoryboard)
+        .execution_options(synchronize_session=False)
+        .where(_expired(now), VideoStoryboard.attempts >= settings.storage.storyboard.max_attempts)
+        .values(status=StoryboardJobStatus.FAILED.value, locked_until=None, error=WORKER_STOPPED_ERROR)
+    )
+    await session.commit()
+    return result.rowcount
 
 
 async def claim_next_storyboard(
@@ -321,20 +339,25 @@ async def queue_missing_storyboards(session: AsyncSession) -> int:
 async def reconcile_storyboards(session: AsyncSession, storage_root: Path, retry_failed: bool = False) -> Dict[str, int]:
     """Repair storyboard state against the filesystem and the media rows (nothing while storyboards are off).
 
+    - expired claims on their last attempt become failed (fail_exhausted_storyboards, first)
     - a non-archived video with a ready poster and a long enough known duration, without a row, gets a pending row
-      (queue_missing_storyboards, first: it needs no filesystem)
+      (queue_missing_storyboards: it needs no filesystem)
     - ready rows whose sheets are missing become pending
     - failed rows become pending with attempts reset when retry_failed is true
     - temporary and set-aside directories older than the extraction timeout are removed
-    A processing row with an expired lease needs nothing here: it is claimable by itself.
+    A processing row with an expired lease and attempts left needs nothing here: it is claimable by itself.
     The filesystem is read in a thread (asyncio.to_thread), never on the event loop; its OSError reaches the caller.
     Safe while other workers start: a row another worker inserted meanwhile is skipped; a leftover another
     worker removed meanwhile is skipped.
     """
-    counts = {"queued_missing_rows": 0, "requeued_missing_files": 0, "retried_failed": 0, "removed_leftovers": 0}
+    counts = {
+        "failed_abandoned": 0, "queued_missing_rows": 0, "requeued_missing_files": 0, "retried_failed": 0,
+        "removed_leftovers": 0,
+    }
     config = settings.storage.storyboard
     if not config.enabled:
         return counts
+    counts["failed_abandoned"] = await fail_exhausted_storyboards(session)
     counts["queued_missing_rows"] = await queue_missing_storyboards(session)
     live_videos = set((await session.exec(
         select(MediaFile.id).where(MediaFile.is_deleted == False, MediaFile.media_type == MediaType.VIDEO.value)

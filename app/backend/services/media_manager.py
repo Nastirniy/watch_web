@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List, Set
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 import aiofiles
@@ -16,7 +17,7 @@ import aiofiles.os
 from pydantic import BaseModel, field_validator
 
 from app.backend.models.media import MediaFile
-from app.backend.services.media.jobs import enqueue_poster
+from app.backend.services.media.jobs import enqueue_poster, release_poster_hold
 from app.backend.services.media.formats import UnsupportedMediaFormat, FileTooLarge
 from app.backend.services.media.probe import image_dimensions
 from app.backend.enums.general import MediaType
@@ -82,6 +83,31 @@ class FileIntegrityCheck:
     status: str  # 'ok', 'missing', 'corrupted'
     issues: List[str]
     security_validated: bool = True
+
+
+def _move_into_place(source: Path, destination: Path) -> None:
+    """Rename on the same filesystem, copy and delete across filesystems (blocking: run it in a thread)"""
+    try:
+        source.rename(destination)
+    except OSError:
+        shutil.copy2(str(source), str(destination))
+        source.unlink()
+    os.chmod(destination, 0o644)
+
+
+def _walk_storage(root: Path) -> Optional[tuple[int, int]]:
+    """(files, bytes) under root, None when it does not exist (blocking: run it in a thread)"""
+    if not root.exists():
+        return None
+    files = size = 0
+    for directory, _, names in os.walk(root):
+        for name in names:
+            try:
+                size += (Path(directory) / name).stat().st_size
+                files += 1
+            except OSError:  # removed while walking
+                pass
+    return files, size
 
 
 class MediaManager:
@@ -434,14 +460,10 @@ class MediaManager:
         return detected_mime
 
     async def _move_file_to_storage(self, source: Path, destination: Path):
-        """Move file to storage. Uses rename if same filesystem, copy+delete otherwise."""
+        """Move file to storage. Uses rename if same filesystem, copy+delete otherwise; in a thread, never on the
+        event loop (a copy of a large file to a network share takes minutes)."""
         await aiofiles.os.makedirs(destination.parent, exist_ok=True)
-        try:
-            source.rename(destination)
-        except OSError:
-            shutil.copy2(str(source), str(destination))
-            source.unlink()
-        os.chmod(destination, 0o644)
+        await asyncio.to_thread(_move_into_place, source, destination)
 
     async def _extract_image_dimensions(self, file_path: Path) -> Optional[tuple[int, int]]:
         """Width and height as displayed, from the image header only (no pixel data is decoded)"""
@@ -572,7 +594,8 @@ class MediaManager:
             if dimensions:
                 media_file.width, media_file.height = dimensions
 
-            # Video posters are extracted by the media worker; queue in the creating transaction
+            # Video posters are extracted by the media worker; queue in the creating transaction, held until the
+            # file is in storage (released below, in the commit after the move)
             enqueue_poster(media_file)
 
             session.add(media_file)
@@ -602,6 +625,11 @@ class MediaManager:
                     raise CodedError(ErrorCode.MEDIA_STORE_FAILED) from e
                 raise
 
+            if media_file.is_video:
+                # The file is in storage: the worker may take the poster job from now on
+                await release_poster_hold(session, media_file.id)
+                await session.refresh(media_file)
+
             if self.enable_deduplication:
                 self._hash_cache[file_hash] = media_file.id
 
@@ -612,54 +640,33 @@ class MediaManager:
             self._active_uploads.discard(upload_session_id)
 
     async def get_storage_statistics(self, session: AsyncSession) -> Dict[str, Any]:
-        """Get storage statistics and health information"""
-
-        # Database statistics
-        files_query = select(MediaFile)
-        files_result = await session.exec(files_query)
-        all_files = files_result.all()
-
-        active_files = [f for f in all_files if not f.is_deleted]
-        deleted_files = [f for f in all_files if f.is_deleted]
-
-        total_files = len(all_files)
-        total_file_size = sum(f.file_size for f in all_files)
-        
-        active_count = len(active_files)
-        active_size = sum(f.file_size for f in active_files)
-        
-        deleted_count = len(deleted_files)
-        deleted_size = sum(f.file_size for f in deleted_files)
-
+        """Counts and sizes of the stored media: SQL aggregates, and a walk of the storage directory in a thread"""
+        size_sum = func.coalesce(func.sum(MediaFile.file_size), 0)
+        groups = (await session.exec(
+            select(MediaFile.is_deleted, MediaFile.media_type, func.count(), size_sum)
+            .group_by(MediaFile.is_deleted, MediaFile.media_type)
+        )).all()
+        active_count = active_size = deleted_count = deleted_size = 0
         # File type breakdown (active only)
-        media_types = {}
-        for file in active_files:
-            media_types[file.media_type] = media_types.get(file.media_type, 0) + 1
+        media_types: Dict[str, int] = {}
+        for is_deleted, media_type, count, size in groups:
+            if is_deleted:
+                deleted_count += count
+                deleted_size += int(size)
+            else:
+                active_count += count
+                active_size += int(size)
+                media_types[media_type] = count
 
-        # Filesystem statistics
+        # Filesystem statistics; the absolute storage path is a server detail: never part of a response
         fs_stats = {}
-        if self.storage_path.exists():
-            fs_size = 0
-            fs_files = 0
-
-            for root, dirs, files in os.walk(self.storage_path):
-                for file in files:
-                    file_path = Path(root) / file
-                    try:
-                        fs_size += file_path.stat().st_size
-                        fs_files += 1
-                    except OSError:  # removed while walking
-                        pass
-
-            # The absolute storage path is a server detail: never part of a response
-            fs_stats = {
-                "filesystem_files": fs_files,
-                "filesystem_size_bytes": fs_size,
-            }
+        walked = await asyncio.to_thread(_walk_storage, self.storage_path)
+        if walked is not None:
+            fs_stats = {"filesystem_files": walked[0], "filesystem_size_bytes": walked[1]}
 
         return {
-            "total_files": total_files,
-            "total_file_size_bytes": total_file_size,
+            "total_files": active_count + deleted_count,
+            "total_file_size_bytes": active_size + deleted_size,
             "active_count": active_count,
             "active_size_bytes": active_size,
             "deleted_count": deleted_count,

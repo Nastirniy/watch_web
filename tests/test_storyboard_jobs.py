@@ -164,6 +164,36 @@ async def test_failure_backs_off_then_fails_permanently(db, storyboard_settings)
     assert await sb.claim_next_storyboard(db, "w1", now=far + timedelta(days=2)) is None
 
 
+async def _abandoned(db, media_id: int, attempts: int, locked_until: datetime) -> None:
+    """A claim whose worker is gone (ffmpeg took it down, out of memory): it recorded nothing, its lease runs out"""
+    row = await _row(db, media_id)
+    row.status, row.worker, row.attempts, row.locked_until = "processing", "media@gone:1", attempts, locked_until
+    db.add(row)
+    await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_an_expired_claim_on_the_last_attempt_fails_and_is_never_claimed_again(db, storyboard_settings):
+    storyboard_settings.max_attempts = 2
+    (video,) = await _videos(db, 1)
+    await _pending(db, video.id)
+    start = datetime.now(timezone.utc)
+    await sb.claim_next_storyboard(db, "w1", lease_seconds=300, now=start)
+    second = start + timedelta(seconds=301)
+    reclaimed = await sb.claim_next_storyboard(db, "w2", lease_seconds=300, now=second)
+    assert reclaimed.attempts == 2, "an attempt was left: the expired claim is taken again"
+
+    after_last = second + timedelta(seconds=301)
+    assert await sb.claim_next_storyboard(db, "w3", now=after_last) is None, "no attempt left: never run again"
+    assert await sb.fail_exhausted_storyboards(db, now=second + timedelta(seconds=299)) == 0, "the lease still runs"
+    assert await sb.fail_exhausted_storyboards(db, now=after_last) == 1
+    row = await _row(db, video.id)
+    assert (row.status, row.attempts, row.locked_until, row.error) == ("failed", 2, None, jobs.WORKER_STOPPED_ERROR)
+    assert await sb.fail_exhausted_storyboards(db, now=after_last) == 0
+    plan = StoryboardPlan(step_seconds=2, frame_count=30, columns=10, rows=10, tile_width=160, sheet_count=1, duration_seconds=60)
+    assert await sb.complete_storyboard(db, video.id, "w2", plan, StoryboardResult(tile_height=90, sheet_count=1)) is False
+
+
 @pytest.mark.asyncio
 async def test_failure_with_empty_backoff_list_uses_a_default(db, storyboard_settings):
     storyboard_settings.backoff_seconds = []
@@ -257,7 +287,10 @@ async def test_reconcile(db, storyboard_settings, tmp_path):
     _make_sheets(tmp_path, ready_ok.id)
 
     counts = await sb.reconcile_storyboards(db, tmp_path)
-    assert counts == {"queued_missing_rows": 1, "requeued_missing_files": 1, "retried_failed": 0, "removed_leftovers": 0}
+    assert counts == {
+        "failed_abandoned": 0, "queued_missing_rows": 1, "requeued_missing_files": 1, "retried_failed": 0,
+        "removed_leftovers": 0,
+    }
     assert (await _row(db, ready_no_files.id)).status == "pending"
     assert (await _row(db, ready_ok.id)).status == "ready"
     assert (await _row(db, untracked.id)).status == "pending"
@@ -271,8 +304,35 @@ async def test_reconcile(db, storyboard_settings, tmp_path):
 
     storyboard_settings.enabled = False
     assert await sb.reconcile_storyboards(db, tmp_path, retry_failed=True) == {
-        "queued_missing_rows": 0, "requeued_missing_files": 0, "retried_failed": 0, "removed_leftovers": 0,
+        "failed_abandoned": 0, "queued_missing_rows": 0, "requeued_missing_files": 0, "retried_failed": 0,
+        "removed_leftovers": 0,
     }
+
+
+@pytest.mark.asyncio
+async def test_reconcile_fails_an_abandoned_last_attempt(db, storyboard_settings, tmp_path):
+    storyboard_settings.max_attempts = 2
+    abandoned, running, early = await _videos(db, 3)
+    now = datetime.now(timezone.utc)
+    for video, attempts, locked_until in (
+        (abandoned, 2, now - timedelta(seconds=1)),
+        (running, 2, now + timedelta(minutes=5)),  # a live worker's last attempt
+        (early, 1, now - timedelta(seconds=1)),  # one attempt left
+    ):
+        await _pending(db, video.id)
+        await _abandoned(db, video.id, attempts, locked_until)
+
+    counts = await sb.reconcile_storyboards(db, tmp_path)
+    assert counts["failed_abandoned"] == 1
+    row = await _row(db, abandoned.id)
+    assert row.status == "failed" and row.error == jobs.WORKER_STOPPED_ERROR
+    assert (await _row(db, running.id)).status == "processing"
+    assert (await _row(db, early.id)).status == "processing"
+
+    counts = await sb.reconcile_storyboards(db, tmp_path, retry_failed=True)
+    assert counts["failed_abandoned"] == 0 and counts["retried_failed"] == 1
+    row = await _row(db, abandoned.id)
+    assert (row.status, row.attempts, row.error) == ("pending", 0, None)
 
 
 @pytest.mark.asyncio
@@ -646,6 +706,49 @@ async def test_the_sweep_queues_a_video_that_became_eligible_while_running(
         await asyncio.wait_for(run, timeout=WAIT_SECONDS)
 
     assert (await _row(db, video.id)).status == "ready"
+
+
+@pytest.mark.asyncio
+async def test_the_worker_fails_an_abandoned_last_storyboard_attempt_before_it_claims(
+    db, session_maker, storyboard_settings, fast_polling, tmp_path
+):
+    (video,) = await _videos(db, 1, duration_seconds=120, poster_status="ready")
+    _write_poster(video.resolve_poster_path(tmp_path))
+    db.add(VideoStoryboard(media_id=video.id, status="ready", sheet_count=1, frame_count=5))
+    await db.commit()
+    _make_sheets(tmp_path, video.id)  # the reconcile on start keeps it ready
+
+    sessions = _one_session_at_a_time(session_maker)
+    worker = MediaWorker(
+        sessions, tmp_path, name="media@test:1", concurrency=2,
+        extractor=lambda source, target: _write_poster(target), storyboard_extractor=_no_storyboard,
+    )
+    run = asyncio.create_task(worker.run())
+    try:
+        async def heartbeat_written() -> bool:
+            async with sessions() as session:
+                return bool(await jobs.worker_heartbeats(session))
+
+        await _wait_until(heartbeat_written, timeout=WAIT_SECONDS)  # started, the reconcile on start is done
+        async with sessions() as session:
+            # A worker took it again later and died on the last attempt (ffmpeg took it down)
+            await _abandoned(session, video.id, storyboard_settings.max_attempts,
+                             datetime.now(timezone.utc) - timedelta(seconds=1))
+
+        async def failed() -> bool:
+            async with sessions() as session:
+                return (await session.get(VideoStoryboard, video.id, populate_existing=True)).status == "failed"
+
+        await _wait_until(failed, timeout=2.0)
+    finally:
+        worker.request_stop()
+        await asyncio.wait_for(run, timeout=WAIT_SECONDS)
+
+    row = await _row(db, video.id)
+    assert (row.attempts, row.error) == (storyboard_settings.max_attempts, jobs.WORKER_STOPPED_ERROR), (
+        "failed before any claim: never run again"
+    )
+    assert worker.jobs_failed == 0
 
 
 def test_slots_must_leave_a_place_for_posters(storyboard_settings, monkeypatch, tmp_path):

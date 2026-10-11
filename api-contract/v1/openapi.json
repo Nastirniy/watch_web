@@ -30340,6 +30340,10 @@
       },
       "PosterReconcileResponse": {
         "properties": {
+          "failed_abandoned": {
+            "type": "integer",
+            "title": "Failed Abandoned"
+          },
           "queued_untracked": {
             "type": "integer",
             "title": "Queued Untracked"
@@ -30355,6 +30359,7 @@
         },
         "type": "object",
         "required": [
+          "failed_abandoned",
           "queued_untracked",
           "requeued_missing",
           "retried_failed"

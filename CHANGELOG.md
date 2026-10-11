@@ -153,6 +153,23 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   before this change answer `null`.
 - `HEAD /media/uploads/{upload_id}` applies the expiry like `GET`: a session past `expires_at` answers
   `Upload-Status: expired` (it answered `open`) and loses its part file.
+- A video whose poster or storyboard extraction takes the media worker down (out of memory, a crash) is no longer
+  retried forever: an expired claim is taken again only while attempts are left (`storage.poster.max_attempts`,
+  `storage.storyboard.max_attempts`). On its last attempt it becomes `failed` (`thumbnail_status` `failed`, 409
+  `poster_failed`) with the error "the worker stopped during processing on the last attempt"; the worker records this
+  before every claim (`fail_exhausted_posters`, `fail_exhausted_storyboards`) and so do both reconciliations.
+  `POST /media/posters/reconcile` reports them as `failed_abandoned` (new required field of
+  `PosterReconcileResponse` in `api-contract/v1/openapi.json`); `media_tools reconcile-posters` and
+  `reconcile-storyboards` print it, and `--retry-failed` queues them again.
+- An uploaded video is no longer claimable before its file is in storage: the row is created `pending` with a hold
+  (`poster_locked_until` one hour ahead, `UPLOAD_HOLD`) that the commit after the move releases. The worker could
+  claim it during a long move (a copy across filesystems) and use up every attempt on "source file missing". Clients
+  see `thumbnail_status` `pending` as before. When the API stops before the release, the worker takes the row after
+  the hold.
+- The move of an upload into storage (the rename, or the copy across filesystems) and the walk of the storage
+  directory of `GET /media/statistics` run in a thread instead of on the event loop; a copy of a large file to a
+  network share blocked every other request. `GET /media/statistics` counts and sums in SQL instead of loading every
+  media row; the response is unchanged.
 
 ### Changed
 

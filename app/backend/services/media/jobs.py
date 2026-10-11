@@ -1,14 +1,19 @@
 """Poster job store: the queue is the media_files row itself.
 
 A video row is enqueued by setting poster_status = pending in the same
-transaction that creates it, so a job can never be lost. Workers claim with a
-conditional UPDATE: two workers may pick the same candidate, only one update
-matches, the other selects again. This needs no SKIP LOCKED and works on
-MySQL 5.7 and 8, MariaDB and the sqlite used by the test suite.
+transaction that creates it, so a job can never be lost. The job is held
+(poster_locked_until ahead) until the commit after the file reached storage
+releases it: the client sees pending, no worker claims a file still on its way.
+Workers claim with a conditional UPDATE: two workers may pick the same
+candidate, only one update matches, the other selects again. This needs no
+SKIP LOCKED and works on MySQL 5.7 and 8, MariaDB and the sqlite used by the
+test suite.
 
 Every completion or failure is guarded by poster_worker = <claimant> and
 poster_status = processing, so a worker whose lease expired cannot overwrite
-a newer result.
+a newer result. An expired claim is taken again only while attempts are left:
+a video whose extraction takes the worker down (out of memory, a crash) is
+failed by fail_exhausted_posters, never run forever.
 """
 from __future__ import annotations
 
@@ -26,6 +31,15 @@ from app.backend.models.media import MediaFile
 from app.backend.models.observation import Observation
 from app.backend.models.worker import WorkerHeartbeat
 
+# Longer than any move of an upload into storage (a rename, or a copy across filesystems of the largest file).
+# Released in the commit after the move; it runs out only when the API stopped before that commit, and the worker
+# then takes the row like any other (a file that never arrived fails as missing).
+UPLOAD_HOLD = timedelta(hours=1)
+
+# Error of a job whose last attempt ended with its worker (killed, out of memory, the host restarted); posters and
+# storyboards
+WORKER_STOPPED_ERROR = "the worker stopped during processing on the last attempt"
+
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -38,14 +52,39 @@ def _as_aware(value: Optional[datetime]) -> Optional[datetime]:
 
 
 def enqueue_poster(media: MediaFile) -> None:
-    """Mark a freshly created video row for poster extraction (call before the creating commit)"""
+    """Mark a freshly created video row for poster extraction (call before the creating commit).
+
+    The job is held for UPLOAD_HOLD: call release_poster_hold in the commit after the file is in storage.
+    """
     if media.is_video:
         media.poster_status = PosterStatus.PENDING.value
         media.poster_attempts = 0
-        media.poster_locked_until = None
+        media.poster_locked_until = utcnow() + UPLOAD_HOLD
         media.poster_worker = None
         media.poster_error = None
         media.poster_generated_at = None
+
+
+async def release_poster_hold(session: AsyncSession, media_id: int) -> None:
+    """The file of a new video is in storage: workers may claim its poster job from now on (commits).
+
+    Only the untouched hold is released; a job a worker took after the hold ran out goes on as it is.
+    """
+    await session.execute(
+        update(MediaFile)
+        .execution_options(synchronize_session=False)
+        .where(
+            MediaFile.id == media_id,
+            MediaFile.poster_status == PosterStatus.PENDING.value,
+            MediaFile.poster_attempts == 0,
+        )
+        .values(poster_locked_until=None)
+    )
+    await session.commit()
+
+
+def _expired(now: datetime):
+    return and_(MediaFile.poster_status == PosterStatus.PROCESSING.value, MediaFile.poster_locked_until < now)
 
 
 def _claimable(now: datetime):
@@ -53,15 +92,28 @@ def _claimable(now: datetime):
         MediaFile.poster_status == PosterStatus.PENDING.value,
         or_(MediaFile.poster_locked_until.is_(None), MediaFile.poster_locked_until < now),
     )
-    expired = and_(
-        MediaFile.poster_status == PosterStatus.PROCESSING.value,
-        MediaFile.poster_locked_until < now,
-    )
+    retry = and_(_expired(now), MediaFile.poster_attempts < settings.storage.poster.max_attempts)
     return and_(
         MediaFile.is_deleted == False,
         MediaFile.media_type == MediaType.VIDEO.value,
-        or_(pending, expired),
+        or_(pending, retry),
     )
+
+
+async def fail_exhausted_posters(session: AsyncSession, now: Optional[datetime] = None) -> int:
+    """Mark failed every expired claim on its last attempt: its worker stopped during processing (commits).
+
+    _claimable never takes such a row again; this records why. The worker calls it before it claims, reconcile too.
+    """
+    now = now or utcnow()
+    result = await session.execute(
+        update(MediaFile)
+        .execution_options(synchronize_session=False)
+        .where(_expired(now), MediaFile.poster_attempts >= settings.storage.poster.max_attempts)
+        .values(poster_status=PosterStatus.FAILED.value, poster_locked_until=None, poster_error=WORKER_STOPPED_ERROR)
+    )
+    await session.commit()
+    return result.rowcount
 
 
 async def claim_next_poster(
@@ -232,11 +284,13 @@ async def requeue_poster(session: AsyncSession, media: MediaFile) -> None:
 async def reconcile_posters(session: AsyncSession, storage_root: Path, retry_failed: bool = False) -> Dict[str, int]:
     """Repair poster state against the filesystem.
 
+    - expired claims on their last attempt become failed (fail_exhausted_posters, first)
     - video rows without a status (legacy uploads) become pending
     - ready rows whose poster file is missing become pending
     - failed rows become pending with attempts reset when retry_failed is true
     """
-    counts = {"queued_untracked": 0, "requeued_missing": 0, "retried_failed": 0}
+    counts = {"failed_abandoned": 0, "queued_untracked": 0, "requeued_missing": 0, "retried_failed": 0}
+    counts["failed_abandoned"] = await fail_exhausted_posters(session)
     videos = (await session.exec(
         select(MediaFile)
         .where(MediaFile.is_deleted == False, MediaFile.media_type == MediaType.VIDEO.value)

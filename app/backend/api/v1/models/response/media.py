@@ -122,6 +122,8 @@ class PosterStatusResponse(BaseModel):
 
 
 class PosterReconcileResponse(BaseModel):
+    # Expired claims on their last attempt (the worker stopped during processing), now failed
+    failed_abandoned: int
     queued_untracked: int
     requeued_missing: int
     retried_failed: int

@@ -294,12 +294,27 @@ class MediaWorker:
 
     async def claim_and_run_once(self) -> bool:
         """Claim one job and process it. False when the queue is empty."""
-        async with self.session_maker() as session:
-            media = await jobs.claim_next_poster(session, self.name)
+        media = await self._claim_poster()
         if media is None:
             return False
         await self.process(media)
         return True
+
+    async def _claim_poster(self) -> Optional[MediaFile]:
+        """Fail the claims whose last attempt took their worker down, then claim the next poster job"""
+        async with self.session_maker() as session:
+            failed = await jobs.fail_exhausted_posters(session)
+            if failed:
+                _logger.error(f"{failed} poster job(s) failed: {jobs.WORKER_STOPPED_ERROR}")
+            return await jobs.claim_next_poster(session, self.name)
+
+    async def _claim_storyboard(self) -> Optional[VideoStoryboard]:
+        """Fail the claims whose last attempt took their worker down, then claim the next storyboard job"""
+        async with self.session_maker() as session:
+            failed = await storyboard_jobs.fail_exhausted_storyboards(session)
+            if failed:
+                _logger.error(f"{failed} storyboard job(s) failed: {jobs.WORKER_STOPPED_ERROR}")
+            return await storyboard_jobs.claim_next_storyboard(session, self.name)
 
     # ---- loops ---------------------------------------------------------
 
@@ -391,12 +406,10 @@ class MediaWorker:
                     semaphore.release()
                     break
                 # A poster first; a storyboard only when no poster is waiting and a slot is free
-                async with self.session_maker() as session:
-                    media = await jobs.claim_next_poster(session, self.name)
+                media = await self._claim_poster()
                 row = None
                 if media is None and self._storyboard_slot_free():
-                    async with self.session_maker() as session:
-                        row = await storyboard_jobs.claim_next_storyboard(session, self.name)
+                    row = await self._claim_storyboard()
                 if media is None and row is None:
                     semaphore.release()
                     try:
