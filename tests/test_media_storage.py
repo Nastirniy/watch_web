@@ -48,6 +48,41 @@ async def test_the_move_into_storage_runs_off_the_event_loop(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failing", ["copy", "replace"])
+async def test_a_failed_copy_across_filesystems_leaves_nothing_at_the_destination(tmp_path, monkeypatch, failing):
+    """The copy fallback writes a temporary name next to the destination and replaces it into place; on any failure the
+    temporary file is removed and the error raised, so no partial file sits under the final name"""
+    manager = MediaManager(storage_path=str(tmp_path / "media"), temp_path=str(tmp_path / "temp"))
+    source = tmp_path / "temp" / "upload.bin"
+    source.write_bytes(b"x" * 4096)
+    destination = tmp_path / "media" / "2026" / "10" / "11" / "obs_001" / "1_abc.bin"
+    real_copy2 = shutil.copy2
+
+    def rename(self, target):
+        raise OSError(18, "Invalid cross-device link")
+
+    def copy2(src, dst, *args, **kwargs):
+        if failing == "copy":
+            Path(dst).write_bytes(b"x" * 100)  # the share filled up halfway
+            raise OSError(28, "No space left on device")
+        return real_copy2(src, dst, *args, **kwargs)
+
+    def replace(src, dst):
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(Path, "rename", rename)
+    monkeypatch.setattr(shutil, "copy2", copy2)
+    if failing == "replace":
+        monkeypatch.setattr(os, "replace", replace)
+    with pytest.raises(OSError):
+        await manager._move_file_to_storage(source, destination)
+
+    assert not destination.exists()
+    assert list(destination.parent.iterdir()) == [], "no temporary file is left behind"
+    assert source.read_bytes() == b"x" * 4096, "the source stays for the caller's cleanup"
+
+
+@pytest.mark.asyncio
 async def test_a_move_the_storage_refuses_removes_the_row(db, tmp_path, monkeypatch):
     """An OSError of the move (raised in its thread) is still media_store_failed, and no row points at a missing file"""
     post = await make_post(db)

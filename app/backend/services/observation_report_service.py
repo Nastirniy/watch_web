@@ -82,15 +82,17 @@ _KIND_LABELS = {
 }
 
 
-_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+def _put(ws, row: int, column: int, value):
+    """Write a value; a str is always a string cell, written unchanged.
 
-
-def escape_text(value):
-    """User-supplied text for a cell: a string that starts like a formula gets a leading apostrophe, so a spreadsheet
-    shows it as text (OWASP CSV injection). Numbers and dates are passed on typed."""
-    if isinstance(value, str) and value.startswith(_FORMULA_PREFIXES):
-        return "'" + value
-    return value
+    openpyxl would store a str starting with `=` as a formula and `#N/A` and the other error names as an error cell
+    (`Cell._bind_value`); forcing the type keeps user text (comment, names, filter values) text. `quotePrefix` keeps
+    it text when the cell is edited in a spreadsheet; nothing visible is added. Numbers and dates stay typed."""
+    cell = ws.cell(row=row, column=column, value=value)
+    if isinstance(value, str):
+        cell.data_type = "s"
+        cell.quotePrefix = True
+    return cell
 
 
 def _kind_label(kind: str) -> str:
@@ -295,7 +297,7 @@ class ObservationReportService:
             c_lbl.alignment = left
             if num_cols > 1:
                 ws.merge_cells(f"B{row}:{last_col}{row}")
-            c_val = ws.cell(row=row, column=2, value=escape_text(value))
+            c_val = _put(ws, row, 2, value)
             c_val.font = _font(size=10)
             c_val.alignment = left
             row += 1
@@ -363,7 +365,7 @@ class ObservationReportService:
                 ]
 
             for col_idx, value in enumerate(row_data, start=1):
-                c = ws.cell(row=row, column=col_idx, value=escape_text(value))
+                c = _put(ws, row, col_idx, value)
                 c.border = thin_border
                 if spacer_col and col_idx == spacer_col:
                     c.fill = _fill(cls._COLOR_SPACER_ALT if use_alt else cls._COLOR_SPACER_BG)

@@ -1,6 +1,7 @@
 """Upload file names (non-ASCII stems), the nginx temp path contract and temp-file cleanup."""
 import os
 import time
+from pathlib import Path
 
 import pytest
 
@@ -37,6 +38,21 @@ def _temp_file(directory, name="0000000001", data=None):
     path = directory / name
     path.write_bytes(data if data is not None else make_png())
     return path
+
+
+def _unlink_refused_for(monkeypatch, names):
+    """Path.unlink raises PermissionError for these file names (a file nginx's user owns, a read-only mount)"""
+    real_unlink = Path.unlink
+    refused = []
+
+    def unlink(self, missing_ok=False):
+        if self.name in names:
+            refused.append(self.name)
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    return refused
 
 
 def _nginx_post(client, headers, user, observation, path, filename="photo.png", media_type="image"):
@@ -144,6 +160,23 @@ async def test_rejected_nginx_upload_removes_the_temp_file(client, db, headers, 
     assert not missing_observation.exists()
 
 
+@pytest.mark.asyncio
+async def test_a_failing_temp_cleanup_never_replaces_the_outcome(client, db, headers, storage, temp_dir, monkeypatch):
+    """An OSError of the unlink in the finally is logged; the answer stays the one the upload earned"""
+    post, user, observation = await _scene(db)
+    stored = _temp_file(temp_dir, "0000000006")
+    rejected = _temp_file(temp_dir, "0000000007", b"MZ" + b"\x00" * 64)
+    refused = _unlink_refused_for(monkeypatch, {stored.name, rejected.name})
+
+    ok = await _nginx_post(client, headers, user, observation, stored)
+    assert ok.status_code in (200, 201), ok.text
+    bad = await _nginx_post(client, headers, user, observation, rejected)
+    assert bad.status_code == 415, bad.text
+    assert bad.json()["code"] == "media_content_type_not_accepted"
+    assert refused == [stored.name, rejected.name]
+    assert rejected.exists(), "left for sweep-nginx-temp"
+
+
 # ----------------------------------------------------------------- sweep
 
 def test_sweep_removes_only_old_files(tmp_path):
@@ -179,3 +212,22 @@ def test_media_tools_sweep_command(tmp_path, monkeypatch, capsys):
     assert media_tools.main(["sweep-nginx-temp"]) == 0
     assert not old.exists()
     assert "1 file" in capsys.readouterr().out
+
+
+def test_sweep_skips_and_counts_a_file_it_may_not_delete(tmp_path, monkeypatch, capsys):
+    long_ago = time.time() - 48 * 3600
+    for name in ("a_old", "b_locked", "c_old"):
+        (tmp_path / name).write_bytes(b"xy")
+        os.utime(tmp_path / name, (long_ago, long_ago))
+    _unlink_refused_for(monkeypatch, {"b_locked"})
+
+    result = uploads.sweep_nginx_temp(tmp_path, max_age_seconds=3600)
+    assert (result.files, result.bytes, result.skipped) == (2, 4, 1)
+    assert (tmp_path / "b_locked").exists()
+    assert not (tmp_path / "a_old").exists() and not (tmp_path / "c_old").exists()
+
+    from app.backend.cli import media_tools
+    monkeypatch.setattr(settings.storage, "nginx_upload_temp_path", str(tmp_path))
+    assert media_tools.main(["sweep-nginx-temp"]) == 0
+    out = capsys.readouterr().out
+    assert "removed 0 file(s)" in out and "skipped 1 file(s)" in out

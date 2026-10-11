@@ -201,6 +201,8 @@ def sweep_nginx_temp(max_age_hours: float) -> int:
 
     result = sweep(Path(settings.storage.nginx_upload_temp_path), max_age_hours * 3600)
     print(f"removed {result.files} file(s), {result.bytes / (1024 * 1024):.1f} MB")
+    if result.skipped:
+        print(f"skipped {result.skipped} file(s) that could not be read or deleted (see the log)")
     return 0
 
 

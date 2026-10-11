@@ -1,5 +1,5 @@
 """Observation data rules: band centre inside the band, disappeared time and duration, locking band read,
-spreadsheet formula escaping in reports and the tz query parameter."""
+report cells that never run user text as a formula and the tz query parameter."""
 import io
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -19,7 +19,7 @@ from app.backend.enums.routes import ObservationRoutes, PostRoutes
 from app.backend.filters.observation_report_filter import ObservationReportCriteria
 from app.backend.models.observation import Observation, ObservationFrequency
 from app.backend.services import observation_counts
-from app.backend.services.observation_report_service import ObservationReportService, escape_text
+from app.backend.services.observation_report_service import ObservationReportService
 from app.backend.errors.coded import CodedError
 from tests.helpers import make_dictionary, make_observation, make_post, make_user
 
@@ -158,22 +158,13 @@ async def test_changing_observed_at_recomputes_the_duration(client, db, headers)
 
 # --- report cells ---
 
-@pytest.mark.parametrize("text", ["=1+1", "+1", "-1", "@SUM(A1)", "\tx", "\rx", "=HYPERLINK(\"http://x\")"])
-def test_escape_text_neutralises_formula_prefixes(text):
-    assert escape_text(text) == "'" + text
-
-
-@pytest.mark.parametrize("text", ["plain", "", "1 = 1", "a=b"])
-def test_escape_text_keeps_other_text(text):
-    assert escape_text(text) == text
-
-
-def test_report_never_writes_user_text_as_a_formula():
+def _report_band(comment):
+    """One rc band whose observation carries user text that looks like formulas everywhere"""
     from app.backend.models.post import Post
     from app.backend.models.user import User
     from app.backend.models.observation import SignalType, Tag
     observation = Observation(
-        id=1, user_id=1, post_id=1, signal_type_id=1, comment="=cmd|' /C calc'!A0",
+        id=1, user_id=1, post_id=1, signal_type_id=1, comment=comment,
         observed_at=datetime(2026, 9, 9, 10, 0, tzinfo=timezone.utc),
     )
     observation.user = User(id=1, username="+user", username_alias="@alias")
@@ -185,19 +176,41 @@ def test_report_never_writes_user_text_as_a_formula():
         frequency_center=Decimal("150"), bandwidth=Decimal("100"),
     )
     band.observation = observation
+    return band
 
+
+def _cells(data):
+    sheet = openpyxl.load_workbook(io.BytesIO(data)).active
+    return [c for row in sheet.iter_rows() for c in row if c.value is not None]
+
+
+def test_report_never_writes_user_text_as_a_formula():
+    """xlsx turns only a leading = into a formula; every user string is forced to a string cell, written unchanged"""
+    band = _report_band("=cmd|' /C calc'!A0")
     for report_type in (ObservationReportType.ALL_FIELDS, ObservationReportType.RC_FREQ_PART):
         params = ObservationReportCriteria(report_type=report_type, statuses=["=bad"], confidence_level="@x", tag_ids=[1])
-        data = ObservationReportService.generate_excel([band], params, tag_names={1: "=tag"})
-        sheet = openpyxl.load_workbook(io.BytesIO(data)).active
-        formulas = [c.coordinate for row in sheet.iter_rows() for c in row if c.data_type == "f"]
-        assert formulas == []
-        texts = [c.value for row in sheet.iter_rows() for c in row if isinstance(c.value, str)]
-        assert "'=cmd|' /C calc'!A0" in texts
-        assert "'=sig" in texts
-        assert any(t.startswith("'=bad") for t in texts)
+        cells = _cells(ObservationReportService.generate_excel([band], params, tag_names={1: "=tag"}))
+        assert [c.coordinate for c in cells if c.data_type == "f"] == []
+        texts = {c.value: c for c in cells if isinstance(c.value, str)}
+        for value in ("=cmd|' /C calc'!A0", "=sig", "=bad", "@x"):
+            assert value in texts, (report_type, value)
+            assert texts[value].data_type == "s"
+        assert not [value for value in texts if value.startswith("'")], "nothing is added to the text"
         # typed values stay typed
-        assert 100.0 in [c.value for row in sheet.iter_rows() for c in row]
+        assert 100.0 in [c.value for c in cells]
+
+
+@pytest.mark.parametrize("comment", [
+    '=HYPERLINK("http://x","click")', "-80 dBm", "+380501234567", "@SUM(A1)", "#N/A", "\tx", "plain", "1 = 1",
+])
+def test_report_writes_user_text_unchanged_as_a_string_cell(comment):
+    band = _report_band(comment)
+    for report_type in (ObservationReportType.ALL_FIELDS, ObservationReportType.RC_FREQ_PART):
+        cells = _cells(ObservationReportService.generate_excel([band], ObservationReportCriteria(report_type=report_type)))
+        found = [c for c in cells if c.value == comment]
+        assert found, (report_type, comment, [c.value for c in cells])
+        assert all(c.data_type == "s" for c in found), [(c.coordinate, c.data_type) for c in found]
+        assert all(c.quotePrefix for c in found), "stays text when the cell is edited in a spreadsheet"
 
 
 # --- tz ---

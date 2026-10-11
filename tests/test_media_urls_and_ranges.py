@@ -56,7 +56,7 @@ def test_image_paths_and_posters_without_a_generation_time_stay_as_they_were():
 
 @pytest.mark.parametrize("ttl", [60, 600, 3600, 7 * 24 * 3600])
 def test_a_share_link_never_outlives_its_ttl_and_is_stable_inside_a_window(ttl):
-    window = max(60, ttl // 10)
+    window = max(1, ttl // 10)
     start = datetime(2026, 9, 4, 12, 17, 33, tzinfo=timezone.utc)
     seen = set()
     for step in range(0, 3 * window, 7):
@@ -66,6 +66,20 @@ def test_a_share_link_never_outlives_its_ttl_and_is_stable_inside_a_window(ttl):
         seen.add(expires)
     assert len(seen) <= 4, "the expiry moves once per window, not per request"
     assert share_expiry(ttl, start) == share_expiry(ttl, start + timedelta(seconds=1)) or window < 2
+
+
+@pytest.mark.parametrize("ttl", [60, 90])
+def test_a_share_link_at_the_smallest_ttl_lives_at_least_nine_tenths_of_it(ttl):
+    """ttl 60 is the smallest the share route accepts; a window of 60 s let such a link expire 1 s after issue"""
+    start = datetime(2026, 9, 4, 12, 0, 0, tzinfo=timezone.utc)
+    shortest = timedelta(seconds=ttl)
+    for step in range(0, 2 * ttl):
+        for fraction in (0, 999999):
+            now = start + timedelta(seconds=step, microseconds=fraction)
+            life = share_expiry(ttl, now) - now
+            assert timedelta(seconds=ttl * 0.9) < life <= timedelta(seconds=ttl), (ttl, now, life)
+            shortest = min(shortest, life)
+    assert shortest < timedelta(seconds=ttl), "the expiry is quantised, not taken from the clock"
 
 
 @pytest.mark.asyncio

@@ -277,12 +277,15 @@ async def get_user(
         # select(User).where(User.id == user_id, User.is_deleted is False)  # TODO: implement boolean check
     )
     user = result.first()
-
-    # Archived users are for those who manage the archive (and administrators, whose user.view is the route's)
-    if not user or (user.is_deleted and not (auth.is_admin or auth.has(Permissions.USER_ARCHIVE))):
+    if not user:
         raise ApiError(ErrorCode.USER_NOT_FOUND)
 
+    # Visibility before the state: an outsider gets the same 403 for an archived and a live user
     AccessControlService.check_user_visibility(auth, user)
+
+    # Archived users are for those who manage the archive (and administrators, whose user.view is the route's)
+    if user.is_deleted and not (auth.is_admin or auth.has(Permissions.USER_ARCHIVE)):
+        raise ApiError(ErrorCode.USER_NOT_FOUND)
 
     return UserResponse.model_validate(user)
 

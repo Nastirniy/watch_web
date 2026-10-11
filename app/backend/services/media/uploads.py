@@ -43,6 +43,9 @@ from app.backend.enums.errors import ErrorCode
 from app.backend.models.media import MediaFile
 from app.backend.models.upload_session import UploadSession
 from app.backend.errors.coded import CodedError
+from app.backend.utils.logging_config import get_logger
+
+_logger = get_logger("uploads")
 
 PART_DIR = "_tmp/uploads"
 # A chunk writer that has not renewed its claim for this long is gone: the next PATCH takes the session over
@@ -436,15 +439,19 @@ def resolve_nginx_temp_file(name: Optional[str], directory: str) -> Optional[Pat
 class SweepResult:
     files: int
     bytes: int
+    skipped: int = 0
 
 
 def sweep_nginx_temp(directory: Path, max_age_seconds: float, now: Optional[float] = None) -> SweepResult:
-    """Delete files under `directory` not modified for `max_age_seconds`; directories stay (nginx owns them)"""
+    """Delete files under `directory` not modified for `max_age_seconds`; directories stay (nginx owns them).
+
+    A file that cannot be read or deleted (PermissionError or another OSError) is logged, counted in `skipped` and
+    left; the sweep goes on with the next one."""
     root = Path(directory)
     if not root.is_dir():
         return SweepResult(0, 0)
     cutoff = (time.time() if now is None else now) - max_age_seconds
-    files = freed = 0
+    files = freed = skipped = 0
     for path in root.rglob("*"):
         try:
             if path.is_symlink() or not path.is_file():
@@ -455,6 +462,10 @@ def sweep_nginx_temp(directory: Path, max_age_seconds: float, now: Optional[floa
             path.unlink()
         except FileNotFoundError:
             continue  # nginx or the API removed it meanwhile
+        except OSError as exc:
+            skipped += 1
+            _logger.warning(f"sweep-nginx-temp: skipped {path}: {exc!r}")
+            continue
         files += 1
         freed += info.st_size
-    return SweepResult(files, freed)
+    return SweepResult(files, freed, skipped)

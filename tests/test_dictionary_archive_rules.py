@@ -114,6 +114,25 @@ async def test_observation_of_an_archived_signal_type_is_not_restored(client, db
     assert (await client.post(restore, headers=headers(user))).status_code == 200
 
 
+def test_only_restore_declares_observation_signal_type_archived():
+    """Archive never checks the signal type, so its operation does not list the code"""
+    from app.main import fastapi_app
+    from app.backend.enums.errors import ErrorCode
+    from app.backend.errors.openapi import schema_name
+    from app.backend.errors.problems import PROBLEM_JSON
+    paths = V1.openapi(fastapi_app)["paths"]
+    name = schema_name(ErrorCode.OBSERVATION_SIGNAL_TYPE_ARCHIVED)
+
+    def declares(route):
+        operation = paths[V1.path(route)]["post"]
+        conflict = operation["responses"].get("409", {"content": {PROBLEM_JSON: {"schema": {"oneOf": []}}}})
+        media = conflict["content"][PROBLEM_JSON]["schema"]
+        return name in {ref["$ref"].rsplit("/", 1)[1] for ref in media.get("oneOf", [media])}
+
+    assert declares(ObservationRoutes.OBSERVATION_RESTORE)
+    assert not declares(ObservationRoutes.OBSERVATION_ARCHIVE)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("change", [{"is_active": False}, {"is_deleted": True}])
 async def test_put_with_the_own_signal_type_skips_its_checks(client, db, headers, change):

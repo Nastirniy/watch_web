@@ -10084,25 +10084,11 @@
             }
           },
           "409": {
-            "description": "`observation_not_archived`: Observation is not archived; `observation_signal_type_archived`: The signal type of the observation is archived",
+            "description": "`observation_not_archived`: Observation is not archived",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/ObservationNotArchivedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/ObservationSignalTypeArchivedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "observation_not_archived": "#/components/schemas/ObservationNotArchivedProblem",
-                      "observation_signal_type_archived": "#/components/schemas/ObservationSignalTypeArchivedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/ObservationNotArchivedProblem"
                 }
               }
             }
@@ -15708,13 +15694,16 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions; `post_access_denied`: No access to the data of this post; `post_write_denied`: Read-only access to this post",
+            "description": "`admin_required`: Administrator access required; `no_post_assigned`: You are not assigned to any post. Please contact an administrator.; `permission_denied`: Insufficient permissions; `post_access_denied`: No access to the data of this post; `post_write_denied`: Read-only access to this post",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
                     {
                       "$ref": "#/components/schemas/AdminRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/NoPostAssignedProblem"
                     },
                     {
                       "$ref": "#/components/schemas/PermissionDeniedProblem"
@@ -15730,6 +15719,7 @@
                     "propertyName": "code",
                     "mapping": {
                       "admin_required": "#/components/schemas/AdminRequiredProblem",
+                      "no_post_assigned": "#/components/schemas/NoPostAssignedProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem",
                       "post_access_denied": "#/components/schemas/PostAccessDeniedProblem",
                       "post_write_denied": "#/components/schemas/PostWriteDeniedProblem"

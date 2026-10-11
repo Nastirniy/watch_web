@@ -126,6 +126,22 @@ async def test_archived_user_is_hidden_without_user_archive(client, db, headers)
 
 
 @pytest.mark.asyncio
+async def test_user_outsider_gets_the_same_403_for_an_archived_and_a_live_user(client, db, headers):
+    home, other = await make_post(db), await make_post(db)
+    live = await make_user(db, post_id=home.id)
+    archived = await make_user(db, post_id=home.id)
+    archived.is_deleted = True
+    db.add(archived)
+    await db.commit()
+    outsider = await make_user(db, perms=["user.view"], post_id=other.id)
+
+    for target in (live, archived):
+        response = await client.get(V1.path(UserRoutes.USER_BY_ID, user_id=target.id), headers=headers(outsider))
+        assert response.status_code == 403, (target.is_deleted, response.text)
+        assert response.json()["code"] == "user_self_only"
+
+
+@pytest.mark.asyncio
 async def test_home_post_move_drops_the_access_row(client, db, headers):
     old_home, new_home = await make_post(db), await make_post(db)
     admin = await make_admin(db)

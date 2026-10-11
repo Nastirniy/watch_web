@@ -15,7 +15,8 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   post before its existence: an unknown post id and a foreign one both answer 403 `post_access_denied` (or
   `no_post_assigned`); a caller with `post.access_all` still gets 404 `post_not_found`.
 - `GET /users/{id}` answers like `GET /users/` for `post.access_all`: users without a post are visible (it was 403
-  `user_self_only`). An archived user answers 404 unless the caller holds `user.archive` or `admin.true`.
+  `user_self_only`). An archived user answers 404 unless the caller holds `user.archive` or `admin.true`; visibility is
+  checked first, so an outsider gets 403 `user_self_only` for an archived user as for a live one.
 - `PATCH /users/{id}` with a `post_id` the user already has a `user_post_access` row for deletes that row in the same
   transaction; the audit row lists it as `removed_post_access` in `new_values`.
 - `PATCH /roles/{id}` with `permission_ids` and `PATCH /users/{id}` with `role_ids` replace the rows by difference: rows
@@ -94,23 +95,26 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   a larger value answers 422 `validation_error` (it answered 500). `POST /observations/{id}/disappeared` answers 422
   with field code `value_too_large` on `disappeared_at` when the duration it computes does not fit an INT. The
   `maximum` of these fields is in `api-contract/v1/openapi.json`.
-- `GET /search/media` no longer returns archived media, and `GET /media` and `GET /search/media` no longer list media
-  of an archived observation (their thumbnail URLs were signed although `GET /media/{id}/info` answers 404), in the items
+- `GET /search/media` no longer returns archived media, and `GET /media` and `GET /search/media` no longer list media of
+  an archived observation (their thumbnail URLs were signed although `GET /media/{id}/info` answers 404), in the items
   and in `total`. Both take `include_deleted` (archived media only, never media of an archived observation), which needs
   `media.archive` (403 `permission_required_for_action`, declared on both operations).
+- `GET /media` and `GET /search/media` no longer list media without an observation (orphans): the listing always joins
+  the observation now (for its archived state and its post), so such a row is left out of the items and of `total` for
+  every caller; before, callers with `post.access_all` (no post scope) got them.
 - `GET /media?has_thumbnail=true` (and search) no longer returns images above `storage.imgproxy.max_src_resolution_mp`
   (`thumbnail_status` `unsupported`); `has_thumbnail=false` returns them.
 - `POST /media/{id}/thumbnail/regenerate` checks write access to the post of the media like archive and restore: an
-  administrator of another post answers 403 `post_access_denied` / `post_write_denied` and the poster is left alone;
-  media of an archived observation answers 404 `media_observation_not_found`. `api-contract/v1/openapi.json` is
-  rewritten for the new codes and the `include_deleted` query parameter.
+  administrator of another post answers 403 `post_access_denied` / `post_write_denied` (`no_post_assigned` for one
+  with no post at all) and the poster is left alone; media of an archived observation answers 404
+  `media_observation_not_found`. `api-contract/v1/openapi.json` is rewritten for the new codes and the
+  `include_deleted` query parameter.
 - Every list and search orders by the requested field and then by the primary key (without `sort_by`, by the primary
   key), so pages of a non-unique field no longer repeat or skip rows on MySQL.
 - `sort_order=*_nulls_first` / `*_nulls_last` answered 500 on MySQL and MariaDB (`NULLS FIRST/LAST` is not their
   syntax); the order is now emulated with an `IS NULL` key in front of the column and means the same.
 - `*_contains` filters match `%`, `_` and `\` literally (`name_contains=%` no longer matches every row).
 - `page` is at most 1000000 on every list and search (422 above it); a huge `page` answered 500.
-
 - `POST /tags/create`, `/categories/create` and `/signal-types/create` no longer restore an archived row with the same
   name or code (and without `X.archive`): they answer `tag_name_archived`, `category_name_archived` and
   `signal_type_code_archived`, as rename does; restore stays on `POST /{id}/restore`. Media formats keep their
@@ -120,8 +124,8 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `POST /observations/{id}/restore` answers 409 `observation_signal_type_archived` while its signal type is archived.
 - `PUT /observations/{id}` skips the existence and active checks of the signal type when `signal_type_id` equals the
   current one, so an observation of a deactivated or archived type can still be edited.
-- OpenAPI contract: the four new codes and the archived-name codes on the three create routes are declared.
-
+- OpenAPI contract: the four new codes and the archived-name codes on the three create routes are declared
+  (`observation_signal_type_archived` on `POST /observations/{id}/restore` only; archive never answers it).
 - A datetime with an offset is stored and compared as its UTC instant: `10:00+03:00` is stored as `07:00Z`. The
   drivers drop the offset, so it used to be stored and read as `10:00Z`, and range filters (`*_from` / `*_to` of every
   list and search, the report body), `POST /observations/{id}/disappeared` durations and `GET /statistics` were off by
@@ -136,7 +140,13 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `ResponseDatetime`. The session times (`GET /auth/sessions`, `GET /users/{id}/sessions`) now end in `Z` instead of
   `+00:00`, and `last_login_at` / `last_activity_at` of `GET /auth/me` have the offset they lacked; these fields are
   `format: date-time` in `api-contract/v1/openapi.json` now (the type stays a string).
-- Unique-violation races: a double click (two requests passing the same uniqueness check) answered 500 on tag, category, signal type, role and media format writes and on user creation. A unique violation at the commit now answers the code the check gives (`tag_name_taken`, `category_name_taken`, `signal_type_code_taken`, `role_name_taken`, `media_format_exists`, `username_or_certificate_taken`). `PUT /users/{id}/post-access/{post_id}` and `PUT /roles/{id}/permissions/{permission_id}` are idempotent: when a concurrent request created the row first they answer 200 with the stored row. `POST /users/` writes the user and its roles in one commit, so a failed role insert no longer leaves a user without roles. No new codes; the OpenAPI contract is unchanged.
+- Unique-violation races: a double click (two requests passing the same uniqueness check) answered 500 on tag, category,
+  signal type, role and media format writes and on user creation. A unique violation at the commit now answers the code
+  the check gives (`tag_name_taken`, `category_name_taken`, `signal_type_code_taken`, `role_name_taken`,
+  `media_format_exists`, `username_or_certificate_taken`). `PUT /users/{id}/post-access/{post_id}` and
+  `PUT /roles/{id}/permissions/{permission_id}` are idempotent: when a concurrent request created the row first they
+  answer 200 with the stored row. `POST /users/` writes the user and its roles in one commit, so a failed role insert no
+  longer leaves a user without roles. No new codes; the OpenAPI contract is unchanged.
 - Resumable uploads: two concurrent `POST /media/uploads/{upload_id}/complete` both checked, hashed and stored the
   file, and the loser could mark the session `aborted` after the winner had completed it. `complete` now claims the
   session with a conditional UPDATE before it reads the file (status `completing`); a concurrent `complete`, chunk or
@@ -178,15 +188,23 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - The move of an upload into storage (the rename, or the copy across filesystems) and the walk of the storage
   directory of `GET /media/statistics` run in a thread instead of on the event loop; a copy of a large file to a
   network share blocked every other request. `GET /media/statistics` counts and sums in SQL instead of loading every
-  media row; the response is unchanged.
-- Startup seeding of the default media formats skips a default whose extensions or MIME spellings already belong to a live row (the conflict check of `/media-formats`), so a renamed default is not added again next to it and two active rows never own `.jpg`; the skip is logged. The registry cache no longer stores a read that began before an invalidate, so a disabled format stops being accepted at once in the process that disabled it. The server ceiling `storage.max_file_size_gb` caps every format limit when it is read, not only when a row is written: session create, upload validation, the 413 answer and `GET /media/formats` all use min(format limit, ceiling).
+  media row; the response is unchanged. The copy across filesystems writes a temporary name in the destination
+  directory and replaces it into place; a copy that fails removes it (still `media_store_failed`), so a partial
+  file never sits under the stored name.
+- Startup seeding of the default media formats skips a default whose extensions or MIME spellings already belong to a
+  live row (the conflict check of `/media-formats`), so a renamed default is not added again next to it and two active
+  rows never own `.jpg`; the skip is logged. The registry cache no longer stores a read that began before an invalidate,
+  so a disabled format stops being accepted at once in the process that disabled it. The server ceiling
+  `storage.max_file_size_gb` caps every format limit when it is read, not only when a row is written: session create,
+  upload validation, the 413 answer and `GET /media/formats` all use min(format limit, ceiling).
 - Video poster URLs carry imgproxy's cache buster `cb:` from `poster_generated_at` (as storyboard sheets carry
   `generated_at`): after `POST /media/{id}/thumbnail/regenerate` the new poster has new URLs and nginx no longer serves
   the render of the old one until its max-age. Image URLs are unchanged.
 - A share link (`POST /media/{id}/share`) never expires later than now + `ttl_seconds` (itself capped by
   `storage.thumbnail.share_max_ttl_seconds`). It used to reach up to twice that. The expiry is
-  floor(now / w) * w + ttl with w = max(60, ttl // 10), so links issued in one window are byte-identical (stable nginx
-  cache key) and live at least ttl - w. The thumbnail URLs in media responses keep `quantised_expiry`.
+  floor(now / w) * w + ttl with w = max(1, ttl // 10), so links issued in one window are byte-identical (stable nginx
+  cache key) and live more than ttl - w, that is more than 0.9 * ttl (more than 54 s for the smallest `ttl_seconds`,
+  60). The thumbnail URLs in media responses keep `quantised_expiry`.
 - Without nginx (`enable_nginx` off) `GET /media/{id}/download` and `/stream` follow RFC 9110 for `Range`: a single
   range `a-b`, `a-` or the suffix `-n` answers 206 with `Content-Range`; an invalid header, another unit or several
   ranges are ignored (200, whole file); an unsatisfiable range answers 416 `range_not_satisfiable` as a problem with
@@ -197,11 +215,11 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - `GET /media/{id}/thumbnail` behind nginx checks that the source (the original image or the poster) is on disk and
   answers 404 `media_file_missing` otherwise (declared on the route; it handed the path to imgproxy and nginx cached
   imgproxy's 404).
-- Archiving a band reads the other bands of the observation with `FOR UPDATE` after the observation row is locked, so two
-  concurrent archives can no longer leave an observation with no active band (the band list loaded with the observation
-  was a plain read that the row lock does not cover on MySQL).
-- A band's `frequency_center` must lie between `frequency_min` and `frequency_max` (both inclusive): `POST
-  /observations/` and `POST /observations/{id}/frequencies` answer 422 `frequency_center_out_of_range` on
+- Archiving a band reads the other bands of the observation with `FOR UPDATE` after the observation row is locked, so
+  two concurrent archives can no longer leave an observation with no active band (the band list loaded with the
+  observation was a plain read that the row lock does not cover on MySQL).
+- A band's `frequency_center` must lie between `frequency_min` and `frequency_max` (both inclusive):
+  `POST /observations/create` and `POST /observations/{id}/frequencies` answer 422 `frequency_center_out_of_range` on
   `frequency_center`, and `PUT /observations/{id}/frequencies/{frequency_id}` checks the merged band (stored values plus
   the request, a recalculated center included). New `FieldErrorCode` value; `api-contract/v1/openapi.json` gained it.
 - `POST /observations/{id}/disappeared` with `disappeared_at` before `observed_at` answers 422
@@ -209,9 +227,11 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `observed_at` on a disappeared observation recomputes `duration_seconds` (unless the request sets it) and answers 422
   `observed_after_disappeared` on `observed_at` when the new start is after `disappeared_at`. Two new `FieldErrorCode`
   values in the contract.
-- Observation reports write user text (comment, signal type, post, user name and alias, tag names, filter values) as a
-  string: a value starting with `=`, `+`, `-`, `@`, a tab or a carriage return gets a leading apostrophe, so a
-  spreadsheet shows it as text instead of running it as a formula. Numbers and times stay typed.
+- Observation reports write user text (comment, signal type, post, user name and alias, tag names, filter values)
+  unchanged and always as a string cell with the `quotePrefix` style: a value starting with `=` is no longer stored as a
+  formula (in xlsx only a leading `=` is one) and `#N/A` and the other error names no longer become error cells; the
+  spreadsheet shows the text as written (`-80 dBm`, `+380...`) and keeps it text when the cell is edited. Numbers and
+  times stay typed.
 - `GET /posts/{id}/observation-stats` limits `tz` to 64 characters (422 `validation_error` above that) and an
   `OSError` from the time zone database answers 400 `unknown_time_zone` instead of 500. The `tz` parameter in
   `api-contract/v1/openapi.json` gained `maxLength`.
@@ -256,13 +276,16 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   the host itself. ENV.md and DEPLOYMENT.md state the defaults and why the API binds `127.0.0.1`.
 - Run the migration `018_media_file_size_bigint` (it runs at startup): on MySQL it alters `media_files.file_size` to
   BIGINT, keeps every row and is skipped when the column is already BIGINT (sqlite needs no change). The downgrade turns
-  the column back into INT and fails while a file over 2 GiB is stored.
+  the column back into INT; it reads `MAX(file_size)` first and refuses with a clear error, changing nothing, while a
+  file over 2 GiB is stored (a non-strict `sql_mode` would otherwise clamp those sizes to 2147483647).
 - Every offloaded upload the API refuses after the path check (415, 413, 403, 404, busy store, invalid content) now
   deletes nginx's body file; before, nginx (`client_body_in_file_only`) left up to 10 GB behind for each. Requests
   rejected before the handler runs (401) still leave their file: `python -m app.backend.cli.media_tools
   sweep-nginx-temp [--max-age-hours N]` deletes files in `storage.nginx_upload_temp_path` older than
   `storage.nginx_upload_temp_max_age_hours` (new setting, default 24); run it from cron (DEPLOYMENT.md). The setting
   must name the same directory as nginx's `client_body_temp_path` (`tests/test_nginx_conf.py` checks the default).
+  A body file the API cannot delete (`OSError`, for example a permission error) is logged and the upload keeps its
+  answer; the sweep skips such a file, logs it and goes on, and prints `skipped N file(s)` after the removed count.
 
 ## Backend layout: auth, errors, bootstrap and cli packages
 

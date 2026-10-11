@@ -1,7 +1,11 @@
 """MySQL column sizes and INT bounds. sqlite enforces neither, so these tests check the guards themselves:
 the column type, the cut of request-derived strings, the request bounds and the migration."""
 import importlib.util
+import os
 import sqlite3
+import subprocess
+import sys
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import pytest
@@ -107,6 +111,63 @@ def test_018_alters_only_a_plain_integer_column_on_mysql():
     assert module.needs_integer(sa.BigInteger(), "sqlite") is False
 
 
+@contextmanager
+def _sizes_table(tmp_path, *sizes):
+    """Connection to a sqlite media_files table holding these file sizes"""
+    engine = sa.create_engine(f"sqlite:///{(tmp_path / 'sizes.db').as_posix()}")
+    try:
+        with engine.begin() as conn:
+            conn.execute(sa.text("create table media_files (id integer primary key, file_size bigint not null)"))
+            for size in sizes:
+                conn.execute(sa.text("insert into media_files (file_size) values (:size)"), {"size": size})
+        with engine.connect() as conn:
+            yield conn
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("sizes", [(), (1, INT_MAX)])
+def test_018_downgrade_guard_passes_sizes_that_fit_an_int(tmp_path, sizes):
+    module = _load_018()
+    with _sizes_table(tmp_path, *sizes) as conn:
+        module.check_sizes_fit_integer(conn)
+
+
+def test_018_downgrade_guard_refuses_a_size_over_an_int(tmp_path):
+    """A non-strict MySQL sql_mode clamps an out-of-range value to 2147483647 instead of failing the ALTER"""
+    module = _load_018()
+    with _sizes_table(tmp_path, 10, INT_MAX + 1) as conn:
+        with pytest.raises(RuntimeError) as refused:
+            module.check_sizes_fit_integer(conn)
+    message = str(refused.value)
+    assert str(INT_MAX + 1) in message and str(INT_MAX) in message and "media_files.file_size" in message
+
+
+def test_018_downgrade_checks_the_sizes_before_the_alter(tmp_path, monkeypatch):
+    module = _load_018()
+    altered = []
+    with _sizes_table(tmp_path, 5000000000) as conn:
+        fake_op = type("FakeOp", (), {
+            "get_bind": staticmethod(lambda: conn),
+            "alter_column": staticmethod(lambda *args, **kwargs: altered.append((args, kwargs))),
+        })
+        monkeypatch.setattr(module, "op", fake_op)
+        monkeypatch.setattr(module, "needs_integer", lambda column_type, dialect_name: True)
+        with pytest.raises(RuntimeError):
+            module.downgrade()
+    assert altered == [], "the column is not touched while a size does not fit"
+
+
+def _run_downgrade(db_file, revision):
+    env = dict(os.environ)
+    env["WATCH_WEB_ALEMBIC_URL"] = f"sqlite+aiosqlite:///{db_file.as_posix()}"
+    env["PYTHONPATH"] = str(PROJECT_ROOT)
+    return subprocess.run(
+        [sys.executable, "-m", "app.backend.cli.migrations_manager", "downgrade", revision],
+        cwd=PROJECT_ROOT, env=env, capture_output=True, text=True, timeout=300,
+    )
+
+
 def test_018_up_and_down_on_sqlite_keep_the_rows(tmp_path):
     db_file = tmp_path / "bigint.db"
     first = run_migrate(db_file)
@@ -125,5 +186,13 @@ def test_018_up_and_down_on_sqlite_keep_the_rows(tmp_path):
     assert second.returncode == 0, second.stdout + second.stderr
     conn = sqlite3.connect(db_file)
     assert conn.execute("select version_num from alembic_version").fetchone()[0] == HEAD
+    assert conn.execute("select file_size from media_files").fetchone() == (5000000000,)
+    conn.close()
+
+    # down: a no-op on sqlite (INTEGER is 64-bit), the row survives
+    down = _run_downgrade(db_file, "017_video_storyboards")
+    assert down.returncode == 0, down.stdout + down.stderr
+    conn = sqlite3.connect(db_file)
+    assert conn.execute("select version_num from alembic_version").fetchone()[0] == "017_video_storyboards"
     assert conn.execute("select file_size from media_files").fetchone() == (5000000000,)
     conn.close()

@@ -511,7 +511,7 @@ async def _set_observation_archived(
     responses=problems(
         AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_OWNER, AccessErrorCode.POST_ACCESS_DENIED,
         AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.OBSERVATION_NOT_ARCHIVED,
-        ErrorCode.OBSERVATION_SIGNAL_TYPE_ARCHIVED, *GUARDED,
+        *GUARDED,
     ),
 )
 async def archive_observation(

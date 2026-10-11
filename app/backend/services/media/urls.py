@@ -88,11 +88,12 @@ def quantised_expiry(ttl_seconds: int, now: Optional[datetime] = None) -> dateti
 def share_expiry(ttl_seconds: int, now: Optional[datetime] = None) -> datetime:
     """Expiry of a share link: stable inside a window and never later than now + ttl.
 
-    Window w = max(60, ttl // 10), expires_at = floor(now / w) * w + ttl, which lies in (now + ttl - w, now + ttl].
-    Links issued in the same window are byte-identical (nginx cache key); the link lives at least ttl - w.
+    Window w = max(1, ttl // 10), expires_at = floor(now / w) * w + ttl, which lies in (now + ttl - w, now + ttl].
+    Links issued in the same window are byte-identical (nginx cache key); the link lives more than ttl - w, which is
+    at least 0.9 * ttl from ttl 10 on (more than 54 s for the smallest share ttl, 60 s).
     """
     ttl = int(ttl_seconds)
-    window = max(60, ttl // 10)
+    window = max(1, ttl // 10)
     now_ts = int((now or datetime.now(timezone.utc)).timestamp())
     return datetime.fromtimestamp(now_ts // window * window + ttl, tz=timezone.utc)
 

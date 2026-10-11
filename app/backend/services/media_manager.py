@@ -86,11 +86,24 @@ class FileIntegrityCheck:
 
 
 def _move_into_place(source: Path, destination: Path) -> None:
-    """Rename on the same filesystem, copy and delete across filesystems (blocking: run it in a thread)"""
+    """Rename on the same filesystem, copy and delete across filesystems (blocking: run it in a thread).
+
+    The copy goes to a temporary name in the destination directory and is replaced into place, so a copy that fails
+    halfway (a full share, a dropped mount) never leaves a partial file under the final name. On any failure the
+    temporary file is removed and the error raised; the source stays for the caller's cleanup."""
     try:
         source.rename(destination)
     except OSError:
-        shutil.copy2(str(source), str(destination))
+        temporary = destination.with_name(f".tmp-{uuid.uuid4().hex}-{destination.name}")
+        try:
+            shutil.copy2(str(source), str(temporary))
+            os.replace(temporary, destination)
+        except BaseException:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError as cleanup_error:
+                _logger.warning(f"Could not remove temporary copy {temporary}: {cleanup_error!r}")
+            raise
         source.unlink()
     os.chmod(destination, 0o644)
 

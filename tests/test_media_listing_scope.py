@@ -146,3 +146,19 @@ async def test_regenerate_needs_access_to_the_post_of_the_media(client, db, head
     ok = await client.post(url, headers=headers(admin_b))
     assert ok.status_code == 200, ok.text
     assert not poster.exists()
+
+
+@pytest.mark.asyncio
+async def test_regenerate_by_an_administrator_without_a_post_is_no_post_assigned(client, db, headers, tmp_path, monkeypatch):
+    """check_post_write answers no_post_assigned to a caller with no home post and no access rows; the route declares it"""
+    monkeypatch.setattr(settings.storage, "upload_path", str(tmp_path))
+    _, _, owner, observation = await _scene(db)
+    homeless_admin = await make_user(db, perms=["media.view", "media.update", "admin.true"])
+    video = await make_media(db, observation, owner, media_type="video", poster_status="ready")
+
+    response = await client.post(V1.path(MediaRoutes.MEDIA_THUMBNAIL_REGENERATE, media_id=video.id),
+                                 headers=headers(homeless_admin))
+    assert response.status_code == 403, response.text
+    assert response.json()["code"] == "no_post_assigned"
+    await db.refresh(video)
+    assert video.poster_status == "ready"

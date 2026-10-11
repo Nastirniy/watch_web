@@ -452,8 +452,12 @@ async def nginx_upload_file(
             _logger.warning(f"Nginx upload rejected: {e}")
             raise store_rejected(e)
     finally:
-        # nginx never deletes the body file; a successful store moved it, every other outcome leaves it here
-        temp_file.unlink(missing_ok=True)
+        # nginx never deletes the body file; a successful store moved it, every other outcome leaves it here.
+        # A failed unlink never replaces the outcome: it is logged and sweep-nginx-temp removes the file later.
+        try:
+            temp_file.unlink(missing_ok=True)
+        except OSError as exc:
+            _logger.warning(f"Nginx upload: could not remove temp file {temp_file}: {exc!r}")
 
     media_file = await record_upload(request, session, auth, media_file_id, observation_id, original_filename, background_tasks, "nginx offload")
     return upload_result(media_file, "nginx offload")
@@ -712,8 +716,8 @@ async def share_media_thumbnail(
     MediaRoutes.MEDIA_THUMBNAIL_REGENERATE.value,
     response_model=ThumbnailRegenerateResponse,
     responses=problems(
-        AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.MEDIA_NOT_FOUND,
-        ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.THUMBNAILS_UNSUPPORTED, *ADMIN,
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED,
+        ErrorCode.MEDIA_NOT_FOUND, ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.THUMBNAILS_UNSUPPORTED, *ADMIN,
     ),
 )
 async def regenerate_thumbnail(
