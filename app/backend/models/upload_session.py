@@ -27,12 +27,13 @@ class UploadSession(SQLModel, table=True):
     received_bytes: int = Field(default=0, sa_column=Column(BigInteger, nullable=False, server_default="0"))
     expected_sha256: Optional[str] = Field(default=None, max_length=64)
 
-    status: str = Field(default="open", max_length=12, index=True)   # open | completed | aborted | expired
+    status: str = Field(default="open", max_length=12, index=True)   # open | completing | completed | aborted | expired
     media_file_id: Optional[int] = Field(default=None, foreign_key="media_files.id")
     part_path: str = Field(max_length=500)                          # relative to the upload root
-    error: Optional[str] = Field(default=None, max_length=500)
+    error: Optional[str] = Field(default=None, max_length=500)       # problem code that aborted the session
 
-    # One chunk writer at a time: token held while a PATCH streams into the part file
+    # One request at a time: token held while a PATCH streams into the part file or a complete stores it
+    # (status completing); writer_since is the time of the claim or of its last renewal
     writer_token: Optional[str] = Field(default=None, max_length=32)
     writer_since: Optional[datetime] = Field(default=None)
 

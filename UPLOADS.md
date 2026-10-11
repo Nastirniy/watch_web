@@ -61,10 +61,10 @@ Content-Length: 8388608
 | Status | Meaning | What the client does |
 |--------|---------|----------------------|
 | 204 | Stored. `Upload-Offset` header is the new offset. | Send the next chunk from that offset. |
-| 409 | `upload_offset_mismatch`: `Upload-Offset` does not match. The header `Upload-Offset` and `offset` carry the real offset (`sent_offset` is what you sent). `upload_writer_busy`: another chunk is still being written. | Mismatch: continue from the offset in the header. Busy: wait one second and ask `GET` for the offset. |
+| 409 | `upload_offset_mismatch`: `Upload-Offset` does not match. The header `Upload-Offset` and `offset` carry the real offset (`sent_offset` is what you sent). `upload_writer_busy`: another chunk is still being written. `upload_session_completing`: a `complete` is storing the file. | Mismatch: continue from the offset in the header. Busy: wait one second and ask `GET` for the offset. Completing: ask `GET` until the status is `completed`. |
 | 413 | `upload_chunk_too_large` (`max_chunk_bytes`) or `upload_chunk_overrun` (`expected_size`). Nothing was written. | Fix the chunking. |
-| 410 | `upload_session_closed`: session is `completed`, `aborted` or `expired` (`session_status`). | Completed: you are done, `media_file_id` is the file. Otherwise open a new session. |
-| 400 | `upload_offset_required` (header missing), `upload_chunk_empty`, or `upload_chunk_not_stored` (the transfer broke mid-chunk or the disk refused the bytes; the file was truncated back to `offset`). | Ask `GET` for the offset and resend. |
+| 410 | `upload_session_closed`: session is `completed`, `aborted` or `expired` (`session_status`). `upload_bytes_missing`: the bytes the server had stored are gone; the session is aborted (`session_status`). | Completed: you are done, `media_file_id` is the file. Otherwise open a new session. |
+| 400 | `upload_offset_required` (header missing), `upload_chunk_empty`, or `upload_chunk_not_stored` (the transfer broke mid-chunk or the disk refused the bytes, and the file was truncated back to the session's offset; or the request stalled so long that another request took the session over, see below). `offset` and the `Upload-Offset` header are the session's offset. | Ask `GET` for the offset and resend. |
 | 500 | `internal_error`: an unexpected failure (its `error_id` is in the server log); the file was truncated back to `offset`. | Ask `GET` for the offset and resend; stop after a few tries. |
 | 415 | `upload_chunk_content_type`: the body is not `application/offset+octet-stream`. | Fix the request. |
 | 401 | Token expired during a long upload. | Refresh the token and resend the same chunk. The session is not affected. |
@@ -75,7 +75,9 @@ Content-Length: 8388608
 HEAD /api/v1/media/uploads/{id}     -> Upload-Offset: 41943040, Upload-Status: open
 ```
 
-or `GET` for the JSON. Then continue from that offset. The server truncates a partially received chunk, so the offset is always a byte boundary the server has durably stored.
+or `GET` for the JSON (both apply the expiry: a session past `expires_at` answers `expired`). Then continue from that offset. The server truncates a partially received chunk, so the offset is always a byte boundary the server has durably stored.
+
+A chunk request holds the session while it streams and keeps it as long as its bytes keep coming. One that receives nothing for two and a half minutes or more may lose it: the next chunk (your retry) takes the session over, and the stalled request, if more of its bytes arrive, stores nothing more and answers `upload_chunk_not_stored`.
 
 Retry policy that works well: on failure wait 1 s, 2 s, 4 s, up to 30 s (with jitter), re-read the offset before each retry, give up after a configurable number of attempts and keep the session `id` for later. The session stays open for `expires_at` (24 hours from creation by default).
 
@@ -88,19 +90,31 @@ POST /api/v1/media/uploads/{id}/complete
 | Status | Meaning | What the client does |
 |--------|---------|----------------------|
 | 200 | File stored. Same body as the other uploads plus `upload_id`. A video starts with `thumbnail_status: pending` and gets its poster from the worker shortly. | Done. |
-| 409 | `upload_incomplete`: bytes still missing (`missing_bytes`, `offset`, `expected_size`). | Send the rest, then complete again. |
+| 409 | `upload_incomplete`: bytes still missing (`missing_bytes`, `offset`, `expected_size`). `upload_session_completing`: another `complete` is storing the file right now (status `completing`). `upload_writer_busy`: a chunk request still holds the session. | Incomplete: send the rest, then complete again. Completing: ask `GET` until the status is `completed` (or `open` again after a server-side failure), or call `complete` again later. Busy: complete again after a second. |
 | 422 | `upload_checksum_mismatch` (`expected_sha256`, `actual_sha256`). The session is aborted and the bytes deleted. | Open a new session and send again. |
 | 415 / 413 | The content did not match the declared format (same 415 codes as on open, plus `media_extension_dangerous`) or `media_file_too_large`. Session aborted. | Tell the user. |
 | 400 | `media_file_empty` or `media_content_invalid` (the file header does not match its type). Session aborted. | Tell the user. |
 | 410 | `upload_session_closed`, or `upload_bytes_missing` (the stored bytes are gone; the session is aborted). | Open a new session. |
-| 500 | `media_store_failed`: the storage refused the file; the session is aborted. `internal_error`: an unexpected failure (its `error_id` is in the server log); the session stays open. | `media_store_failed`: open a new session. `internal_error`: retry `complete` later. |
-| 503 | `media_uploads_busy`: too many uploads are being stored at once. | Retry `complete` after a few seconds. |
+| 500 | `media_store_failed`: the storage refused the file; the session is aborted. `internal_error`: an unexpected failure (its `error_id` is in the server log); the session is open again. | `media_store_failed`: open a new session. `internal_error`: retry `complete` later. |
+| 503 | `media_uploads_busy`: too many uploads are being stored at once; the session is open again. | Retry `complete` after a few seconds. |
 
-Completing an already completed session returns 200 with the same `media_file_id`, so a lost response to the first `complete` is harmless.
+Only one `complete` runs per session: it moves the session to `completing` before it reads the file, and back to `open` when the failure is the server's (503, `internal_error`). Completing an already completed session returns 200 with the same `media_file_id` and stores nothing, so a lost response to the first `complete` is harmless. A `complete` whose request died (server restart) leaves the session `completing` for at most an hour; then `complete` works again.
+
+When a refused file or lost bytes abort the session, `error` of the session (`GET`, the list) is the code of the error that answered it, for example `upload_checksum_mismatch`; it is `null` when the client aborted the session or it expired.
 
 ### 4. Give up
 
-`POST /api/v1/media/uploads/{id}/abort` deletes the received bytes and marks the session `aborted`. Sessions that are neither completed nor aborted expire after `expires_at`; the media worker removes their bytes.
+`POST /api/v1/media/uploads/{id}/abort` deletes the received bytes and marks the session `aborted`. It answers 409 `upload_session_completed` for a completed session and 409 `upload_session_completing` while a `complete` stores the file. Sessions that are neither completed nor aborted expire after `expires_at`; the media worker removes their bytes.
+
+### Session status
+
+| `status` (`Upload-Status`) | Meaning |
+|----------------------------|---------|
+| `open` | Takes chunks; `complete` once `received_bytes` equals `expected_size`. |
+| `completing` | A `complete` is storing the file: chunks, `abort` and another `complete` answer 409 `upload_session_completing`. Ends `completed`, `aborted` (file refused) or `open` (server-side failure). |
+| `completed` | Stored; `media_file_id` is the file. |
+| `aborted` | Given up by the client (`error` null), or ended by a refused file or lost bytes (`error` is the code). |
+| `expired` | Not completed before `expires_at`; the bytes are gone. |
 
 ### After a page reload
 
@@ -109,10 +123,11 @@ Completing an already completed session returns 200 with the same `media_file_id
 ## What the server guarantees
 
 - `received_bytes` only grows, only by fully written chunks, and only through one writer at a time. A duplicated or retried request cannot corrupt the file; the worst case is a 409 with the right offset.
-- A chunk that fails mid-transfer is truncated away; the offset the server reports is always safe to continue from.
+- A chunk that fails mid-transfer is truncated away; the offset the server reports is always safe to continue from. A chunk request that lost the session to another one writes nothing more, truncates nothing and does not move the offset. Missing bytes are never filled in: if the stored file is shorter than the offset, the session is aborted (`upload_bytes_missing`).
+- One `complete` at a time: the file is checked and stored once, and a concurrent `complete`, chunk or abort cannot change the outcome.
 - Format, declared type and size are checked when the session opens, content and hash when it completes. A file that is refused at completion was already refused for a reason the client could not have fixed by resending.
 - Sessions belong to the user who opened them. `media.manage_any` may inspect and complete any session. Post access is re-checked on every call.
-- Every open, abort and completion is audited.
+- Every open, abort and completion is audited once (a repeated `complete` adds no audit row).
 
 ## Sizes and timeouts to keep in mind
 
@@ -121,6 +136,8 @@ Completing an already completed session returns 200 with the same `media_file_id
 | Max chunk | 64 MB | `storage.upload.max_chunk_bytes`; nginx `client_max_body_size` on the uploads location stays above it, so the API answers an oversized chunk |
 | Recommended chunk | 8 MB | `storage.upload.recommended_chunk_bytes` |
 | Session lifetime | 24 h since creation | `storage.upload.session_ttl_hours` |
+| A chunk request's hold on the session lapses | 150 to 180 s after its last byte | `WRITER_STALE_SECONDS` (180 s), renewed every `WRITER_RENEW_SECONDS` (30 s) while bytes arrive, in `services/media/uploads.py` |
+| A `complete` whose request died holds the session for | 1 h | `COMPLETION_STALE_SECONDS` in `services/media/uploads.py` |
 | Per-format file limit | see `GET /media/formats` | `media_formats.max_file_size_bytes` |
 | nginx request timeout for a chunk | 300 s | `proxy_read_timeout` on the uploads location |
 

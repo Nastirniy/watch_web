@@ -15768,10 +15768,10 @@
                   "type": "null"
                 }
               ],
-              "description": "open, completed, aborted or expired; default all",
+              "description": "open, completing, completed, aborted or expired; default all",
               "title": "Status"
             },
-            "description": "open, completed, aborted or expired; default all"
+            "description": "open, completing, completed, aborted or expired; default all"
           },
           {
             "name": "observation_id",
@@ -15934,7 +15934,7 @@
                 }
               },
               "Upload-Status": {
-                "description": "open, completed, aborted or expired",
+                "description": "open, completing, completed, aborted or expired",
                 "schema": {
                   "type": "string"
                 }
@@ -16159,7 +16159,7 @@
                 }
               },
               "Upload-Status": {
-                "description": "open, completed, aborted or expired",
+                "description": "open, completing, completed, aborted or expired",
                 "schema": {
                   "type": "string"
                 }
@@ -16289,7 +16289,7 @@
           "MEDIA"
         ],
         "summary": "Append Upload Chunk",
-        "description": "Append one chunk. Headers: Upload-Offset (must equal the session's received_bytes),\nContent-Type application/offset+octet-stream, Content-Length. Body: raw bytes.\n204 with the new Upload-Offset; 409 with the real Upload-Offset when they disagree;\n413 when the chunk is larger than max_chunk_bytes or overruns the declared size; 410 when the session is not open.",
+        "description": "Append one chunk. Headers: Upload-Offset (must equal the session's received_bytes),\nContent-Type application/offset+octet-stream, Content-Length. Body: raw bytes.\n204 with the new Upload-Offset; 409 with the real Upload-Offset when they disagree;\n413 when the chunk is larger than max_chunk_bytes or overruns the declared size; 410 when the session is not open\n(or the stored bytes are gone: the session is aborted); 409 while a complete stores the file.",
         "operationId": "append_upload_chunk",
         "security": [
           {
@@ -16349,7 +16349,7 @@
                 }
               },
               "Upload-Status": {
-                "description": "open, completed, aborted or expired",
+                "description": "open, completing, completed, aborted or expired",
                 "schema": {
                   "type": "string"
                 }
@@ -16501,13 +16501,16 @@
             }
           },
           "409": {
-            "description": "`upload_offset_mismatch`: Upload-Offset does not match the session offset; `upload_writer_busy`: Another chunk is being written to this session; retry after it finishes",
+            "description": "`upload_offset_mismatch`: Upload-Offset does not match the session offset; `upload_session_completing`: Session is being completed; ask GET for its status; `upload_writer_busy`: Another chunk is being written to this session; retry after it finishes",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
                     {
                       "$ref": "#/components/schemas/UploadOffsetMismatchProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UploadSessionCompletingProblem"
                     },
                     {
                       "$ref": "#/components/schemas/UploadWriterBusyProblem"
@@ -16517,6 +16520,7 @@
                     "propertyName": "code",
                     "mapping": {
                       "upload_offset_mismatch": "#/components/schemas/UploadOffsetMismatchProblem",
+                      "upload_session_completing": "#/components/schemas/UploadSessionCompletingProblem",
                       "upload_writer_busy": "#/components/schemas/UploadWriterBusyProblem"
                     }
                   }
@@ -16525,11 +16529,25 @@
             }
           },
           "410": {
-            "description": "`upload_session_closed`: Upload session is closed",
+            "description": "`upload_bytes_missing`: Stored bytes are missing; open a new session; `upload_session_closed`: Upload session is closed",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UploadSessionClosedProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/UploadBytesMissingProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UploadSessionClosedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "upload_bytes_missing": "#/components/schemas/UploadBytesMissingProblem",
+                      "upload_session_closed": "#/components/schemas/UploadSessionClosedProblem"
+                    }
+                  }
                 }
               }
             }
@@ -16577,7 +16595,7 @@
           "MEDIA"
         ],
         "summary": "Complete Upload Session",
-        "description": "Turn a fully received session into a media file: size, optional sha256, format and content checks,\nthen the same storage path as the other uploads. Calling it again on a completed session returns the same\nmedia file (200). 409 when bytes are missing (resend from Upload-Offset); 422 on hash mismatch (session aborted);\n415 / 413 as for other uploads (session aborted).",
+        "description": "Turn a fully received session into a media file: size, optional sha256, format and content checks,\nthen the same storage path as the other uploads. Calling it again on a completed session returns the same\nmedia file (200). 409 when bytes are missing (resend from Upload-Offset) or while another complete stores the\nfile; 422 on hash mismatch (session aborted); 415 / 413 as for other uploads (session aborted).",
         "operationId": "complete_upload_session",
         "security": [
           {
@@ -16773,11 +16791,29 @@
             }
           },
           "409": {
-            "description": "`upload_incomplete`: Upload incomplete",
+            "description": "`upload_incomplete`: Upload incomplete; `upload_session_completing`: Session is being completed; ask GET for its status; `upload_writer_busy`: Another chunk is being written to this session; retry after it finishes",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UploadIncompleteProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/UploadIncompleteProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UploadSessionCompletingProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UploadWriterBusyProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "upload_incomplete": "#/components/schemas/UploadIncompleteProblem",
+                      "upload_session_completing": "#/components/schemas/UploadSessionCompletingProblem",
+                      "upload_writer_busy": "#/components/schemas/UploadWriterBusyProblem"
+                    }
+                  }
                 }
               }
             }
@@ -16871,7 +16907,7 @@
           "MEDIA"
         ],
         "summary": "Abort Upload Session",
-        "description": "Give up on an open session and delete the received bytes. Completed sessions cannot be aborted (409).",
+        "description": "Give up on an open session and delete the received bytes. Completed sessions cannot be aborted (409), nor a\nsession while a complete stores its file (409).",
         "operationId": "abort_upload_session",
         "security": [
           {
@@ -17011,11 +17047,25 @@
             }
           },
           "409": {
-            "description": "`upload_session_completed`: Session is completed; archive the media file instead",
+            "description": "`upload_session_completed`: Session is completed; archive the media file instead; `upload_session_completing`: Session is being completed; ask GET for its status",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UploadSessionCompletedProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/UploadSessionCompletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UploadSessionCompletingProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "upload_session_completed": "#/components/schemas/UploadSessionCompletedProblem",
+                      "upload_session_completing": "#/components/schemas/UploadSessionCompletingProblem"
+                    }
+                  }
                 }
               }
             }
@@ -34912,6 +34962,69 @@
           }
         ]
       },
+      "UploadSessionCompletingProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Session is being completed; ask GET for its status",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Session is being completed; ask GET for its status"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "upload_session_completing",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "UploadSessionCompletingProblem",
+        "description": "Session is being completed; ask GET for its status (HTTP 409). Problem type upload_session_completing.",
+        "examples": [
+          {
+            "code": "upload_session_completing",
+            "detail": "Session is being completed; ask GET for its status",
+            "instance": "/api/v1/...",
+            "status": 409,
+            "title": "Session is being completed; ask GET for its status",
+            "type": "https://example.org/problems/upload_session_completing"
+          }
+        ]
+      },
       "UploadSessionCreate": {
         "properties": {
           "observation_id": {
@@ -35169,7 +35282,8 @@
                 "type": "null"
               }
             ],
-            "title": "Error"
+            "title": "Error",
+            "description": "Code of the problem that aborted the session (the code of the error that answered it, such as upload_checksum_mismatch); null otherwise, also when the client aborted it or it expired"
           },
           "created_at": {
             "type": "string",

@@ -128,6 +128,29 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `+00:00`, and `last_login_at` / `last_activity_at` of `GET /auth/me` have the offset they lacked; these fields are
   `format: date-time` in `api-contract/v1/openapi.json` now (the type stays a string).
 - Unique-violation races: a double click (two requests passing the same uniqueness check) answered 500 on tag, category, signal type, role and media format writes and on user creation. A unique violation at the commit now answers the code the check gives (`tag_name_taken`, `category_name_taken`, `signal_type_code_taken`, `role_name_taken`, `media_format_exists`, `username_or_certificate_taken`). `PUT /users/{id}/post-access/{post_id}` and `PUT /roles/{id}/permissions/{permission_id}` are idempotent: when a concurrent request created the row first they answer 200 with the stored row. `POST /users/` writes the user and its roles in one commit, so a failed role insert no longer leaves a user without roles. No new codes; the OpenAPI contract is unchanged.
+- Resumable uploads: two concurrent `POST /media/uploads/{upload_id}/complete` both checked, hashed and stored the
+  file, and the loser could mark the session `aborted` after the winner had completed it. `complete` now claims the
+  session with a conditional UPDATE before it reads the file (status `completing`); a concurrent `complete`, chunk or
+  abort answers 409 `upload_session_completing` and changes nothing. A refused file still aborts the session;
+  `media_uploads_busy` and unexpected errors put it back to `open`. A claim whose request died is taken over after one
+  hour (`COMPLETION_STALE_SECONDS`).
+- A chunk request (`PATCH /media/uploads/{upload_id}`) that stalled past the writer stale time (180 s) kept writing
+  after another request had taken the session over: both appended to the part file, the first one's error path
+  truncated the second one's bytes and the next chunk filled the gap with zeros, so without the optional `sha256` the
+  stored file was silently corrupt. A writer now renews its claim every 30 s while bytes arrive and checks it before
+  every write, before truncating and before releasing; one that lost the session writes, truncates and releases
+  nothing and answers 400 `upload_chunk_not_stored` (`offset` and `Upload-Offset` are the session's offset). A part
+  file shorter than `received_bytes` is never extended: the session is aborted and the chunk answers 410
+  `upload_bytes_missing`, as `complete` already did.
+- A repeated `complete` on a completed upload session returns the stored result without another `create` audit row
+  (and without probing the file again).
+- `error` of the upload session bodies (`GET /media/uploads`, `GET /media/uploads/{upload_id}`, `POST .../abort`)
+  carried the stored internal reason (for example the Python repr of the refused file's problem). It is now the code
+  of the problem that aborted the session (`upload_checksum_mismatch`, `upload_bytes_missing`,
+  `media_content_invalid`, ...) and `null` after a client abort or an expiry; the reason goes to the log. Rows written
+  before this change answer `null`.
+- `HEAD /media/uploads/{upload_id}` applies the expiry like `GET`: a session past `expires_at` answers
+  `Upload-Status: expired` (it answered `open`) and loses its part file.
 
 ### Changed
 
@@ -147,6 +170,12 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - `GET /categories/{category_id}/signal-types` takes `page` and `page_size` (1 to 200, default 50, like the other
   lists) instead of `skip` and `limit` (contract change: `skip` and `limit` are gone from
   `api-contract/v1/openapi.json`), and orders by `sort_order`, then `id`. `limit=-1` answered 500 on MariaDB.
+- Resumable uploads: new session status `completing` (in `status`, `Upload-Status` and the `status` filter of
+  `GET /media/uploads`) and new problem code `upload_session_completing` (409) for the web localization package.
+  `PATCH /media/uploads/{upload_id}` declares `upload_session_completing` and `upload_bytes_missing`,
+  `POST .../complete` declares `upload_session_completing` and `upload_writer_busy`, `POST .../abort` declares
+  `upload_session_completing`; `api-contract/v1/openapi.json` gained these, the schema `UploadSessionCompletingProblem`
+  and the description of `error`. UPLOADS.md lists the session states.
 
 ### Changed (operators)
 

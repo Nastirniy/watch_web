@@ -342,6 +342,8 @@ class ErrorCode(ProblemType):
         410, "Upload session is closed", "Upload session is {session_status}; open a new session",
         session_status=str, media_file_id=Optional[int]))
     UPLOAD_SESSION_COMPLETED = ("upload_session_completed", problem(409, "Session is completed; archive the media file instead"))
+    # Another complete is storing the file (status completing): no chunk, abort or second complete meanwhile
+    UPLOAD_SESSION_COMPLETING = ("upload_session_completing", problem(409, "Session is being completed; ask GET for its status"))
     UPLOAD_OFFSET_REQUIRED = ("upload_offset_required", problem(400, "Upload-Offset header is required and must be a non-negative integer"))
     UPLOAD_OFFSET_MISMATCH = ("upload_offset_mismatch", problem(
         409, "Upload-Offset does not match the session offset",

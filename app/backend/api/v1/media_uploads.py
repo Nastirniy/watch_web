@@ -77,7 +77,7 @@ def _to_response(row: UploadSession, version: PublishedVersion) -> UploadSession
         remaining_bytes=row.remaining_bytes,
         max_chunk_bytes=settings.storage.upload.max_chunk_bytes,
         media_file_id=row.media_file_id,
-        error=row.error,
+        error=uploads.error_code(row),
         created_at=row.created_at,
         last_activity_at=row.last_activity_at,
         expires_at=row.expires_at,
@@ -103,20 +103,45 @@ async def _owned_session(session: AsyncSession, auth: AuthContext, upload_id: st
     return row
 
 
+async def _expire_if_due(session: AsyncSession, row: UploadSession) -> UploadSession:
+    """The row after the expiry check every session route applies (GET, HEAD, chunk, complete)"""
+    if await uploads.expire_if_due(session, row, storage_root()):
+        row = await uploads.get_session_row(session, row.id)
+    return row
+
+
+def _completing(row: UploadSession) -> ApiError:
+    return ApiError(ErrorCode.UPLOAD_SESSION_COMPLETING, headers=_session_headers(row))
+
+
+def _closed(row: UploadSession) -> ApiError:
+    _logger.info(f"upload session {row.id} is {row.status} ({row.error})")
+    return ApiError(
+        ErrorCode.UPLOAD_SESSION_CLOSED,
+        headers=_session_headers(row),
+        session_status=row.status,
+        media_file_id=row.media_file_id,
+    )
+
+
+def _incomplete(row: UploadSession) -> ApiError:
+    return ApiError(
+        ErrorCode.UPLOAD_INCOMPLETE,
+        headers=_session_headers(row),
+        missing_bytes=int(row.remaining_bytes),
+        offset=int(row.received_bytes),
+        expected_size=int(row.expected_size),
+    )
+
+
 async def _require_open(session: AsyncSession, row: UploadSession) -> UploadSession:
-    """410 Gone with the final status when the session can no longer take chunks"""
-    if row.status == uploads.STATUS_OPEN and uploads.is_expired(row):
-        await uploads.remove_part(row, storage_root())
-        await uploads.mark(session, row, uploads.STATUS_EXPIRED, error="session expired before completion")
+    """409 while a complete stores the file, 410 Gone with the final status when the session can no longer
+    take chunks"""
+    row = await _expire_if_due(session, row)
+    if row.status == uploads.STATUS_COMPLETING:
+        raise _completing(row)
     if row.status != uploads.STATUS_OPEN:
-        # row.error is an internal reason: logged, never returned
-        _logger.info(f"upload session {row.id} is {row.status}: {row.error}")
-        raise ApiError(
-            ErrorCode.UPLOAD_SESSION_CLOSED,
-            headers=_session_headers(row),
-            session_status=row.status,
-            media_file_id=row.media_file_id,
-        )
+        raise _closed(row)
     return row
 
 
@@ -126,7 +151,7 @@ async def _require_open(session: AsyncSession, row: UploadSession) -> UploadSess
 
 @router.get(MediaRoutes.UPLOADS.value, response_model=List[UploadSessionResponse], responses=problems(*GUARDED))
 async def list_upload_sessions(
-    status: Optional[str] = Query(None, description="open, completed, aborted or expired; default all"),
+    status: Optional[str] = Query(None, description="open, completing, completed, aborted or expired; default all"),
     observation_id: Optional[int] = Query(None),
     session: AsyncSession = Depends(get_session),
     auth: AuthContext = Depends(UPLOAD_REQUIRE),
@@ -216,10 +241,7 @@ async def get_upload_session(
     version: PublishedVersion = Depends(request_version),
 ):
     """Current offset and status. Ask this after every failed chunk and continue from received_bytes."""
-    row = await _owned_session(session, auth, upload_id)
-    if row.status == uploads.STATUS_OPEN and uploads.is_expired(row):
-        await uploads.remove_part(row, storage_root())
-        await uploads.mark(session, row, uploads.STATUS_EXPIRED, error="session expired before completion")
+    row = await _expire_if_due(session, await _owned_session(session, auth, upload_id))
     response.headers.update(_session_headers(row))
     return _to_response(row, version)
 
@@ -231,7 +253,7 @@ async def head_upload_session(
     auth: AuthContext = Depends(UPLOAD_REQUIRE),
 ):
     """Same as GET but headers only (tus style): Upload-Offset, Upload-Length, Upload-Status."""
-    row = await _owned_session(session, auth, upload_id)
+    row = await _expire_if_due(session, await _owned_session(session, auth, upload_id))
     return Response(status_code=200, headers=_session_headers(row))
 
 
@@ -246,6 +268,7 @@ async def head_upload_session(
             AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED,
             AccessErrorCode.UPLOAD_SESSION_NOT_OWNER, ErrorCode.UPLOAD_SESSION_NOT_FOUND,
             ErrorCode.UPLOAD_OFFSET_MISMATCH, ErrorCode.UPLOAD_WRITER_BUSY, ErrorCode.UPLOAD_SESSION_CLOSED,
+            ErrorCode.UPLOAD_SESSION_COMPLETING, ErrorCode.UPLOAD_BYTES_MISSING,
             ErrorCode.UPLOAD_CHUNK_OVERRUN, ErrorCode.UPLOAD_CHUNK_TOO_LARGE, ErrorCode.UPLOAD_CHUNK_CONTENT_TYPE,
             *GUARDED,
         ),
@@ -262,7 +285,8 @@ async def append_upload_chunk(
     Append one chunk. Headers: Upload-Offset (must equal the session's received_bytes),
     Content-Type application/offset+octet-stream, Content-Length. Body: raw bytes.
     204 with the new Upload-Offset; 409 with the real Upload-Offset when they disagree;
-    413 when the chunk is larger than max_chunk_bytes or overruns the declared size; 410 when the session is not open.
+    413 when the chunk is larger than max_chunk_bytes or overruns the declared size; 410 when the session is not open
+    (or the stored bytes are gone: the session is aborted); 409 while a complete stores the file.
     """
     row = await _require_open(session, await _owned_session(session, auth, upload_id))
 
@@ -296,19 +320,29 @@ async def append_upload_chunk(
     except uploads.WriterBusy:
         raise ApiError(ErrorCode.UPLOAD_WRITER_BUSY, headers=_session_headers(row), offset=offset)
     except LookupError:
-        row = await uploads.get_session_row(session, upload_id)
-        await _require_open(session, row)
+        await _require_open(session, await uploads.get_session_row(session, upload_id))
         raise
 
     try:
         new_offset = await uploads.append_chunk(session, row, token, storage_root(), request.stream(), offset, max_chunk)
     except uploads.ChunkTooLarge as exc:
         raise ApiError.from_coded(exc, headers=_session_headers(row), offset=offset)
+    except uploads.BytesMissing as exc:
+        _logger.warning(f"upload session {upload_id}: the part file holds fewer than the {offset} bytes received; session aborted")
+        raise ApiError.from_coded(exc, headers=_session_headers(await uploads.get_session_row(session, upload_id)))
+    except uploads.WriterLost:
+        # The request stalled past the writer's stale time and another one took the session (or it ended):
+        # this chunk is not counted and the part file was left to the other request
+        _logger.warning(f"upload session {upload_id}: chunk at {offset} not stored, the writer lost the session")
+        row = await _require_open(session, await uploads.get_session_row(session, upload_id))
+        raise ApiError(ErrorCode.UPLOAD_CHUNK_NOT_STORED, headers=_session_headers(row), offset=int(row.received_bytes))
     except (ClientDisconnect, OSError) as exc:
         # The transfer broke (client gone) or the disk refused the bytes: append_chunk truncated the part
-        # file back to `offset`, so the client resends from there. Anything else is a bug: a plain 500.
+        # file back to `offset` (when it still held the session), so the client resends from the session's
+        # offset. Anything else is a bug: a plain 500.
         _logger.warning(f"upload session {upload_id}: chunk at {offset} not stored: {exc!r}")
-        raise ApiError(ErrorCode.UPLOAD_CHUNK_NOT_STORED, headers=_session_headers(row), offset=offset)
+        row = await uploads.get_session_row(session, upload_id)
+        raise ApiError(ErrorCode.UPLOAD_CHUNK_NOT_STORED, headers=_session_headers(row), offset=int(row.received_bytes))
 
     row = await uploads.get_session_row(session, upload_id)
     return Response(status_code=fapi_status.HTTP_204_NO_CONTENT, headers={**_session_headers(row), "Upload-Offset": str(new_offset)})
@@ -325,7 +359,7 @@ async def append_upload_chunk(
         ErrorCode.MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED,
         ErrorCode.MEDIA_EXTENSION_DANGEROUS, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, ErrorCode.MEDIA_TYPE_UNKNOWN,
         ErrorCode.UPLOAD_CHECKSUM_MISMATCH, ErrorCode.MEDIA_STORE_FAILED,
-        ErrorCode.MEDIA_UPLOADS_BUSY, *GUARDED,
+        ErrorCode.MEDIA_UPLOADS_BUSY, ErrorCode.UPLOAD_SESSION_COMPLETING, ErrorCode.UPLOAD_WRITER_BUSY, *GUARDED,
     ),
 )
 async def complete_upload_session(
@@ -338,35 +372,71 @@ async def complete_upload_session(
     """
     Turn a fully received session into a media file: size, optional sha256, format and content checks,
     then the same storage path as the other uploads. Calling it again on a completed session returns the same
-    media file (200). 409 when bytes are missing (resend from Upload-Offset); 422 on hash mismatch (session aborted);
-    415 / 413 as for other uploads (session aborted).
+    media file (200). 409 when bytes are missing (resend from Upload-Offset) or while another complete stores the
+    file; 422 on hash mismatch (session aborted); 415 / 413 as for other uploads (session aborted).
     """
-    row = await _owned_session(session, auth, upload_id)
+    row = await _expire_if_due(session, await _owned_session(session, auth, upload_id))
     if row.status == uploads.STATUS_COMPLETED and row.media_file_id:
-        media_file = await record_upload(request, session, auth, row.media_file_id, row.observation_id, row.original_filename, background_tasks, "resumable, already completed")
-        return upload_result(media_file, "resumable, already completed", upload_id=row.id)
-    row = await _require_open(session, row)
-    root = storage_root()
-
+        return await _completed_result(session, row)
+    if row.status not in (uploads.STATUS_OPEN, uploads.STATUS_COMPLETING):
+        raise _closed(row)
     if int(row.received_bytes) != int(row.expected_size):
-        raise ApiError(
-            ErrorCode.UPLOAD_INCOMPLETE,
-            headers=_session_headers(row),
-            missing_bytes=int(row.remaining_bytes),
-            offset=int(row.received_bytes),
-            expected_size=int(row.expected_size),
-        )
-    part = uploads.resolve_part(row, root)
+        raise _incomplete(row)
+
+    # One complete at a time: the claim moves the session to `completing` before anything is read
+    token = await uploads.claim_completion(session, row.id)
+    if token is None:
+        return await _claim_refused(session, row.id)
+    row = await uploads.get_session_row(session, row.id)
+    try:
+        media_file_id = await _store_claimed(session, row, token)
+    except BaseException:
+        # Not the file's fault (a refused file aborted the session already): open again, complete can be retried
+        await uploads.release_completion(session, row.id, token)
+        raise
+
+    media_file = await record_upload(request, session, auth, media_file_id, row.observation_id, row.original_filename, background_tasks, "resumable")
+    return upload_result(media_file, "resumable", upload_id=row.id)
+
+
+async def _completed_result(session: AsyncSession, row: UploadSession) -> UploadResultResponse:
+    """A completed session answers its media file again: nothing is stored, probed or audited"""
+    media_file = await uploads.completed_media(session, row)
+    return upload_result(media_file, "resumable, already completed", upload_id=row.id)
+
+
+async def _claim_refused(session: AsyncSession, upload_id: str) -> UploadResultResponse:
+    """Another request holds the session: answer by what it is now"""
+    row = await uploads.get_session_row(session, upload_id)
+    if row.status == uploads.STATUS_COMPLETED and row.media_file_id:
+        return await _completed_result(session, row)
+    if row.status == uploads.STATUS_COMPLETING:
+        raise _completing(row)
+    if row.status != uploads.STATUS_OPEN:
+        raise _closed(row)
+    if int(row.received_bytes) != int(row.expected_size):
+        raise _incomplete(row)
+    raise ApiError(ErrorCode.UPLOAD_WRITER_BUSY, headers=_session_headers(row), offset=int(row.received_bytes))
+
+
+async def _abort_claimed(session: AsyncSession, row: UploadSession, token: str, code: ErrorCode, reason: str) -> UploadSession:
+    """End a claimed session as aborted by `code`: the code is stored, the internal reason only logged"""
+    _logger.warning(f"upload session {row.id} aborted at completion ({code.value}): {reason}")
+    await uploads.abort_session(session, row, storage_root(), code, token=token)
+    return await uploads.get_session_row(session, row.id)
+
+
+async def _store_claimed(session: AsyncSession, row: UploadSession, token: str) -> int:
+    """Check and store the part file of a session this request claimed; the media file id"""
+    part = uploads.resolve_part(row, storage_root())
     if not part.exists() or part.stat().st_size != int(row.expected_size):
-        await uploads.remove_part(row, root)
-        await uploads.mark(session, row, uploads.STATUS_ABORTED, error="part file missing or inconsistent")
+        row = await _abort_claimed(session, row, token, ErrorCode.UPLOAD_BYTES_MISSING, "part file missing or inconsistent")
         raise ApiError(ErrorCode.UPLOAD_BYTES_MISSING, headers=_session_headers(row), session_status=row.status)
 
     if row.expected_sha256:
         actual = await uploads.sha256_of(part)
         if actual != row.expected_sha256:
-            await uploads.remove_part(row, root)
-            await uploads.mark(session, row, uploads.STATUS_ABORTED, error="sha256 mismatch")
+            row = await _abort_claimed(session, row, token, ErrorCode.UPLOAD_CHECKSUM_MISMATCH, "sha256 mismatch")
             raise ApiError(ErrorCode.UPLOAD_CHECKSUM_MISMATCH, headers=_session_headers(row),
                            expected_sha256=row.expected_sha256, actual_sha256=actual)
 
@@ -379,23 +449,24 @@ async def complete_upload_session(
             validation_config=validation_config_for(registry, spec),
         )
     except FileTooLarge as e:
-        await uploads.remove_part(row, root)
-        await uploads.mark(session, row, uploads.STATUS_ABORTED, error=str(e))
+        await _abort_claimed(session, row, token, ErrorCode.MEDIA_FILE_TOO_LARGE, str(e))
         raise too_large(spec, e.actual_bytes)
     except UnsupportedMediaFormat as e:
-        await uploads.remove_part(row, root)
-        await uploads.mark(session, row, uploads.STATUS_ABORTED, error=str(e))
+        await _abort_claimed(session, row, token, e.code, str(e))
         raise format_rejected(registry, e)
     except CodedError as e:
-        # Busy is the server's state, not the file's: keep the bytes so complete can be retried
-        if e.code != ErrorCode.MEDIA_UPLOADS_BUSY:
-            await uploads.remove_part(row, root)
-            await uploads.mark(session, row, uploads.STATUS_ABORTED, error=str(e))
+        if e.code == ErrorCode.MEDIA_UPLOADS_BUSY:
+            # Busy is the server's state, not the file's: keep the bytes so complete can be retried
+            await uploads.release_completion(session, row.id, token)
+            row = await uploads.get_session_row(session, row.id)
+        else:
+            row = await _abort_claimed(session, row, token, e.code, str(e))
         raise store_rejected(e, headers=_session_headers(row))
 
-    await uploads.mark(session, row, uploads.STATUS_COMPLETED, media_file_id=media_file_id)
-    media_file = await record_upload(request, session, auth, media_file_id, row.observation_id, row.original_filename, background_tasks, "resumable")
-    return upload_result(media_file, "resumable", upload_id=row.id)
+    if not await uploads.finish_completion(session, row.id, token, media_file_id):
+        # Only after COMPLETION_STALE_SECONDS: another complete took the session over meanwhile
+        _logger.warning(f"upload session {row.id}: stored as media {media_file_id} after its completion claim went stale")
+    return media_file_id
 
 
 @router.post(
@@ -404,7 +475,7 @@ async def complete_upload_session(
     responses=problems(
         AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED,
         AccessErrorCode.UPLOAD_SESSION_NOT_OWNER, ErrorCode.UPLOAD_SESSION_NOT_FOUND,
-        ErrorCode.UPLOAD_SESSION_COMPLETED, *GUARDED,
+        ErrorCode.UPLOAD_SESSION_COMPLETED, ErrorCode.UPLOAD_SESSION_COMPLETING, *GUARDED,
     ),
 )
 async def abort_upload_session(
@@ -414,17 +485,20 @@ async def abort_upload_session(
     auth: AuthContext = Depends(UPLOAD_REQUIRE),
     version: PublishedVersion = Depends(request_version),
 ):
-    """Give up on an open session and delete the received bytes. Completed sessions cannot be aborted (409)."""
+    """Give up on an open session and delete the received bytes. Completed sessions cannot be aborted (409), nor a
+    session while a complete stores its file (409)."""
     row = await _owned_session(session, auth, upload_id)
+    if row.status in (uploads.STATUS_OPEN, uploads.STATUS_COMPLETING):
+        if await uploads.abort_session(session, row, storage_root()):
+            await create_audit_log(
+                session=session, action="abort", resource_type="upload_session", resource_id=None,
+                user_id=auth.user.id, details={"message": f"User {auth.user.username} aborted upload session {row.id} at {row.received_bytes}/{row.expected_size} bytes", "upload_id": row.id},
+                **client_info(request, auth),
+            )
+            await session.commit()
+        row = await uploads.get_session_row(session, upload_id)
+    if row.status == uploads.STATUS_COMPLETING:
+        raise _completing(row)
     if row.status == uploads.STATUS_COMPLETED:
         raise ApiError(ErrorCode.UPLOAD_SESSION_COMPLETED)
-    if row.status == uploads.STATUS_OPEN:
-        await uploads.remove_part(row, storage_root())
-        await uploads.mark(session, row, uploads.STATUS_ABORTED, error="aborted by client")
-        await create_audit_log(
-            session=session, action="abort", resource_type="upload_session", resource_id=None,
-            user_id=auth.user.id, details={"message": f"User {auth.user.username} aborted upload session {row.id} at {row.received_bytes}/{row.expected_size} bytes", "upload_id": row.id},
-            **client_info(request, auth),
-        )
-        await session.commit()
     return _to_response(row, version)
