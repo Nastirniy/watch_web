@@ -10,6 +10,7 @@ Usage:
     python -m app.backend.cli.media_tools storyboard-status
     python -m app.backend.cli.media_tools probe-missing [--limit N] [--all]
     python -m app.backend.cli.media_tools expire-uploads
+    python -m app.backend.cli.media_tools sweep-nginx-temp [--max-age-hours N]
 
 cleanup-legacy-thumbnails removes the *_thumb_small|medium|large.jpg files the
 old pipeline wrote next to the originals. Thumbnails are now rendered on
@@ -194,6 +195,15 @@ async def expire_uploads() -> int:
     return 0
 
 
+def sweep_nginx_temp(max_age_hours: float) -> int:
+    """Delete leftovers in nginx's upload temp directory (requests the API refused before its handler ran)"""
+    from app.backend.services.media.uploads import sweep_nginx_temp as sweep
+
+    result = sweep(Path(settings.storage.nginx_upload_temp_path), max_age_hours * 3600)
+    print(f"removed {result.files} file(s), {result.bytes / (1024 * 1024):.1f} MB")
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Media maintenance commands")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -218,6 +228,10 @@ def main(argv=None) -> int:
 
     sub.add_parser("expire-uploads", help="expire abandoned resumable upload sessions")
 
+    sweep_temp = sub.add_parser("sweep-nginx-temp", help="delete old files in the nginx upload temp directory")
+    sweep_temp.add_argument("--max-age-hours", type=float, default=None,
+                            help="age of a leftover (default: storage.nginx_upload_temp_max_age_hours)")
+
     args = parser.parse_args(argv)
     if args.command == "cleanup-legacy-thumbnails":
         return cleanup_legacy_thumbnails(args.dry_run)
@@ -233,6 +247,9 @@ def main(argv=None) -> int:
         return asyncio.run(probe_missing(args.limit, refresh=args.all))
     if args.command == "expire-uploads":
         return asyncio.run(expire_uploads())
+    if args.command == "sweep-nginx-temp":
+        hours = args.max_age_hours if args.max_age_hours is not None else settings.storage.nginx_upload_temp_max_age_hours
+        return sweep_nginx_temp(hours)
     return 1
 
 

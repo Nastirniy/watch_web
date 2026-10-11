@@ -14457,7 +14457,7 @@
             }
           },
           "400": {
-            "description": "`media_content_invalid`: File content does not match its type; `media_file_empty`: File is empty; `media_upload_source_missing`: Uploaded file not found; `nginx_file_name_missing`: Missing X-File-Name header",
+            "description": "`media_content_invalid`: File content does not match its type; `media_file_empty`: File is empty; `media_upload_source_missing`: Uploaded file not found; `nginx_file_name_invalid`: X-File-Name is not a file in the upload temp directory; `nginx_file_name_missing`: Missing X-File-Name header",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -14472,6 +14472,9 @@
                       "$ref": "#/components/schemas/MediaUploadSourceMissingProblem"
                     },
                     {
+                      "$ref": "#/components/schemas/NginxFileNameInvalidProblem"
+                    },
+                    {
                       "$ref": "#/components/schemas/NginxFileNameMissingProblem"
                     }
                   ],
@@ -14481,6 +14484,7 @@
                       "media_content_invalid": "#/components/schemas/MediaContentInvalidProblem",
                       "media_file_empty": "#/components/schemas/MediaFileEmptyProblem",
                       "media_upload_source_missing": "#/components/schemas/MediaUploadSourceMissingProblem",
+                      "nginx_file_name_invalid": "#/components/schemas/NginxFileNameInvalidProblem",
                       "nginx_file_name_missing": "#/components/schemas/NginxFileNameMissingProblem"
                     }
                   }
@@ -27074,6 +27078,69 @@
         ],
         "title": "MessageResponse",
         "description": "Generic message response"
+      },
+      "NginxFileNameInvalidProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "X-File-Name is not a file in the upload temp directory",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 400,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "X-File-Name is not a file in the upload temp directory"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "nginx_file_name_invalid",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "NginxFileNameInvalidProblem",
+        "description": "X-File-Name is not a file in the upload temp directory (HTTP 400). Problem type nginx_file_name_invalid.",
+        "examples": [
+          {
+            "code": "nginx_file_name_invalid",
+            "detail": "X-File-Name is not a file in the upload temp directory",
+            "instance": "/api/v1/...",
+            "status": 400,
+            "title": "X-File-Name is not a file in the upload temp directory",
+            "type": "https://example.org/problems/nginx_file_name_invalid"
+          }
+        ]
       },
       "NginxFileNameMissingProblem": {
         "properties": {

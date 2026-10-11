@@ -14,7 +14,9 @@ applies once, in one place.
 from __future__ import annotations
 
 import hashlib
+import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import AsyncIterator, Dict, Iterable, List, Optional
@@ -258,3 +260,53 @@ async def expire_sessions(session: AsyncSession, storage_root: Path, now: Option
 
 def is_expired(row: UploadSession, now: Optional[datetime] = None) -> bool:
     return _aware(row.expires_at) <= (now or utcnow())
+
+
+# ---------------------------------------------------------------------------
+# Files nginx wrote for offloaded uploads (client_body_in_file_only)
+# ---------------------------------------------------------------------------
+
+def resolve_nginx_temp_file(name: Optional[str], directory: str) -> Optional[Path]:
+    """The regular file `name` (nginx's X-File-Name) points at, only when it lies inside `directory`.
+
+    Both are resolved first, so `..` and symbolic links cannot lead out; nginx's own sub-directories
+    (client_body_temp_path levels) are inside. Anything else is None and the file is left alone.
+    """
+    if not name or "\x00" in name:
+        return None
+    try:
+        root = Path(directory).resolve()
+        candidate = Path(name).resolve()
+        if candidate == root or not candidate.is_relative_to(root) or not candidate.is_file():
+            return None
+    except (OSError, ValueError):
+        return None
+    return candidate
+
+
+@dataclass(frozen=True)
+class SweepResult:
+    files: int
+    bytes: int
+
+
+def sweep_nginx_temp(directory: Path, max_age_seconds: float, now: Optional[float] = None) -> SweepResult:
+    """Delete files under `directory` not modified for `max_age_seconds`; directories stay (nginx owns them)"""
+    root = Path(directory)
+    if not root.is_dir():
+        return SweepResult(0, 0)
+    cutoff = (time.time() if now is None else now) - max_age_seconds
+    files = freed = 0
+    for path in root.rglob("*"):
+        try:
+            if path.is_symlink() or not path.is_file():
+                continue
+            info = path.stat()
+            if info.st_mtime >= cutoff:
+                continue
+            path.unlink()
+        except FileNotFoundError:
+            continue  # nginx or the API removed it meanwhile
+        files += 1
+        freed += info.st_size
+    return SweepResult(files, freed)

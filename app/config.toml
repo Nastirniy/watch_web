@@ -63,6 +63,7 @@ ffprobe_path = "ffprobe"
 # thumbnails (X-Accel-Redirect to imgproxy through the nginx cache). One switch for all of them.
 enable_nginx = false
 nginx_upload_temp_path = "/var/www/nginx_uploads"  # Must match nginx client_body_temp_path
+nginx_upload_temp_max_age_hours = 24  # `media_tools sweep-nginx-temp` deletes older leftovers there
 nginx_internal_uploads_prefix = "/protected_uploads"  # Must match the internal location in nginx.conf
 
 [storage.imgproxy]

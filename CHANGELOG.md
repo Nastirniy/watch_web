@@ -53,6 +53,10 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `utils/validators.py`.
 - `POST /observations/create` without `observed_at` stores the current UTC time (it answered 500). `observed_at` of
   the request is no longer nullable in `api-contract/v1/openapi.json`; an explicit `null` there answers 422.
+- Upload file names: the extension is read from the original name and only the stem is reduced to ASCII. A name such
+  as `foto.png` written in Cyrillic used to lose its extension and every upload path answered 415
+  `media_extension_not_accepted`; it is now stored as `upload_<8 hex>.png` (`file_extension` `.png`). ASCII names are
+  stored as before.
 
 ### Changed
 
@@ -60,6 +64,19 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `last_admin_required`, `cannot_remove_own_admin` (409) and `grant_exceeds_own_permissions`,
   `target_user_more_privileged` (403). The role and user routes above declare them; `api-contract/v1/openapi.json`
   gained their schemas.
+- `POST /media/nginx-upload` answers 400 `nginx_file_name_invalid` when `X-File-Name` is not a regular file inside
+  `storage.nginx_upload_temp_path` (paths outside it, `..`, links leading out, directories, missing files); the file
+  is not touched. The route declares the code and `api-contract/v1/openapi.json` gained it. New problem code for the
+  web localization package.
+
+### Changed (operators)
+
+- Every offloaded upload the API refuses after the path check (415, 413, 403, 404, busy store, invalid content) now
+  deletes nginx's body file; before, nginx (`client_body_in_file_only`) left up to 10 GB behind for each. Requests
+  rejected before the handler runs (401) still leave their file: `python -m app.backend.cli.media_tools
+  sweep-nginx-temp [--max-age-hours N]` deletes files in `storage.nginx_upload_temp_path` older than
+  `storage.nginx_upload_temp_max_age_hours` (new setting, default 24); run it from cron (DEPLOYMENT.md). The setting
+  must name the same directory as nginx's `client_body_temp_path` (`tests/test_nginx_conf.py` checks the default).
 
 ## Backend layout: auth, errors, bootstrap and cli packages
 

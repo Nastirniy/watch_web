@@ -290,6 +290,7 @@ class ErrorCode(ProblemType):
     MEDIA_STORE_FAILED = ("media_store_failed", problem(500, "Failed to store the file"))
     NGINX_UPLOAD_DISABLED = ("nginx_upload_disabled", problem(501, "Nginx upload offloading is not enabled"))
     NGINX_FILE_NAME_MISSING = ("nginx_file_name_missing", problem(400, "Missing X-File-Name header"))
+    NGINX_FILE_NAME_INVALID = ("nginx_file_name_invalid", problem(400, "X-File-Name is not a file in the upload temp directory"))
     THUMBNAILS_UNSUPPORTED = ("thumbnails_unsupported", problem(422, "Thumbnails are not supported for this media type"))
     IMAGE_TOO_LARGE_FOR_THUMBNAILS = ("image_too_large_for_thumbnails", problem(
         422, "Image too large for thumbnails",

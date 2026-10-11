@@ -116,14 +116,13 @@ class MediaManager:
         if not filename:
             return f"upload_{uuid.uuid4().hex[:8]}"
 
-        # Normalize Unicode characters (decompose accented characters)
-        filename = unicodedata.normalize('NFKD', filename)
-
-        # Convert to ASCII, replacing non-ASCII characters
-        filename = filename.encode('ascii', 'ignore').decode('ascii')
-
-        # Split name and extension for proper handling
+        # The extension comes from the original name (as check_declared_format reads it); only the
+        # stem is reduced to ASCII, so a stem without ASCII letters cannot swallow the extension
         name, ext = os.path.splitext(filename)
+        name, ext = (
+            unicodedata.normalize('NFKD', part).encode('ascii', 'ignore').decode('ascii')
+            for part in (name, ext)
+        )
 
         # Remove dangerous characters and patterns (Windows + Unix) + spaces
         dangerous_chars = r'[<>:"/\\|?*\x00-\x1f\x7f-\x9f\s]'
@@ -165,8 +164,8 @@ class MediaManager:
             else:
                 sanitized = sanitized[:max_filename_len]
 
-        # Final validation
-        if not sanitized or sanitized in ['.', '..', '_']:
+        # Final validation: an empty stem becomes a generated one, the extension is kept
+        if not name or name in ['.', '..', '_']:
             sanitized = f"upload_{uuid.uuid4().hex[:8]}{ext}"
 
         return sanitized

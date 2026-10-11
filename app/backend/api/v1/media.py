@@ -22,7 +22,7 @@ from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
 from app.backend.auth.access_control import AccessControlService
 from app.backend.services.media.manager import get_media_manager
-from app.backend.services.media import formats, jobs, renderer, urls as thumb_urls
+from app.backend.services.media import formats, jobs, renderer, uploads, urls as thumb_urls
 from app.backend.services.media.storyboards import build_vtt, layout_usable, status_for
 from app.backend.services.media.formats import UnsupportedMediaFormat, FileTooLarge
 from app.backend.enums.general import Permissions, PosterStatus, StoryboardStatus, ThumbnailFormat, ThumbnailSize, ThumbnailStatus
@@ -381,7 +381,7 @@ async def upload_complete_file(
     response_model=UploadResultResponse,
     responses=problems(
         ErrorCode.MEDIA_CONTENT_INVALID, ErrorCode.MEDIA_FILE_EMPTY, ErrorCode.MEDIA_UPLOAD_SOURCE_MISSING,
-        ErrorCode.NGINX_FILE_NAME_MISSING, AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED,
+        ErrorCode.NGINX_FILE_NAME_MISSING, ErrorCode.NGINX_FILE_NAME_INVALID, AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED,
         AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_FILE_TOO_LARGE,
         ErrorCode.MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED,
         ErrorCode.MEDIA_EXTENSION_DANGEROUS, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, ErrorCode.MEDIA_TYPE_UNKNOWN,
@@ -406,34 +406,43 @@ async def nginx_upload_file(
     if not settings.storage.enable_nginx:
         raise ApiError(ErrorCode.NGINX_UPLOAD_DISABLED)
 
-    temp_file_path = x_file_name
-    if not temp_file_path:
+    if not x_file_name:
         raise ApiError(ErrorCode.NGINX_FILE_NAME_MISSING)
-    original_filename = x_original_filename or "uploaded_file"
-    registry = await formats.load_registry(session)
-    spec = check_declared_format(registry, media_type, original_filename, request.headers.get("content-type"))
-    media_type = spec.media_type
-
-    await load_observation_for_upload(session, auth, observation_id)
+    # Only a file nginx wrote in its upload temp directory is ever touched; the header is not trusted as a path
+    temp_file = uploads.resolve_nginx_temp_file(x_file_name, settings.storage.nginx_upload_temp_path)
+    if temp_file is None:
+        _logger.warning(f"Nginx upload refused: X-File-Name {x_file_name!r} is not a file in the upload temp directory")
+        raise ApiError(ErrorCode.NGINX_FILE_NAME_INVALID)
 
     try:
-        media_file_id = await get_media_manager().store_file_from_path(
-            session=session,
-            observation_id=observation_id,
-            source_path=temp_file_path,
-            original_filename=original_filename,
-            media_type=media_type,
-            user_id=auth.user.id,
-            validation_config=validation_config_for(registry, spec),
-        )
-    except FileTooLarge as e:
-        raise too_large(spec, e.actual_bytes)
-    except UnsupportedMediaFormat as e:
-        _logger.warning(f"Nginx upload rejected (format): {e}")
-        raise format_rejected(registry, e)
-    except CodedError as e:
-        _logger.warning(f"Nginx upload rejected: {e}")
-        raise store_rejected(e)
+        original_filename = x_original_filename or "uploaded_file"
+        registry = await formats.load_registry(session)
+        spec = check_declared_format(registry, media_type, original_filename, request.headers.get("content-type"))
+        media_type = spec.media_type
+
+        await load_observation_for_upload(session, auth, observation_id)
+
+        try:
+            media_file_id = await get_media_manager().store_file_from_path(
+                session=session,
+                observation_id=observation_id,
+                source_path=str(temp_file),
+                original_filename=original_filename,
+                media_type=media_type,
+                user_id=auth.user.id,
+                validation_config=validation_config_for(registry, spec),
+            )
+        except FileTooLarge as e:
+            raise too_large(spec, e.actual_bytes)
+        except UnsupportedMediaFormat as e:
+            _logger.warning(f"Nginx upload rejected (format): {e}")
+            raise format_rejected(registry, e)
+        except CodedError as e:
+            _logger.warning(f"Nginx upload rejected: {e}")
+            raise store_rejected(e)
+    finally:
+        # nginx never deletes the body file; a successful store moved it, every other outcome leaves it here
+        temp_file.unlink(missing_ok=True)
 
     media_file = await record_upload(request, session, auth, media_file_id, observation_id, original_filename, background_tasks, "nginx offload")
     return upload_result(media_file, "nginx offload")

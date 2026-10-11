@@ -286,6 +286,9 @@ class StorageConfig(BaseModel):
     enable_nginx: bool = False
 
     nginx_upload_temp_path: str = "/var/www/nginx_uploads"
+    # Files in nginx_upload_temp_path older than this are leftovers (requests nginx accepted and the API
+    # refused before its handler ran); `media_tools sweep-nginx-temp` deletes them
+    nginx_upload_temp_max_age_hours: int = 24
     nginx_internal_uploads_prefix: str = "/protected_uploads"
 
     # ffmpeg binaries used by the media worker. A bare name is looked up on PATH;

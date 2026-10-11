@@ -199,3 +199,11 @@ def test_the_access_log_records_the_request_id():
     assert all(found and "$request_id" in found.group(1) for found in formats)
     assert formats[0].group(1) == formats[1].group(1), "the e2e stack logs like production"
     assert re.search(r"access_log \S+ watch_web;", _without_blocks(APP, "location"))
+
+
+def test_upload_temp_path_agrees_with_the_api_setting():
+    """The API accepts X-File-Name only inside storage.nginx_upload_temp_path: nginx must write there"""
+    declared = re.findall(r"client_body_temp_path\s+(\S+)", _directives(APP))
+    assert declared == [settings.storage.nginx_upload_temp_path]
+    assert f"{settings.storage.nginx_upload_temp_path}" in E2E_COMPOSE
+    assert "NGINX_UPLOAD_TEMP" in (ROOT / "docker-compose.yml").read_text(encoding="utf-8")

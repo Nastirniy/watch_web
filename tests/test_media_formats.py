@@ -125,16 +125,20 @@ async def test_upload_respects_per_format_size_limit_and_deactivation(client, db
 
 
 @pytest.mark.asyncio
-async def test_nginx_upload_checks_declared_format_before_the_temp_file(client, db, headers, monkeypatch):
+async def test_nginx_upload_checks_declared_format_before_the_temp_file(client, db, headers, monkeypatch, tmp_path):
     monkeypatch.setattr(settings.storage, "enable_nginx", True)
+    monkeypatch.setattr(settings.storage, "nginx_upload_temp_path", str(tmp_path))
+    temp_file = tmp_path / "0000000001"
+    temp_file.write_bytes(b"not read")
     user, observation = await _scene(db)
     response = await client.post(
         NGINX_UPLOAD, params={"observation_id": observation.id, "media_type": "video"},
-        headers={"X-File-Name": "/nonexistent/tmp/0000000001", "X-Original-Filename": "clip.avi", **headers(user)},
+        headers={"X-File-Name": str(temp_file), "X-Original-Filename": "clip.avi", **headers(user)},
         content=b"",
     )
     assert response.status_code == 415, response.text
     assert response.headers["accept-post"].startswith("video/mp4")
+    assert not temp_file.exists()
 
 
 # ----------------------------------------------------------------- admin CRUD

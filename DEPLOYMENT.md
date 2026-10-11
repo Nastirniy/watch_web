@@ -124,6 +124,8 @@ Upgrades: `docker compose build api && docker compose up -d api media-worker`. T
 
 Upgrading to sizes as displayed (vertical phone videos, EXIF-rotated photos): rows stored before keep the stored frame size until probed again. `docker compose exec media-worker python -m app.backend.cli.media_tools probe-missing --all` probes every video and audio file again and re-reads every image size (headers only; `--limit N` per run, default 1000). Video uploads that failed only because they have no video stream become `unsupported` after `media_tools reconcile-posters --retry-failed`: the worker sees the probed metadata and stops trying.
 
+Offloaded uploads (`/api/v1/media/nginx-upload`): nginx keeps the request body in `NGINX_UPLOAD_TEMP` (`client_body_in_file_only` never deletes it). The API accepts `X-File-Name` only for a regular file inside that directory (`storage.nginx_upload_temp_path`, same path as `client_body_temp_path`), moves it on success and deletes it on every other outcome once the path is checked. A request refused before the handler runs (an expired token, 401) leaves its file, so sweep the directory from cron: `docker compose exec api python -m app.backend.cli.media_tools sweep-nginx-temp` deletes files older than `storage.nginx_upload_temp_max_age_hours` (24 by default; `--max-age-hours N` overrides it). Keep the age above the longest upload, nginx may still be writing a younger file.
+
 ## Storyboards (seek previews)
 
 The media worker also builds a storyboard (sprite sheets, one ffmpeg pass over the keyframes with the last frame
