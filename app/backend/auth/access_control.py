@@ -19,7 +19,7 @@ class AccessControlService:
     - post.access_all: every post is readable and writable
     - otherwise: home post (users.post_id) is readable and writable, rows in
       user_post_access are readable, and writable when can_write is set
-    - an archived post is in no home-post or access-row scope (auth/context.py, scope_post_rows); its
+    - an archived post is in no home-post or access-row scope (auth/context.py, _legacy_data_scope); its
       data is read-only, writes answer 409 post_archived (api/shared/helpers/post_helper.py)
     - admin.true plays no role here; it only gates administration routes
     """

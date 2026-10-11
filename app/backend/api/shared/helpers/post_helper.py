@@ -1,7 +1,7 @@
 """Archived posts: the data of an archived post is read-only history.
 
 The read side needs nothing here: an archived post leaves every data scope that came from a home post or a
-user_post_access row (auth/context.py, scope_post_rows), so only post.access_all still reads it. The write side is
+user_post_access row (auth/context.py, _legacy_data_scope), so only post.access_all still reads it. The write side is
 refuse_archived_post: every write into the data of a post (observations, bands, tags, media, uploads, posters) and
 every assignment of a post (home post, access row) answers 409 post_archived. Call it after the scope and ownership
 checks, so an outsider still gets its 403 first.
