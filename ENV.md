@@ -15,7 +15,7 @@ Variables marked `[REQUIRED in prod]` have an insecure or wrong default and must
 | Variable | Description |
 |----------|-------------|
 | `MYSETTINGS_DATABASE__PASSWORD` | MySQL password. No default. |
-| `MYSETTINGS_SECURITY__SECRET_KEY` | JWT signing key. No default. Generate: `python3 -c "import secrets; print(secrets.token_hex(32))"` |
+| `MYSETTINGS_SECURITY__SECRET_KEY` | JWT signing key. No default; in production an empty value or a placeholder (`your-secret-key-change-this-in-production`, the one in `app/config.toml`, and `CHANGE_ME`, the one in `.env.example`) stops the start. Generate: `python3 -c "import secrets; print(secrets.token_hex(32))"` |
 
 ---
 
@@ -27,7 +27,7 @@ Variables marked `[REQUIRED in prod]` have an insecure or wrong default and must
 | `MYSETTINGS_DATABASE__HOST` | `localhost` | Set to your database host |
 | `MYSETTINGS_DATABASE__USER` | `dbuser` | Set to your database user |
 | `MYSETTINGS_DATABASE__NAME` | `radio_monitoring` | Set to your database name |
-| `MYSETTINGS_APP__ENVIRONMENT` | `production` | Must be `production` (disables debug output) |
+| `MYSETTINGS_APP__ENVIRONMENT` | `production` | Must be `production` (disables debug output). The Docker image sets it; the committed `app/config.toml` (local runs) says `development`, so a venv deployment must set it |
 | `MYSETTINGS_APP__DEBUG` | `false` | Must stay `false` in production |
 
 ---
@@ -38,7 +38,7 @@ Variables marked `[REQUIRED in prod]` have an insecure or wrong default and must
 |----------|---------|-------------|
 | `MYSETTINGS_APP__NAME` | `Radio Monitoring System` | Application name shown in logs |
 | `MYSETTINGS_APP__DEBUG` | `false` | Enable debug mode |
-| `MYSETTINGS_APP__ENVIRONMENT` | `production` | `development` or `production` |
+| `MYSETTINGS_APP__ENVIRONMENT` | `production` in the code and the Docker image, `development` in `app/config.toml` | `development` or `production`. Outside production a warning line is logged at start; in production a placeholder secret stops the start |
 | `MYSETTINGS_APP__PROBLEM_BASE_URL` | empty | Base of the `type` URI of every error (RFC 9457), e.g. `https://monitoring.example/problems`. Empty: the request origin + `/problems`, served by the API itself |
 
 ---
@@ -61,7 +61,7 @@ Variables marked `[REQUIRED in prod]` have an insecure or wrong default and must
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MYSETTINGS_SECURITY__SECRET_KEY` | **[REQUIRED]** | JWT signing key |
+| `MYSETTINGS_SECURITY__SECRET_KEY` | **[REQUIRED]** | JWT signing key; production refuses an empty or placeholder value |
 | `MYSETTINGS_SECURITY__ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | Access token lifetime in minutes, never beyond the hard end of its session |
 | `MYSETTINGS_SECURITY__SESSION_IDLE_TIMEOUT_MINUTES` | `30` | A session ends after this long without a request; every request and refresh moves the end |
 | `MYSETTINGS_SECURITY__SESSION_MAX_HOURS` | `0` | Optional hard limit since the login, whatever the activity. `0`: an active session never ends by itself |
@@ -73,7 +73,8 @@ Variables marked `[REQUIRED in prod]` have an insecure or wrong default and must
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MYSETTINGS_SERVER__HOST` | `127.0.0.1` | Bind address (use `0.0.0.0` behind a reverse proxy) |
+| `MYSETTINGS_SERVER__HOST` | `127.0.0.1` | Bind address. Keep `127.0.0.1`: host nginx connects from the same machine, and with host networking (`docker-compose.yml`) `0.0.0.0` would open the port to the network, where anyone could send `X-SSL-Client-*` headers nginx never saw. Never `0.0.0.0` behind a reverse proxy on the same host. The Docker image itself defaults to `0.0.0.0` for bridge networks; `docker-compose.yml` overrides it |
+| `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Not a `MYSETTINGS_` variable: uvicorn reads it. Addresses whose `X-Forwarded-For` / `X-Forwarded-Proto` are trusted (uvicorn 0.35 default when `--forwarded-allow-ips` is not passed). The image no longer passes `*`. Set it only when nginx connects from another address (a bridge network); never `*` where the port is reachable by clients |
 | `MYSETTINGS_SERVER__PORT` | `8000` | Bind port |
 | `MYSETTINGS_SERVER__WORKERS` | `4` | Number of Uvicorn workers |
 | `MYSETTINGS_SERVER__SSL_KEYFILE` | *(none)* | Path to SSL private key |
@@ -203,8 +204,8 @@ Seek previews (sprite sheets) made by the media worker with ffmpeg, only while t
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MYSETTINGS_HEALTH__ENABLE_HOST_CHECK` | `true` | Restrict `/health` to allowed hosts |
-| `MYSETTINGS_HEALTH__ALLOWED_HOSTS` | `["127.0.0.1", "localhost", "::1"]` | Hosts allowed to call `/health` |
+| `MYSETTINGS_HEALTH__ENABLE_HOST_CHECK` | `true` in production, `false` in development | Restrict `/health` to allowed client addresses. Unset: follows the environment; set it to decide explicitly |
+| `MYSETTINGS_HEALTH__ALLOWED_HOSTS` | `["127.0.0.1", "localhost", "::1"]` | Client addresses allowed to call `/health` (`request.client.host`: nginx passes the real peer in `X-Forwarded-For`, so a remote client is refused; call it on the host) |
 | `MYSETTINGS_HEALTH__ENABLE_RATE_LIMIT` | `true` | Rate-limit `/health` requests |
 | `MYSETTINGS_HEALTH__RATE_LIMIT_REQUESTS` | `10` | Max requests per window |
 | `MYSETTINGS_HEALTH__RATE_LIMIT_WINDOW_SECONDS` | `60` | Rate limit window in seconds |

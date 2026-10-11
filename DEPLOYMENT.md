@@ -95,12 +95,14 @@ nginx answers some requests itself, in its own format: no or an invalid client c
 
 nginx is the control point for user certificates. `ssl_verify_client on` makes every request (API, thumbnails, `/api/v1/docs`) present a certificate issued by `ssl_client_certificate`, inside its validity period and not on `ssl_crl`; anything else gets an nginx 400 page ("No required SSL certificate was sent" / "The SSL certificate error") and never reaches the API. Port 80 only redirects to 443.
 
+- The API binds `127.0.0.1` (`MYSETTINGS_SERVER__HOST`, set by `docker-compose.yml`). With host networking `0.0.0.0` would publish the port: a client reaching it directly could send `X-SSL-Client-*` headers nginx never checked and log in with public certificate data. uvicorn trusts `X-Forwarded-For` only from `FORWARDED_ALLOW_IPS` (default `127.0.0.1`, where host nginx connects from; the image no longer passes `*`), and `nginx-proxy.conf` sets `X-Forwarded-For $remote_addr` (replaces what the client sent), so `request.client.host` is the real peer and a forged header is not believed.
 - The API sees the certificate only through four headers nginx sets in `nginx-proxy.conf`: `X-SSL-Client-Verify`, `-DN`, `-Serial`, `-Fingerprint`. `POST /auth/login` maps them to a user. nginx replaces any header of these names the client sends, but only in locations that include the snippet: every location with `proxy_pass http://watch_web_api` must include it (`tests/test_nginx_conf.py` fails otherwise).
 - Revocation: a certificate added to the CRL is refused after `nginx -s reload`. Refresh the CRL before its `nextUpdate`: an expired CRL makes nginx refuse every certificate. A resumed TLS session is not checked again, for at most `ssl_session_timeout` (10 minutes). Sessions already logged in with the revoked certificate stay valid in the API until they end, but every request still needs the certificate here.
 - `ssl_verify_depth 2` accepts a user certificate issued by an intermediate CA under the root in `ssl_client_certificate`; raise it for longer chains.
-- Servers run with `MYSETTINGS_APP__ENVIRONMENT=production`. In `development` the login takes the certificate fields from a JSON body without any check.
+- Servers run with `MYSETTINGS_APP__ENVIRONMENT=production` (the Docker image sets it; `app/config.toml` says `development`, so a venv run must set it). The API refuses to start in production with an empty or placeholder `MYSETTINGS_SECURITY__SECRET_KEY`. In `development` the login takes the certificate fields from a JSON body without any check.
 - The admin user: set `MYSETTINGS_ADMIN__PKI_CERTIFICATE_CN` / `_SERIAL` / `_FINGERPRINT` from the real admin certificate (serial in hex, fingerprint SHA-1, as nginx reports them). Credentials generated on first start have no private key anyone can install; they only serve the development login.
-- Check: `curl --cert user.crt --key user.key https://host/health` answers; the same without `--cert` gets 400.
+- `/health` is limited to loopback in production (`MYSETTINGS_HEALTH__ENABLE_HOST_CHECK` defaults to on there): run the check on the host (`curl --cert ... https://127.0.0.1/health`); from another machine it answers 403.
+- Check: `curl --cert user.crt --key user.key https://host/health` answers on the host; the same without `--cert` gets 400.
 
 ## MySQL on the host
 

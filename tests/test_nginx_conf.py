@@ -207,3 +207,11 @@ def test_upload_temp_path_agrees_with_the_api_setting():
     assert declared == [settings.storage.nginx_upload_temp_path]
     assert f"{settings.storage.nginx_upload_temp_path}" in E2E_COMPOSE
     assert "NGINX_UPLOAD_TEMP" in (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+
+
+def test_nginx_replaces_the_client_forwarded_for_with_the_peer_address():
+    """$proxy_add_x_forwarded_for appends to what the client sent, and uvicorn takes the leftmost entry as the
+    client: a forged X-Forwarded-For would become request.client.host"""
+    proxy = _directives(PROXY)
+    assert "proxy_set_header X-Forwarded-For $remote_addr;" in proxy
+    assert "$proxy_add_x_forwarded_for" not in proxy

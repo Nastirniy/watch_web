@@ -72,6 +72,9 @@ services:
       MYSETTINGS_SERVER__HOST: 0.0.0.0
       MYSETTINGS_SERVER__PORT: "8000"
       MYSETTINGS_SERVER__WORKERS: "2"
+      # nginx is another container here, so its address is not 127.0.0.1. Test stack only: the bridge network
+      # is private to the stack; production keeps uvicorn's default (127.0.0.1, host nginx).
+      FORWARDED_ALLOW_IPS: "*"
       MYSETTINGS_STORAGE__ENABLE_NGINX: "true"
       MYSETTINGS_STORAGE__NGINX_UPLOAD_TEMP_PATH: /var/www/nginx_uploads
       MYSETTINGS_STORAGE__IMGPROXY__URL: http://imgproxy:8080

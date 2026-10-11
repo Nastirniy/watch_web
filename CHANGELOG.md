@@ -149,6 +149,17 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ### Changed (operators)
 
+- Deployment defaults are closed: `nginx-proxy.conf` sets `X-Forwarded-For $remote_addr` (replace, not append; reload
+  nginx and re-install the snippet), the image no longer starts uvicorn with `--forwarded-allow-ips '*'` (it trusts
+  `127.0.0.1`, or `FORWARDED_ALLOW_IPS` when nginx connects from another address) and the image sets
+  `MYSETTINGS_APP__ENVIRONMENT=production` (`app/config.toml`, used by local runs, stays `development`). A forged
+  `X-Forwarded-For: 127.0.0.1` passed the `/health` host check and a forged session IP was stored. The test stack
+  sets `FORWARDED_ALLOW_IPS=*` because its nginx is a container.
+- The API refuses to start in production when `security.secret_key` is empty, `your-secret-key-change-this-in-production`
+  or `CHANGE_ME` (case ignored); set `MYSETTINGS_SECURITY__SECRET_KEY`. Outside production one warning line is logged at
+  start. `health.enable_host_check` defaults to on in production (off in development; set it to decide), and the
+  committed `app/config.toml` no longer lists `"*"` in `health.allowed_hosts`: `/health` answers only requests from
+  the host itself. ENV.md and DEPLOYMENT.md state the defaults and why the API binds `127.0.0.1`.
 - Run the migration `018_media_file_size_bigint` (it runs at startup): on MySQL it alters `media_files.file_size` to
   BIGINT, keeps every row and is skipped when the column is already BIGINT (sqlite needs no change). The downgrade turns
   the column back into INT and fails while a file over 2 GiB is stored.

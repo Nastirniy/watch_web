@@ -3,6 +3,7 @@ from fastapi import FastAPI
 
 from app.backend.config import settings
 from app.backend.utils.logging_config import setup_logging, get_logger, get_main_logger
+from app.backend.bootstrap.deployment import check_deployment
 from app.backend.bootstrap.startup import initialize_database_with_migrations
 from app.backend.errors.handlers import register_error_handlers
 from app.backend.request_id import RequestIdMiddleware
@@ -63,6 +64,7 @@ operation ids are the endpoint names (`update_post`).
 async def lifespan(app: FastAPI):
     """Manage application lifecycle"""
     try:
+        check_deployment(settings)
         _logger.info("Starting application...")
         await initialize_database_with_migrations()
         _logger.info("Database initialization completed. Server ready.")

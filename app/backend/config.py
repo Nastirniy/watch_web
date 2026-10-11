@@ -317,7 +317,8 @@ class HealthConfig(BaseModel):
     rate_limit_requests: int = 10
     rate_limit_window_seconds: int = 60
     enable_rate_limit: bool = True
-    enable_host_check: bool = True
+    # None: on in production, off elsewhere (resolved in Settings); set it to decide explicitly
+    enable_host_check: Optional[bool] = None
 
     @field_validator('rate_limit_requests')
     @classmethod
@@ -396,6 +397,8 @@ class Settings(BaseSettings):
                 kwargs[field_name] = field_type(**config_data[field_name])
 
         super().__init__(**kwargs)
+        if self.health.enable_host_check is None:
+            self.health.enable_host_check = self.app.environment == AppEnvironment.PRODUCTION.value
 
 
 settings = Settings()

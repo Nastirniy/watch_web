@@ -41,13 +41,17 @@ ENV USER=watchweb \
     LOGNAME=watchweb \
     HOME=/tmp
 
-# Defaults; docker-compose.yml overrides them with the host paths from .env
-ENV MYSETTINGS_STORAGE__UPLOAD_PATH=/srv/uploads \
+# Defaults; docker-compose.yml overrides them with the host paths from .env.
+# The image runs in production (config.toml, used by local runs, is development): the app refuses to start there
+# without a real MYSETTINGS_SECURITY__SECRET_KEY. uvicorn trusts X-Forwarded-* only from FORWARDED_ALLOW_IPS
+# (127.0.0.1 when unset), which is where host nginx connects from.
+ENV MYSETTINGS_APP__ENVIRONMENT=production \
+    MYSETTINGS_STORAGE__UPLOAD_PATH=/srv/uploads \
     MYSETTINGS_STORAGE__TEMP_PATH=/srv/temp \
     MYSETTINGS_SERVER__HOST=0.0.0.0 \
     MYSETTINGS_SERVER__PORT=8000 \
     MYSETTINGS_SERVER__WORKERS=4
 
 EXPOSE 8000
-# Shell form so host, port and worker count follow the environment (host networking binds 127.0.0.1)
-CMD ["sh", "-c", "exec python -m uvicorn app.main:fastapi_app --host \"$MYSETTINGS_SERVER__HOST\" --port \"$MYSETTINGS_SERVER__PORT\" --workers \"$MYSETTINGS_SERVER__WORKERS\" --proxy-headers --forwarded-allow-ips '*'"]
+# Shell form so host, port and worker count follow the environment (docker-compose.yml binds 127.0.0.1)
+CMD ["sh", "-c", "exec python -m uvicorn app.main:fastapi_app --host \"$MYSETTINGS_SERVER__HOST\" --port \"$MYSETTINGS_SERVER__PORT\" --workers \"$MYSETTINGS_SERVER__WORKERS\" --proxy-headers"]

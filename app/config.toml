@@ -123,8 +123,8 @@ retry_after_seconds = 30  # Retry-After of the 202 answer
 
 [health]
 # Health endpoint security configuration
-allowed_hosts = ["127.0.0.1", "localhost", "::1", "*"]  # Hosts allowed to access health endpoint. Use "*" to allow all
+allowed_hosts = ["127.0.0.1", "localhost", "::1"]  # Client addresses allowed to call /health ("*" allows all)
 rate_limit_requests = 10  # Maximum requests per window (1-1000)
 rate_limit_window_seconds = 60  # Rate limit window in seconds (10-3600)
 enable_rate_limit = true  # Enable rate limiting for health endpoint
-enable_host_check = false  # Enable host restrictions for health endpoint (set to true in production)
+# enable_host_check: left out = on in production, off in development; set true/false to decide explicitly
