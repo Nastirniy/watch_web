@@ -22,6 +22,7 @@ from app.backend.api.v1.models.query.posts import PostFilterParams
 from app.backend.filters.post_filter import PostFilterService
 from app.backend.api.v1.models.response.posts import PostResponse, PostObservationStatsResponse, post_to_response
 from app.backend.services.observation_counts import post_observation_stats
+from app.backend.services.scope_groups import get_group
 from app.backend.errors.problems import ApiError
 from app.backend.errors.coded import CodedError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
@@ -74,7 +75,20 @@ async def list_posts(
     return [post_to_response(post) for post in result.all()]
 
 
-@router.post(PostRoutes.ROOT.value, response_model=PostResponse, responses=problems(ErrorCode.POST_CODE_TAKEN, *ADMIN))
+async def _check_group(session: AsyncSession, group_id: Optional[int]) -> None:
+    """The group of a post exists and is not archived (null: directly under the root)"""
+    if group_id is None:
+        return
+    try:
+        await get_group(session, group_id)
+    except CodedError as exc:
+        raise ApiError.from_coded(exc)
+
+
+@router.post(
+    PostRoutes.ROOT.value, response_model=PostResponse,
+    responses=problems(ErrorCode.POST_CODE_TAKEN, ErrorCode.SCOPE_GROUP_NOT_FOUND, *ADMIN),
+)
 async def create_post(
         request: Request,
         post_data: PostCreate,
@@ -87,6 +101,7 @@ async def create_post(
     result = await session.exec(_code_taken(post_data.code))
     if result.first():
         raise ApiError(ErrorCode.POST_CODE_TAKEN)
+    await _check_group(session, post_data.group_id)
 
     post = Post(**post_data.model_dump())
     session.add(post)
@@ -186,7 +201,7 @@ async def get_post_observation_stats(
 @router.put(
     PostRoutes.POST_BY_ID.value,
     response_model=PostResponse,
-    responses=problems(ErrorCode.POST_CODE_TAKEN, ErrorCode.POST_NOT_FOUND, *ADMIN),
+    responses=problems(ErrorCode.POST_CODE_TAKEN, ErrorCode.POST_NOT_FOUND, ErrorCode.SCOPE_GROUP_NOT_FOUND, *ADMIN),
 )
 async def update_post(
         request: Request,
@@ -215,6 +230,8 @@ async def update_post(
         existing = await session.exec(_code_taken(update_data["code"], exclude_post_id=post_id))
         if existing.first():
             raise ApiError(ErrorCode.POST_CODE_TAKEN)
+    if update_data.get("group_id") is not None:
+        await _check_group(session, update_data["group_id"])
 
     # Store old values for auditing
     old_values = post.model_dump()

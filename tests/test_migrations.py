@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-HEAD = "020_post_archive"
+HEAD = "021_scope_groups"
 
 
 def run_migrate(db_file: Path, cwd: Path = PROJECT_ROOT) -> subprocess.CompletedProcess:
@@ -76,8 +76,9 @@ def test_migration_chain_on_empty_database(tmp_path):
 
     conn = sqlite3.connect(db_file)
     tables = {row[0] for row in conn.execute("select name from sqlite_master where type='table'")}
-    assert {"users", "roles", "permissions", "observations", "media_files", "user_post_access", "worker_heartbeats", "media_formats", "upload_sessions", "observation_frequencies", "video_storyboards"} <= tables
+    assert {"users", "roles", "permissions", "observations", "media_files", "user_post_access", "worker_heartbeats", "media_formats", "upload_sessions", "observation_frequencies", "video_storyboards", "scope_groups"} <= tables
     assert conn.execute("select version_num from alembic_version").fetchone()[0] == HEAD
+    assert "group_id" in {row[1] for row in conn.execute("pragma table_info(posts)")}
     media_columns = {row[1] for row in conn.execute("pragma table_info(media_files)")}
     assert {"poster_status", "poster_attempts", "poster_locked_until", "poster_worker", "poster_generated_at", "poster_error"} <= media_columns
     assert "thumbnail_path" not in media_columns and "thumbnail_error" not in media_columns

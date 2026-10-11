@@ -72,6 +72,20 @@ class PostRoutes(str, Enum):
         return "POSTS"
 
 
+class ScopeGroupRoutes(str, Enum):
+    """Scope groups: nested groups of posts"""
+    BASE = "/scope-groups"
+    ROOT = "/"  # collection: list and create
+    TREE = "/tree"
+    GROUP_BY_ID = "/{group_id}"
+    GROUP_ARCHIVE = "/{group_id}/archive"
+    GROUP_RESTORE = "/{group_id}/restore"
+
+    @staticmethod
+    def tag() -> str:
+        return "SCOPE_GROUPS"
+
+
 class ObservationRoutes(str, Enum):
     """Observation management routes"""
     BASE = "/observations"
@@ -251,6 +265,7 @@ class Routes:
     SYSTEM = SystemRoutes
     AUTH = AuthRoutes
     POSTS = PostRoutes
+    SCOPE_GROUPS = ScopeGroupRoutes
     STATISTICS = StatisticsRoutes
     OBSERVATIONS = ObservationRoutes
     MEDIA = MediaRoutes

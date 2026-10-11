@@ -34,6 +34,7 @@ TABLES_OWNED_BY_LATER_REVISIONS = {
     "upload_sessions",  # 011_upload_sessions
     "observation_frequencies",  # 012_observation_frequencies
     "video_storyboards",  # 017_video_storyboards
+    "scope_groups",  # 021_scope_groups
 }
 down_revision = "001_relativize_media_paths"
 branch_labels = None
@@ -162,6 +163,13 @@ def upgrade() -> None:
         if table.name in TABLES_OWNED_BY_LATER_REVISIONS:
             continue
         if table.name not in existing_tables:
+            # A foreign key to a table owned by a later revision (posts.group_id -> scope_groups) needs its target
+            for fk in table.foreign_keys:
+                target = fk.column.table
+                if target.name in TABLES_OWNED_BY_LATER_REVISIONS and target.name not in existing_tables:
+                    _log(f"creating {target.name} first: {table.name} refers to it")
+                    target.create(bind, checkfirst=True)
+                    existing_tables.add(target.name)
             _log(f"creating missing table {table.name}")
             table.create(bind, checkfirst=True)
             existing_tables.add(table.name)

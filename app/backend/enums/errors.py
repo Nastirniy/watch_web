@@ -226,6 +226,18 @@ class ErrorCode(ProblemType):
     POST_ARCHIVED = ("post_archived", problem(
         409, "Post is archived", "Post {post_id} is archived: its data is read-only", post_id=int))
 
+    # ---------------------------------------------------------------- scope groups
+    SCOPE_GROUP_NOT_FOUND = ("scope_group_not_found", problem(404, "Scope group not found"))
+    SCOPE_GROUP_NOT_ARCHIVED = ("scope_group_not_archived", problem(409, "Scope group is not archived"))
+    SCOPE_GROUP_NOT_EMPTY = ("scope_group_not_empty", problem(
+        409, "Scope group is not empty", "Scope group has active groups or posts: move or archive them first"))
+    SCOPE_GROUP_CYCLE = ("scope_group_cycle", problem(
+        409, "Scope group cannot move into its own subtree", "A group cannot become a child of itself or of its descendant"))
+    SCOPE_GROUP_DEPTH_EXCEEDED = ("scope_group_depth_exceeded", problem(
+        409, "Scope group tree is too deep", "Groups can be nested at most {max_depth} levels deep", max_depth=int))
+    SCOPE_GROUP_NAME_TAKEN = ("scope_group_name_taken", problem(
+        409, "Scope group name already exists", "A group with this name already exists under the same parent"))
+
     # ---------------------------------------------------------------- dictionaries
     CATEGORY_NOT_FOUND = ("category_not_found", problem(404, "Category not found", category_id=Optional[int]))
     CATEGORY_NOT_ARCHIVED = ("category_not_archived", problem(409, "Category is not archived"))

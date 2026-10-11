@@ -5,6 +5,26 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Authorization v2
+
+### Added
+
+- Scope groups: nested groups of posts (migration `021_scope_groups`, table `scope_groups`, column `posts.group_id`).
+  `GET/POST /scope-groups/`, `GET /scope-groups/tree`, `GET/PATCH /scope-groups/{group_id}`,
+  `POST /scope-groups/{group_id}/archive` and `/restore`. Names are unique within a parent (archived groups included),
+  groups nest at most 6 levels deep, a group cannot move into its own subtree, only an empty group can be archived.
+  Errors: `scope_group_not_found`, `scope_group_not_archived`, `scope_group_not_empty`, `scope_group_cycle`,
+  `scope_group_depth_exceeded` (`max_depth`), `scope_group_name_taken`.
+- Permissions `scope_group.view`, `scope_group.create`, `scope_group.update`, `scope_group.archive` (the routes also need
+  `admin.true` for now; nothing reads the tree for authorization yet).
+- `group_id` on `PostCreate`, `PostUpdate` and `PostResponse` (null: directly under the root); an unknown or archived
+  group answers 404 `scope_group_not_found`.
+
+### Changed
+
+- `002_sync_schema` creates a table owned by a later revision first when the table it creates refers to it
+  (`posts.group_id` -> `scope_groups`), so a fresh MySQL install gets the foreign key.
+
 ## Post archiving and certificate name hash
 
 ### Fixed

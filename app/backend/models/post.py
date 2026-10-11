@@ -22,6 +22,8 @@ class Post(SQLModel, table=True):
     # Archived (POST /posts/{id}/archive): leaves every home-post and access-row data scope, its data is read-only.
     # NOT NULL with a server default like the column 020 adds, so a fresh install (built by 002) gets the same column
     is_deleted: bool = Field(default=False, index=True, sa_column_kwargs={"server_default": false(), "nullable": False})
+    # Place in the scope tree (scope_groups); null: directly under the root
+    group_id: Optional[int] = Field(default=None, foreign_key="scope_groups.id", index=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

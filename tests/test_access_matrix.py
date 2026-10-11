@@ -59,6 +59,7 @@ async def test_route_gate(client, db, headers, entry, persona):
         "permission_id": (await db.exec(select(Permission.id).where(
             Permission.name.in_(perms)).order_by(Permission.id))).first() or 1,
         "format_id": 1,
+        "group_id": 1,
         "upload_id": "0" * 32,
         "session_id": "0" * 32,
     })

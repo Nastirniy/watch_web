@@ -37,9 +37,9 @@ def perm_name(permission) -> str:
     return permission.value if isinstance(permission, Permissions) else str(permission)
 
 
-async def make_post(db: AsyncSession, name: str = None) -> Post:
+async def make_post(db: AsyncSession, name: str = None, group_id: Optional[int] = None) -> Post:
     n = _next()
-    post = Post(name=name or f"Post {n}", code=f"P{n:04d}")
+    post = Post(name=name or f"Post {n}", code=f"P{n:04d}", group_id=group_id)
     db.add(post)
     await db.commit()
     await db.refresh(post)

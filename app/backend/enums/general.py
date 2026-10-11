@@ -56,6 +56,12 @@ class Permissions(Enum):
     TAG_UPDATE = "tag.update"
     TAG_ARCHIVE = "tag.archive"
 
+    # Scope group permissions (nested groups of posts)
+    SCOPE_GROUP_VIEW = "scope_group.view"
+    SCOPE_GROUP_CREATE = "scope_group.create"
+    SCOPE_GROUP_UPDATE = "scope_group.update"
+    SCOPE_GROUP_ARCHIVE = "scope_group.archive"
+
     # Media permissions
     MEDIA_VIEW = "media.view"
     MEDIA_CREATE = "media.create"

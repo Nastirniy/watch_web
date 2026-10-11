@@ -23,6 +23,7 @@ class PostCreate(BaseModel):
     description: Optional[str] = Field(None, max_length=1000, description="Post description")
     region: Optional[str] = Field(None, max_length=255, description="Post region")
     city: Optional[str] = Field(None, max_length=255, description="Post city")
+    group_id: Optional[int] = Field(default=None, gt=0, description="Scope group the post sits in; null: directly under the root")
 
     @field_validator('name', 'code')
     @classmethod
@@ -48,6 +49,7 @@ class PostUpdate(BaseModel):
     region: Optional[str] = Field(None, max_length=255, description="Post region")
     city: Optional[str] = Field(None, max_length=255, description="Post city")
     is_active: Optional[bool] = None
+    group_id: Optional[int] = Field(default=None, gt=0, description="Scope group the post sits in; null: directly under the root")
 
     # Validators do not run on the default, so None here is an explicit null for a NOT NULL column
     @field_validator('name', 'code')
