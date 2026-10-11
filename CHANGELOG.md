@@ -18,13 +18,43 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - A certificate subject with several CNs: the login reads the same CN the certificate upload stores (the first in the
   certificate), from nginx's RFC 2253 form and from the legacy `/CN=` form.
 
+### Changed
+
+- Posts are archived like every other entity: `POST /posts/{post_id}/archive` and `POST /posts/{post_id}/restore`
+  (administration: `post.view` and `post.archive` plus `admin.true`; `post.archive` was seeded but had no route).
+  Archiving an archived or unknown post answers 404 `post_not_found`, restoring a live post 409 `post_not_archived`;
+  audit rows `archive` / `restore`. `PUT /posts/{post_id}` answers 404 for an archived post and `is_deleted` is never
+  read from a request body. `PostResponse` gained `is_deleted`. `GET /posts/` and `GET /search/posts` hide archived
+  posts unless `include_deleted=true` (requires `post.archive`, otherwise 403 `permission_required_for_action`, now
+  declared on both); `GET /posts/{post_id}` answers 404 for an archived post unless the caller holds `post.archive` or
+  is an administrator.
+- Data scope: an archived post leaves the scope of its home users and of its `user_post_access` rows, so every list,
+  search, report, statistics, `observation-stats` and single-resource check follows (403 for the data of the post,
+  `accessible_post_ids` of login and `GET /auth/me` leaves it out). Only `post.access_all` still reads its data; an
+  administrator without `post.access_all` does not (observations, media and reports have no administrator
+  exception). Archiving changes no user row: home posts and access rows stay and apply again after a restore.
+- New problem code `post_archived` (409, param `post_id`): the data of an archived post is read-only. Answered after
+  the 403 checks by observation create, update (tags included), mark disappeared, every band change, media upload
+  (multipart, nginx, resumable create and complete; a session waits open and completes after a restore, UPLOADS.md
+  lists it), media
+  archive and restore, and poster regenerate. Observation archive and restore answer it to everyone but administrators
+  (`admin.true` with `observation.view` and `observation.archive`). `POST /users/`, `PATCH /users/{user_id}` (moving a
+  user onto the post) and `PUT /users/{user_id}/post-access/{post_id}` answer it too. `post_archived` and
+  `post_not_archived` are new keys for the web localization package; the routes declare them and
+  `api-contract/v1/openapi.json` was rewritten (the two routes, `PostArchivedProblem`, `PostNotArchivedProblem`,
+  `PostResponse.is_deleted`, `include_deleted` on the post lists, descriptions).
+
 ### Changed (operators)
 
 - Migration `019_certificate_cn_hash_scheme` adds `users.pki_certificate_cn_hash_scheme` (small integer, NOT NULL, server
   default 1) and runs at startup. Certificates already in the database stay scheme 1 and keep working; they are not
   upgraded automatically (the name itself is not stored) - a user moves to scheme 2 when their certificate is replaced.
   Every certificate stored from now on, the first admin from the configuration included, is scheme 2. Downgrading drops
-  the column: users of scheme 2 cannot log in with the older code until their certificate is replaced.
+  the column: users of scheme 2 cannot log in with the older code until their certificate is replaced. A fresh install
+  creates the same SMALLINT column (the model declares it now).
+- Migration `020_post_archive` adds `posts.is_deleted` (boolean, NOT NULL, server default false, index
+  `ix_posts_is_deleted`) and runs at startup; it archives no post, and a fresh install creates the same column from the
+  model. Downgrading drops the column and its index: archived posts become live again.
 
 ## API audit fixes
 

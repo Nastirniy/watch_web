@@ -63,6 +63,8 @@ class PostRoutes(str, Enum):
     BASE = "/posts"
     ROOT = "/"  # collection: list and create (the trailing slash is part of the published path)
     POST_BY_ID = "/{post_id}"
+    POST_ARCHIVE = "/{post_id}/archive"
+    POST_RESTORE = "/{post_id}/restore"
     POST_OBSERVATION_STATS = "/{post_id}/observation-stats"
 
     @staticmethod

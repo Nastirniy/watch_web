@@ -50,7 +50,10 @@ async def _commit_post(session: AsyncSession) -> None:
         raise
 
 
-@router.get(PostRoutes.ROOT.value, response_model=List[PostResponse], responses=problems(*GUARDED))
+@router.get(
+    PostRoutes.ROOT.value, response_model=List[PostResponse],
+    responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
+)
 async def list_posts(
         filters: Annotated[PostFilterParams, Query()],
         session: AsyncSession = Depends(get_session),
@@ -60,8 +63,11 @@ async def list_posts(
 
     Note:
         - Administrators (admin.true) see every post record
-        - Everyone else sees the posts of their data scope (home post, user_post_access, or all with post.access_all)
+        - Everyone else sees the posts of their data scope (home post, user_post_access, or all with post.access_all);
+          an archived post leaves the home-post and access-row scope
+        - Archived posts only with include_deleted (requires post.archive)
     """
+    AccessControlService.check_include_deleted(auth, filters, Permissions.POST_ARCHIVE)
     query = select(Post)
     query = PostFilterService.apply_filters(query, filters, AccessControlService.post_record_scope(auth))
     result = await session.exec(query)
@@ -120,6 +126,7 @@ async def get_post(
     Note:
         - Administrators (admin.true) can view any post record
         - Everyone else needs the post in their data scope
+        - An archived post answers 404 unless the caller holds post.archive or is an administrator
     """
     AccessControlService.check_post_record_view(auth, post_id)
 
@@ -130,6 +137,10 @@ async def get_post(
     post = result.first()
 
     if not post:
+        raise ApiError(ErrorCode.POST_NOT_FOUND)
+    # The state after the scope: archived posts are for those who manage the archive (and administrators, whose
+    # post.view is the route's)
+    if post.is_deleted and not (auth.is_admin or auth.has(Permissions.POST_ARCHIVE)):
         raise ApiError(ErrorCode.POST_NOT_FOUND)
 
     return post_to_response(post)
@@ -187,6 +198,7 @@ async def update_post(
     """Update post by ID. Administration route: any post, only for administrators.
 
     Only the fields sent are changed; null is refused for name, code and is_active (omit them instead).
+    Archived posts answer 404 until restored (POST /{post_id}/restore); is_deleted is never read from the body.
     """
     current_user = auth.user
     result = await session.exec(
@@ -194,7 +206,7 @@ async def update_post(
     )
     post = result.first()
 
-    if not post:
+    if not post or post.is_deleted:
         raise ApiError(ErrorCode.POST_NOT_FOUND)
 
     # Check code uniqueness if being updated
@@ -231,3 +243,77 @@ async def update_post(
 
     return post_to_response(post)
 
+
+async def _set_post_archived(
+        request: Request,
+        session: AsyncSession,
+        auth: AuthContext,
+        post_id: int,
+        archived: bool,
+) -> PostResponse:
+    """Shared body of archive / restore: state checks, flag flip, audit row (administration: any post)"""
+    current_user = auth.user
+    post = (await session.exec(select(Post).where(Post.id == post_id))).first()
+    if not post or (archived and post.is_deleted):
+        raise ApiError(ErrorCode.POST_NOT_FOUND)
+    if not archived and not post.is_deleted:
+        raise ApiError(ErrorCode.POST_NOT_ARCHIVED)
+
+    action = "archive" if archived else "restore"
+    old_values = post.model_dump()
+    post.is_deleted = archived
+    post.updated_at = datetime.now(timezone.utc)
+    session.add(post)
+    await create_audit_log(
+        session=session,
+        action=action,
+        resource_type="post",
+        resource_id=post.id,
+        user_id=current_user.id,
+        old_values=old_values,
+        new_values=post.model_dump(),
+        details={"message": f"User {current_user.username} {action}d post '{post.name}' ({post.code})"},
+        **client_info(request, auth)
+    )
+    await session.commit()
+    await session.refresh(post)
+    return post_to_response(post)
+
+
+@router.post(
+    PostRoutes.POST_ARCHIVE.value,
+    response_model=PostResponse,
+    responses=problems(ErrorCode.POST_NOT_FOUND, *ADMIN),
+)
+async def archive_post(
+        request: Request,
+        post_id: int,
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW, Permissions.POST_ARCHIVE], admin=True))
+):
+    """Archive a post (is_deleted=true). Administration route: any post, only for administrators.
+
+    Nothing is removed and no user row changes. The post leaves the data scope of its home users and of its
+    user_post_access rows until it is restored (they keep the rows); only post.access_all still reads its data. Its
+    observations and media become read-only history: writes answer 409 post_archived, except that administrators
+    (admin.true with observation.view and observation.archive) still archive and restore its observations. It cannot
+    become a home post or get new access rows. Hidden from lists unless include_deleted=true.
+    Undo with POST /{post_id}/restore. Already archived or unknown: 404.
+    """
+    return await _set_post_archived(request, session, auth, post_id, archived=True)
+
+
+@router.post(
+    PostRoutes.POST_RESTORE.value,
+    response_model=PostResponse,
+    responses=problems(ErrorCode.POST_NOT_FOUND, ErrorCode.POST_NOT_ARCHIVED, *ADMIN),
+)
+async def restore_post(
+        request: Request,
+        post_id: int,
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW, Permissions.POST_ARCHIVE], admin=True))
+):
+    """Restore an archived post (is_deleted=false): its home users and access rows read and write its data again.
+    Unknown: 404. Not archived: 409."""
+    return await _set_post_archived(request, session, auth, post_id, archived=False)

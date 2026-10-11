@@ -30,6 +30,7 @@ class PostCriteria(ListCriteria):
     created_at_to: Optional[datetime] = None
     last_user_activity_from: Optional[datetime] = None
     last_user_activity_to: Optional[datetime] = None
+    include_deleted: bool = False
 
 
 class PostFilterService(SimpleFilterEngine):
@@ -56,7 +57,8 @@ class PostFilterService(SimpleFilterEngine):
         """Apply all filters from PostCriteria"""
         params = cls.criteria(params)
 
-        # Post has no is_deleted field, skip soft delete
+        # Archived posts only on include_deleted
+        query = cls._apply_soft_delete(query, params)
 
         # Access control (user can only see their post)
         if access_post_ids is not None:
@@ -107,6 +109,7 @@ class PostFilterService(SimpleFilterEngine):
     ) -> Select:
         """Apply filters without pagination"""
         params = cls.criteria(params)
+        query = cls._apply_soft_delete(query, params)
         if access_post_ids is not None:
             query = query.where(Post.id.in_(list(access_post_ids)))
         query = cls._apply_exact(query, Post.id, params.id)

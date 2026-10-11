@@ -23,6 +23,7 @@ from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.services.audit import create_audit_log
 from app.backend.models.upload_session import UploadSession
 from app.backend.api.shared.helpers.media_helper import storage_root
+from app.backend.api.shared.helpers.post_helper import ensure_post_not_archived
 from app.backend.api.versioning import PublishedVersion, request_version
 from app.backend.api.shared.helpers.upload_helper import (
     check_declared_format, load_observation_for_upload, record_upload,
@@ -179,7 +180,7 @@ async def list_upload_sessions(
         **with_headers(201, "Session open", {**UPLOAD_SESSION_HEADERS, "Location": header("URL of the session: send chunks there")}),
         **problems(
             AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED,
-            ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_FILE_TOO_LARGE,
+            ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.POST_ARCHIVED, ErrorCode.MEDIA_FILE_TOO_LARGE,
             ErrorCode.MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED,
             ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, ErrorCode.MEDIA_TYPE_UNKNOWN, *GUARDED,
         ),
@@ -193,7 +194,8 @@ async def create_upload_session(
     auth: AuthContext = Depends(UPLOAD_REQUIRE),
     version: PublishedVersion = Depends(request_version),
 ):
-    """Open a resumable upload. Format, declared Content-Type and size are checked here, before any byte is sent."""
+    """Open a resumable upload. Format, declared Content-Type and size are checked here, before any byte is sent.
+    An observation of an archived post: 409 post_archived."""
     observation = await load_observation_for_upload(session, auth, body.observation_id)
     registry = await formats.load_registry(session)
     spec = check_declared_format(registry, body.media_type, body.original_filename, body.content_type)
@@ -360,7 +362,7 @@ async def append_upload_chunk(
         ErrorCode.UPLOAD_BYTES_MISSING, ErrorCode.UPLOAD_SESSION_CLOSED, ErrorCode.MEDIA_FILE_TOO_LARGE,
         ErrorCode.MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED,
         ErrorCode.MEDIA_EXTENSION_DANGEROUS, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, ErrorCode.MEDIA_TYPE_UNKNOWN,
-        ErrorCode.UPLOAD_CHECKSUM_MISMATCH, ErrorCode.MEDIA_STORE_FAILED,
+        ErrorCode.UPLOAD_CHECKSUM_MISMATCH, ErrorCode.MEDIA_STORE_FAILED, ErrorCode.POST_ARCHIVED,
         ErrorCode.MEDIA_UPLOADS_BUSY, ErrorCode.UPLOAD_SESSION_COMPLETING, ErrorCode.UPLOAD_WRITER_BUSY, *GUARDED,
     ),
 )
@@ -375,11 +377,14 @@ async def complete_upload_session(
     Turn a fully received session into a media file: size, optional sha256, format and content checks,
     then the same storage path as the other uploads. Calling it again on a completed session returns the same
     media file (200). 409 when bytes are missing (resend from Upload-Offset) or while another complete stores the
-    file; 422 on hash mismatch (session aborted); 415 / 413 as for other uploads (session aborted).
+    file; 422 on hash mismatch (session aborted); 415 / 413 as for other uploads (session aborted). The post of the
+    session archived: 409 post_archived, the session stays open and completes after a restore.
     """
     row = await _expire_if_due(session, await _owned_session(session, auth, upload_id))
     if row.status == uploads.STATUS_COMPLETED and row.media_file_id:
         return await _completed_result(session, row)
+    # A completed session above answers its file again (no write); nothing new goes into an archived post
+    await ensure_post_not_archived(session, row.post_id)
     if row.status not in (uploads.STATUS_OPEN, uploads.STATUS_COMPLETING):
         raise _closed(row)
     if int(row.received_bytes) != int(row.expected_size):

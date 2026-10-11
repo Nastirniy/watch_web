@@ -54,6 +54,7 @@ from app.backend.api.shared.helpers.upload_helper import (
     check_declared_format, format_rejected, load_observation_for_upload, record_upload, store_rejected,
     too_large, validation_config_for,
 )
+from app.backend.api.shared.helpers.post_helper import ensure_post_not_archived
 from app.backend.api.shared.helpers.media_helper import (
     get_observation_from_media,
     get_media_or_404,
@@ -243,7 +244,8 @@ async def stream_media_file(
 
 
 async def _set_media_archived(request: Request, session: AsyncSession, auth: AuthContext, media_id: int, archived: bool) -> MediaFileInfo:
-    """Shared body of archive / restore: post write access, ownership (media.manage_any overrides), flag flip, audit row."""
+    """Shared body of archive / restore: post write access, ownership (media.manage_any overrides), flag flip, audit row.
+    Media of an archived post: 409 post_archived (after the 403 checks)."""
     current_user = auth.user
     media_file = await get_media_or_404(session, media_id, include_deleted=True)
 
@@ -252,6 +254,8 @@ async def _set_media_archived(request: Request, session: AsyncSession, auth: Aut
         observation = await get_observation_from_media(session, media_file)
         AccessControlService.check_post_write(auth, observation.post_id, "media")
     AccessControlService.check_media_ownership(auth, media_file, observation)
+    if observation is not None:
+        await ensure_post_not_archived(session, observation.post_id)
 
     # The state last: an outsider gets the same 403 whatever the row looks like
     if archived and media_file.is_deleted:
@@ -280,7 +284,7 @@ async def _set_media_archived(request: Request, session: AsyncSession, auth: Aut
     responses=problems(
         AccessErrorCode.MEDIA_NOT_OWNER, AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_ACTIVE,
         AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.MEDIA_NOT_FOUND,
-        ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_NOT_ARCHIVED, *GUARDED,
+        ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_NOT_ARCHIVED, ErrorCode.POST_ARCHIVED, *GUARDED,
     ),
 )
 async def archive_media_file(
@@ -292,6 +296,7 @@ async def archive_media_file(
     """Archive a media file (is_deleted=true): hidden from its observation and from lists, the file stays on disk
     and stays linked to the observation so it can be restored. Regular users may only archive files they uploaded
     within their post while the observation is active; media.manage_any overrides. Undo with POST /{media_id}/restore.
+    Media of an archived post: 409 post_archived.
     """
     return await _set_media_archived(request, session, auth, media_id, archived=True)
 
@@ -302,7 +307,7 @@ async def archive_media_file(
     responses=problems(
         AccessErrorCode.MEDIA_NOT_OWNER, AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_ACTIVE,
         AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.MEDIA_NOT_FOUND,
-        ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_NOT_ARCHIVED, *GUARDED,
+        ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_NOT_ARCHIVED, ErrorCode.POST_ARCHIVED, *GUARDED,
     ),
 )
 async def restore_media_file(
@@ -326,7 +331,7 @@ async def restore_media_file(
     responses=problems(
         ErrorCode.MEDIA_CONTENT_INVALID, ErrorCode.MEDIA_FILE_EMPTY, ErrorCode.MEDIA_UPLOAD_SOURCE_MISSING,
         AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED,
-        ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_FILE_TOO_LARGE,
+        ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.POST_ARCHIVED, ErrorCode.MEDIA_FILE_TOO_LARGE,
         ErrorCode.MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED,
         ErrorCode.MEDIA_EXTENSION_DANGEROUS, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, ErrorCode.MEDIA_TYPE_UNKNOWN,
         ErrorCode.MEDIA_STORE_FAILED, ErrorCode.MEDIA_UPLOADS_BUSY, *GUARDED,
@@ -343,7 +348,8 @@ async def upload_complete_file(
 ):
     """
     Multipart upload. The body is spooled to a temp file in 1 MB chunks and hashed
-    while streaming; it is never held in memory. Users can only upload for observations of their post.
+    while streaming; it is never held in memory. Users can only upload for observations of their post; an archived
+    post: 409 post_archived.
     """
     await load_observation_for_upload(session, auth, observation_id)
 
@@ -393,7 +399,7 @@ async def upload_complete_file(
     responses=problems(
         ErrorCode.MEDIA_CONTENT_INVALID, ErrorCode.MEDIA_FILE_EMPTY, ErrorCode.MEDIA_UPLOAD_SOURCE_MISSING,
         ErrorCode.NGINX_FILE_NAME_MISSING, ErrorCode.NGINX_FILE_NAME_INVALID, AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED,
-        AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_FILE_TOO_LARGE,
+        AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.POST_ARCHIVED, ErrorCode.MEDIA_FILE_TOO_LARGE,
         ErrorCode.MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED,
         ErrorCode.MEDIA_EXTENSION_DANGEROUS, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, ErrorCode.MEDIA_TYPE_UNKNOWN,
         ErrorCode.MEDIA_STORE_FAILED, ErrorCode.NGINX_UPLOAD_DISABLED,
@@ -717,7 +723,8 @@ async def share_media_thumbnail(
     response_model=ThumbnailRegenerateResponse,
     responses=problems(
         AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED,
-        ErrorCode.MEDIA_NOT_FOUND, ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.THUMBNAILS_UNSUPPORTED, *ADMIN,
+        ErrorCode.MEDIA_NOT_FOUND, ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.POST_ARCHIVED,
+        ErrorCode.THUMBNAILS_UNSUPPORTED, *ADMIN,
     ),
 )
 async def regenerate_thumbnail(
@@ -725,11 +732,13 @@ async def regenerate_thumbnail(
     session: AsyncSession = Depends(get_session),
     auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW, Permissions.MEDIA_UPDATE], admin=True)),
 ):
-    """Video: delete the poster and queue extraction again. Images are rendered on demand, nothing to regenerate."""
+    """Video: delete the poster and queue extraction again. Images are rendered on demand, nothing to regenerate.
+    Media of an archived post: 409 post_archived."""
     media_file = await get_media_or_404(session, media_id, include_deleted=True)
     if media_file.observation_id:
         observation = await get_observation_from_media(session, media_file)
         AccessControlService.check_post_write(auth, observation.post_id, "media")
+        await ensure_post_not_archived(session, observation.post_id)
 
     if media_file.is_video:
         poster = media_file.resolve_poster_path(storage_root())

@@ -7,6 +7,7 @@ from sqlmodel import select, desc
 from datetime import datetime, timezone
 
 from app.backend.api.shared.helpers.db_errors import is_data_too_long, is_unique_violation
+from app.backend.api.shared.helpers.post_helper import refuse_archived_post
 from app.backend.database import get_session
 from app.backend.models.user import User, UserSession
 from app.backend.models.role import Role, UserRole
@@ -126,7 +127,7 @@ async def list_users(
     responses=problems(
         ErrorCode.CERTIFICATE_FILE_EMPTY, ErrorCode.CERTIFICATE_INVALID, ErrorCode.CERTIFICATE_TAKEN,
         ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, ErrorCode.USERNAME_OR_CERTIFICATE_TAKEN, ErrorCode.USERNAME_TAKEN,
-        ErrorCode.POST_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.CERTIFICATE_FILE_TOO_LARGE,
+        ErrorCode.POST_NOT_FOUND, ErrorCode.POST_ARCHIVED, ErrorCode.ROLE_NOT_FOUND, ErrorCode.CERTIFICATE_FILE_TOO_LARGE,
         ErrorCode.DATA_TOO_LONG, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *ADMIN,
     ),
 )
@@ -147,7 +148,8 @@ async def create_user(
     These fields are hashed before storage for security.
 
     The form fields are described by UserCreateForm; role_ids is repeated once per role. The caller must hold
-    every permission of the roles (403 grant_exceeds_own_permissions).
+    every permission of the roles (403 grant_exceeds_own_permissions). An archived post cannot be the home post
+    (409 post_archived).
     """
     current_user = auth.user
     certificate = user_data.certificate
@@ -155,11 +157,10 @@ async def create_user(
 
     # Validate post_id exists if provided
     if user_data.post_id is not None:
-        post_result = await session.exec(
-            select(Post).where(Post.id == user_data.post_id)
-        )
-        if not post_result.first():
+        post = (await session.exec(select(Post).where(Post.id == user_data.post_id))).first()
+        if not post:
             raise ApiError(ErrorCode.POST_NOT_FOUND, post_id=user_data.post_id)
+        refuse_archived_post(post)
 
     # Check if user already exists
     result = await session.exec(_username_taken(user_data.username))
@@ -299,7 +300,7 @@ async def get_user(
     responses=problems(
         ErrorCode.CANNOT_DEACTIVATE_SELF, ErrorCode.CERTIFICATE_FILE_EMPTY, ErrorCode.CERTIFICATE_INVALID,
         ErrorCode.CERTIFICATE_TAKEN, ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, ErrorCode.USERNAME_TAKEN,
-        ErrorCode.POST_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.USER_NOT_FOUND,
+        ErrorCode.POST_NOT_FOUND, ErrorCode.POST_ARCHIVED, ErrorCode.ROLE_NOT_FOUND, ErrorCode.USER_NOT_FOUND,
         ErrorCode.CERTIFICATE_FILE_TOO_LARGE, ErrorCode.FORM_CONTENT_TYPE_REQUIRED,
         ErrorCode.LAST_ADMIN_REQUIRED, ErrorCode.CANNOT_REMOVE_OWN_ADMIN,
         AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, AccessErrorCode.TARGET_USER_MORE_PRIVILEGED,
@@ -319,7 +320,8 @@ async def update_user(
     Supports updating:
     - username: Unique username (3-50 characters)
     - username_alias: User's display name (1-255 characters)
-    - post_id: User's post/position ID
+    - post_id: User's post/position ID; moving the user onto an archived post answers 409 post_archived (sending
+      the current home post again changes nothing and is accepted)
     - is_active: User's active status (boolean)
     - role_ids: Replace all user roles, one form field per role (role_ids=1&role_ids=2)
     - certificate: Update PKI certificate authentication data (file upload). A different certificate ends every
@@ -374,11 +376,11 @@ async def update_user(
         user.username = update_data.username
 
     if update_data.post_id is not None:
-        post_result = await session.exec(
-            select(Post).where(Post.id == update_data.post_id)
-        )
-        if not post_result.first():
+        post = (await session.exec(select(Post).where(Post.id == update_data.post_id))).first()
+        if not post:
             raise ApiError(ErrorCode.POST_NOT_FOUND, post_id=update_data.post_id)
+        if post.id != user.post_id:
+            refuse_archived_post(post)
         user.post_id = update_data.post_id
         # The home post already grants full access: an extra access row for it would be stale
         for row in (await session.exec(
@@ -604,7 +606,7 @@ async def list_user_post_access(
     UserRoutes.USER_POST_ACCESS_BY_POST.value,
     response_model=UserPostAccessResponse,
     responses=problems(
-        ErrorCode.POST_ACCESS_HOME_POST, ErrorCode.POST_NOT_FOUND, ErrorCode.USER_NOT_FOUND,
+        ErrorCode.POST_ACCESS_HOME_POST, ErrorCode.POST_NOT_FOUND, ErrorCode.POST_ARCHIVED, ErrorCode.USER_NOT_FOUND,
         AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *ADMIN,
     ),
 )
@@ -617,7 +619,8 @@ async def upsert_user_post_access(
         auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE, Permissions.POST_VIEW], admin=True))
 ):
     """Grant a user read (can_write=false) or read+write (can_write=true) access to an additional post.
-    A user holding permissions the caller lacks: 403 target_user_more_privileged."""
+    A user holding permissions the caller lacks: 403 target_user_more_privileged. An archived post: 409 post_archived
+    (its existing rows stay and apply again after a restore; DELETE still revokes them)."""
     current_user = auth.user
     user = await _get_active_user_or_404(session, user_id)
     await check_target_user(session, auth, user)
@@ -625,6 +628,7 @@ async def upsert_user_post_access(
     post = await session.get(Post, post_id)
     if not post:
         raise ApiError(ErrorCode.POST_NOT_FOUND)
+    refuse_archived_post(post)
 
     if user.post_id == post_id:
         raise ApiError(ErrorCode.POST_ACCESS_HOME_POST)

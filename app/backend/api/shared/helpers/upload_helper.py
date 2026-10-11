@@ -21,6 +21,7 @@ from app.backend.services.audit import create_audit_log
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.config import settings
 from app.backend.api.shared.helpers.media_helper import storage_root
+from app.backend.api.shared.helpers.post_helper import ensure_post_not_archived
 from app.backend.enums.errors import ErrorCode
 from app.backend.errors.problems import ApiError
 from app.backend.errors.coded import CodedError
@@ -77,12 +78,15 @@ def check_declared_format(registry: formats.FormatRegistry, media_type: str, fil
 
 
 async def load_observation_for_upload(session: AsyncSession, auth: AuthContext, observation_id: int) -> Observation:
+    """The observation an upload goes to: 404 when missing or archived, 403 without write access to its post, 409
+    post_archived when its post is archived"""
     observation = (await session.exec(
         select(Observation).where(Observation.id == observation_id, Observation.is_deleted == False)
     )).first()
     if not observation:
         raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
     AccessControlService.check_post_write(auth, observation.post_id, "media")
+    await ensure_post_not_archived(session, observation.post_id)
     return observation
 
 

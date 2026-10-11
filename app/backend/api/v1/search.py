@@ -167,8 +167,8 @@ async def search_users(
     SearchRoutes.POSTS.value,
     response_model=SearchResponse[PostResponse],
     summary="Search posts",
-    description="Search posts with typed filters.",
-    responses=problems(*GUARDED),
+    description="Search posts with typed filters. Archived posts only with include_deleted (requires post.archive).",
+    responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
 )
 async def search_posts(
     request: Request,
@@ -176,6 +176,7 @@ async def search_posts(
     auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW])),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse[PostResponse]:
+    AccessControlService.check_include_deleted(auth, params, Permissions.POST_ARCHIVE)
     access_post_ids = AccessControlService.post_record_scope(auth)
 
     query = select(Post)

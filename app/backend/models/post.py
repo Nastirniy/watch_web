@@ -1,5 +1,6 @@
 from typing import Optional, List, TYPE_CHECKING
 from datetime import datetime, timezone
+from sqlalchemy import false
 from sqlmodel import Field, SQLModel, Relationship
 
 if TYPE_CHECKING:
@@ -18,6 +19,9 @@ class Post(SQLModel, table=True):
     region: Optional[str] = Field(default=None, max_length=255)
     city: Optional[str] = Field(default=None, max_length=255)
     is_active: bool = Field(default=True, index=True)
+    # Archived (POST /posts/{id}/archive): leaves every home-post and access-row data scope, its data is read-only.
+    # NOT NULL with a server default like the column 020 adds, so a fresh install (built by 002) gets the same column
+    is_deleted: bool = Field(default=False, index=True, sa_column_kwargs={"server_default": false(), "nullable": False})
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

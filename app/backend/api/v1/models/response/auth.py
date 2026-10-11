@@ -24,7 +24,8 @@ class AuthorizationInfo(PlainTextModel):
     roles: List[RoleBriefResponse] = Field(default_factory=list)
     accessible_post_ids: Optional[List[int]] = Field(
         default=None,
-        description="Posts whose data the user may read. null means every post (post.access_all)"
+        description="Posts whose data the user may read: the home post and the extra post access, archived posts left out. "
+                    "null means every post (post.access_all)"
     )
 
 

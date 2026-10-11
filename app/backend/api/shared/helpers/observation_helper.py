@@ -8,6 +8,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.models.observation import Observation, ObservationFrequency
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.context import AuthContext
+from app.backend.api.shared.helpers.post_helper import ensure_post_not_archived
 from app.backend.errors.problems import ApiError, field_problem
 from app.backend.enums.errors import ErrorCode, FieldErrorCode
 from app.backend.filters.observation_frequency_filter import ObservationFrequencyFilter
@@ -21,7 +22,8 @@ async def get_observation_for_write(
         observation_id: int,
         lock: bool = False,
 ) -> Observation:
-    """Observation the caller may modify: 404 when missing or archived, 403 without post write access or ownership.
+    """Observation the caller may modify: 404 when missing or archived, 403 without post write access or ownership,
+    409 post_archived when its post is archived (after the 403 checks).
     lock=True takes a row lock (MySQL) so concurrent band changes of one observation run one after another."""
     query = select(Observation).where(Observation.id == observation_id).options(selectinload(Observation.all_frequencies))
     if lock:
@@ -32,6 +34,7 @@ async def get_observation_for_write(
 
     AccessControlService.check_post_write(auth, observation.post_id, "observation")
     AccessControlService.check_observation_ownership(auth, observation)
+    await ensure_post_not_archived(session, observation.post_id)
 
     if observation.is_deleted:
         raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)

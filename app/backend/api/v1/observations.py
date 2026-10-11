@@ -33,6 +33,7 @@ from app.backend.api.v1.models.response.observations import (
     ObservationWithMedia,
     ObservationFrequencyResponse,
 )
+from app.backend.api.shared.helpers.post_helper import ensure_post_not_archived, refuse_archived_post
 from app.backend.api.shared.helpers.observation_helper import (
     get_observation_for_write,
     get_frequency_or_404,
@@ -138,7 +139,7 @@ async def list_observations(
     response_model=ObservationWithMedia,
     responses=problems(
         ErrorCode.SIGNAL_TYPE_INACTIVE, AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED,
-        AccessErrorCode.POST_WRITE_DENIED, ErrorCode.POST_NOT_FOUND, ErrorCode.SIGNAL_TYPE_NOT_FOUND,
+        AccessErrorCode.POST_WRITE_DENIED, ErrorCode.POST_NOT_FOUND, ErrorCode.POST_ARCHIVED, ErrorCode.SIGNAL_TYPE_NOT_FOUND,
         ErrorCode.TAGS_NOT_FOUND, *GUARDED,
     ),
 )
@@ -150,18 +151,17 @@ async def create_observation(
 ):
     """
     Create new observation.
-    Users can only create observations for their assigned post.
+    Users can only create observations for their assigned post. An archived post: 409 post_archived.
     Note: Field validation is handled by Pydantic model validators.
     """
     current_user = auth.user
     # Access first: an unknown post id and a foreign one answer alike (403), only post.access_all learns 404
     AccessControlService.check_post_write(auth, observation_data.post_id, "observation")
 
-    post_result = await session.exec(
-        select(Post).where(Post.id == observation_data.post_id)
-    )
-    if not post_result.first():
+    post = (await session.exec(select(Post).where(Post.id == observation_data.post_id))).first()
+    if not post:
         raise ApiError(ErrorCode.POST_NOT_FOUND, post_id=observation_data.post_id)
+    refuse_archived_post(post)
 
     # Validate signal_type exists and is active
     signal_type_result = await session.exec(
@@ -224,7 +224,7 @@ async def create_observation(
     responses=problems(
         ErrorCode.SIGNAL_TYPE_INACTIVE, AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_OWNER,
         AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND,
-        ErrorCode.SIGNAL_TYPE_NOT_FOUND, ErrorCode.TAGS_NOT_FOUND, *GUARDED,
+        ErrorCode.POST_ARCHIVED, ErrorCode.SIGNAL_TYPE_NOT_FOUND, ErrorCode.TAGS_NOT_FOUND, *GUARDED,
     ),
 )
 async def update_observation(
@@ -235,9 +235,9 @@ async def update_observation(
         auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW, Permissions.OBSERVATION_UPDATE]))
 ):
     """
-    Update existing observation.
+    Update existing observation (tags included).
     Users can only update observations from their assigned post.
-    Archived observations answer 404 until restored (POST /{observation_id}/restore).
+    Archived observations answer 404 until restored (POST /{observation_id}/restore); an archived post: 409 post_archived.
     """
     current_user = auth.user
     # Get observation by ID with tags and bands pre-loaded
@@ -257,6 +257,7 @@ async def update_observation(
     # Check if user has access to this observation's post
     AccessControlService.check_post_write(auth, observation.post_id, "observation")
     AccessControlService.check_observation_ownership(auth, observation)
+    await ensure_post_not_archived(session, observation.post_id)
 
     if observation.is_deleted:
         raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
@@ -320,7 +321,7 @@ async def update_observation(
     response_model=MessageResponse,
     responses=problems(
         AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_OWNER, AccessErrorCode.POST_ACCESS_DENIED,
-        AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, *GUARDED,
+        AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.POST_ARCHIVED, *GUARDED,
     ),
 )
 async def mark_observation_disappeared(
@@ -332,7 +333,7 @@ async def mark_observation_disappeared(
 ):
     """
     Mark observation as disappeared.
-    Users can only mark observations from their assigned post.
+    Users can only mark observations from their assigned post. An archived post: 409 post_archived.
     """
     current_user = auth.user
     result = await session.exec(
@@ -352,6 +353,7 @@ async def mark_observation_disappeared(
     # Check if user has access to this observation's post
     AccessControlService.check_post_write(auth, observation.post_id, "observation")
     AccessControlService.check_observation_ownership(auth, observation)
+    await ensure_post_not_archived(session, observation.post_id)
 
     duration = disappeared_duration(observation.observed_at, disappeared_data.disappeared_at, "disappeared_at")
 
@@ -459,7 +461,8 @@ async def _set_observation_archived(
         observation_id: int,
         archived: bool,
 ) -> ObservationWithMedia:
-    """Shared body of archive / restore: ownership rules, flag flip, audit row."""
+    """Shared body of archive / restore: ownership rules, flag flip, audit row. In an archived post only
+    administrators (admin.true; the routes require observation.view and observation.archive) archive and restore."""
     current_user = auth.user
     result = await session.exec(select(Observation).where(Observation.id == observation_id))
     observation = result.first()
@@ -468,6 +471,8 @@ async def _set_observation_archived(
 
     AccessControlService.check_post_write(auth, observation.post_id, "observation")
     AccessControlService.check_observation_ownership(auth, observation)
+    if not auth.is_admin:
+        await ensure_post_not_archived(session, observation.post_id)
 
     # The state after the scope and ownership checks: an outsider gets the same 403 whatever the row looks like
     if archived and observation.is_deleted:
@@ -511,7 +516,7 @@ async def _set_observation_archived(
     responses=problems(
         AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_OWNER, AccessErrorCode.POST_ACCESS_DENIED,
         AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.OBSERVATION_NOT_ARCHIVED,
-        *GUARDED,
+        ErrorCode.POST_ARCHIVED, *GUARDED,
     ),
 )
 async def archive_observation(
@@ -523,7 +528,8 @@ async def archive_observation(
     """Archive an observation (is_deleted=true). Owner or observation.manage_any, write access to its post.
 
     Nothing is removed: media files stay attached, the row is hidden from lists unless include_deleted=true.
-    Undo with POST /{observation_id}/restore. Already archived or unknown: 404.
+    Undo with POST /{observation_id}/restore. Already archived or unknown: 404. In an archived post only
+    administrators (admin.true) archive; everyone else gets 409 post_archived.
     """
     return await _set_observation_archived(request, session, auth, observation_id, archived=True)
 
@@ -534,7 +540,7 @@ async def archive_observation(
     responses=problems(
         AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_OWNER, AccessErrorCode.POST_ACCESS_DENIED,
         AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.OBSERVATION_NOT_ARCHIVED, ErrorCode.OBSERVATION_SIGNAL_TYPE_ARCHIVED,
-        *GUARDED,
+        ErrorCode.POST_ARCHIVED, *GUARDED,
     ),
 )
 async def restore_observation(
@@ -543,7 +549,8 @@ async def restore_observation(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW, Permissions.OBSERVATION_ARCHIVE]))
 ):
-    """Restore an archived observation (is_deleted=false). Same rules as archive. Not archived: 409."""
+    """Restore an archived observation (is_deleted=false). Same rules as archive (an archived post: only
+    administrators). Not archived: 409."""
     return await _set_observation_archived(request, session, auth, observation_id, archived=False)
 
 
@@ -606,7 +613,7 @@ async def list_observation_frequencies(
     response_model=ObservationFrequencyResponse,
     responses=problems(
         AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_OWNER, AccessErrorCode.POST_ACCESS_DENIED,
-        AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, *GUARDED,
+        AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.POST_ARCHIVED, *GUARDED,
     ),
 )
 async def add_observation_frequency(
@@ -617,7 +624,7 @@ async def add_observation_frequency(
         auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW, Permissions.OBSERVATION_UPDATE]))
 ):
     """Add a band to an observation. Owner or observation.manage_any, write access to its post.
-    Archived or unknown observation: 404."""
+    Archived or unknown observation: 404. An archived post: 409 post_archived (every band change)."""
     observation = await get_observation_for_write(session, auth, observation_id, lock=True)
 
     frequency = frequency_rows([frequency_data])[0]
@@ -636,7 +643,8 @@ async def add_observation_frequency(
     response_model=ObservationFrequencyResponse,
     responses=problems(
         AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_OWNER, AccessErrorCode.POST_ACCESS_DENIED,
-        AccessErrorCode.POST_WRITE_DENIED, ErrorCode.FREQUENCY_NOT_FOUND, ErrorCode.OBSERVATION_NOT_FOUND, *GUARDED,
+        AccessErrorCode.POST_WRITE_DENIED, ErrorCode.FREQUENCY_NOT_FOUND, ErrorCode.OBSERVATION_NOT_FOUND,
+        ErrorCode.POST_ARCHIVED, *GUARDED,
     ),
 )
 async def update_observation_frequency(
@@ -720,7 +728,7 @@ async def _set_frequency_archived(
     responses=problems(
         AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_OWNER, AccessErrorCode.POST_ACCESS_DENIED,
         AccessErrorCode.POST_WRITE_DENIED, ErrorCode.FREQUENCY_NOT_FOUND, ErrorCode.OBSERVATION_NOT_FOUND,
-        ErrorCode.FREQUENCY_NOT_ARCHIVED, ErrorCode.LAST_FREQUENCY_NOT_ARCHIVABLE, *GUARDED,
+        ErrorCode.FREQUENCY_NOT_ARCHIVED, ErrorCode.LAST_FREQUENCY_NOT_ARCHIVABLE, ErrorCode.POST_ARCHIVED, *GUARDED,
     ),
 )
 async def archive_observation_frequency(
@@ -742,7 +750,7 @@ async def archive_observation_frequency(
     responses=problems(
         AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_OWNER, AccessErrorCode.POST_ACCESS_DENIED,
         AccessErrorCode.POST_WRITE_DENIED, ErrorCode.FREQUENCY_NOT_FOUND, ErrorCode.OBSERVATION_NOT_FOUND,
-        ErrorCode.FREQUENCY_NOT_ARCHIVED, ErrorCode.LAST_FREQUENCY_NOT_ARCHIVABLE, *GUARDED,
+        ErrorCode.FREQUENCY_NOT_ARCHIVED, ErrorCode.LAST_FREQUENCY_NOT_ARCHIVABLE, ErrorCode.POST_ARCHIVED, *GUARDED,
     ),
 )
 async def restore_observation_frequency(

@@ -16,6 +16,7 @@ class PostResponse(PlainTextModel):
     region: Optional[str] = None
     city: Optional[str] = None
     is_active: bool
+    is_deleted: bool = Field(default=False, description="Archived (POST /posts/{post_id}/archive): its data is read-only")
     online_user_count: int = Field(default=0, description="Home users with an authenticated request within security.online_threshold_seconds")
     last_user_activity_at: Optional[ResponseDatetime] = Field(default=None, description="Latest activity of any home user; null when none has an active session")
     user_count: int = Field(default=0, description="Active, not archived users whose home post is this post")
@@ -32,6 +33,7 @@ def post_to_response(post: Post) -> PostResponse:
         region=post.region,
         city=post.city,
         is_active=post.is_active,
+        is_deleted=post.is_deleted,
         online_user_count=post.online_user_count or 0,
         last_user_activity_at=post.last_user_activity_at,
         user_count=post.user_count or 0,

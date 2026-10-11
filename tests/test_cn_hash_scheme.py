@@ -197,3 +197,17 @@ def test_019_adds_the_column_keeps_old_rows_at_scheme_1_and_downgrades(tmp_path)
     assert "pki_certificate_cn_hash_scheme" not in {row[1] for row in conn.execute("pragma table_info(users)")}
     assert conn.execute("select username from users").fetchone() == ("legacy",)
     conn.close()
+
+
+@pytest.mark.slow
+def test_a_fresh_install_makes_the_scheme_column_a_small_integer_like_019(tmp_path):
+    """A fresh install builds users from the model (002_sync_schema), 019 adds the column to an existing table: both
+    must give SMALLINT NOT NULL DEFAULT 1 (the model said int, so a fresh install got INTEGER)"""
+    db_file = tmp_path / "fresh.db"
+    result = run_migrate(db_file)
+    assert result.returncode == 0, result.stdout + result.stderr
+    conn = sqlite3.connect(db_file)
+    column = {row[1]: row for row in conn.execute("pragma table_info(users)")}["pki_certificate_cn_hash_scheme"]
+    conn.close()
+    _, _, column_type, not_null, default, _ = column
+    assert (column_type, not_null, default) == ("SMALLINT", 1, "'1'")

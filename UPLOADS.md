@@ -39,6 +39,7 @@ Everything that can be refused is refused here, before a single byte is sent:
 | 415 | Format not accepted: `media_type_unknown`, `media_extension_not_accepted` (`extension`), `media_content_type_not_accepted` or `media_content_type_extension_mismatch` (`content_type`, `expected_content_type`). `Accept-Post` header, `accepted_content_types` and `accepted_extensions` say what is. | Tell the user; do not retry. |
 | 413 | `media_file_too_large`: `expected_size` above the format's `max_file_size_bytes` (`max_file_size_bytes`, `content_type`). | Tell the user; do not retry. |
 | 404 / 403 | Observation missing, or no write access to its post. | Tell the user; do not retry. |
+| 409 | `post_archived` (`post_id`): the post of the observation is archived, its data is read-only. | Tell the user; do not retry. |
 
 Store `id` locally (for example in `localStorage` keyed by file name and size) so the upload can continue after a page reload.
 
@@ -90,7 +91,7 @@ POST /api/v1/media/uploads/{id}/complete
 | Status | Meaning | What the client does |
 |--------|---------|----------------------|
 | 200 | File stored. Same body as the other uploads plus `upload_id`. A video starts with `thumbnail_status: pending` and gets its poster from the worker shortly. | Done. |
-| 409 | `upload_incomplete`: bytes still missing (`missing_bytes`, `offset`, `expected_size`). `upload_session_completing`: another `complete` is storing the file right now (status `completing`). `upload_writer_busy`: a chunk request still holds the session. | Incomplete: send the rest, then complete again. Completing: ask `GET` until the status is `completed` (or `open` again after a server-side failure), or call `complete` again later. Busy: complete again after a second. |
+| 409 | `upload_incomplete`: bytes still missing (`missing_bytes`, `offset`, `expected_size`). `upload_session_completing`: another `complete` is storing the file right now (status `completing`). `upload_writer_busy`: a chunk request still holds the session. `post_archived` (`post_id`): the post was archived after the session opened; the session stays `open`. | Incomplete: send the rest, then complete again. Completing: ask `GET` until the status is `completed` (or `open` again after a server-side failure), or call `complete` again later. Busy: complete again after a second. Archived post: tell the user; complete again once the post is restored, or abort. |
 | 422 | `upload_checksum_mismatch` (`expected_sha256`, `actual_sha256`). The session is aborted and the bytes deleted. | Open a new session and send again. |
 | 415 / 413 | The content did not match the declared format (same 415 codes as on open, plus `media_extension_dangerous`) or `media_file_too_large`. Session aborted. | Tell the user. |
 | 400 | `media_file_empty` or `media_content_invalid` (the file header does not match its type). Session aborted. | Tell the user. |

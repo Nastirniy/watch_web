@@ -7,11 +7,13 @@ database again during the request.
 from dataclasses import dataclass
 from typing import Dict, FrozenSet, List, Optional, Set, Tuple, Union
 
+from sqlalchemy import and_, or_
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.enums.general import Permissions
 from app.backend.models.user import User
+from app.backend.models.post import Post
 from app.backend.models.role import Role, Permission, RolePermission, UserRole
 from app.backend.models.user_post_access import UserPostAccess
 
@@ -28,8 +30,8 @@ class AuthContext:
     user: User
     permissions: FrozenSet[str]
     roles: Tuple[RoleBrief, ...]
-    readable_post_ids: FrozenSet[int]   # home post + every user_post_access row
-    writable_post_ids: FrozenSet[int]   # home post + user_post_access rows with can_write
+    readable_post_ids: FrozenSet[int]   # home post + every user_post_access row, archived posts left out
+    writable_post_ids: FrozenSet[int]   # home post + user_post_access rows with can_write, archived posts left out
     session_id: Optional[str] = None    # user_sessions.id of the access token (audit, logout)
 
     @property
@@ -90,8 +92,21 @@ async def effective_permissions(session: AsyncSession, user_id: int) -> FrozenSe
     return frozenset(permission_name for *_, permission_name in rows if permission_name)
 
 
+def scope_post_rows(user: User):
+    """(post id, can_write of its user_post_access row or None) of the posts that make the user's data scope: the
+    home post and every post of a user_post_access row, archived posts left out. An archived post leaves every
+    scope that came from a home post or an access row (only post.access_all still reads its data); the rows stay
+    and apply again after a restore. A user without a home post compares posts.id with NULL, which matches nothing."""
+    return (
+        select(Post.id, UserPostAccess.can_write)
+        .select_from(Post)
+        .outerjoin(UserPostAccess, and_(UserPostAccess.post_id == Post.id, UserPostAccess.user_id == user.id))
+        .where(Post.is_deleted == False, or_(Post.id == user.post_id, UserPostAccess.id.is_not(None)))
+    )
+
+
 async def load_auth_context(session: AsyncSession, user: User, session_id: Optional[str] = None) -> AuthContext:
-    """Two queries: roles with their permissions, and extra post access rows."""
+    """Two queries: roles with their permissions, and the posts of the data scope (scope_post_rows)."""
     role_rows = (await session.exec(role_permission_rows(user.id))).all()
 
     roles: Dict[int, RoleBrief] = {}
@@ -101,19 +116,11 @@ async def load_auth_context(session: AsyncSession, user: User, session_id: Optio
         if permission_name:
             permissions.add(permission_name)
 
-    access_rows = (await session.exec(
-        select(UserPostAccess.post_id, UserPostAccess.can_write)
-        .where(UserPostAccess.user_id == user.id)
-    )).all()
-
     readable: Set[int] = set()
     writable: Set[int] = set()
-    if user.post_id is not None:
-        readable.add(user.post_id)
-        writable.add(user.post_id)
-    for post_id, can_write in access_rows:
+    for post_id, can_write in (await session.exec(scope_post_rows(user))).all():
         readable.add(post_id)
-        if can_write:
+        if post_id == user.post_id or can_write:
             writable.add(post_id)
 
     return AuthContext(

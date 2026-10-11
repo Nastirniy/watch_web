@@ -1164,7 +1164,7 @@
           "USERS"
         ],
         "summary": "Create User",
-        "description": "Create new user with PKI certificate authentication\n\nThe certificate file will be parsed to extract:\n- Common Name (CN)\n- Serial Number\n- SHA256 Fingerprint\n\nThese fields are hashed before storage for security.\n\nThe form fields are described by UserCreateForm; role_ids is repeated once per role. The caller must hold\nevery permission of the roles (403 grant_exceeds_own_permissions).",
+        "description": "Create new user with PKI certificate authentication\n\nThe certificate file will be parsed to extract:\n- Common Name (CN)\n- Serial Number\n- SHA256 Fingerprint\n\nThese fields are hashed before storage for security.\n\nThe form fields are described by UserCreateForm; role_ids is repeated once per role. The caller must hold\nevery permission of the roles (403 grant_exceeds_own_permissions). An archived post cannot be the home post\n(409 post_archived).",
         "operationId": "create_user",
         "security": [
           {
@@ -1362,6 +1362,16 @@
               }
             }
           },
+          "409": {
+            "description": "`post_archived`: Post is archived",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostArchivedProblem"
+                }
+              }
+            }
+          },
           "413": {
             "description": "`certificate_file_too_large`: Certificate file is too large",
             "content": {
@@ -1516,7 +1526,7 @@
           "USERS"
         ],
         "summary": "Update User",
-        "description": "Update user fields - all fields are optional\n\nSupports updating:\n- username: Unique username (3-50 characters)\n- username_alias: User's display name (1-255 characters)\n- post_id: User's post/position ID\n- is_active: User's active status (boolean)\n- role_ids: Replace all user roles, one form field per role (role_ids=1&role_ids=2)\n- certificate: Update PKI certificate authentication data (file upload). A different certificate ends every\n  session of the user, like deactivation: the old certificate's tokens stop working.\n\nOnly provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).\nThe fields are form fields: any other body (JSON included) answers 415 instead of being ignored.\n\nChanging another user needs a user who holds no permission the caller lacks (403\ntarget_user_more_privileged), new roles only permissions the caller holds (403\ngrant_exceeds_own_permissions). A role change or a deactivation must leave an active administrator and the\ncaller's own admin.true (409 last_admin_required, cannot_remove_own_admin).",
+        "description": "Update user fields - all fields are optional\n\nSupports updating:\n- username: Unique username (3-50 characters)\n- username_alias: User's display name (1-255 characters)\n- post_id: User's post/position ID; moving the user onto an archived post answers 409 post_archived (sending\n  the current home post again changes nothing and is accepted)\n- is_active: User's active status (boolean)\n- role_ids: Replace all user roles, one form field per role (role_ids=1&role_ids=2)\n- certificate: Update PKI certificate authentication data (file upload). A different certificate ends every\n  session of the user, like deactivation: the old certificate's tokens stop working.\n\nOnly provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).\nThe fields are form fields: any other body (JSON included) answers 415 instead of being ignored.\n\nChanging another user needs a user who holds no permission the caller lacks (403\ntarget_user_more_privileged), new roles only permissions the caller holds (403\ngrant_exceeds_own_permissions). A role change or a deactivation must leave an active administrator and the\ncaller's own admin.true (409 last_admin_required, cannot_remove_own_admin).",
         "operationId": "update_user",
         "security": [
           {
@@ -1721,7 +1731,7 @@
             }
           },
           "409": {
-            "description": "`cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no active administrator",
+            "description": "`cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no active administrator; `post_archived`: Post is archived",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1731,13 +1741,17 @@
                     },
                     {
                       "$ref": "#/components/schemas/LastAdminRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PostArchivedProblem"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
                       "cannot_remove_own_admin": "#/components/schemas/CannotRemoveOwnAdminProblem",
-                      "last_admin_required": "#/components/schemas/LastAdminRequiredProblem"
+                      "last_admin_required": "#/components/schemas/LastAdminRequiredProblem",
+                      "post_archived": "#/components/schemas/PostArchivedProblem"
                     }
                   }
                 }
@@ -2054,7 +2068,7 @@
           "USERS"
         ],
         "summary": "Upsert User Post Access",
-        "description": "Grant a user read (can_write=false) or read+write (can_write=true) access to an additional post.\nA user holding permissions the caller lacks: 403 target_user_more_privileged.",
+        "description": "Grant a user read (can_write=false) or read+write (can_write=true) access to an additional post.\nA user holding permissions the caller lacks: 403 target_user_more_privileged. An archived post: 409 post_archived\n(its existing rows stay and apply again after a restore; DELETE still revokes them).",
         "operationId": "upsert_user_post_access",
         "security": [
           {
@@ -2224,6 +2238,16 @@
                       "user_not_found": "#/components/schemas/UserNotFoundProblem"
                     }
                   }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`post_archived`: Post is archived",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostArchivedProblem"
                 }
               }
             }
@@ -9178,7 +9202,7 @@
           "OBSERVATIONS"
         ],
         "summary": "Create Observation",
-        "description": "Create new observation.\nUsers can only create observations for their assigned post.\nNote: Field validation is handled by Pydantic model validators.",
+        "description": "Create new observation.\nUsers can only create observations for their assigned post. An archived post: 409 post_archived.\nNote: Field validation is handled by Pydantic model validators.",
         "operationId": "create_observation",
         "requestBody": {
           "content": {
@@ -9334,6 +9358,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "`post_archived`: Post is archived",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostArchivedProblem"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -9349,7 +9383,7 @@
           "OBSERVATIONS"
         ],
         "summary": "Update Observation",
-        "description": "Update existing observation.\nUsers can only update observations from their assigned post.\nArchived observations answer 404 until restored (POST /{observation_id}/restore).",
+        "description": "Update existing observation (tags included).\nUsers can only update observations from their assigned post.\nArchived observations answer 404 until restored (POST /{observation_id}/restore); an archived post: 409 post_archived.",
         "operationId": "update_observation",
         "security": [
           {
@@ -9525,6 +9559,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "`post_archived`: Post is archived",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostArchivedProblem"
+                }
+              }
+            }
           }
         }
       }
@@ -9535,7 +9579,7 @@
           "OBSERVATIONS"
         ],
         "summary": "Mark Observation Disappeared",
-        "description": "Mark observation as disappeared.\nUsers can only mark observations from their assigned post.",
+        "description": "Mark observation as disappeared.\nUsers can only mark observations from their assigned post. An archived post: 409 post_archived.",
         "operationId": "mark_observation_disappeared",
         "security": [
           {
@@ -9680,6 +9724,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ObservationNotFoundProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`post_archived`: Post is archived",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostArchivedProblem"
                 }
               }
             }
@@ -9944,7 +9998,7 @@
           "OBSERVATIONS"
         ],
         "summary": "Archive Observation",
-        "description": "Archive an observation (is_deleted=true). Owner or observation.manage_any, write access to its post.\n\nNothing is removed: media files stay attached, the row is hidden from lists unless include_deleted=true.\nUndo with POST /{observation_id}/restore. Already archived or unknown: 404.",
+        "description": "Archive an observation (is_deleted=true). Owner or observation.manage_any, write access to its post.\n\nNothing is removed: media files stay attached, the row is hidden from lists unless include_deleted=true.\nUndo with POST /{observation_id}/restore. Already archived or unknown: 404. In an archived post only\nadministrators (admin.true) archive; everyone else gets 409 post_archived.",
         "operationId": "archive_observation",
         "security": [
           {
@@ -10084,11 +10138,25 @@
             }
           },
           "409": {
-            "description": "`observation_not_archived`: Observation is not archived",
+            "description": "`observation_not_archived`: Observation is not archived; `post_archived`: Post is archived",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ObservationNotArchivedProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ObservationNotArchivedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PostArchivedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "observation_not_archived": "#/components/schemas/ObservationNotArchivedProblem",
+                      "post_archived": "#/components/schemas/PostArchivedProblem"
+                    }
+                  }
                 }
               }
             }
@@ -10102,7 +10170,7 @@
           "OBSERVATIONS"
         ],
         "summary": "Restore Observation",
-        "description": "Restore an archived observation (is_deleted=false). Same rules as archive. Not archived: 409.",
+        "description": "Restore an archived observation (is_deleted=false). Same rules as archive (an archived post: only\nadministrators). Not archived: 409.",
         "operationId": "restore_observation",
         "security": [
           {
@@ -10242,7 +10310,7 @@
             }
           },
           "409": {
-            "description": "`observation_not_archived`: Observation is not archived; `observation_signal_type_archived`: The signal type of the observation is archived",
+            "description": "`observation_not_archived`: Observation is not archived; `observation_signal_type_archived`: The signal type of the observation is archived; `post_archived`: Post is archived",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10252,13 +10320,17 @@
                     },
                     {
                       "$ref": "#/components/schemas/ObservationSignalTypeArchivedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PostArchivedProblem"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
                       "observation_not_archived": "#/components/schemas/ObservationNotArchivedProblem",
-                      "observation_signal_type_archived": "#/components/schemas/ObservationSignalTypeArchivedProblem"
+                      "observation_signal_type_archived": "#/components/schemas/ObservationSignalTypeArchivedProblem",
+                      "post_archived": "#/components/schemas/PostArchivedProblem"
                     }
                   }
                 }
@@ -10430,7 +10502,7 @@
           "OBSERVATIONS"
         ],
         "summary": "Add Observation Frequency",
-        "description": "Add a band to an observation. Owner or observation.manage_any, write access to its post.\nArchived or unknown observation: 404.",
+        "description": "Add a band to an observation. Owner or observation.manage_any, write access to its post.\nArchived or unknown observation: 404. An archived post: 409 post_archived (every band change).",
         "operationId": "add_observation_frequency",
         "security": [
           {
@@ -10575,6 +10647,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ObservationNotFoundProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`post_archived`: Post is archived",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostArchivedProblem"
                 }
               }
             }
@@ -10759,6 +10841,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "`post_archived`: Post is archived",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostArchivedProblem"
+                }
+              }
+            }
           }
         }
       }
@@ -10932,7 +11024,7 @@
             }
           },
           "409": {
-            "description": "`frequency_not_archived`: Frequency is not archived; `last_frequency_not_archivable`: The last active frequency of an observation cannot be archived",
+            "description": "`frequency_not_archived`: Frequency is not archived; `last_frequency_not_archivable`: The last active frequency of an observation cannot be archived; `post_archived`: Post is archived",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10942,13 +11034,17 @@
                     },
                     {
                       "$ref": "#/components/schemas/LastFrequencyNotArchivableProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PostArchivedProblem"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
                       "frequency_not_archived": "#/components/schemas/FrequencyNotArchivedProblem",
-                      "last_frequency_not_archivable": "#/components/schemas/LastFrequencyNotArchivableProblem"
+                      "last_frequency_not_archivable": "#/components/schemas/LastFrequencyNotArchivableProblem",
+                      "post_archived": "#/components/schemas/PostArchivedProblem"
                     }
                   }
                 }
@@ -11127,7 +11223,7 @@
             }
           },
           "409": {
-            "description": "`frequency_not_archived`: Frequency is not archived; `last_frequency_not_archivable`: The last active frequency of an observation cannot be archived",
+            "description": "`frequency_not_archived`: Frequency is not archived; `last_frequency_not_archivable`: The last active frequency of an observation cannot be archived; `post_archived`: Post is archived",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -11137,13 +11233,17 @@
                     },
                     {
                       "$ref": "#/components/schemas/LastFrequencyNotArchivableProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PostArchivedProblem"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
                       "frequency_not_archived": "#/components/schemas/FrequencyNotArchivedProblem",
-                      "last_frequency_not_archivable": "#/components/schemas/LastFrequencyNotArchivableProblem"
+                      "last_frequency_not_archivable": "#/components/schemas/LastFrequencyNotArchivableProblem",
+                      "post_archived": "#/components/schemas/PostArchivedProblem"
                     }
                   }
                 }
@@ -11159,7 +11259,7 @@
           "POSTS"
         ],
         "summary": "List Posts",
-        "description": "List posts with filters\n\nNote:\n    - Administrators (admin.true) see every post record\n    - Everyone else sees the posts of their data scope (home post, user_post_access, or all with post.access_all)",
+        "description": "List posts with filters\n\nNote:\n    - Administrators (admin.true) see every post record\n    - Everyone else sees the posts of their data scope (home post, user_post_access, or all with post.access_all);\n      an archived post leaves the home-post and access-row scope\n    - Archived posts only with include_deleted (requires post.archive)",
         "operationId": "list_posts",
         "security": [
           {
@@ -11532,6 +11632,18 @@
               "title": "Last User Activity To"
             },
             "description": "Latest home user activity before"
+          },
+          {
+            "name": "include_deleted",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Include archived posts (requires post.archive)",
+              "default": false,
+              "title": "Include Deleted"
+            },
+            "description": "Include archived posts (requires post.archive)"
           }
         ],
         "responses": {
@@ -11614,11 +11726,25 @@
             }
           },
           "403": {
-            "description": "`permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PermissionDeniedProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionRequiredForActionProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "permission_required_for_action": "#/components/schemas/PermissionRequiredForActionProblem"
+                    }
+                  }
                 }
               }
             }
@@ -11765,7 +11891,7 @@
           "POSTS"
         ],
         "summary": "Get Post",
-        "description": "Get post by ID\n\nNote:\n    - Administrators (admin.true) can view any post record\n    - Everyone else needs the post in their data scope",
+        "description": "Get post by ID\n\nNote:\n    - Administrators (admin.true) can view any post record\n    - Everyone else needs the post in their data scope\n    - An archived post answers 404 unless the caller holds post.archive or is an administrator",
         "operationId": "get_post",
         "security": [
           {
@@ -11903,7 +12029,7 @@
           "POSTS"
         ],
         "summary": "Update Post",
-        "description": "Update post by ID. Administration route: any post, only for administrators.\n\nOnly the fields sent are changed; null is refused for name, code and is_active (omit them instead).",
+        "description": "Update post by ID. Administration route: any post, only for administrators.\n\nOnly the fields sent are changed; null is refused for name, code and is_active (omit them instead).\nArchived posts answer 404 until restored (POST /{post_id}/restore); is_deleted is never read from the body.",
         "operationId": "update_post",
         "security": [
           {
@@ -12294,6 +12420,288 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/PostNotFoundProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/posts/{post_id}/archive": {
+      "post": {
+        "tags": [
+          "POSTS"
+        ],
+        "summary": "Archive Post",
+        "description": "Archive a post (is_deleted=true). Administration route: any post, only for administrators.\n\nNothing is removed and no user row changes. The post leaves the data scope of its home users and of its\nuser_post_access rows until it is restored (they keep the rows); only post.access_all still reads its data. Its\nobservations and media become read-only history: writes answer 409 post_archived, except that administrators\n(admin.true with observation.view and observation.archive) still archive and restore its observations. It cannot\nbecome a home post or get new access rows. Hidden from lists unless include_deleted=true.\nUndo with POST /{post_id}/restore. Already archived or unknown: 404.",
+        "operationId": "archive_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "post_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Post Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AdminRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "admin_required": "#/components/schemas/AdminRequiredProblem",
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`post_not_found`: Post not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostNotFoundProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/posts/{post_id}/restore": {
+      "post": {
+        "tags": [
+          "POSTS"
+        ],
+        "summary": "Restore Post",
+        "description": "Restore an archived post (is_deleted=false): its home users and access rows read and write its data again.\nUnknown: 404. Not archived: 409.",
+        "operationId": "restore_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "post_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Post Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AdminRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "admin_required": "#/components/schemas/AdminRequiredProblem",
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`post_not_found`: Post not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostNotFoundProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`post_not_archived`: Post is not archived",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostNotArchivedProblem"
                 }
               }
             }
@@ -13862,7 +14270,7 @@
           "MEDIA"
         ],
         "summary": "Archive Media File",
-        "description": "Archive a media file (is_deleted=true): hidden from its observation and from lists, the file stays on disk\nand stays linked to the observation so it can be restored. Regular users may only archive files they uploaded\nwithin their post while the observation is active; media.manage_any overrides. Undo with POST /{media_id}/restore.",
+        "description": "Archive a media file (is_deleted=true): hidden from its observation and from lists, the file stays on disk\nand stays linked to the observation so it can be restored. Regular users may only archive files they uploaded\nwithin their post while the observation is active; media.manage_any overrides. Undo with POST /{media_id}/restore.\nMedia of an archived post: 409 post_archived.",
         "operationId": "archive_media_file",
         "security": [
           {
@@ -14020,11 +14428,25 @@
             }
           },
           "409": {
-            "description": "`media_not_archived`: Media file is not archived",
+            "description": "`media_not_archived`: Media file is not archived; `post_archived`: Post is archived",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MediaNotArchivedProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MediaNotArchivedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PostArchivedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "media_not_archived": "#/components/schemas/MediaNotArchivedProblem",
+                      "post_archived": "#/components/schemas/PostArchivedProblem"
+                    }
+                  }
                 }
               }
             }
@@ -14196,11 +14618,25 @@
             }
           },
           "409": {
-            "description": "`media_not_archived`: Media file is not archived",
+            "description": "`media_not_archived`: Media file is not archived; `post_archived`: Post is archived",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MediaNotArchivedProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MediaNotArchivedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PostArchivedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "media_not_archived": "#/components/schemas/MediaNotArchivedProblem",
+                      "post_archived": "#/components/schemas/PostArchivedProblem"
+                    }
+                  }
                 }
               }
             }
@@ -14214,7 +14650,7 @@
           "MEDIA"
         ],
         "summary": "Upload Complete File",
-        "description": "Multipart upload. The body is spooled to a temp file in 1 MB chunks and hashed\nwhile streaming; it is never held in memory. Users can only upload for observations of their post.",
+        "description": "Multipart upload. The body is spooled to a temp file in 1 MB chunks and hashed\nwhile streaming; it is never held in memory. Users can only upload for observations of their post; an archived\npost: 409 post_archived.",
         "operationId": "upload_complete_file",
         "requestBody": {
           "content": {
@@ -14381,6 +14817,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ObservationNotFoundProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`post_archived`: Post is archived",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostArchivedProblem"
                 }
               }
             }
@@ -14649,6 +15095,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ObservationNotFoundProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`post_archived`: Post is archived",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostArchivedProblem"
                 }
               }
             }
@@ -15586,7 +16042,7 @@
           "MEDIA"
         ],
         "summary": "Regenerate Thumbnail",
-        "description": "Video: delete the poster and queue extraction again. Images are rendered on demand, nothing to regenerate.",
+        "description": "Video: delete the poster and queue extraction again. Images are rendered on demand, nothing to regenerate.\nMedia of an archived post: 409 post_archived.",
         "operationId": "regenerate_thumbnail",
         "security": [
           {
@@ -15752,6 +16208,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "`post_archived`: Post is archived",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostArchivedProblem"
+                }
+              }
+            }
           }
         }
       }
@@ -15901,7 +16367,7 @@
           "MEDIA"
         ],
         "summary": "Create Upload Session",
-        "description": "Open a resumable upload. Format, declared Content-Type and size are checked here, before any byte is sent.",
+        "description": "Open a resumable upload. Format, declared Content-Type and size are checked here, before any byte is sent.\nAn observation of an archived post: 409 post_archived.",
         "operationId": "create_upload_session",
         "security": [
           {
@@ -16070,6 +16536,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ObservationNotFoundProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`post_archived`: Post is archived",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostArchivedProblem"
                 }
               }
             }
@@ -16610,7 +17086,7 @@
           "MEDIA"
         ],
         "summary": "Complete Upload Session",
-        "description": "Turn a fully received session into a media file: size, optional sha256, format and content checks,\nthen the same storage path as the other uploads. Calling it again on a completed session returns the same\nmedia file (200). 409 when bytes are missing (resend from Upload-Offset) or while another complete stores the\nfile; 422 on hash mismatch (session aborted); 415 / 413 as for other uploads (session aborted).",
+        "description": "Turn a fully received session into a media file: size, optional sha256, format and content checks,\nthen the same storage path as the other uploads. Calling it again on a completed session returns the same\nmedia file (200). 409 when bytes are missing (resend from Upload-Offset) or while another complete stores the\nfile; 422 on hash mismatch (session aborted); 415 / 413 as for other uploads (session aborted). The post of the\nsession archived: 409 post_archived, the session stays open and completes after a restore.",
         "operationId": "complete_upload_session",
         "security": [
           {
@@ -16806,11 +17282,14 @@
             }
           },
           "409": {
-            "description": "`upload_incomplete`: Upload incomplete; `upload_session_completing`: Session is being completed; ask GET for its status; `upload_writer_busy`: Another chunk is being written to this session; retry after it finishes",
+            "description": "`post_archived`: Post is archived; `upload_incomplete`: Upload incomplete; `upload_session_completing`: Session is being completed; ask GET for its status; `upload_writer_busy`: Another chunk is being written to this session; retry after it finishes",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PostArchivedProblem"
+                    },
                     {
                       "$ref": "#/components/schemas/UploadIncompleteProblem"
                     },
@@ -16824,6 +17303,7 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
+                      "post_archived": "#/components/schemas/PostArchivedProblem",
                       "upload_incomplete": "#/components/schemas/UploadIncompleteProblem",
                       "upload_session_completing": "#/components/schemas/UploadSessionCompletingProblem",
                       "upload_writer_busy": "#/components/schemas/UploadWriterBusyProblem"
@@ -19253,7 +19733,7 @@
           "SEARCH"
         ],
         "summary": "Search posts",
-        "description": "Search posts with typed filters.",
+        "description": "Search posts with typed filters. Archived posts only with include_deleted (requires post.archive).",
         "operationId": "search_posts",
         "security": [
           {
@@ -19626,6 +20106,18 @@
               "title": "Last User Activity To"
             },
             "description": "Latest home user activity before"
+          },
+          {
+            "name": "include_deleted",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Include archived posts (requires post.archive)",
+              "default": false,
+              "title": "Include Deleted"
+            },
+            "description": "Include archived posts (requires post.archive)"
           }
         ],
         "responses": {
@@ -19704,11 +20196,25 @@
             }
           },
           "403": {
-            "description": "`permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PermissionDeniedProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionRequiredForActionProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "permission_required_for_action": "#/components/schemas/PermissionRequiredForActionProblem"
+                    }
+                  }
                 }
               }
             }
@@ -24897,7 +25403,7 @@
               }
             ],
             "title": "Accessible Post Ids",
-            "description": "Posts whose data the user may read. null means every post (post.access_all)"
+            "description": "Posts whose data the user may read: the home post and the extra post access, archived posts left out. null means every post (post.access_all)"
           },
           "access_token": {
             "type": "string",
@@ -29725,6 +30231,75 @@
           }
         ]
       },
+      "PostArchivedProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Post is archived",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Post {post_id} is archived: its data is read-only"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "post_archived",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          },
+          "post_id": {
+            "type": "integer",
+            "title": "Post Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code",
+          "post_id"
+        ],
+        "title": "PostArchivedProblem",
+        "description": "Post is archived (HTTP 409). Problem type post_archived.",
+        "examples": [
+          {
+            "code": "post_archived",
+            "detail": "Post 1024 is archived: its data is read-only",
+            "instance": "/api/v1/...",
+            "post_id": 1024,
+            "status": 409,
+            "title": "Post is archived",
+            "type": "https://example.org/problems/post_archived"
+          }
+        ]
+      },
       "PostCodeTakenProblem": {
         "properties": {
           "type": {
@@ -29851,6 +30426,69 @@
         ],
         "title": "PostCreate",
         "description": "Create post with proper validation matching DB constraints"
+      },
+      "PostNotArchivedProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Post is not archived",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Post is not archived"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "post_not_archived",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "PostNotArchivedProblem",
+        "description": "Post is not archived (HTTP 409). Problem type post_not_archived.",
+        "examples": [
+          {
+            "code": "post_not_archived",
+            "detail": "Post is not archived",
+            "instance": "/api/v1/...",
+            "status": 409,
+            "title": "Post is not archived",
+            "type": "https://example.org/problems/post_not_archived"
+          }
+        ]
       },
       "PostNotFoundProblem": {
         "properties": {
@@ -30026,6 +30664,12 @@
           "is_active": {
             "type": "boolean",
             "title": "Is Active"
+          },
+          "is_deleted": {
+            "type": "boolean",
+            "title": "Is Deleted",
+            "description": "Archived (POST /posts/{post_id}/archive): its data is read-only",
+            "default": false
           },
           "online_user_count": {
             "type": "integer",
@@ -35600,7 +36244,7 @@
               }
             ],
             "title": "Accessible Post Ids",
-            "description": "Posts whose data the user may read. null means every post (post.access_all)"
+            "description": "Posts whose data the user may read: the home post and the extra post access, archived posts left out. null means every post (post.access_all)"
           },
           "id": {
             "type": "integer",

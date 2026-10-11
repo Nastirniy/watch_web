@@ -33,4 +33,5 @@ class PostFilterParams(BaseFilterParams):
     created_at_to: Optional[UtcDatetime] = Field(default=None, description="Created before")
     last_user_activity_from: Optional[UtcDatetime] = Field(default=None, description="Latest home user activity after")
     last_user_activity_to: Optional[UtcDatetime] = Field(default=None, description="Latest home user activity before")
+    include_deleted: bool = Field(default=False, description="Include archived posts (requires post.archive)")
 

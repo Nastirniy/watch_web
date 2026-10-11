@@ -221,6 +221,10 @@ class ErrorCode(ProblemType):
     # ---------------------------------------------------------------- posts
     POST_NOT_FOUND = ("post_not_found", problem(404, "Post not found", post_id=Optional[int]))
     POST_CODE_TAKEN = ("post_code_taken", problem(400, "Post with this code already exists"))
+    POST_NOT_ARCHIVED = ("post_not_archived", problem(409, "Post is not archived"))
+    # The data of an archived post is read-only history; it cannot become a home post or get access rows either
+    POST_ARCHIVED = ("post_archived", problem(
+        409, "Post is archived", "Post {post_id} is archived: its data is read-only", post_id=int))
 
     # ---------------------------------------------------------------- dictionaries
     CATEGORY_NOT_FOUND = ("category_not_found", problem(404, "Category not found", category_id=Optional[int]))
