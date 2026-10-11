@@ -19,7 +19,7 @@ from app.backend.database import get_session_maker, create_database_if_not_exist
 from app.backend.models.user import User
 from app.backend.models.role import Role, UserRole
 from app.backend.auth.certificates import CertificateParser, hash_pki_certificate_data
-from app.backend.helpers.audit_helper import create_audit_log
+from app.backend.services.audit import create_audit_log
 
 from sqlmodel import select
 

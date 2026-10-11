@@ -26,6 +26,8 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - Code only: startup and seeding moved out of `database.py` into `app/backend/bootstrap/` (`startup.py` schema lock and
   migrations, `seed.py`, `permissions.py` with `PERMISSION_META` and `ADMIN_ROLE_NAME`); `database.py` keeps the engine
   and sessions.
+- Code only: `helpers/` is gone. `create_audit_log` moved to `services/audit.py`, `client_info(request, auth)` (used by
+  routes only) to `api/shared/helpers/audit_helper.py`, `truncate_for_logging` to its one user, `auth/service.py`.
 
 ## Media that cannot be rendered; sizes as displayed (found by the live format matrix)
 

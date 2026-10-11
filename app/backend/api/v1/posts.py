@@ -16,7 +16,8 @@ from app.backend.auth.require import require
 from app.backend.enums.general import Permissions, StatsGroupBy
 from app.backend.config import settings
 from app.backend.enums.routes import PostRoutes
-from app.backend.helpers.audit_helper import client_info, create_audit_log
+from app.backend.api.shared.helpers.audit_helper import client_info
+from app.backend.services.audit import create_audit_log
 from app.backend.api.v1.models.query.posts import PostFilterParams
 from app.backend.filters.post_filter import PostFilterService
 from app.backend.api.v1.models.response.posts import PostResponse, PostObservationStatsResponse, post_to_response

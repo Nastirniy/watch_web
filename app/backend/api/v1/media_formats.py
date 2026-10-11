@@ -23,7 +23,8 @@ from app.backend.auth.require import require
 from app.backend.services.media.formats import hard_limit_bytes, invalidate_registry_cache
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import MediaFormatRoutes
-from app.backend.helpers.audit_helper import client_info, create_audit_log
+from app.backend.api.shared.helpers.audit_helper import client_info
+from app.backend.services.audit import create_audit_log
 from app.backend.utils.datetime_utils import get_default_timezone_datetime
 from app.backend.api.v1.models.request.media_formats import MediaFormatCreate, MediaFormatUpdate
 from app.backend.api.v1.models.response.media_formats import MediaFormatResponse

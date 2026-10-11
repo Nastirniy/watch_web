@@ -12,7 +12,8 @@ from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import TagRoutes
-from app.backend.helpers.audit_helper import client_info, create_audit_log
+from app.backend.api.shared.helpers.audit_helper import client_info
+from app.backend.services.audit import create_audit_log
 from app.backend.api.v1.models.request.tags import TagCreate, TagUpdate
 from app.backend.api.v1.models.response.tags import TagResponse
 from app.backend.api.v1.models.query.tags import TagFilterParams

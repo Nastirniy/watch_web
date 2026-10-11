@@ -21,7 +21,8 @@ from app.backend.models.role import Role
 from app.backend.models.observation import Observation, Category, SignalType, Tag
 from app.backend.models.media_format import MediaFormat
 from app.backend.models.media import MediaFile
-from app.backend.helpers.audit_helper import client_info, create_audit_log
+from app.backend.api.shared.helpers.audit_helper import client_info
+from app.backend.services.audit import create_audit_log
 
 # Filter params
 from app.backend.api.v1.models.query.observations import ObservationFilterParams

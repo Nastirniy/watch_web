@@ -16,7 +16,8 @@ from app.backend.services.media_manager import FileValidationConfig
 from app.backend.services.media import formats, jobs, renderer, urls as thumb_urls
 from app.backend.services.media.probe import has_no_video_stream, metadata_for, resolve_tools
 from app.backend.enums.general import MediaType, ThumbnailFormat, ThumbnailSize
-from app.backend.helpers.audit_helper import client_info, create_audit_log
+from app.backend.api.shared.helpers.audit_helper import client_info
+from app.backend.services.audit import create_audit_log
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.config import settings
 from app.backend.api.shared.helpers.media_helper import storage_root

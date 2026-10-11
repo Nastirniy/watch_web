@@ -21,7 +21,8 @@ from app.backend.enums.general import Permissions, SessionEndReason, SessionRevo
 from app.backend.auth import sessions as session_lifetimes
 from app.backend.api.v1.models.response.auth import SessionsEndedResponse, UserSessionResponse, build_session_response
 from app.backend.enums.routes import UserRoutes
-from app.backend.helpers.audit_helper import client_info, create_audit_log
+from app.backend.api.shared.helpers.audit_helper import client_info
+from app.backend.services.audit import create_audit_log
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.api.v1.models.request.users import UserCreateForm, UserUpdateForm, UserPostAccessUpsert
 from app.backend.api.v1.models.response.users import UserResponse, UserRoleResponse, UserPostAccessResponse

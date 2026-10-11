@@ -13,7 +13,8 @@ from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import SignalTypeRoutes
-from app.backend.helpers.audit_helper import client_info, create_audit_log
+from app.backend.api.shared.helpers.audit_helper import client_info
+from app.backend.services.audit import create_audit_log
 from app.backend.api.v1.models.request.signal_types import SignalTypeCreate, SignalTypeUpdate
 from app.backend.api.v1.models.response.signal_types import SignalTypeResponse, SignalTypeWithCategoryResponse
 from app.backend.api.v1.models.query.signal_types import SignalTypeFilterParams
