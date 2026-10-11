@@ -62,17 +62,25 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Drops posts.group_id and scope_groups: the tree is lost, every post goes back under the root."""
+    """Drops posts.group_id and scope_groups: the tree is lost, every post goes back under the root.
+
+    Order matters on MySQL: the foreign key needs the index of its column, so the constraint goes first, then the
+    index, then the column, then the table the constraint pointed at.
+    """
     inspector = sa.inspect(op.get_bind())
     if POSTS in inspector.get_table_names():
-        if INDEX in {i["name"] for i in inspector.get_indexes(POSTS)}:
-            op.drop_index(INDEX, table_name=POSTS)
-        if COLUMN in {c["name"] for c in inspector.get_columns(POSTS)}:
-            fks = {fk["name"] for fk in inspector.get_foreign_keys(POSTS) if COLUMN in fk["constrained_columns"]}
+        fk_names = [
+            fk["name"] for fk in inspector.get_foreign_keys(POSTS)
+            if COLUMN in fk["constrained_columns"] and fk.get("name")
+        ]
+        if fk_names:
             with op.batch_alter_table(POSTS) as batch:
-                for name in fks:
-                    if name:
-                        batch.drop_constraint(name, type_="foreignkey")
+                for name in fk_names:
+                    batch.drop_constraint(name, type_="foreignkey")
+        if INDEX in {i["name"] for i in sa.inspect(op.get_bind()).get_indexes(POSTS)}:
+            op.drop_index(INDEX, table_name=POSTS)
+        if COLUMN in {c["name"] for c in sa.inspect(op.get_bind()).get_columns(POSTS)}:
+            with op.batch_alter_table(POSTS) as batch:
                 batch.drop_column(COLUMN)
     if TABLE in sa.inspect(op.get_bind()).get_table_names():
         op.drop_table(TABLE)
