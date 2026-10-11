@@ -9,6 +9,7 @@ from sqlalchemy import and_, not_, or_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql.selectable import Select
 
+from app.backend.config import settings
 from app.backend.models.media import MediaFile
 from app.backend.enums.general import MediaType, PosterStatus
 from app.backend.models.observation import Observation
@@ -33,6 +34,7 @@ class MediaCriteria(ListCriteria):
     has_thumbnail: Optional[bool] = None
     uploaded_at_from: Optional[datetime] = None
     uploaded_at_to: Optional[datetime] = None
+    include_deleted: bool = False
 
 
 class MediaFilterService(SimpleFilterEngine):
@@ -44,14 +46,31 @@ class MediaFilterService(SimpleFilterEngine):
 
     @staticmethod
     def _apply_has_thumbnail(query: Select, has_thumbnail: Optional[bool]) -> Select:
-        """Images always have a thumbnail (rendered on demand); videos once their poster is ready"""
+        """Images have a thumbnail (rendered on demand) unless imgproxy refuses them as too large, the rule of
+        MediaFile.too_large_to_render (an unknown size counts as renderable); videos once their poster is ready"""
         if has_thumbnail is None:
             return query
+        too_large = and_(
+            MediaFile.width.is_not(None), MediaFile.width > 0,
+            MediaFile.height.is_not(None), MediaFile.height > 0,
+            MediaFile.width * MediaFile.height > settings.storage.imgproxy.max_src_resolution_mp * 1_000_000,
+        )
         ready = or_(
-            MediaFile.media_type == MediaType.IMAGE.value,
+            and_(MediaFile.media_type == MediaType.IMAGE.value, not_(too_large)),
             and_(MediaFile.media_type == MediaType.VIDEO.value, MediaFile.poster_status == PosterStatus.READY.value),
         )
         return query.where(ready) if has_thumbnail else query.where(not_(ready))
+
+    @classmethod
+    def _apply_scope(cls, query: Select, params: MediaCriteria, access_post_ids: Optional[Iterable[int]]) -> Select:
+        """Archived media only on include_deleted; media of an archived observation never (the media routes answer
+        404 for it); the post scope through the observation's post_id"""
+        query = cls._apply_soft_delete(query, params)
+        query = query.join(Observation, MediaFile.observation_id == Observation.id)
+        query = query.where(Observation.is_deleted == False)
+        if access_post_ids is not None:
+            query = query.where(Observation.post_id.in_(list(access_post_ids)))
+        return query
 
     @classmethod
     def apply_filters(
@@ -64,12 +83,7 @@ class MediaFilterService(SimpleFilterEngine):
         params = cls.criteria(params)
         query = query.options(selectinload(MediaFile.user))
 
-        # MediaFile has no is_deleted
-
-        # Access control through observation's post_id
-        if access_post_ids is not None:
-            query = query.join(Observation, MediaFile.observation_id == Observation.id)
-            query = query.where(Observation.post_id.in_(list(access_post_ids)))
+        query = cls._apply_scope(query, params, access_post_ids)
 
         query = cls._apply_exact(query, MediaFile.id, params.id)
         query = cls._apply_exact(query, MediaFile.observation_id, params.observation_id)
@@ -98,9 +112,7 @@ class MediaFilterService(SimpleFilterEngine):
     ) -> Select:
         """Apply filters without pagination"""
         params = cls.criteria(params)
-        if access_post_ids is not None:
-            query = query.join(Observation, MediaFile.observation_id == Observation.id)
-            query = query.where(Observation.post_id.in_(list(access_post_ids)))
+        query = cls._apply_scope(query, params, access_post_ids)
 
         query = cls._apply_exact(query, MediaFile.id, params.id)
         query = cls._apply_exact(query, MediaFile.observation_id, params.observation_id)

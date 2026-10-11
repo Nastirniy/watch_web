@@ -85,6 +85,16 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   a larger value answers 422 `validation_error` (it answered 500). `POST /observations/{id}/disappeared` answers 422
   with field code `value_too_large` on `disappeared_at` when the duration it computes does not fit an INT. The
   `maximum` of these fields is in `api-contract/v1/openapi.json`.
+- `GET /search/media` no longer returns archived media, and `GET /media` and `GET /search/media` no longer list media
+  of an archived observation (their thumbnail URLs were signed although `GET /media/{id}/info` answers 404), in the items
+  and in `total`. Both take `include_deleted` (archived media only, never media of an archived observation), which needs
+  `media.archive` (403 `permission_required_for_action`, declared on both operations).
+- `GET /media?has_thumbnail=true` (and search) no longer returns images above `storage.imgproxy.max_src_resolution_mp`
+  (`thumbnail_status` `unsupported`); `has_thumbnail=false` returns them.
+- `POST /media/{id}/thumbnail/regenerate` checks write access to the post of the media like archive and restore: an
+  administrator of another post answers 403 `post_access_denied` / `post_write_denied` and the poster is left alone;
+  media of an archived observation answers 404 `media_observation_not_found`. `api-contract/v1/openapi.json` is
+  rewritten for the new codes and the `include_deleted` query parameter.
 
 ### Changed
 

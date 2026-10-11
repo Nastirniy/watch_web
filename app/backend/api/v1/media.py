@@ -91,14 +91,18 @@ async def get_media_formats(
     )
 
 
-@router.get(MediaRoutes.ROOT.value, response_model=List[MediaFileInfo], responses=problems(*GUARDED))
+@router.get(
+    MediaRoutes.ROOT.value, response_model=List[MediaFileInfo],
+    responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
+)
 async def list_media_files(
     filters: Annotated[MediaFilterParams, Query()],
     session: AsyncSession = Depends(get_session),
     auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW]))
 ):
     """List media files with filters. Each item carries thumbnail_status and signed thumbnail_urls."""
-    query = select(MediaFile).where(MediaFile.is_deleted == False)
+    AccessControlService.check_include_deleted(auth, filters, Permissions.MEDIA_ARCHIVE)
+    query = select(MediaFile)
     query = MediaFilterService.apply_filters(query, filters, AccessControlService.post_scope(auth))
     result = await session.exec(query)
     return [MediaFileInfo.model_validate(mf) for mf in result.all()]
@@ -693,7 +697,10 @@ async def share_media_thumbnail(
 @router.post(
     MediaRoutes.MEDIA_THUMBNAIL_REGENERATE.value,
     response_model=ThumbnailRegenerateResponse,
-    responses=problems(ErrorCode.MEDIA_NOT_FOUND, ErrorCode.THUMBNAILS_UNSUPPORTED, *ADMIN),
+    responses=problems(
+        AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.MEDIA_NOT_FOUND,
+        ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.THUMBNAILS_UNSUPPORTED, *ADMIN,
+    ),
 )
 async def regenerate_thumbnail(
     media_id: int,
@@ -702,6 +709,9 @@ async def regenerate_thumbnail(
 ):
     """Video: delete the poster and queue extraction again. Images are rendered on demand, nothing to regenerate."""
     media_file = await get_media_or_404(session, media_id, include_deleted=True)
+    if media_file.observation_id:
+        observation = await get_observation_from_media(session, media_file)
+        AccessControlService.check_post_write(auth, observation.post_id, "media")
 
     if media_file.is_video:
         poster = media_file.resolve_poster_path(storage_root())

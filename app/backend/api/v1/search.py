@@ -324,7 +324,7 @@ async def search_tags(
     response_model=SearchResponse[MediaFileInfo],
     summary="Search media files",
     description="Search media files with typed filters.",
-    responses=problems(*GUARDED),
+    responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
 )
 async def search_media(
     request: Request,
@@ -332,6 +332,7 @@ async def search_media(
     auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW])),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse[MediaFileInfo]:
+    AccessControlService.check_include_deleted(auth, params, Permissions.MEDIA_ARCHIVE)
     access_post_ids = AccessControlService.post_scope(auth)
 
     query = select(MediaFile)

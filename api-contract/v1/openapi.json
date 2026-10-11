@@ -12662,6 +12662,18 @@
               "title": "Uploaded At To"
             },
             "description": "Uploaded before"
+          },
+          {
+            "name": "include_deleted",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Include archived media (requires media.archive); media of archived observations are never listed",
+              "default": false,
+              "title": "Include Deleted"
+            },
+            "description": "Include archived media (requires media.archive); media of archived observations are never listed"
           }
         ],
         "responses": {
@@ -12744,11 +12756,25 @@
             }
           },
           "403": {
-            "description": "`permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PermissionDeniedProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionRequiredForActionProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "permission_required_for_action": "#/components/schemas/PermissionRequiredForActionProblem"
+                    }
+                  }
                 }
               }
             }
@@ -15547,7 +15573,7 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions; `post_access_denied`: No access to the data of this post; `post_write_denied`: Read-only access to this post",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -15557,13 +15583,21 @@
                     },
                     {
                       "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PostAccessDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PostWriteDeniedProblem"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
                       "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "post_access_denied": "#/components/schemas/PostAccessDeniedProblem",
+                      "post_write_denied": "#/components/schemas/PostWriteDeniedProblem"
                     }
                   }
                 }
@@ -15571,11 +15605,25 @@
             }
           },
           "404": {
-            "description": "`media_not_found`: Media file not found",
+            "description": "`media_not_found`: Media file not found; `media_observation_not_found`: Associated observation not found",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MediaNotFoundProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MediaNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MediaObservationNotFoundProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "media_not_found": "#/components/schemas/MediaNotFoundProblem",
+                      "media_observation_not_found": "#/components/schemas/MediaObservationNotFoundProblem"
+                    }
+                  }
                 }
               }
             }
@@ -21171,6 +21219,18 @@
               "title": "Uploaded At To"
             },
             "description": "Uploaded before"
+          },
+          {
+            "name": "include_deleted",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Include archived media (requires media.archive); media of archived observations are never listed",
+              "default": false,
+              "title": "Include Deleted"
+            },
+            "description": "Include archived media (requires media.archive); media of archived observations are never listed"
           }
         ],
         "responses": {
@@ -21249,11 +21309,25 @@
             }
           },
           "403": {
-            "description": "`permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PermissionDeniedProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionRequiredForActionProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "permission_required_for_action": "#/components/schemas/PermissionRequiredForActionProblem"
+                    }
+                  }
                 }
               }
             }
