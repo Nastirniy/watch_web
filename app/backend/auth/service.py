@@ -16,7 +16,8 @@ from app.backend.auth.certificates import (
     validate_pki_certificate_data,
     hash_pki_certificate_data,
     serial_hashes,
-    create_pki_auth_audit_details
+    create_pki_auth_audit_details,
+    cn_hash_matches,
 )
 from app.backend.services.audit import create_audit_log
 from app.backend.utils.text import fit_column
@@ -207,7 +208,7 @@ class AuthService:
         )
 
         # Hash the certificate data for secure comparison using helper
-        cn_hash, _, fingerprint_hash = await hash_pki_certificate_data(
+        _, _, fingerprint_hash = await hash_pki_certificate_data(
             certificate_cn, certificate_serial, certificate_fingerprint
         )
         stored_serial_forms = await serial_hashes(certificate_serial)
@@ -229,7 +230,7 @@ class AuthService:
         result = await session.exec(
             select(User).where(
                 and_(
-                    User.pki_certificate_cn_hash == cn_hash,
+                    await cn_hash_matches(certificate_cn),
                     User.pki_certificate_serial_hash.in_(stored_serial_forms),
                     User.pki_certificate_fingerprint_hash == fingerprint_hash,
                 )

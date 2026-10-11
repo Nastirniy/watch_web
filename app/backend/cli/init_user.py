@@ -18,7 +18,9 @@ from loguru import logger
 from app.backend.database import get_session_maker, create_database_if_not_exists
 from app.backend.models.user import User
 from app.backend.models.role import Role, UserRole
-from app.backend.auth.certificates import CertificateParser, hash_pki_certificate_data
+from app.backend.auth.certificates import (
+    CN_SCHEME_CURRENT, CertificateParser, cn_hash_matches, hash_pki_certificate_data,
+)
 from app.backend.services.audit import create_audit_log
 
 from sqlmodel import select
@@ -101,7 +103,7 @@ async def create_user(
         # Check certificate uniqueness
         dup = await session.exec(
             select(User).where(
-                (User.pki_certificate_cn_hash == pki_cn_hash) |
+                await cn_hash_matches(pki_cn) |
                 (User.pki_certificate_serial_hash == pki_serial_hash) |
                 (User.pki_certificate_fingerprint_hash == pki_fingerprint_hash)
             )
@@ -127,6 +129,7 @@ async def create_user(
             username=username,
             username_alias=username_alias,
             pki_certificate_cn_hash=pki_cn_hash,
+            pki_certificate_cn_hash_scheme=CN_SCHEME_CURRENT,
             pki_certificate_serial_hash=pki_serial_hash,
             pki_certificate_fingerprint_hash=pki_fingerprint_hash,
         )

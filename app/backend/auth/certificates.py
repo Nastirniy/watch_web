@@ -1,14 +1,21 @@
 from typing import Dict, List, Optional, Tuple
 import hashlib
 import string
+import unicodedata
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 
+from sqlalchemy import and_, or_
+
 from app.backend.utils.logging_config import get_security_logger
 
 _logger = get_security_logger()
+
+# users.pki_certificate_cn_hash_scheme: the rule that made the stored name hash
+CN_SCHEME_LEGACY = 1  # hash_data; certificates stored before migration 019 keep it
+CN_SCHEME_CURRENT = 2  # hash_cn; every certificate stored from now on
 
 
 class CertificateParser:
@@ -120,12 +127,16 @@ async def parse_cn(dn: str) -> Optional[str]:
                 return part[3:]
         return None
 
-    for rdn in _split_unescaped(dn, ","):
-        for attribute in _split_unescaped(rdn, "+"):
-            name, separator, value = attribute.partition("=")
-            if separator and name.strip().upper() == "CN":
-                return _unescape_rfc2253(value)
-    return None
+    # RFC 2253 lists the RDNs last first (the attributes of one RDN keep their order): read in certificate order
+    # the first CN is the one CertificateParser stores.
+    values = [
+        value
+        for rdn in reversed(_split_unescaped(dn, ","))
+        for attribute in _split_unescaped(rdn, "+")
+        for name, separator, value in [attribute.partition("=")]
+        if separator and name.strip().upper() == "CN"
+    ]
+    return _unescape_rfc2253(values[0]) if values else None
 
 
 async def hash_data(data: str) -> str:
@@ -136,6 +147,15 @@ async def hash_data(data: str) -> str:
     """
     normalized = data.replace(":", "").replace("-", "").strip().lower()
     return hashlib.sha256(normalized.encode('utf-8')).hexdigest()
+
+
+async def hash_cn(common_name: str) -> str:
+    """Scheme 2 hash of a certificate name: Unicode NFC and surrounding whitespace stripped, nothing else.
+
+    Case, dashes and colons are part of a name ('Post-Kyiv' and 'postkyiv' are two certificates), unlike a serial
+    or a fingerprint (hash_data).
+    """
+    return hashlib.sha256(unicodedata.normalize("NFC", common_name).strip().encode("utf-8")).hexdigest()
 
 
 async def serial_hashes(certificate_serial: str) -> set[str]:
@@ -182,13 +202,26 @@ async def hash_pki_certificate_data(
         certificate_fingerprint: Certificate Fingerprint
 
     Returns:
-        Tuple of (cn_hash, serial_hash, fingerprint_hash)
+        Tuple of (cn_hash, serial_hash, fingerprint_hash); the name hash is scheme 2 (CN_SCHEME_CURRENT), the
+        rule of every certificate stored now
     """
-    cn_hash = await hash_data(certificate_cn)
+    cn_hash = await hash_cn(certificate_cn)
     serial_hash = await hash_data(certificate_serial)
     fingerprint_hash = await hash_data(certificate_fingerprint)
 
     return cn_hash, serial_hash, fingerprint_hash
+
+
+async def cn_hash_matches(certificate_cn: str):
+    """SQL condition: the user row holds this name under the rule of its own scheme (scheme 1 rows were hashed
+    with hash_data, scheme 2 rows with hash_cn)."""
+    from app.backend.models.user import User  # models load auth.sessions, which imports this module
+    return or_(
+        and_(User.pki_certificate_cn_hash_scheme == CN_SCHEME_LEGACY,
+             User.pki_certificate_cn_hash == await hash_data(certificate_cn)),
+        and_(User.pki_certificate_cn_hash_scheme == CN_SCHEME_CURRENT,
+             User.pki_certificate_cn_hash == await hash_cn(certificate_cn)),
+    )
 
 
 async def create_pki_auth_audit_details(

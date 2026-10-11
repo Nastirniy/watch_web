@@ -14,6 +14,10 @@ class User(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     pki_certificate_cn_hash: str = Field(unique=True, index=True, max_length=255)
+    # Rule that made pki_certificate_cn_hash: 1 = hash_data (rows from before 019), 2 = hash_cn (every new certificate)
+    pki_certificate_cn_hash_scheme: int = Field(
+        default=1, sa_column_kwargs={"server_default": "1", "nullable": False}
+    )
     pki_certificate_serial_hash: str = Field(unique=True, max_length=255)
     pki_certificate_fingerprint_hash: str = Field(unique=True, max_length=255)
     username: str = Field(unique=True, index=True, max_length=255)

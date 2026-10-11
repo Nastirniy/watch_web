@@ -1,7 +1,7 @@
 """Initial data, idempotent: roles and permissions, accepted media formats, the admin user in development."""
 from sqlmodel import select
 
-from app.backend.auth.certificates import hash_data
+from app.backend.auth.certificates import CN_SCHEME_CURRENT, hash_cn, hash_data
 from app.backend.bootstrap.permissions import seed_roles_and_permissions
 from app.backend.config import settings
 from app.backend.database import create_database_if_not_exists, get_session_maker
@@ -113,7 +113,8 @@ async def seed_database():
                 admin_user = User(
                     username=settings.admin.username,
                     username_alias=settings.admin.username_alias,
-                    pki_certificate_cn_hash=await hash_data(admin_pki["pki_certificate_cn"]),
+                    pki_certificate_cn_hash=await hash_cn(admin_pki["pki_certificate_cn"]),
+                    pki_certificate_cn_hash_scheme=CN_SCHEME_CURRENT,
                     pki_certificate_serial_hash=await hash_data(admin_pki["pki_certificate_serial"]),
                     pki_certificate_fingerprint_hash=await hash_data(admin_pki["pki_certificate_fingerprint"]),
                     is_active=True

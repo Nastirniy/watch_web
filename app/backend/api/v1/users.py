@@ -19,7 +19,9 @@ from app.backend.auth.privileges import (
     check_admin_kept, check_an_admin_remains, check_grant, check_target_user, role_permission_names,
 )
 from app.backend.auth.service import AuthService
-from app.backend.auth.certificates import CertificateParser, hash_data, hash_pki_certificate_data
+from app.backend.auth.certificates import (
+    CN_SCHEME_CURRENT, CertificateParser, cn_hash_matches, hash_pki_certificate_data,
+)
 from app.backend.enums.general import Permissions, SessionEndReason, SessionRevokeCause, SessionStatus
 from app.backend.auth import sessions as session_lifetimes
 from app.backend.api.v1.models.response.auth import SessionsEndedResponse, UserSessionResponse, build_session_response
@@ -196,7 +198,7 @@ async def create_user(
     # Check for duplicate certificate before creating user
     duplicate_check = await session.exec(
         select(User).where(
-            (User.pki_certificate_cn_hash == pki_cn_hash) |
+            await cn_hash_matches(pki_cn) |
             (User.pki_certificate_serial_hash == pki_serial_hash) |
             (User.pki_certificate_fingerprint_hash == pki_fingerprint_hash)
         )
@@ -210,6 +212,7 @@ async def create_user(
         username_alias=user_data.username_alias,
         post_id=user_data.post_id,
         pki_certificate_cn_hash=pki_cn_hash,
+        pki_certificate_cn_hash_scheme=CN_SCHEME_CURRENT,
         pki_certificate_serial_hash=pki_serial_hash,
         pki_certificate_fingerprint_hash=pki_fingerprint_hash
     )
@@ -414,15 +417,15 @@ async def update_user(
             _logger.info(f"Certificate parsed for user {user.username}: CN={pki_cn}, Serial={pki_serial[:16]}...")
 
             # Hash PKI certificate data before storing
-            pki_cn_hash = await hash_data(pki_cn)
-            pki_serial_hash = await hash_data(pki_serial)
-            pki_fingerprint_hash = await hash_data(pki_fingerprint)
+            pki_cn_hash, pki_serial_hash, pki_fingerprint_hash = await hash_pki_certificate_data(
+                pki_cn, pki_serial, pki_fingerprint
+            )
 
             # Check for duplicate certificate (excluding current user)
             duplicate_check = await session.exec(
                 select(User).where(
                     (
-                        (User.pki_certificate_cn_hash == pki_cn_hash) |
+                        await cn_hash_matches(pki_cn) |
                         (User.pki_certificate_serial_hash == pki_serial_hash) |
                         (User.pki_certificate_fingerprint_hash == pki_fingerprint_hash)
                     ) &
@@ -434,6 +437,7 @@ async def update_user(
 
             certificate_replaced = user.pki_certificate_fingerprint_hash != pki_fingerprint_hash
             user.pki_certificate_cn_hash = pki_cn_hash
+            user.pki_certificate_cn_hash_scheme = CN_SCHEME_CURRENT
             user.pki_certificate_serial_hash = pki_serial_hash
             user.pki_certificate_fingerprint_hash = pki_fingerprint_hash
 

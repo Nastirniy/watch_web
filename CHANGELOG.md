@@ -5,6 +5,27 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Post archiving and certificate name hash
+
+### Fixed
+
+- Two certificates whose names differ only by case, dashes or colons (`Post-Kyiv` and `postkyiv`) are two different
+  certificates: `POST /users`, the certificate replace in `PATCH /users/{id}` and `cli/init_user` no longer refuse the
+  second one with `certificate_taken`. The name hash is now computed on the name as written (Unicode NFC, surrounding
+  whitespace stripped); serial and fingerprint hashing do not change. A column `users.pki_certificate_cn_hash_scheme`
+  says which rule made a stored hash (1 = the old rule, 2 = the new one); login and the duplicate checks compare each
+  row under its own scheme.
+- A certificate subject with several CNs: the login reads the same CN the certificate upload stores (the first in the
+  certificate), from nginx's RFC 2253 form and from the legacy `/CN=` form.
+
+### Changed (operators)
+
+- Migration `019_certificate_cn_hash_scheme` adds `users.pki_certificate_cn_hash_scheme` (small integer, NOT NULL, server
+  default 1) and runs at startup. Certificates already in the database stay scheme 1 and keep working; they are not
+  upgraded automatically (the name itself is not stored) - a user moves to scheme 2 when their certificate is replaced.
+  Every certificate stored from now on, the first admin from the configuration included, is scheme 2. Downgrading drops
+  the column: users of scheme 2 cannot log in with the older code until their certificate is replaced.
+
 ## API audit fixes
 
 ### Fixed

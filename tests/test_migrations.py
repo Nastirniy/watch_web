@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-HEAD = "018_media_file_size_bigint"
+HEAD = "019_certificate_cn_hash_scheme"
 
 
 def run_migrate(db_file: Path, cwd: Path = PROJECT_ROOT) -> subprocess.CompletedProcess:
