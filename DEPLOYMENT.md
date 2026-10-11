@@ -126,7 +126,29 @@ Upgrades: `docker compose build api && docker compose up -d api media-worker`. T
 
 Upgrading to sizes as displayed (vertical phone videos, EXIF-rotated photos): rows stored before keep the stored frame size until probed again. `docker compose exec media-worker python -m app.backend.cli.media_tools probe-missing --all` probes every video and audio file again and re-reads every image size (headers only; `--limit N` per run, default 1000). Video uploads that failed only because they have no video stream become `unsupported` after `media_tools reconcile-posters --retry-failed`: the worker sees the probed metadata and stops trying.
 
-Offloaded uploads (`/api/v1/media/nginx-upload`): nginx keeps the request body in `NGINX_UPLOAD_TEMP` (`client_body_in_file_only` never deletes it). The API accepts `X-File-Name` only for a regular file inside that directory (`storage.nginx_upload_temp_path`, same path as `client_body_temp_path`), moves it on success and deletes it on every other outcome once the path is checked. A request refused before the handler runs (an expired token, 401) leaves its file, so sweep the directory from cron: `docker compose exec api python -m app.backend.cli.media_tools sweep-nginx-temp` deletes files older than `storage.nginx_upload_temp_max_age_hours` (24 by default; `--max-age-hours N` overrides it). Keep the age above the longest upload, nginx may still be writing a younger file. A file the command cannot read or delete (permissions) is logged, left in place and counted (`skipped N file(s)` in its output); the sweep goes on with the others.
+Offloaded uploads (`/api/v1/media/nginx-upload`): nginx keeps the request body in `NGINX_UPLOAD_TEMP` (`client_body_in_file_only` never deletes it). The API accepts `X-File-Name` only for a regular file inside that directory (`storage.nginx_upload_temp_path`, same path as `client_body_temp_path`), moves it on success and deletes it on every other outcome once the path is checked. A request refused before the handler runs (an expired token, 401) leaves its file, so sweep the directory from cron (see "Scheduled cleanup" below): `docker compose exec api python -m app.backend.cli.media_tools sweep-nginx-temp` deletes files older than `storage.nginx_upload_temp_max_age_hours` (24 by default; `--max-age-hours N` overrides it). Keep the age above the longest upload, nginx may still be writing a younger file. A file the command cannot read or delete (permissions) is logged, left in place and counted (`skipped N file(s)` in its output); the sweep goes on with the others.
+
+### Scheduled cleanup (cron)
+
+Every installation that accepts offloaded uploads needs this job; without it rejected upload bodies (up to the format
+limit each, 10 GB by default) pile up in `NGINX_UPLOAD_TEMP` until the disk is full. Add a cron entry on the host, for
+example `/etc/cron.d/watch-web` (run as root or as a user in the `docker` group; `/srv/watch_web` stands for the
+directory that holds `docker-compose.yml`):
+
+```cron
+# minute hour day month weekday user command
+15 * * * * root cd /srv/watch_web && docker compose exec -T api python -m app.backend.cli.media_tools sweep-nginx-temp >> /var/log/watch-web-sweep.log 2>&1
+```
+
+- `-T`: cron has no terminal, `docker compose exec` must not ask for one.
+- Once an hour is enough: the command removes only files older than `storage.nginx_upload_temp_max_age_hours` (24 by
+  default), so a younger file nginx is still writing is never touched. Set `--max-age-hours N` only above the longest
+  upload you expect.
+- Each run prints `removed N file(s), X MB` and, when it could not delete something, `skipped N file(s) ...`; check the
+  log after the first runs (`tail /var/log/watch-web-sweep.log`). A skipped file is a permission problem: the API user
+  (`MEDIA_UID`) must be able to delete files nginx wrote there (see "Host nginx": the simplest arrangement is
+  `MEDIA_UID` = the nginx worker user).
+- The api container must be running; the command uses the same settings (`.env`) as the API.
 
 ## Storyboards (seek previews)
 
@@ -220,4 +242,4 @@ docker compose exec media-worker python -m app.backend.cli.media_tools storyboar
 
 ## Without Docker
 
-The same image contents run from a venv: `python -m uvicorn app.main:fastapi_app --host 127.0.0.1 --port 8000 --workers 4 --proxy-headers` for the API, `systemd/watch-web-media-worker.service` for the worker, and imgproxy as a Podman or Docker container (it is distributed as an image only). Settings come from `.env`; `MYSETTINGS_STORAGE__UPLOAD_PATH` must equal `MEDIA_ROOT`.
+The same image contents run from a venv: `python -m uvicorn app.main:fastapi_app --host 127.0.0.1 --port 8000 --workers 4 --proxy-headers` for the API, `systemd/watch-web-media-worker.service` for the worker, and imgproxy as a Podman or Docker container (it is distributed as an image only). Settings come from `.env`; `MYSETTINGS_STORAGE__UPLOAD_PATH` must equal `MEDIA_ROOT`. The scheduled cleanup runs from the venv instead of the container: `15 * * * * watch-web cd /srv/watch_web && venv/bin/python -m app.backend.cli.media_tools sweep-nginx-temp >> /var/log/watch-web-sweep.log 2>&1` (as the user the API runs as, from the project root so `.env` is read).
