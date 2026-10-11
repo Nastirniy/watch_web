@@ -12146,7 +12146,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 64
                 },
                 {
                   "type": "null"
@@ -23875,7 +23876,10 @@
           "date_filters_conflict",
           "relative_date_filters_conflict",
           "observed_at_range_reversed",
-          "frequency_range_invalid"
+          "frequency_range_invalid",
+          "frequency_center_out_of_range",
+          "disappeared_before_observed",
+          "observed_after_disappeared"
         ],
         "title": "FieldErrorCode",
         "description": "Rules of the API on single values. Built-in checks keep pydantic's codes (missing, string_too_short, ...)."
@@ -28060,7 +28064,7 @@
         },
         "type": "object",
         "title": "ObservationFrequencyUpdate",
-        "description": "Partial update of one band. The merged band is checked again (frequency_max > frequency_min).\nWhen min or max changes and frequency_center is not sent, the center is recalculated."
+        "description": "Partial update of one band. The merged band is checked again (frequency_max > frequency_min, the center inside).\nWhen min or max changes and frequency_center is not sent, the center is recalculated."
       },
       "ObservationNotActiveProblem": {
         "properties": {

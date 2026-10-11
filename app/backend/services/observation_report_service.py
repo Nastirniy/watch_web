@@ -82,6 +82,17 @@ _KIND_LABELS = {
 }
 
 
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def escape_text(value):
+    """User-supplied text for a cell: a string that starts like a formula gets a leading apostrophe, so a spreadsheet
+    shows it as text (OWASP CSV injection). Numbers and dates are passed on typed."""
+    if isinstance(value, str) and value.startswith(_FORMULA_PREFIXES):
+        return "'" + value
+    return value
+
+
 def _kind_label(kind: str) -> str:
     return _KIND_LABELS.get(kind, kind)
 
@@ -284,7 +295,7 @@ class ObservationReportService:
             c_lbl.alignment = left
             if num_cols > 1:
                 ws.merge_cells(f"B{row}:{last_col}{row}")
-            c_val = ws.cell(row=row, column=2, value=value)
+            c_val = ws.cell(row=row, column=2, value=escape_text(value))
             c_val.font = _font(size=10)
             c_val.alignment = left
             row += 1
@@ -352,7 +363,7 @@ class ObservationReportService:
                 ]
 
             for col_idx, value in enumerate(row_data, start=1):
-                c = ws.cell(row=row, column=col_idx, value=value)
+                c = ws.cell(row=row, column=col_idx, value=escape_text(value))
                 c.border = thin_border
                 if spacer_col and col_idx == spacer_col:
                     c.fill = _fill(cls._COLOR_SPACER_ALT if use_alt else cls._COLOR_SPACER_BG)

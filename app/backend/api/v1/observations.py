@@ -36,6 +36,7 @@ from app.backend.api.v1.models.response.observations import (
 from app.backend.api.shared.helpers.observation_helper import (
     get_observation_for_write,
     get_frequency_or_404,
+    disappeared_duration,
     ensure_other_active_frequency,
     frequency_audit_values,
     observation_audit_values,
@@ -46,8 +47,6 @@ from app.backend.api.v1.models.query.observations import ObservationFilterParams
 from app.backend.filters.observation_filter import ObservationFilterService
 from app.backend.filters.observation_report_filter import ObservationReportFilter
 from app.backend.services.observation_report_service import ObservationReportService
-from app.backend.utils.validators import INT_MAX
-from app.backend.utils.datetime_utils import as_utc
 from app.backend.errors.problems import ApiError, field_problem
 from app.backend.enums.errors import AccessErrorCode, ErrorCode, FieldErrorCode
 from app.backend.api.shared.openapi_docs import file_response, header
@@ -278,6 +277,10 @@ async def update_observation(
             raise ApiError(ErrorCode.SIGNAL_TYPE_INACTIVE, signal_type_name=signal_type.name)
 
     update_data = observation_data.model_dump(exclude_unset=True, exclude={"tag_ids"})
+    if "observed_at" in update_data and observation.disappeared_at is not None:
+        # the duration of a disappeared observation follows its start unless the request sets it
+        duration = disappeared_duration(update_data["observed_at"], observation.disappeared_at, "observed_at")
+        update_data.setdefault("duration_seconds", duration)
     for field, value in update_data.items():
         setattr(observation, field, value)
 
@@ -352,17 +355,13 @@ async def mark_observation_disappeared(
     AccessControlService.check_post_write(auth, observation.post_id, "observation")
     AccessControlService.check_observation_ownership(auth, observation)
 
+    duration = disappeared_duration(observation.observed_at, disappeared_data.disappeared_at, "disappeared_at")
+
     observation.status = ObservationStatus.DISAPPEARED.value
     observation.disappeared_at = disappeared_data.disappeared_at
     observation.disappeared_by = current_user.id
     observation.updated_at = datetime.now(timezone.utc)
-
-    if observation.observed_at:
-        time_delta = disappeared_data.disappeared_at - as_utc(observation.observed_at)
-        duration = int(time_delta.total_seconds())
-        if abs(duration) > INT_MAX:
-            raise field_problem(FieldErrorCode.VALUE_TOO_LARGE, ("body", "disappeared_at"), max_value=INT_MAX)
-        observation.duration_seconds = duration
+    observation.duration_seconds = duration
 
     session.add(observation)
     
@@ -662,6 +661,9 @@ async def update_observation_frequency(
         changes["kind"] = changes["kind"].value
     if ("frequency_min" in changes or "frequency_max" in changes) and "frequency_center" not in changes:
         changes["frequency_center"] = default_frequency_center(frequency_min, frequency_max)
+    frequency_center = changes.get("frequency_center", frequency.frequency_center)
+    if {"frequency_min", "frequency_max", "frequency_center"} & changes.keys() and not frequency_min <= frequency_center <= frequency_max:
+        raise field_problem(FieldErrorCode.FREQUENCY_CENTER_OUT_OF_RANGE, ("body", "frequency_center"))
 
     old_values = frequency_audit_values(frequency)
     now = datetime.now(timezone.utc)
@@ -693,7 +695,7 @@ async def _set_frequency_archived(
     if not archived and not frequency.is_deleted:
         raise ApiError(ErrorCode.FREQUENCY_NOT_ARCHIVED)
     if archived:
-        ensure_other_active_frequency(observation, frequency.id)
+        await ensure_other_active_frequency(session, observation.id, frequency.id)
 
     action = "archive" if archived else "restore"
     old_values = frequency_audit_values(frequency)

@@ -1,7 +1,7 @@
 from typing import Optional, List
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
-from pydantic import BaseModel, Field, field_validator, model_validator, PositiveInt
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator, PositiveInt
 
 from app.backend.enums.general import ConfidenceLevel, FrequencyKind, ObservationReportType, TagMatch
 from app.backend.errors.coded import invalid
@@ -37,6 +37,15 @@ class ObservationFrequencyCreate(BaseModel):
         description="Optional: bands with the same number inside one observation belong to one emitter"
     )
 
+    @field_validator('frequency_center')
+    @classmethod
+    def validate_center(cls, v: Optional[Decimal], info: ValidationInfo) -> Optional[Decimal]:
+        """Checked against the band when min and max are valid; a center outside would hide the band from range filters"""
+        low, high = info.data.get("frequency_min"), info.data.get("frequency_max")
+        if v is not None and low is not None and high is not None and low < high and not low <= v <= high:
+            raise invalid(FieldErrorCode.FREQUENCY_CENTER_OUT_OF_RANGE)
+        return v
+
     @model_validator(mode='after')
     def validate_band(self):
         if self.frequency_min >= self.frequency_max:
@@ -47,7 +56,7 @@ class ObservationFrequencyCreate(BaseModel):
 
 
 class ObservationFrequencyUpdate(BaseModel):
-    """Partial update of one band. The merged band is checked again (frequency_max > frequency_min).
+    """Partial update of one band. The merged band is checked again (frequency_max > frequency_min, the center inside).
     When min or max changes and frequency_center is not sent, the center is recalculated."""
 
     kind: Optional[FrequencyKind] = Field(None, description="Band kind: rc or video")

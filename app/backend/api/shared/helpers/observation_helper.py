@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import List
 
 from sqlalchemy.orm import selectinload
@@ -7,8 +8,11 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.models.observation import Observation, ObservationFrequency
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.context import AuthContext
-from app.backend.errors.problems import ApiError
-from app.backend.enums.errors import ErrorCode
+from app.backend.errors.problems import ApiError, field_problem
+from app.backend.enums.errors import ErrorCode, FieldErrorCode
+from app.backend.filters.observation_frequency_filter import ObservationFrequencyFilter
+from app.backend.utils.datetime_utils import as_utc
+from app.backend.utils.validators import INT_MAX
 
 
 async def get_observation_for_write(
@@ -42,11 +46,26 @@ def get_frequency_or_404(observation: Observation, frequency_id: int) -> Observa
     raise ApiError(ErrorCode.FREQUENCY_NOT_FOUND)
 
 
-def ensure_other_active_frequency(observation: Observation, frequency_id: int) -> None:
+async def ensure_other_active_frequency(session: AsyncSession, observation_id: int, frequency_id: int) -> None:
     """An observation keeps at least one active band of any kind: 409 when frequency_id is the last one.
-    Load the observation with get_observation_for_write(lock=True) so the band list cannot change meanwhile."""
-    if not any(f.id != frequency_id for f in observation.frequencies):
+    Call it after get_observation_for_write(lock=True). The band list loaded with the observation is not covered by
+    its row lock (a plain read of a snapshot on MySQL), so the other bands are read again with FOR UPDATE."""
+    query = ObservationFrequencyFilter.of_observation(observation_id).where(ObservationFrequency.id != frequency_id)
+    if (await session.exec(query.with_for_update().limit(1))).first() is None:
         raise ApiError(ErrorCode.LAST_FREQUENCY_NOT_ARCHIVABLE)
+
+
+def disappeared_duration(observed_at: datetime, disappeared_at: datetime, field: str) -> int:
+    """Seconds between the two instants; a field problem on `field` when disappeared_at is before observed_at
+    or the duration does not fit the INT column"""
+    delta = as_utc(disappeared_at) - as_utc(observed_at)
+    duration = int(delta.total_seconds())
+    if duration < 0:
+        code = FieldErrorCode.DISAPPEARED_BEFORE_OBSERVED if field == "disappeared_at" else FieldErrorCode.OBSERVED_AFTER_DISAPPEARED
+        raise field_problem(code, ("body", field))
+    if duration > INT_MAX:
+        raise field_problem(FieldErrorCode.VALUE_TOO_LARGE, ("body", field), max_value=INT_MAX)
+    return duration
 
 
 def frequency_audit_values(frequency: ObservationFrequency) -> dict:

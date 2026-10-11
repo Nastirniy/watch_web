@@ -188,6 +188,24 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - `GET /media/{id}/thumbnail` behind nginx checks that the source (the original image or the poster) is on disk and
   answers 404 `media_file_missing` otherwise (declared on the route; it handed the path to imgproxy and nginx cached
   imgproxy's 404).
+- Archiving a band reads the other bands of the observation with `FOR UPDATE` after the observation row is locked, so two
+  concurrent archives can no longer leave an observation with no active band (the band list loaded with the observation
+  was a plain read that the row lock does not cover on MySQL).
+- A band's `frequency_center` must lie between `frequency_min` and `frequency_max` (both inclusive): `POST
+  /observations/` and `POST /observations/{id}/frequencies` answer 422 `frequency_center_out_of_range` on
+  `frequency_center`, and `PUT /observations/{id}/frequencies/{frequency_id}` checks the merged band (stored values plus
+  the request, a recalculated center included). New `FieldErrorCode` value; `api-contract/v1/openapi.json` gained it.
+- `POST /observations/{id}/disappeared` with `disappeared_at` before `observed_at` answers 422
+  `disappeared_before_observed` (the duration used to become negative). `PUT /observations/{id}` with a new
+  `observed_at` on a disappeared observation recomputes `duration_seconds` (unless the request sets it) and answers 422
+  `observed_after_disappeared` on `observed_at` when the new start is after `disappeared_at`. Two new `FieldErrorCode`
+  values in the contract.
+- Observation reports write user text (comment, signal type, post, user name and alias, tag names, filter values) as a
+  string: a value starting with `=`, `+`, `-`, `@`, a tab or a carriage return gets a leading apostrophe, so a
+  spreadsheet shows it as text instead of running it as a formula. Numbers and times stay typed.
+- `GET /posts/{id}/observation-stats` limits `tz` to 64 characters (422 `validation_error` above that) and an
+  `OSError` from the time zone database answers 400 `unknown_time_zone` instead of 500. The `tz` parameter in
+  `api-contract/v1/openapi.json` gained `maxLength`.
 
 ### Changed
 

@@ -412,6 +412,9 @@ class FieldErrorCode(FieldCode):
     RELATIVE_DATE_FILTERS_CONFLICT = ("relative_date_filters_conflict", field("Cannot use both last_n_days and day_offset"))
     OBSERVED_AT_RANGE_REVERSED = ("observed_at_range_reversed", field("observed_at_from must be before or equal to observed_at_to"))
     FREQUENCY_RANGE_INVALID = ("frequency_range_invalid", field("frequency_max must be greater than frequency_min"))
+    FREQUENCY_CENTER_OUT_OF_RANGE = ("frequency_center_out_of_range", field("frequency_center must lie between frequency_min and frequency_max"))
+    DISAPPEARED_BEFORE_OBSERVED = ("disappeared_before_observed", field("disappeared_at must not be before observed_at"))
+    OBSERVED_AFTER_DISAPPEARED = ("observed_after_disappeared", field("observed_at must not be after disappeared_at"))
 
 
 PROBLEM_ENUMS = (AuthErrorCode, AccessErrorCode, ErrorCode)

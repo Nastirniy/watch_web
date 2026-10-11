@@ -88,7 +88,7 @@ def check_period(date_from: Optional[datetime], date_to: Optional[datetime], nam
 def _zone(name: str) -> ZoneInfo:
     try:
         return ZoneInfo(name)
-    except (ZoneInfoNotFoundError, ValueError):
+    except (ZoneInfoNotFoundError, ValueError, OSError):
         raise CodedError(ErrorCode.UNKNOWN_TIME_ZONE, time_zone=name)
 
 
