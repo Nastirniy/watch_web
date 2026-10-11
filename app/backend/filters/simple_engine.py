@@ -15,6 +15,8 @@ from app.backend.enums.general import SortOrder
 
 C = TypeVar("C")
 
+LIKE_ESCAPE = "\\"
+
 
 @dataclass(frozen=True, kw_only=True)
 class ListCriteria:
@@ -102,9 +104,10 @@ class SimpleFilterEngine:
 
     @classmethod
     def _apply_contains(cls, query: Select, column, value: Optional[str]) -> Select:
-        """Apply case-insensitive contains filter"""
+        """Apply case-insensitive contains filter; %, _ and the escape character match themselves"""
         if value:
-            return query.where(column.ilike(f"%{value}%"))
+            escaped = value.replace(LIKE_ESCAPE, LIKE_ESCAPE * 2).replace("%", LIKE_ESCAPE + "%").replace("_", LIKE_ESCAPE + "_")
+            return query.where(column.ilike(f"%{escaped}%", escape=LIKE_ESCAPE))
         return query
 
     @classmethod
@@ -144,24 +147,25 @@ class SimpleFilterEngine:
 
     @classmethod
     def _apply_sorting(cls, query: Select, params: ListCriteria) -> Select:
-        """Apply sorting using SortOrder enum"""
+        """ORDER BY of a list: the requested field (SortOrder), then the primary key of MODEL, so that pages of
+        a non-unique field neither repeat nor skip rows; without a field the primary key alone.
+
+        NULLS FIRST / NULLS LAST are not MySQL syntax (error 1064): they are emulated with an `IS NULL` key in
+        front of the column, which both MySQL and sqlite understand."""
+        terms = []
         if params.sort_by and params.sort_by in cls.SORTABLE_FIELDS:
             column = cls._sort_expression(params.sort_by, params)
             if column is not None:
                 order = params.sort_order
-                if order == SortOrder.ASCENDING:
-                    query = query.order_by(column.asc())
-                elif order == SortOrder.DESCENDING:
-                    query = query.order_by(column.desc())
-                elif order == SortOrder.ASCENDING_NULLS_FIRST:
-                    query = query.order_by(column.asc().nulls_first())
-                elif order == SortOrder.ASCENDING_NULLS_LAST:
-                    query = query.order_by(column.asc().nulls_last())
-                elif order == SortOrder.DESCENDING_NULLS_FIRST:
-                    query = query.order_by(column.desc().nulls_first())
-                elif order == SortOrder.DESCENDING_NULLS_LAST:
-                    query = query.order_by(column.desc().nulls_last())
-        return query
+                descending = order in (SortOrder.DESCENDING, SortOrder.DESCENDING_NULLS_FIRST,
+                                       SortOrder.DESCENDING_NULLS_LAST)
+                if order in (SortOrder.ASCENDING_NULLS_FIRST, SortOrder.DESCENDING_NULLS_FIRST):
+                    terms.append(column.is_(None).desc())
+                elif order in (SortOrder.ASCENDING_NULLS_LAST, SortOrder.DESCENDING_NULLS_LAST):
+                    terms.append(column.is_(None).asc())
+                terms.append(column.desc() if descending else column.asc())
+        terms.extend(sa_inspect(cls.MODEL).primary_key)
+        return query.order_by(*terms)
 
     @classmethod
     def _apply_soft_delete(cls, query: Select, params: ListCriteria) -> Select:

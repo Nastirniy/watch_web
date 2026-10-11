@@ -750,6 +750,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 1000000,
               "minimum": 1,
               "description": "Page number",
               "default": 1,
@@ -3197,6 +3198,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 1000000,
               "minimum": 1,
               "description": "Page number",
               "default": 1,
@@ -5162,6 +5164,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 1000000,
               "minimum": 1,
               "description": "Page number",
               "default": 1,
@@ -6155,24 +6158,32 @@
             }
           },
           {
-            "name": "skip",
+            "name": "page",
             "in": "query",
             "required": false,
             "schema": {
               "type": "integer",
-              "default": 0,
-              "title": "Skip"
-            }
+              "maximum": 1000000,
+              "minimum": 1,
+              "description": "Page number",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "Page number"
           },
           {
-            "name": "limit",
+            "name": "page_size",
             "in": "query",
             "required": false,
             "schema": {
               "type": "integer",
-              "default": 100,
-              "title": "Limit"
-            }
+              "maximum": 200,
+              "minimum": 1,
+              "description": "Items per page",
+              "default": 50,
+              "title": "Page Size"
+            },
+            "description": "Items per page"
           },
           {
             "name": "include_inactive",
@@ -6306,6 +6317,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 1000000,
               "minimum": 1,
               "description": "Page number",
               "default": 1,
@@ -7463,6 +7475,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 1000000,
               "minimum": 1,
               "description": "Page number",
               "default": 1,
@@ -8454,6 +8467,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 1000000,
               "minimum": 1,
               "description": "Page number",
               "default": 1,
@@ -11079,6 +11093,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 1000000,
               "minimum": 1,
               "description": "Page number",
               "default": 1,
@@ -12326,6 +12341,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 1000000,
               "minimum": 1,
               "description": "Page number",
               "default": 1,
@@ -16933,6 +16949,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 1000000,
               "minimum": 1,
               "description": "Page number",
               "default": 1,
@@ -18010,6 +18027,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 1000000,
               "minimum": 1,
               "description": "Page number",
               "default": 1,
@@ -18664,6 +18682,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 1000000,
               "minimum": 1,
               "description": "Page number",
               "default": 1,
@@ -19089,6 +19108,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 1000000,
               "minimum": 1,
               "description": "Page number",
               "default": 1,
@@ -19557,6 +19577,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 1000000,
               "minimum": 1,
               "description": "Page number",
               "default": 1,
@@ -19902,6 +19923,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 1000000,
               "minimum": 1,
               "description": "Page number",
               "default": 1,
@@ -20184,6 +20206,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 1000000,
               "minimum": 1,
               "description": "Page number",
               "default": 1,
@@ -20600,6 +20623,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 1000000,
               "minimum": 1,
               "description": "Page number",
               "default": 1,
@@ -20883,6 +20907,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 1000000,
               "minimum": 1,
               "description": "Page number",
               "default": 1,
@@ -21355,6 +21380,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 1000000,
               "minimum": 1,
               "description": "Page number",
               "default": 1,

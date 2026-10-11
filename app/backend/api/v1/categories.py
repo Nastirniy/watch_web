@@ -16,6 +16,7 @@ from app.backend.services.audit import create_audit_log
 from app.backend.api.v1.models.request.categories import CategoryCreate, CategoryUpdate
 from app.backend.api.v1.models.response.categories import CategoryResponse
 from app.backend.api.v1.models.response.signal_types import SignalTypeResponse
+from app.backend.api.v1.models.query.base import MAX_PAGE
 from app.backend.api.v1.models.query.categories import CategoryFilterParams
 from app.backend.filters.category_filter import CategoryFilterService
 from app.backend.errors.problems import ApiError
@@ -280,8 +281,8 @@ async def restore_category(
 )
 async def list_category_signal_types(
         category_id: int,
-        skip: int = 0,
-        limit: int = 100,
+        page: int = Query(default=1, ge=1, le=MAX_PAGE, description="Page number"),
+        page_size: int = Query(default=50, ge=1, le=200, description="Items per page"),
         include_inactive: bool = False,
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW, Permissions.SIGNAL_TYPE_VIEW]))
@@ -305,7 +306,7 @@ async def list_category_signal_types(
     if not include_inactive:
         query = query.where(SignalType.is_active == True)
 
-    result = await session.exec(query.offset(skip).limit(limit))
+    result = await session.exec(query.order_by(SignalType.sort_order, SignalType.id).offset((page - 1) * page_size).limit(page_size))
     signal_types = result.all()
 
     return [SignalTypeResponse.model_validate(st) for st in signal_types]

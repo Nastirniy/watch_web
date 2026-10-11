@@ -95,6 +95,12 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   administrator of another post answers 403 `post_access_denied` / `post_write_denied` and the poster is left alone;
   media of an archived observation answers 404 `media_observation_not_found`. `api-contract/v1/openapi.json` is
   rewritten for the new codes and the `include_deleted` query parameter.
+- Every list and search orders by the requested field and then by the primary key (without `sort_by`, by the primary
+  key), so pages of a non-unique field no longer repeat or skip rows on MySQL.
+- `sort_order=*_nulls_first` / `*_nulls_last` answered 500 on MySQL and MariaDB (`NULLS FIRST/LAST` is not their
+  syntax); the order is now emulated with an `IS NULL` key in front of the column and means the same.
+- `*_contains` filters match `%`, `_` and `\` literally (`name_contains=%` no longer matches every row).
+- `page` is at most 1000000 on every list and search (422 above it); a huge `page` answered 500.
 
 ### Changed
 
@@ -111,6 +117,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   session, which are refused now) and the `LogoutRequest` schema are gone from `api-contract/v1/openapi.json`, and so
   is the problem code `no_active_session` (it can no longer occur): remove its translation from the web localization
   package.
+- `GET /categories/{category_id}/signal-types` takes `page` and `page_size` (1 to 200, default 50, like the other
+  lists) instead of `skip` and `limit` (contract change: `skip` and `limit` are gone from
+  `api-contract/v1/openapi.json`), and orders by `sort_order`, then `id`. `limit=-1` answered 500 on MariaDB.
 
 ### Changed (operators)
 
