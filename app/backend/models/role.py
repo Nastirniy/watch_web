@@ -17,6 +17,8 @@ class Role(SQLModel, table=True):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     is_deleted: bool = Field(default=False, index=True)
+    # Built-in roles (one per UserType, owned by code and re-synced at every start) carry the type key here
+    builtin_key: Optional[str] = Field(default=None, max_length=50, unique=True, index=True)
 
     # Relationships
     role_permissions: List["RolePermission"] = Relationship(back_populates="role", cascade_delete=True)

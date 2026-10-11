@@ -1,8 +1,8 @@
-from typing import Optional
+from typing import Dict, List, Optional, Set
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 
-from app.backend.models.role import Role, Permission
+from app.backend.models.role import Role, Permission, RolePermission
 from app.backend.errors.problems import ApiError
 from app.backend.enums.errors import ErrorCode
 
@@ -38,3 +38,18 @@ async def check_role_name_exists(session: AsyncSession, name: str, exclude_id: O
         if existing.is_deleted:
             raise ApiError(ErrorCode.ROLE_NAME_ARCHIVED, role_id=existing.id)
         raise ApiError(ErrorCode.ROLE_NAME_TAKEN)
+
+
+async def permission_names_by_role(session: AsyncSession, role_ids: List[int]) -> Dict[int, Set[str]]:
+    """Permission names of every given role, in one query"""
+    names: Dict[int, Set[str]] = {}
+    if not role_ids:
+        return names
+    rows = await session.exec(
+        select(RolePermission.role_id, Permission.name)
+        .join(Permission, RolePermission.permission_id == Permission.id)
+        .where(RolePermission.role_id.in_(role_ids))
+    )
+    for role_id, name in rows.all():
+        names.setdefault(role_id, set()).add(name)
+    return names

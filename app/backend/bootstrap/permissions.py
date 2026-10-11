@@ -1,12 +1,13 @@
-"""The built-in admin role and the display texts of every permission; seeding keeps the database in sync."""
+"""The display texts and levels of every permission and the built-in roles; seeding keeps the database in sync."""
+from typing import Dict, Iterable
+
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.backend.enums.general import PermissionLevel, Permissions, UserType
 from app.backend.utils.logging_config import get_database_logger
 
 _logger = get_database_logger()
-
-ADMIN_ROLE_NAME = "admin"  # built-in role: seeded, cannot be renamed (the name is its key), archived or deleted
 
 PERMISSION_META = {
     "user.view": ("Перегляд користувачів", "Дозволяє переглядати інформацію та профілі користувачів"),
@@ -57,36 +58,92 @@ PERMISSION_META = {
     "media_format.update": ("Оновлення форматів медіа", "Дозволяє змінювати прийнятні формати та обмеження розміру файлів"),
     "media_format.archive": ("Архівування форматів медіа", "Дозволяє архівувати та відновлювати формати завантаження. Архівований формат одразу перестає прийматися, завантажені файли не змінюються; також дозволяє бачити архівовані у списках (include_deleted)"),
     "statistics.view": ("Перегляд статистики", "Дозволяє переглядати зведену статистику: адміністратор бачить усі пости, інші користувачі - лише доступні їм пости"),
+    "media.monitor": ("Моніторинг медіасховища", "Дозволяє переглядати стан сховища медіафайлів і черги обробки мініатюр"),
+}
+
+# Permissions assignable only at the root of the scope tree; every other permission is scoped
+_SYSTEM_PERMISSIONS = frozenset({
+    "role.create", "role.update", "role.archive", "role.delete",
+    "category.create", "category.update", "category.archive",
+    "signal_type.create", "signal_type.update", "signal_type.archive",
+    "tag.create", "tag.update", "tag.archive",
+    "media_format.create", "media_format.update", "media_format.archive",
+    "scope_group.create", "scope_group.update", "scope_group.archive",
+    "media.monitor", "audit.view", "admin.true",
+})
+
+PERMISSION_LEVELS: Dict[str, PermissionLevel] = {
+    perm.value: PermissionLevel.SYSTEM if perm.value in _SYSTEM_PERMISSIONS else PermissionLevel.SCOPED
+    for perm in Permissions
 }
 
 
+def permission_level(name: str) -> PermissionLevel:
+    return PERMISSION_LEVELS[name]
+
+
+def role_level(permission_names: Iterable[str]) -> PermissionLevel:
+    """A role is system when it holds at least one system permission: it can be assigned only at the root"""
+    if any(permission_level(name) is PermissionLevel.SYSTEM for name in permission_names):
+        return PermissionLevel.SYSTEM
+    return PermissionLevel.SCOPED
+
+
+async def sync_builtin_roles(session: AsyncSession) -> Dict[UserType, "Role"]:
+    """One built-in role per user type, owned by code: found by builtin_key, else a role already named like the
+    key is claimed, else created. Display texts, the archive flag and the permission set (the base of the type)
+    are restored at every start. The permissions must already be seeded. Does not commit."""
+    from app.backend.auth.user_types import USER_TYPES
+    from app.backend.models.role import Role, Permission, RolePermission
+
+    permission_ids = {name: pid for pid, name in (await session.exec(select(Permission.id, Permission.name))).all()}
+    roles: Dict[UserType, Role] = {}
+    for user_type, spec in USER_TYPES.items():
+        key = user_type.value
+        role = (await session.exec(select(Role).where(Role.builtin_key == key))).first()
+        if role is None:
+            role = (await session.exec(select(Role).where(Role.name == key))).first()
+            if role is not None:
+                _logger.warning(f"Role '{key}' claimed as the built-in role of the user type")
+        if role is None:
+            role = Role(name=key, display_name=spec.display_name, description=spec.description, builtin_key=key)
+            session.add(role)
+            await session.flush()
+            _logger.info(f"Built-in role '{key}' created")
+        else:
+            if role.is_deleted:
+                _logger.warning(f"Built-in role '{key}' was archived; restored by seeding")
+            role.builtin_key = key
+            role.name = key
+            role.display_name = spec.display_name
+            role.description = spec.description
+            role.is_deleted = False
+            session.add(role)
+            await session.flush()
+
+        wanted = {permission_ids[name] for name in spec.base_permissions}
+        present = set()
+        for grant in (await session.exec(select(RolePermission).where(RolePermission.role_id == role.id))).all():
+            if grant.permission_id in wanted:
+                present.add(grant.permission_id)
+            else:
+                await session.delete(grant)
+        for permission_id in sorted(wanted - present):
+            session.add(RolePermission(role_id=role.id, permission_id=permission_id))
+        await session.flush()
+        roles[user_type] = role
+    return roles
+
+
 async def seed_roles_and_permissions(session: AsyncSession):
-    """Idempotent: ensure the admin role, every Permission row from the enum
-    (display texts refreshed from PERMISSION_META), and that the admin role holds
-    every permission (re-granted on every run). Renamed permissions are handled by
-    migrations (010_archive_permissions), never here.
+    """Idempotent: ensure every Permission row from the enum (display texts refreshed from PERMISSION_META)
+    and the built-in role of every user type with exactly its base permissions (sync_builtin_roles; the admin
+    role holds every permission, re-granted on every run). Renamed permissions are handled by migrations
+    (010_archive_permissions), never here.
 
     Returns the admin Role.
     """
-    from app.backend.models.role import Role, Permission, RolePermission
-    from app.backend.enums.general import Permissions
-
-    result = await session.exec(select(Role).where(Role.name == ADMIN_ROLE_NAME))
-    admin_role = result.first()
-    if not admin_role:
-        admin_role = Role(
-            name=ADMIN_ROLE_NAME,
-            display_name="Administrator",
-            description="Full system access"
-        )
-        session.add(admin_role)
-        await session.flush()
-        _logger.info("Admin role created")
-    elif admin_role.is_deleted:
-        admin_role.is_deleted = False
-        session.add(admin_role)
-        await session.flush()
-        _logger.warning("Admin role was soft-deleted; restored by seeding")
+    from app.backend.models.role import Permission
 
     result = await session.exec(select(Permission))
     existing_permissions = {p.name: p for p in result.all()}
@@ -109,18 +166,6 @@ async def seed_roles_and_permissions(session: AsyncSession):
         await session.flush()
         _logger.info(f"Seeded {permissions_added} new permissions, refreshed {permissions_refreshed} descriptions")
 
-    # Re-grant: the admin role must hold every permission after every startup
-    result = await session.exec(select(Permission.id))
-    all_permission_ids = set(result.all())
-    result = await session.exec(
-        select(RolePermission.permission_id).where(RolePermission.role_id == admin_role.id)
-    )
-    granted_ids = set(result.all())
-    missing_ids = sorted(all_permission_ids - granted_ids)
-    for permission_id in missing_ids:
-        session.add(RolePermission(role_id=admin_role.id, permission_id=permission_id))
-    if missing_ids:
-        _logger.info(f"Re-granted {len(missing_ids)} permissions to the admin role")
-
+    roles = await sync_builtin_roles(session)
     await session.commit()
-    return admin_role
+    return roles[UserType.ADMIN]

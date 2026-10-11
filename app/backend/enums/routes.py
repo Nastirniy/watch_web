@@ -164,6 +164,7 @@ class RoleRoutes(str, Enum):
     ROLE_BY_ID = "/{role_id}"  # DELETE here is the permanent delete (role.delete)
     ROLE_ARCHIVE = "/{role_id}/archive"
     ROLE_RESTORE = "/{role_id}/restore"
+    ROLE_CLONE = "/{role_id}/clone"
     ROLE_PERMISSIONS = "/{role_id}/permissions"
     ROLE_PERMISSION_BY_ID = "/{role_id}/permissions/{permission_id}"
     ALL_PERMISSIONS = "/list-all-permissions"
@@ -171,6 +172,16 @@ class RoleRoutes(str, Enum):
     @staticmethod
     def tag() -> str:
         return "ROLES"
+
+
+class UserTypeRoutes(str, Enum):
+    """The catalog of user types"""
+    BASE = "/user-types"
+    ROOT = "/"
+
+    @staticmethod
+    def tag() -> str:
+        return "USER_TYPES"
 
 
 class MediaFormatRoutes(str, Enum):
@@ -266,6 +277,7 @@ class Routes:
     AUTH = AuthRoutes
     POSTS = PostRoutes
     SCOPE_GROUPS = ScopeGroupRoutes
+    USER_TYPES = UserTypeRoutes
     STATISTICS = StatisticsRoutes
     OBSERVATIONS = ObservationRoutes
     MEDIA = MediaRoutes

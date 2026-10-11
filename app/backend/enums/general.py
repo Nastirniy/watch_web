@@ -82,6 +82,26 @@ class Permissions(Enum):
     # Administration dashboard
     STATISTICS_VIEW = "statistics.view"
 
+    # Storage and worker monitoring
+    MEDIA_MONITOR = "media.monitor"
+
+
+class PermissionLevel(str, Enum):
+    """Where a permission can be assigned: system only at the root of the scope tree, scoped at any node"""
+    SYSTEM = "system"
+    SCOPED = "scoped"
+
+
+class UserType(str, Enum):
+    """The type of a user; the order is the order of the catalog. The key of the built-in role is the same string"""
+    VIEWER = "viewer"
+    OPERATOR = "operator"
+    SENIOR_OPERATOR = "senior_operator"
+    ANALYST = "analyst"
+    POST_ADMIN = "post_admin"
+    ADMIN = "admin"
+
+
 class ObservationStatus(Enum):
     ACTIVE = "active"
     DISAPPEARED = "disappeared"

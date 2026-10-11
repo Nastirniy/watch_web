@@ -204,12 +204,12 @@ class ErrorCode(ProblemType):
     ROLE_NAME_ARCHIVED = ("role_name_archived", problem(
         409, "Role name belongs to an archived role",
         "Role with this name exists as an archived role ({role_id}); restore it or choose another name", role_id=int))
-    ADMIN_ROLE_NOT_ARCHIVABLE = ("admin_role_not_archivable", problem(409, "The built-in admin role cannot be archived"))
-    ADMIN_ROLE_NOT_DELETABLE = ("admin_role_not_deletable", problem(409, "The built-in admin role cannot be deleted"))
-    ADMIN_ROLE_NOT_RENAMABLE = ("admin_role_not_renamable", problem(409, "The built-in admin role cannot be renamed"))
-    # Seeding grants the admin role every permission at start; the API never changes its set
-    ADMIN_ROLE_PERMISSIONS_FIXED = ("admin_role_permissions_fixed", problem(
-        409, "The permissions of the built-in admin role cannot be changed"))
+    BUILTIN_ROLE_NOT_ARCHIVABLE = ("builtin_role_not_archivable", problem(409, "Built-in roles cannot be archived"))
+    BUILTIN_ROLE_NOT_DELETABLE = ("builtin_role_not_deletable", problem(409, "Built-in roles cannot be deleted"))
+    BUILTIN_ROLE_NOT_RENAMABLE = ("builtin_role_not_renamable", problem(409, "Built-in roles cannot be renamed"))
+    # Seeding restores the permissions of every built-in role at start; the API never changes their set (clone it)
+    BUILTIN_ROLE_PERMISSIONS_FIXED = ("builtin_role_permissions_fixed", problem(
+        409, "The permissions of built-in roles cannot be changed"))
     LAST_ADMIN_REQUIRED = ("last_admin_required", problem(409, "This change would leave no active administrator"))
     CANNOT_REMOVE_OWN_ADMIN = ("cannot_remove_own_admin", problem(409, "You cannot remove administrator access from yourself"))
     ROLE_DELETE_REQUIRES_ARCHIVE = ("role_delete_requires_archive", problem(409, "Role must be archived before it can be deleted permanently"))

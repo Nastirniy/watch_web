@@ -49,7 +49,8 @@ from app.backend.filters.media_filter import MediaFilterService
 from app.backend.api.v1.models.response.observations import ObservationWithMedia
 from app.backend.api.v1.models.response.posts import PostResponse, post_to_response
 from app.backend.api.v1.models.response.users import UserResponse
-from app.backend.api.v1.models.response.roles import RoleResponse
+from app.backend.api.shared.helpers.roles_helper import permission_names_by_role
+from app.backend.api.v1.models.response.roles import RoleResponse, role_to_response
 from app.backend.api.v1.models.response.categories import CategoryResponse
 from app.backend.api.v1.models.response.signal_types import SignalTypeResponse
 from app.backend.api.v1.models.response.tags import TagResponse
@@ -219,9 +220,10 @@ async def search_roles(
     count_query = RoleFilterService.apply_filters_for_count(count_query, params)
     total = (await session.exec(count_query)).one()
 
+    names = await permission_names_by_role(session, [item.id for item in items])
     await log_search(request, session, auth, "roles", params.model_dump(exclude_none=True), len(items))
 
-    return SearchResponse[RoleResponse].create("roles", [RoleResponse.model_validate(item) for item in items], total, params.page, params.page_size)
+    return SearchResponse[RoleResponse].create("roles", [role_to_response(item, names.get(item.id, ())) for item in items], total, params.page, params.page_size)
 
 
 # =============================================================================

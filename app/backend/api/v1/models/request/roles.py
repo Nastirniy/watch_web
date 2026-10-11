@@ -6,11 +6,11 @@ from app.backend.errors.coded import invalid
 from app.backend.utils.validators import SecureBaseModel, SecurityValidators
 
 
-class RoleCreate(SecureBaseModel):
+class RoleClone(SecureBaseModel):
+    """Name and texts of a custom copy of a role (POST /roles/{role_id}/clone); the permissions are copied"""
     name: str = Field(..., min_length=1, max_length=100)
     display_name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = Field(default=None, max_length=500)
-    permission_ids: Optional[List[PositiveInt]] = Field(default=None)
 
     @field_validator('name')
     @classmethod
@@ -28,6 +28,10 @@ class RoleCreate(SecureBaseModel):
         if v is not None:
             return SecurityValidators.sanitize_string(v, max_length=500)
         return v
+
+
+class RoleCreate(RoleClone):
+    permission_ids: Optional[List[PositiveInt]] = Field(default=None)
 
     @field_validator('permission_ids')
     @classmethod

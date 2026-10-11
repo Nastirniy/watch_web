@@ -3404,6 +3404,24 @@
             "description": "Description contains text"
           },
           {
+            "name": "is_builtin",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only built-in roles (true) or only custom ones (false)",
+              "title": "Is Builtin"
+            },
+            "description": "Only built-in roles (true) or only custom ones (false)"
+          },
+          {
             "name": "created_at_from",
             "in": "query",
             "required": false,
@@ -3969,7 +3987,7 @@
           "ROLES"
         ],
         "summary": "Update Role",
-        "description": "Update role and optionally replace all permissions. Archived roles answer 404 until restored (POST /{role_id}/restore).\n\nThe built-in admin role keeps its name and its permissions (409). The caller must hold every permission\npermission_ids adds or removes (403 grant_exceeds_own_permissions); removing admin.true must leave an active\nadministrator and the caller's own admin.true (409).",
+        "description": "Update role and optionally replace all permissions. Archived roles answer 404 until restored (POST /{role_id}/restore).\n\nA built-in role keeps its name and its permissions (409); clone it to change them. The caller must hold every permission\npermission_ids adds or removes (403 grant_exceeds_own_permissions); removing admin.true must leave an active\nadministrator and the caller's own admin.true (409).",
         "operationId": "update_role",
         "security": [
           {
@@ -4136,16 +4154,16 @@
             }
           },
           "409": {
-            "description": "`admin_role_not_renamable`: The built-in admin role cannot be renamed; `admin_role_permissions_fixed`: The permissions of the built-in admin role cannot be changed; `cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no active administrator; `role_name_archived`: Role name belongs to an archived role",
+            "description": "`builtin_role_not_renamable`: Built-in roles cannot be renamed; `builtin_role_permissions_fixed`: The permissions of built-in roles cannot be changed; `cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no active administrator; `role_name_archived`: Role name belongs to an archived role",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
                     {
-                      "$ref": "#/components/schemas/AdminRoleNotRenamableProblem"
+                      "$ref": "#/components/schemas/BuiltinRoleNotRenamableProblem"
                     },
                     {
-                      "$ref": "#/components/schemas/AdminRolePermissionsFixedProblem"
+                      "$ref": "#/components/schemas/BuiltinRolePermissionsFixedProblem"
                     },
                     {
                       "$ref": "#/components/schemas/CannotRemoveOwnAdminProblem"
@@ -4160,8 +4178,8 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_role_not_renamable": "#/components/schemas/AdminRoleNotRenamableProblem",
-                      "admin_role_permissions_fixed": "#/components/schemas/AdminRolePermissionsFixedProblem",
+                      "builtin_role_not_renamable": "#/components/schemas/BuiltinRoleNotRenamableProblem",
+                      "builtin_role_permissions_fixed": "#/components/schemas/BuiltinRolePermissionsFixedProblem",
                       "cannot_remove_own_admin": "#/components/schemas/CannotRemoveOwnAdminProblem",
                       "last_admin_required": "#/components/schemas/LastAdminRequiredProblem",
                       "role_name_archived": "#/components/schemas/RoleNameArchivedProblem"
@@ -4178,7 +4196,7 @@
           "ROLES"
         ],
         "summary": "Delete Role",
-        "description": "PERMANENTLY delete a role. This is the only hard delete in the API and cannot be undone.\n\nRequires role.delete (distinct from role.archive). The role row, its permission grants and its\nassignments to archived users are removed from the database. Preconditions, each answered with 409:\nthe role must be archived first (POST /{role_id}/archive), no active user may still hold it\n(the response lists them), and the built-in admin role can never be deleted.\nThe audit log keeps a full copy of the role, its permissions and its assignments.",
+        "description": "PERMANENTLY delete a role. This is the only hard delete in the API and cannot be undone.\n\nRequires role.delete (distinct from role.archive). The role row, its permission grants and its\nassignments to archived users are removed from the database. Preconditions, each answered with 409:\nthe role must be archived first (POST /{role_id}/archive), no active user may still hold it\n(the response lists them), and a built-in role can never be deleted.\nThe audit log keeps a full copy of the role, its permissions and its assignments.",
         "operationId": "delete_role",
         "security": [
           {
@@ -4300,13 +4318,13 @@
             }
           },
           "409": {
-            "description": "`admin_role_not_deletable`: The built-in admin role cannot be deleted; `role_delete_requires_archive`: Role must be archived before it can be deleted permanently; `role_has_active_users`: Role is still assigned to active users; unassign it before deleting permanently",
+            "description": "`builtin_role_not_deletable`: Built-in roles cannot be deleted; `role_delete_requires_archive`: Role must be archived before it can be deleted permanently; `role_has_active_users`: Role is still assigned to active users; unassign it before deleting permanently",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
                     {
-                      "$ref": "#/components/schemas/AdminRoleNotDeletableProblem"
+                      "$ref": "#/components/schemas/BuiltinRoleNotDeletableProblem"
                     },
                     {
                       "$ref": "#/components/schemas/RoleDeleteRequiresArchiveProblem"
@@ -4318,7 +4336,7 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_role_not_deletable": "#/components/schemas/AdminRoleNotDeletableProblem",
+                      "builtin_role_not_deletable": "#/components/schemas/BuiltinRoleNotDeletableProblem",
                       "role_delete_requires_archive": "#/components/schemas/RoleDeleteRequiresArchiveProblem",
                       "role_has_active_users": "#/components/schemas/RoleHasActiveUsersProblem"
                     }
@@ -4469,13 +4487,13 @@
             }
           },
           "409": {
-            "description": "`admin_role_not_archivable`: The built-in admin role cannot be archived; `cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no active administrator",
+            "description": "`builtin_role_not_archivable`: Built-in roles cannot be archived; `cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no active administrator",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
                     {
-                      "$ref": "#/components/schemas/AdminRoleNotArchivableProblem"
+                      "$ref": "#/components/schemas/BuiltinRoleNotArchivableProblem"
                     },
                     {
                       "$ref": "#/components/schemas/CannotRemoveOwnAdminProblem"
@@ -4487,7 +4505,7 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_role_not_archivable": "#/components/schemas/AdminRoleNotArchivableProblem",
+                      "builtin_role_not_archivable": "#/components/schemas/BuiltinRoleNotArchivableProblem",
                       "cannot_remove_own_admin": "#/components/schemas/CannotRemoveOwnAdminProblem",
                       "last_admin_required": "#/components/schemas/LastAdminRequiredProblem"
                     }
@@ -4650,6 +4668,177 @@
         }
       }
     },
+    "/api/v1/roles/{role_id}/clone": {
+      "post": {
+        "tags": [
+          "ROLES"
+        ],
+        "summary": "Clone Role",
+        "description": "Create a custom role with the permissions of an existing one (a built-in role is the usual source).\n\nThe copy is an ordinary role: it can be renamed, changed, archived and deleted. The caller must hold every\npermission of the source (403 grant_exceeds_own_permissions).",
+        "operationId": "clone_role",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "role_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Role Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoleClone"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`role_name_taken`: Role with this name already exists",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleNameTakenProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`admin_required`: Administrator access required; `grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AdminRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GrantExceedsOwnPermissionsProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "admin_required": "#/components/schemas/AdminRequiredProblem",
+                      "grant_exceeds_own_permissions": "#/components/schemas/GrantExceedsOwnPermissionsProblem",
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`role_not_found`: Role not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleNotFoundProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`role_name_archived`: Role name belongs to an archived role",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleNameArchivedProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/roles/{role_id}/permissions": {
       "get": {
         "tags": [
@@ -4797,7 +4986,7 @@
           "ROLES"
         ],
         "summary": "Add Role Permission",
-        "description": "Grant one permission to a role (idempotent). Returns the role's permissions.\nOnly a permission the caller holds can be granted (403 grant_exceeds_own_permissions); the admin role gains\npermissions only by seeding (409 admin_role_permissions_fixed).",
+        "description": "Grant one permission to a role (idempotent). Returns the role's permissions.\nOnly a permission the caller holds can be granted (403 grant_exceeds_own_permissions); a built-in role gets\npermissions only by seeding (409 builtin_role_permissions_fixed).",
         "operationId": "add_role_permission",
         "security": [
           {
@@ -4958,11 +5147,11 @@
             }
           },
           "409": {
-            "description": "`admin_role_permissions_fixed`: The permissions of the built-in admin role cannot be changed",
+            "description": "`builtin_role_permissions_fixed`: The permissions of built-in roles cannot be changed",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminRolePermissionsFixedProblem"
+                  "$ref": "#/components/schemas/BuiltinRolePermissionsFixedProblem"
                 }
               }
             }
@@ -4974,7 +5163,7 @@
           "ROLES"
         ],
         "summary": "Remove Role Permission",
-        "description": "Revoke one permission from a role. Returns the role's remaining permissions.\nOnly a permission the caller holds can be revoked (403); the admin role keeps every permission (409);\nrevoking admin.true must leave an active administrator and the caller's own admin.true (409).",
+        "description": "Revoke one permission from a role. Returns the role's remaining permissions.\nOnly a permission the caller holds can be revoked (403); a built-in role keeps its permissions (409);\nrevoking admin.true must leave an active administrator and the caller's own admin.true (409).",
         "operationId": "remove_role_permission",
         "security": [
           {
@@ -5139,13 +5328,13 @@
             }
           },
           "409": {
-            "description": "`admin_role_permissions_fixed`: The permissions of the built-in admin role cannot be changed; `cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no active administrator",
+            "description": "`builtin_role_permissions_fixed`: The permissions of built-in roles cannot be changed; `cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no active administrator",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
                     {
-                      "$ref": "#/components/schemas/AdminRolePermissionsFixedProblem"
+                      "$ref": "#/components/schemas/BuiltinRolePermissionsFixedProblem"
                     },
                     {
                       "$ref": "#/components/schemas/CannotRemoveOwnAdminProblem"
@@ -5157,7 +5346,7 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_role_permissions_fixed": "#/components/schemas/AdminRolePermissionsFixedProblem",
+                      "builtin_role_permissions_fixed": "#/components/schemas/BuiltinRolePermissionsFixedProblem",
                       "cannot_remove_own_admin": "#/components/schemas/CannotRemoveOwnAdminProblem",
                       "last_admin_required": "#/components/schemas/LastAdminRequiredProblem"
                     }
@@ -21605,6 +21794,24 @@
             "description": "Description contains text"
           },
           {
+            "name": "is_builtin",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only built-in roles (true) or only custom ones (false)",
+              "title": "Is Builtin"
+            },
+            "description": "Only built-in roles (true) or only custom ones (false)"
+          },
+          {
             "name": "created_at_from",
             "in": "query",
             "required": false,
@@ -23661,6 +23868,101 @@
           }
         }
       }
+    },
+    "/api/v1/user-types/": {
+      "get": {
+        "tags": [
+          "USER_TYPES"
+        ],
+        "summary": "List User Types",
+        "description": "The catalog of user types, in catalog order: the base role, the base permissions and the ceiling of each.",
+        "operationId": "list_user_types",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UserTypeResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List User Types"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -23927,258 +24229,6 @@
           }
         ]
       },
-      "AdminRoleNotArchivableProblem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "title": "Type",
-            "description": "URI of the problem type; dereference it for its documentation"
-          },
-          "title": {
-            "type": "string",
-            "const": "The built-in admin role cannot be archived",
-            "title": "Title",
-            "description": "Summary of the problem type"
-          },
-          "status": {
-            "type": "integer",
-            "const": 409,
-            "title": "Status",
-            "description": "HTTP status code"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "Explanation of this occurrence",
-            "examples": [
-              "The built-in admin role cannot be archived"
-            ]
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "description": "Path of the request that failed"
-          },
-          "code": {
-            "type": "string",
-            "const": "admin_role_not_archivable",
-            "title": "Code",
-            "description": "Key of exactly this problem in the localization package"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "code"
-        ],
-        "title": "AdminRoleNotArchivableProblem",
-        "description": "The built-in admin role cannot be archived (HTTP 409). Problem type admin_role_not_archivable.",
-        "examples": [
-          {
-            "code": "admin_role_not_archivable",
-            "detail": "The built-in admin role cannot be archived",
-            "instance": "/api/v1/...",
-            "status": 409,
-            "title": "The built-in admin role cannot be archived",
-            "type": "https://example.org/problems/admin_role_not_archivable"
-          }
-        ]
-      },
-      "AdminRoleNotDeletableProblem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "title": "Type",
-            "description": "URI of the problem type; dereference it for its documentation"
-          },
-          "title": {
-            "type": "string",
-            "const": "The built-in admin role cannot be deleted",
-            "title": "Title",
-            "description": "Summary of the problem type"
-          },
-          "status": {
-            "type": "integer",
-            "const": 409,
-            "title": "Status",
-            "description": "HTTP status code"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "Explanation of this occurrence",
-            "examples": [
-              "The built-in admin role cannot be deleted"
-            ]
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "description": "Path of the request that failed"
-          },
-          "code": {
-            "type": "string",
-            "const": "admin_role_not_deletable",
-            "title": "Code",
-            "description": "Key of exactly this problem in the localization package"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "code"
-        ],
-        "title": "AdminRoleNotDeletableProblem",
-        "description": "The built-in admin role cannot be deleted (HTTP 409). Problem type admin_role_not_deletable.",
-        "examples": [
-          {
-            "code": "admin_role_not_deletable",
-            "detail": "The built-in admin role cannot be deleted",
-            "instance": "/api/v1/...",
-            "status": 409,
-            "title": "The built-in admin role cannot be deleted",
-            "type": "https://example.org/problems/admin_role_not_deletable"
-          }
-        ]
-      },
-      "AdminRoleNotRenamableProblem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "title": "Type",
-            "description": "URI of the problem type; dereference it for its documentation"
-          },
-          "title": {
-            "type": "string",
-            "const": "The built-in admin role cannot be renamed",
-            "title": "Title",
-            "description": "Summary of the problem type"
-          },
-          "status": {
-            "type": "integer",
-            "const": 409,
-            "title": "Status",
-            "description": "HTTP status code"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "Explanation of this occurrence",
-            "examples": [
-              "The built-in admin role cannot be renamed"
-            ]
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "description": "Path of the request that failed"
-          },
-          "code": {
-            "type": "string",
-            "const": "admin_role_not_renamable",
-            "title": "Code",
-            "description": "Key of exactly this problem in the localization package"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "code"
-        ],
-        "title": "AdminRoleNotRenamableProblem",
-        "description": "The built-in admin role cannot be renamed (HTTP 409). Problem type admin_role_not_renamable.",
-        "examples": [
-          {
-            "code": "admin_role_not_renamable",
-            "detail": "The built-in admin role cannot be renamed",
-            "instance": "/api/v1/...",
-            "status": 409,
-            "title": "The built-in admin role cannot be renamed",
-            "type": "https://example.org/problems/admin_role_not_renamable"
-          }
-        ]
-      },
-      "AdminRolePermissionsFixedProblem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "title": "Type",
-            "description": "URI of the problem type; dereference it for its documentation"
-          },
-          "title": {
-            "type": "string",
-            "const": "The permissions of the built-in admin role cannot be changed",
-            "title": "Title",
-            "description": "Summary of the problem type"
-          },
-          "status": {
-            "type": "integer",
-            "const": 409,
-            "title": "Status",
-            "description": "HTTP status code"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "Explanation of this occurrence",
-            "examples": [
-              "The permissions of the built-in admin role cannot be changed"
-            ]
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "description": "Path of the request that failed"
-          },
-          "code": {
-            "type": "string",
-            "const": "admin_role_permissions_fixed",
-            "title": "Code",
-            "description": "Key of exactly this problem in the localization package"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "code"
-        ],
-        "title": "AdminRolePermissionsFixedProblem",
-        "description": "The permissions of the built-in admin role cannot be changed (HTTP 409). Problem type admin_role_permissions_fixed.",
-        "examples": [
-          {
-            "code": "admin_role_permissions_fixed",
-            "detail": "The permissions of the built-in admin role cannot be changed",
-            "instance": "/api/v1/...",
-            "status": 409,
-            "title": "The permissions of the built-in admin role cannot be changed",
-            "type": "https://example.org/problems/admin_role_permissions_fixed"
-          }
-        ]
-      },
       "Body_upload_complete_file": {
         "properties": {
           "observation_id": {
@@ -24202,6 +24252,258 @@
           "file"
         ],
         "title": "Body_upload_complete_file"
+      },
+      "BuiltinRoleNotArchivableProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Built-in roles cannot be archived",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Built-in roles cannot be archived"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "builtin_role_not_archivable",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "BuiltinRoleNotArchivableProblem",
+        "description": "Built-in roles cannot be archived (HTTP 409). Problem type builtin_role_not_archivable.",
+        "examples": [
+          {
+            "code": "builtin_role_not_archivable",
+            "detail": "Built-in roles cannot be archived",
+            "instance": "/api/v1/...",
+            "status": 409,
+            "title": "Built-in roles cannot be archived",
+            "type": "https://example.org/problems/builtin_role_not_archivable"
+          }
+        ]
+      },
+      "BuiltinRoleNotDeletableProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Built-in roles cannot be deleted",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Built-in roles cannot be deleted"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "builtin_role_not_deletable",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "BuiltinRoleNotDeletableProblem",
+        "description": "Built-in roles cannot be deleted (HTTP 409). Problem type builtin_role_not_deletable.",
+        "examples": [
+          {
+            "code": "builtin_role_not_deletable",
+            "detail": "Built-in roles cannot be deleted",
+            "instance": "/api/v1/...",
+            "status": 409,
+            "title": "Built-in roles cannot be deleted",
+            "type": "https://example.org/problems/builtin_role_not_deletable"
+          }
+        ]
+      },
+      "BuiltinRoleNotRenamableProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Built-in roles cannot be renamed",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Built-in roles cannot be renamed"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "builtin_role_not_renamable",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "BuiltinRoleNotRenamableProblem",
+        "description": "Built-in roles cannot be renamed (HTTP 409). Problem type builtin_role_not_renamable.",
+        "examples": [
+          {
+            "code": "builtin_role_not_renamable",
+            "detail": "Built-in roles cannot be renamed",
+            "instance": "/api/v1/...",
+            "status": 409,
+            "title": "Built-in roles cannot be renamed",
+            "type": "https://example.org/problems/builtin_role_not_renamable"
+          }
+        ]
+      },
+      "BuiltinRolePermissionsFixedProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "The permissions of built-in roles cannot be changed",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "The permissions of built-in roles cannot be changed"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "builtin_role_permissions_fixed",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "BuiltinRolePermissionsFixedProblem",
+        "description": "The permissions of built-in roles cannot be changed (HTTP 409). Problem type builtin_role_permissions_fixed.",
+        "examples": [
+          {
+            "code": "builtin_role_permissions_fixed",
+            "detail": "The permissions of built-in roles cannot be changed",
+            "instance": "/api/v1/...",
+            "status": 409,
+            "title": "The permissions of built-in roles cannot be changed",
+            "type": "https://example.org/problems/builtin_role_permissions_fixed"
+          }
+        ]
       },
       "CannotArchiveSelfProblem": {
         "properties": {
@@ -31024,6 +31326,15 @@
           }
         ]
       },
+      "PermissionLevel": {
+        "type": "string",
+        "enum": [
+          "system",
+          "scoped"
+        ],
+        "title": "PermissionLevel",
+        "description": "Where a permission can be assigned: system only at the root of the scope tree, scoped at any node"
+      },
       "PermissionNotFoundProblem": {
         "properties": {
           "type": {
@@ -31189,6 +31500,11 @@
           "description": {
             "type": "string",
             "title": "Description"
+          },
+          "level": {
+            "$ref": "#/components/schemas/PermissionLevel",
+            "description": "system: assignable only at the root; scoped: at any node",
+            "default": "scoped"
           }
         },
         "additionalProperties": false,
@@ -32508,6 +32824,42 @@
         ],
         "title": "RoleBriefResponse"
       },
+      "RoleClone": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "display_name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Display Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "display_name"
+        ],
+        "title": "RoleClone",
+        "description": "Name and texts of a custom copy of a role (POST /roles/{role_id}/clone); the permissions are copied"
+      },
       "RoleCreate": {
         "properties": {
           "name": {
@@ -33062,6 +33414,29 @@
             "type": "boolean",
             "title": "Is Deleted",
             "default": false
+          },
+          "builtin_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Builtin Key",
+            "description": "Key of the user type this built-in role belongs to; null for custom roles"
+          },
+          "is_builtin": {
+            "type": "boolean",
+            "title": "Is Builtin",
+            "description": "Built-in roles are owned by the system: no rename, no permission change, no archive",
+            "default": false
+          },
+          "level": {
+            "$ref": "#/components/schemas/PermissionLevel",
+            "description": "system when the role holds a system permission (assignable only at the root), else scoped",
+            "default": "scoped"
           }
         },
         "additionalProperties": false,
@@ -38739,6 +39114,89 @@
           "deleted"
         ],
         "title": "UserStatistics"
+      },
+      "UserType": {
+        "type": "string",
+        "enum": [
+          "viewer",
+          "operator",
+          "senior_operator",
+          "analyst",
+          "post_admin",
+          "admin"
+        ],
+        "title": "UserType",
+        "description": "The type of a user; the order is the order of the catalog. The key of the built-in role is the same string"
+      },
+      "UserTypeResponse": {
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/UserType"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "base_role": {
+            "$ref": "#/components/schemas/UserTypeRole",
+            "description": "The built-in role of the type: every user of the type gets it by default"
+          },
+          "base_permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Base Permissions",
+            "description": "Permissions of the base role, sorted"
+          },
+          "allowed_permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Permissions",
+            "description": "The ceiling: a role assigned to a user of this type holds nothing outside it. Sorted, includes the base"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "display_name",
+          "description",
+          "base_role",
+          "base_permissions",
+          "allowed_permissions"
+        ],
+        "title": "UserTypeResponse"
+      },
+      "UserTypeRole": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "display_name"
+        ],
+        "title": "UserTypeRole"
       },
       "UserUpdateForm": {
         "properties": {

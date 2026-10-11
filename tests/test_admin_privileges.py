@@ -79,9 +79,9 @@ async def test_admin_role_cannot_be_renamed(client, db, headers):
     role = await admin_role(db)
 
     problem(await client.patch(ROLE.format(role_id=role.id), headers=headers(admin), json={"name": "chief"}),
-            409, "admin_role_not_renamable")
+            409, "builtin_role_not_renamable")
     assert (await db.exec(select(Role.name).where(Role.id == role.id))).one() == "admin"
-    problem(await client.post(ROLE_ARCHIVE.format(role_id=role.id), headers=headers(admin)), 409, "admin_role_not_archivable")
+    problem(await client.post(ROLE_ARCHIVE.format(role_id=role.id), headers=headers(admin)), 409, "builtin_role_not_archivable")
 
     # the unchanged name and the other fields stay editable
     same = await client.patch(ROLE.format(role_id=role.id), headers=headers(admin),
@@ -102,10 +102,10 @@ async def test_admin_role_permissions_cannot_be_changed(client, db, headers):
 
     for caller in (editor, admin):
         problem(await client.delete(ROLE_PERMISSION.format(role_id=role.id, permission_id=is_admin), headers=headers(caller)),
-                409, "admin_role_permissions_fixed")
+                409, "builtin_role_permissions_fixed")
         problem(await client.patch(ROLE.format(role_id=role.id), headers=headers(caller),
                                    json={"permission_ids": [pid for pid in every if pid != is_admin]}),
-                409, "admin_role_permissions_fixed")
+                409, "builtin_role_permissions_fixed")
     assert await stored_permissions(db, role.id) == before
 
     # the same set (in any order) and the other fields stay editable
@@ -125,7 +125,7 @@ async def test_admin_role_gains_permissions_only_by_seeding(client, db, headers)
     await db.commit()
 
     problem(await client.put(ROLE_PERMISSION.format(role_id=role.id, permission_id=audit_view), headers=headers(admin)),
-            409, "admin_role_permissions_fixed")
+            409, "builtin_role_permissions_fixed")
     assert "audit.view" not in await stored_permissions(db, role.id)
 
     await seed_roles_and_permissions(db)

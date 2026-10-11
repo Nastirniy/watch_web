@@ -23,7 +23,7 @@ ROUTE_ACCESS = V1.path(AuthRoutes.ROUTE_ACCESS)
 async def test_archive_lifecycle(client, db, headers):
     post = await make_post(db)
     admin = await make_admin(db)
-    role = await make_role(db, ["tag.view"], name="viewer")
+    role = await make_role(db, ["tag.view"], name="reviewer")
     user = await make_user(db, role=role, post_id=post.id)
 
     assert (await client.get(TAGS, headers=headers(user))).status_code == 200
@@ -55,7 +55,7 @@ async def test_archive_lifecycle(client, db, headers):
     assign = await client.patch(V1.path(UserRoutes.USER_BY_ID, user_id=user.id),
                                 data={"role_ids": [role.id]}, headers=headers(admin))
     assert assign.status_code == 400, assign.text
-    reuse = await client.post(ROLES, json={"name": "viewer", "display_name": "Viewer"}, headers=headers(admin))
+    reuse = await client.post(ROLES, json={"name": "reviewer", "display_name": "Reviewer"}, headers=headers(admin))
     assert reuse.status_code == 409
 
     # the user's role list hides it, /auth/me shows no roles; the assignment row itself is kept

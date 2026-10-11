@@ -19,9 +19,24 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `admin.true` for now; nothing reads the tree for authorization yet).
 - `group_id` on `PostCreate`, `PostUpdate` and `PostResponse` (null: directly under the root); an unknown or archived
   group answers 404 `scope_group_not_found`.
+- User types and built-in roles (migration `022_builtin_roles`, column `roles.builtin_key`, unique): one code-owned role
+  per type (`viewer`, `operator`, `senior_operator`, `analyst`, `post_admin`, `admin`), created and restored at every
+  start with exactly the base permissions of its type. A custom role already named like one of these keys (except
+  `admin`) is renamed to `<key>_custom` by the migration.
+- `GET /user-types`: the catalog (`key`, `display_name`, `description`, `base_role`, `base_permissions`,
+  `allowed_permissions` = the ceiling of the type). Nothing authorizes by type yet.
+- Permission levels: `level` (`system` or `scoped`) on `RoleResponse` (system when the role holds a system permission)
+  and on `PermissionResponse`. `RoleResponse` also has `is_builtin` and `builtin_key`; the role list and
+  `/search/roles` take `is_builtin`.
+- `POST /roles/{role_id}/clone` (`role.view` + `role.create`, admin): a custom copy of a role with its permissions
+  (403 `grant_exceeds_own_permissions` when the caller lacks one); audit `create` with `cloned_from`.
+- Permission `media.monitor` (system level; nothing requires it yet).
 
 ### Changed
 
+- Built-in roles are not renamable, not archivable, not deletable and their permissions are fixed (409). The four
+  `admin_role_*` codes are renamed: `builtin_role_not_renamable`, `builtin_role_permissions_fixed`,
+  `builtin_role_not_archivable`, `builtin_role_not_deletable` (one message each, now for every built-in role).
 - `002_sync_schema` creates a table owned by a later revision first when the table it creates refers to it
   (`posts.group_id` -> `scope_groups`), so a fresh MySQL install gets the foreign key.
 

@@ -24,5 +24,6 @@ class RoleFilterParams(BaseFilterParams):
     display_name: Optional[str] = Field(default=None, description="Exact display name")
     display_name_contains: Optional[str] = Field(default=None, max_length=50, description="Display name contains text")
     description_contains: Optional[str] = Field(default=None, max_length=100, description="Description contains text")
+    is_builtin: Optional[bool] = Field(default=None, description="Only built-in roles (true) or only custom ones (false)")
     created_at_from: Optional[UtcDatetime] = Field(default=None, description="Created after")
     created_at_to: Optional[UtcDatetime] = Field(default=None, description="Created before")
