@@ -59,13 +59,14 @@ def _dev_login(cert: x509.Certificate, cn: str) -> dict:
     }
 
 
-def multi_cn_certificate(first: str, second: str, serial: int) -> x509.Certificate:
+def multi_cn_certificate(first: str, second: str, serial: int, one_rdn: bool = False) -> x509.Certificate:
     key = ec.generate_private_key(ec.SECP256R1())
-    name = x509.Name([
-        x509.NameAttribute(NameOID.COUNTRY_NAME, "UA"),
-        x509.NameAttribute(NameOID.COMMON_NAME, first),
-        x509.NameAttribute(NameOID.COMMON_NAME, second),
-    ])
+    country = x509.NameAttribute(NameOID.COUNTRY_NAME, "UA")
+    names = [x509.NameAttribute(NameOID.COMMON_NAME, first), x509.NameAttribute(NameOID.COMMON_NAME, second)]
+    if one_rdn:
+        name = x509.Name([x509.RelativeDistinguishedName([country]), x509.RelativeDistinguishedName(names)])
+    else:
+        name = x509.Name([country, *names])
     now = datetime.now(timezone.utc)
     return (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
             .serial_number(serial).not_valid_before(now).not_valid_after(now + timedelta(days=1))
@@ -168,6 +169,18 @@ async def test_a_subject_with_several_names_logs_in(client, db, headers, product
     await _create_user(client, db, headers, "multi-cn", cert)
     me = await client.get(ME, headers=await _login(client, cert))
     assert me.status_code == 200 and me.json()["username"] == "multi-cn"
+
+
+@pytest.mark.asyncio
+async def test_two_names_in_one_rdn_log_in(client, db, headers, production):
+    """OpenSSL reverses the attributes of a multi-valued RDN too: CN=bbb+CN=aaa for a certificate that has aaa first"""
+    cert = multi_cn_certificate("aaa-first", "bbb-second", 0xD2, one_rdn=True)
+    assert openssl_rfc2253(cert.subject) == "CN=bbb-second+CN=aaa-first,C=UA"
+    stored = CertificateParser.parse_certificate(pem(cert))["pki_certificate_cn"]
+    assert stored == "aaa-first" and await parse_cn(openssl_rfc2253(cert.subject)) == stored
+    await _create_user(client, db, headers, "one-rdn", cert)
+    me = await client.get(ME, headers=await _login(client, cert))
+    assert me.status_code == 200 and me.json()["username"] == "one-rdn"
 
 
 @pytest.mark.slow

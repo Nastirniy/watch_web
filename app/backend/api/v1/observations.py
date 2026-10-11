@@ -462,7 +462,9 @@ async def _set_observation_archived(
         archived: bool,
 ) -> ObservationWithMedia:
     """Shared body of archive / restore: ownership rules, flag flip, audit row. In an archived post only
-    administrators (admin.true; the routes require observation.view and observation.archive) archive and restore."""
+    callers with admin.true AND post.access_all archive and restore (the routes require observation.view and
+    observation.archive; ownership or observation.manage_any as always); post.access_all without admin.true gets
+    409 post_archived, home-post and access-row users 403."""
     current_user = auth.user
     result = await session.exec(select(Observation).where(Observation.id == observation_id))
     observation = result.first()
@@ -528,8 +530,9 @@ async def archive_observation(
     """Archive an observation (is_deleted=true). Owner or observation.manage_any, write access to its post.
 
     Nothing is removed: media files stay attached, the row is hidden from lists unless include_deleted=true.
-    Undo with POST /{observation_id}/restore. Already archived or unknown: 404. In an archived post only
-    administrators (admin.true) archive; everyone else gets 409 post_archived.
+    Undo with POST /{observation_id}/restore. Already archived or unknown: 404. In an archived post it needs
+    admin.true AND post.access_all; post.access_all without admin.true gets 409 post_archived, a home-post or
+    access-row user 403.
     """
     return await _set_observation_archived(request, session, auth, observation_id, archived=True)
 
@@ -550,7 +553,7 @@ async def restore_observation(
         auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW, Permissions.OBSERVATION_ARCHIVE]))
 ):
     """Restore an archived observation (is_deleted=false). Same rules as archive (an archived post: only
-    administrators). Not archived: 409."""
+    admin.true AND post.access_all). Not archived: 409."""
     return await _set_observation_archived(request, session, auth, observation_id, archived=False)
 
 

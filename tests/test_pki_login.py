@@ -46,7 +46,8 @@ _RFC2253_SPECIALS = ',+"\\<>;'
 
 
 def openssl_rfc2253(name: x509.Name) -> str:
-    """$ssl_client_s_dn as nginx writes it (OpenSSL X509_NAME_print_ex, XN_FLAG_RFC2253): RDNs last first, the
+    """$ssl_client_s_dn as nginx writes it (OpenSSL X509_NAME_print_ex, XN_FLAG_RFC2253): RDNs last first (the
+    attributes of a multi-valued RDN too, XN_FLAG_DN_REV reverses every entry), the
     specials of RFC 2253 and a leading '#' or space escaped with a backslash, every byte of a character above 0x7F
     (and every control character) as \\XX. rfc4514_string() leaves non-ASCII characters as they are."""
     def escape(value: str) -> str:
@@ -59,7 +60,7 @@ def openssl_rfc2253(name: x509.Name) -> str:
             else:
                 out.append(char)
         return "".join(out)
-    return ",".join("+".join(f"{attribute.rfc4514_attribute_name}={escape(attribute.value)}" for attribute in rdn)
+    return ",".join("+".join(f"{attribute.rfc4514_attribute_name}={escape(attribute.value)}" for attribute in reversed(list(rdn)))
                     for rdn in reversed(name.rdns))
 
 

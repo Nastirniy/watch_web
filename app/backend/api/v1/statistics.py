@@ -71,13 +71,15 @@ async def get_statistics(
     post_ids = sorted(scope) if scope is not None else None
     # Scope conditions; an empty scope matches nothing
     in_posts = (Post.id.in_(post_ids),) if post_ids is not None else ()
+    # An archived post is neither active nor online: post counts cover live posts only
+    live_posts = (*in_posts, Post.is_deleted == False)
     in_user_posts = (User.post_id.in_(post_ids),) if post_ids is not None else ()
     in_observation_posts = (Observation.post_id.in_(post_ids),) if post_ids is not None else ()
 
     posts = PostStatistics(
-        total=await _scalar(session, select(func.count()).select_from(Post).where(*in_posts)),
-        active=await _scalar(session, select(func.count()).select_from(Post).where(*in_posts, Post.is_active == True)),
-        online=await _scalar(session, select(func.count()).select_from(Post).where(*in_posts, Post.online_user_count > 0)),
+        total=await _scalar(session, select(func.count()).select_from(Post).where(*live_posts)),
+        active=await _scalar(session, select(func.count()).select_from(Post).where(*live_posts, Post.is_active == True)),
+        online=await _scalar(session, select(func.count()).select_from(Post).where(*live_posts, Post.online_user_count > 0)),
     )
 
     online_ids = online_user_ids_select()

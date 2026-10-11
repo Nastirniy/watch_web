@@ -127,16 +127,17 @@ async def parse_cn(dn: str) -> Optional[str]:
                 return part[3:]
         return None
 
-    # RFC 2253 lists the RDNs last first (the attributes of one RDN keep their order): read in certificate order
-    # the first CN is the one CertificateParser stores.
+    # OpenSSL (XN_FLAG_DN_REV) lists every entry last first, the attributes of a multi-valued RDN included: the
+    # string is the certificate order reversed, so the last CN in string order is the first one in the certificate,
+    # the one CertificateParser stores.
     values = [
         value
-        for rdn in reversed(_split_unescaped(dn, ","))
+        for rdn in _split_unescaped(dn, ",")
         for attribute in _split_unescaped(rdn, "+")
         for name, separator, value in [attribute.partition("=")]
         if separator and name.strip().upper() == "CN"
     ]
-    return _unescape_rfc2253(values[0]) if values else None
+    return _unescape_rfc2253(values[-1]) if values else None
 
 
 async def hash_data(data: str) -> str:

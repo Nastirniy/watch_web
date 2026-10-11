@@ -383,10 +383,10 @@ async def complete_upload_session(
     row = await _expire_if_due(session, await _owned_session(session, auth, upload_id))
     if row.status == uploads.STATUS_COMPLETED and row.media_file_id:
         return await _completed_result(session, row)
-    # A completed session above answers its file again (no write); nothing new goes into an archived post
-    await ensure_post_not_archived(session, row.post_id)
     if row.status not in (uploads.STATUS_OPEN, uploads.STATUS_COMPLETING):
         raise _closed(row)
+    # A completed session above answers its file again (no write); nothing new goes into an archived post
+    await ensure_post_not_archived(session, row.post_id)
     if int(row.received_bytes) != int(row.expected_size):
         raise _incomplete(row)
 

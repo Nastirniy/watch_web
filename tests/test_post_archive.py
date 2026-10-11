@@ -244,6 +244,18 @@ async def test_an_administrator_without_access_all_loses_the_data_too(client, db
 
 
 @pytest.mark.asyncio
+async def test_statistics_post_counts_leave_out_archived_posts(client, db, headers):
+    scene = await _scene(db)
+    before = (await client.get(STATISTICS, headers=headers(scene.admin))).json()["posts"]
+    await _set_archived(db, scene.post)
+    after = (await client.get(STATISTICS, headers=headers(scene.admin))).json()["posts"]
+    assert after["total"] == before["total"] - 1, (before, after)
+    assert after["active"] == before["active"] - 1, (before, after)
+    access_all = (await client.get(STATISTICS, headers=headers(scene.access_all))).json()["posts"]
+    assert access_all["total"] == after["total"]
+
+
+@pytest.mark.asyncio
 async def test_statistics_and_observation_stats_follow_the_scope(client, db, headers):
     scene = await _scene(db)
     stats = V1.path(PostRoutes.POST_OBSERVATION_STATS, post_id=scene.post.id)
@@ -365,6 +377,20 @@ async def test_completing_an_upload_into_an_archived_post_answers_post_archived(
     await _set_archived(db, scene.post, False)
     done = await client.post(complete, headers=headers(scene.access_all))
     assert done.status_code == 200, done.text
+
+
+@pytest.mark.asyncio
+async def test_a_closed_upload_session_of_an_archived_post_answers_410_not_post_archived(client, db, headers, storage):
+    scene = await _scene(db)
+    data = make_png()
+    created = await client.post(V1.path(MediaRoutes.UPLOADS), json=_create_body(scene.observation.id, data), headers=headers(scene.access_all))
+    upload_id = created.json()["id"]
+    aborted = await client.post(V1.path(MediaRoutes.UPLOAD_SESSION_ABORT, upload_id=upload_id), headers=headers(scene.access_all))
+    assert aborted.status_code == 200, aborted.text
+
+    await _set_archived(db, scene.post)
+    complete = await client.post(V1.path(MediaRoutes.UPLOAD_SESSION_COMPLETE, upload_id=upload_id), headers=headers(scene.access_all))
+    assert complete.status_code == 410 and complete.json()["code"] == "upload_session_closed", complete.text
 
 
 @pytest.mark.asyncio

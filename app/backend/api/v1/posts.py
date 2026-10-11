@@ -295,8 +295,9 @@ async def archive_post(
 
     Nothing is removed and no user row changes. The post leaves the data scope of its home users and of its
     user_post_access rows until it is restored (they keep the rows); only post.access_all still reads its data. Its
-    observations and media become read-only history: writes answer 409 post_archived, except that administrators
-    (admin.true with observation.view and observation.archive) still archive and restore its observations. It cannot
+    observations and media become read-only history: writes answer 409 post_archived, except that callers with
+    admin.true AND post.access_all (plus observation.view, observation.archive and ownership or
+    observation.manage_any) still archive and restore its observations. It cannot
     become a home post or get new access rows. Hidden from lists unless include_deleted=true.
     Undo with POST /{post_id}/restore. Already archived or unknown: 404.
     """

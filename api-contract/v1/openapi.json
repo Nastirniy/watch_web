@@ -9998,7 +9998,7 @@
           "OBSERVATIONS"
         ],
         "summary": "Archive Observation",
-        "description": "Archive an observation (is_deleted=true). Owner or observation.manage_any, write access to its post.\n\nNothing is removed: media files stay attached, the row is hidden from lists unless include_deleted=true.\nUndo with POST /{observation_id}/restore. Already archived or unknown: 404. In an archived post only\nadministrators (admin.true) archive; everyone else gets 409 post_archived.",
+        "description": "Archive an observation (is_deleted=true). Owner or observation.manage_any, write access to its post.\n\nNothing is removed: media files stay attached, the row is hidden from lists unless include_deleted=true.\nUndo with POST /{observation_id}/restore. Already archived or unknown: 404. In an archived post it needs\nadmin.true AND post.access_all; post.access_all without admin.true gets 409 post_archived, a home-post or\naccess-row user 403.",
         "operationId": "archive_observation",
         "security": [
           {
@@ -10170,7 +10170,7 @@
           "OBSERVATIONS"
         ],
         "summary": "Restore Observation",
-        "description": "Restore an archived observation (is_deleted=false). Same rules as archive (an archived post: only\nadministrators). Not archived: 409.",
+        "description": "Restore an archived observation (is_deleted=false). Same rules as archive (an archived post: only\nadmin.true AND post.access_all). Not archived: 409.",
         "operationId": "restore_observation",
         "security": [
           {
@@ -12433,7 +12433,7 @@
           "POSTS"
         ],
         "summary": "Archive Post",
-        "description": "Archive a post (is_deleted=true). Administration route: any post, only for administrators.\n\nNothing is removed and no user row changes. The post leaves the data scope of its home users and of its\nuser_post_access rows until it is restored (they keep the rows); only post.access_all still reads its data. Its\nobservations and media become read-only history: writes answer 409 post_archived, except that administrators\n(admin.true with observation.view and observation.archive) still archive and restore its observations. It cannot\nbecome a home post or get new access rows. Hidden from lists unless include_deleted=true.\nUndo with POST /{post_id}/restore. Already archived or unknown: 404.",
+        "description": "Archive a post (is_deleted=true). Administration route: any post, only for administrators.\n\nNothing is removed and no user row changes. The post leaves the data scope of its home users and of its\nuser_post_access rows until it is restored (they keep the rows); only post.access_all still reads its data. Its\nobservations and media become read-only history: writes answer 409 post_archived, except that callers with\nadmin.true AND post.access_all (plus observation.view, observation.archive and ownership or\nobservation.manage_any) still archive and restore its observations. It cannot\nbecome a home post or get new access rows. Hidden from lists unless include_deleted=true.\nUndo with POST /{post_id}/restore. Already archived or unknown: 404.",
         "operationId": "archive_post",
         "security": [
           {

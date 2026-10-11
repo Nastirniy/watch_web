@@ -14,9 +14,13 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   second one with `certificate_taken`. The name hash is now computed on the name as written (Unicode NFC, surrounding
   whitespace stripped); serial and fingerprint hashing do not change. A column `users.pki_certificate_cn_hash_scheme`
   says which rule made a stored hash (1 = the old rule, 2 = the new one); login and the duplicate checks compare each
-  row under its own scheme.
+  row under its own scheme. A new certificate is still refused when its name collides with a certificate stored before
+  the change (scheme 1, by design: the old hash cannot be recomputed). Uploading the same certificate again through
+  `PATCH /users/{id}` moves that user to the new rule; the fingerprint is unchanged, so their sessions are not ended.
 - A certificate subject with several CNs: the login reads the same CN the certificate upload stores (the first in the
-  certificate), from nginx's RFC 2253 form and from the legacy `/CN=` form.
+  certificate), from nginx's RFC 2253 form and from the legacy `/CN=` form. OpenSSL prints every entry last first,
+  the attributes of a multi-valued RDN included (`CN=bbb+CN=aaa` for a certificate that has `aaa` first); the login
+  takes the last CN of the string.
 
 ### Changed
 
@@ -32,23 +36,34 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   search, report, statistics, `observation-stats` and single-resource check follows (403 for the data of the post,
   `accessible_post_ids` of login and `GET /auth/me` leaves it out). Only `post.access_all` still reads its data; an
   administrator without `post.access_all` does not (observations, media and reports have no administrator
-  exception). Archiving changes no user row: home posts and access rows stay and apply again after a restore.
+  exception for them). Aggregates keep the administrator exception of CLAUDE.md: `GET /statistics`,
+  `observation-stats` and the `media.manage_any` upload list still cover every post for administrators. Archiving
+  changes no user row: home posts and access rows stay and apply again after a restore.
 - New problem code `post_archived` (409, param `post_id`): the data of an archived post is read-only. Answered after
   the 403 checks by observation create, update (tags included), mark disappeared, every band change, media upload
   (multipart, nginx, resumable create and complete; a session waits open and completes after a restore, UPLOADS.md
   lists it), media
-  archive and restore, and poster regenerate. Observation archive and restore answer it to everyone but administrators
-  (`admin.true` with `observation.view` and `observation.archive`). `POST /users/`, `PATCH /users/{user_id}` (moving a
+  archive and restore, and poster regenerate. Observation archive and restore work in an archived post only for a caller
+  with `admin.true` AND `post.access_all` (and ownership or `observation.manage_any`, plus the route's
+  `observation.view` and `observation.archive`): an archived post is in no data scope except `post.access_all`, so the
+  403 checks come first. A `post.access_all` holder without `admin.true` gets 409 `post_archived`; a home-post or
+  access-row user gets 403 (`no_post_assigned` / `post_access_denied`). `POST /users/`, `PATCH /users/{user_id}` (moving a
   user onto the post) and `PUT /users/{user_id}/post-access/{post_id}` answer it too. `post_archived` and
   `post_not_archived` are new keys for the web localization package; the routes declare them and
   `api-contract/v1/openapi.json` was rewritten (the two routes, `PostArchivedProblem`, `PostNotArchivedProblem`,
   `PostResponse.is_deleted`, `include_deleted` on the post lists, descriptions).
+- `GET /statistics`: `posts.total`, `posts.active` and `posts.online` count live posts only (an archived post is neither
+  active nor online); no field changed.
+- A resumable upload session that is aborted or expired answers 410 `upload_session_closed` on `complete` also when its
+  post is archived (the closed check runs before `post_archived`).
 
 ### Changed (operators)
 
 - Migration `019_certificate_cn_hash_scheme` adds `users.pki_certificate_cn_hash_scheme` (small integer, NOT NULL, server
   default 1) and runs at startup. Certificates already in the database stay scheme 1 and keep working; they are not
-  upgraded automatically (the name itself is not stored) - a user moves to scheme 2 when their certificate is replaced.
+  upgraded automatically (the name itself is not stored) - a user moves to scheme 2 when their certificate is uploaded
+  again through `PATCH /users/{id}`, the same file included (an unchanged fingerprint ends no session). A new
+  certificate whose name collides with a scheme 1 row is still refused with `certificate_taken` (by design).
   Every certificate stored from now on, the first admin from the configuration included, is scheme 2. Downgrading drops
   the column: users of scheme 2 cannot log in with the older code until their certificate is replaced. A fresh install
   creates the same SMALLINT column (the model declares it now).
