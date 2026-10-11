@@ -1,6 +1,8 @@
 from typing import List, Optional
 from pydantic import Field, field_validator, PositiveInt
 
+from app.backend.enums.errors import FieldErrorCode
+from app.backend.errors.coded import invalid
 from app.backend.utils.validators import SecureBaseModel, SecurityValidators
 
 
@@ -27,6 +29,12 @@ class RoleCreate(SecureBaseModel):
             return SecurityValidators.sanitize_string(v, max_length=500)
         return v
 
+    @field_validator('permission_ids')
+    @classmethod
+    def validate_permission_ids(cls, v: Optional[List[int]]) -> Optional[List[int]]:
+        if v is not None and len(v) != len(set(v)):
+            raise invalid(FieldErrorCode.PERMISSION_IDS_DUPLICATE)
+        return v
 
 
 class RoleUpdate(SecureBaseModel):
@@ -56,3 +64,9 @@ class RoleUpdate(SecureBaseModel):
             return SecurityValidators.sanitize_string(v, max_length=500)
         return v
 
+    @field_validator('permission_ids')
+    @classmethod
+    def validate_permission_ids(cls, v: Optional[List[int]]) -> Optional[List[int]]:
+        if v is not None and len(v) != len(set(v)):
+            raise invalid(FieldErrorCode.PERMISSION_IDS_DUPLICATE)
+        return v

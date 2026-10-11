@@ -23183,6 +23183,7 @@
           "latitude_out_of_range",
           "longitude_out_of_range",
           "role_ids_duplicate",
+          "permission_ids_duplicate",
           "permissions_unknown",
           "certificate_cn_invalid",
           "certificate_serial_invalid",

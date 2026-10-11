@@ -5,6 +5,19 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## API audit fixes
+
+### Fixed
+
+- `PATCH /roles/{id}` with `permission_ids` and `PATCH /users/{id}` with `role_ids` replace the rows by difference: rows
+  that stay are kept, removed ones are deleted, new ones are inserted. A set that kept an existing id used to answer
+  500 (roles) or 400 `certificate_taken` (users) because the flush wrote the INSERTs before the DELETEs.
+- `PATCH /users/{id}` maps a unique violation to `username_taken` only for `users.username` and to `certificate_taken`
+  only for the certificate hash columns; any other `IntegrityError` is no longer reported as a taken certificate.
+- Repeated ids in `permission_ids` of `POST /roles/` and `PATCH /roles/{id}` answer 422 with the new field code
+  `permission_ids_duplicate` (they answered 500). The `FieldErrorCode` schema in `api-contract/v1/openapi.json` gained
+  that value.
+
 ## Backend layout: auth, errors, bootstrap and cli packages
 
 ### Changed (operators)

@@ -369,6 +369,7 @@ class FieldErrorCode(FieldCode):
     LATITUDE_OUT_OF_RANGE = ("latitude_out_of_range", field("Latitude must be between -90 and 90"))
     LONGITUDE_OUT_OF_RANGE = ("longitude_out_of_range", field("Longitude must be between -180 and 180"))
     ROLE_IDS_DUPLICATE = ("role_ids_duplicate", field("Duplicate role IDs are not allowed"))
+    PERMISSION_IDS_DUPLICATE = ("permission_ids_duplicate", field("Duplicate permission IDs are not allowed"))
     PERMISSIONS_UNKNOWN = ("permissions_unknown", field("Unknown permissions: {permissions}", permissions=List[str]))
     CERTIFICATE_CN_INVALID = ("certificate_cn_invalid", field("Invalid certificate CN format"))
     CERTIFICATE_SERIAL_INVALID = ("certificate_serial_invalid", field("Invalid certificate serial format"))

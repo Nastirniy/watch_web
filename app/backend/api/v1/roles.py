@@ -186,16 +186,18 @@ async def update_role(
         for perm_id in role_update.permission_ids:
             await get_permission_or_404(session, perm_id)
 
-        # Delete all old permissions
-        old_permissions = await session.exec(
-            select(RolePermission).where(RolePermission.role_id == role_id)
-        )
-        for assignment in old_permissions.all():
-            await session.delete(assignment)
-
-        # Add all new permissions
+        # Replace by difference: the flush writes INSERTs before DELETEs, so a kept row must not be re-inserted
+        wanted = set(role_update.permission_ids)
+        current = await session.exec(select(RolePermission).where(RolePermission.role_id == role_id))
+        present = set()
+        for assignment in current.all():
+            if assignment.permission_id in wanted:
+                present.add(assignment.permission_id)
+            else:
+                await session.delete(assignment)
         for perm_id in role_update.permission_ids:
-            session.add(RolePermission(role_id=role_id, permission_id=perm_id))
+            if perm_id not in present:
+                session.add(RolePermission(role_id=role_id, permission_id=perm_id))
 
         _logger.info(
             f"User {current_user.username} updated role {role.name} with {len(role_update.permission_ids)} permissions"

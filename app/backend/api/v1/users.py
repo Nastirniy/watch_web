@@ -35,6 +35,22 @@ from app.backend.errors.openapi import ADMIN, GUARDED, problems
 router = APIRouter(prefix=UserRoutes.BASE.value, tags=[UserRoutes.tag()])
 _logger = get_api_logger()
 
+
+def taken_error_code(exc: IntegrityError) -> ErrorCode | None:
+    """The problem for a unique violation on users.username or a certificate hash column, otherwise None.
+
+    e.orig holds only the database message (sqlite: "users.username", MySQL: the key name, which contains the column);
+    str(exc) also carries the SQL, which names every column, so it is never searched.
+    """
+    if not is_unique_violation(exc):
+        return None
+    message = str(exc.orig)
+    if "username" in message:
+        return ErrorCode.USERNAME_TAKEN
+    if "pki_certificate" in message:
+        return ErrorCode.CERTIFICATE_TAKEN
+    return None
+
 # PATCH /users/{id} reads form fields only; a JSON body would reach the route with every field unset
 FORM_CONTENT_TYPES = ("multipart/form-data", "application/x-www-form-urlencoded")
 MAX_CERTIFICATE_BYTES = 5 * 1024 * 1024
@@ -421,11 +437,17 @@ async def update_user(
     try:
         if roles_to_assign is not None:
             # Replace the role assignments in the same transaction as the other changes
-            existing_assignments = (await session.exec(select(UserRole).where(UserRole.user_id == user_id))).all()
-            for assignment in existing_assignments:
-                await session.delete(assignment)
+            # By difference: the flush writes INSERTs before DELETEs, so a kept row must not be re-inserted
+            wanted = {role.id for role in roles_to_assign}
+            present = set()
+            for assignment in (await session.exec(select(UserRole).where(UserRole.user_id == user_id))).all():
+                if assignment.role_id in wanted:
+                    present.add(assignment.role_id)
+                else:
+                    await session.delete(assignment)
             for role in roles_to_assign:
-                session.add(UserRole(user_id=user_id, role_id=role.id))
+                if role.id not in present:
+                    session.add(UserRole(user_id=user_id, role_id=role.id))
             _logger.info(f"User {current_user.username} replaced the roles of user {user.username} with {len(roles_to_assign)} roles")
 
         await session.commit()
@@ -452,11 +474,11 @@ async def update_user(
 
     except IntegrityError as e:
         await session.rollback()
-        if not is_unique_violation(e):
-            raise
         # A concurrent request took the username or the certificate after the checks above
-        # e.orig holds only the database message; str(e) also carries the SQL, which names every column
-        raise ApiError(ErrorCode.USERNAME_TAKEN if "username" in str(e.orig) else ErrorCode.CERTIFICATE_TAKEN)
+        code = taken_error_code(e)
+        if code is None:
+            raise
+        raise ApiError(code)
 
 
 # UserRole Management Routes
