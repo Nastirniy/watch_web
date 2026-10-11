@@ -5524,11 +5524,25 @@
             }
           },
           "400": {
-            "description": "`category_name_taken`: Category name already exists",
+            "description": "`category_name_archived`: Category name belongs to an archived category; `category_name_taken`: Category name already exists",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CategoryNameTakenProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CategoryNameArchivedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CategoryNameTakenProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "category_name_archived": "#/components/schemas/CategoryNameArchivedProblem",
+                      "category_name_taken": "#/components/schemas/CategoryNameTakenProblem"
+                    }
+                  }
                 }
               }
             }
@@ -5982,6 +5996,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/CategoryNotFoundProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`category_has_signal_types`: Cannot archive a category that has signal types",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategoryHasSignalTypesProblem"
                 }
               }
             }
@@ -6811,11 +6835,25 @@
             }
           },
           "400": {
-            "description": "`signal_type_code_taken`: Signal type code already exists",
+            "description": "`signal_type_code_archived`: Signal type code belongs to an archived signal type; `signal_type_code_taken`: Signal type code already exists",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SignalTypeCodeTakenProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/SignalTypeCodeArchivedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SignalTypeCodeTakenProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "signal_type_code_archived": "#/components/schemas/SignalTypeCodeArchivedProblem",
+                      "signal_type_code_taken": "#/components/schemas/SignalTypeCodeTakenProblem"
+                    }
+                  }
                 }
               }
             }
@@ -7444,11 +7482,25 @@
             }
           },
           "409": {
-            "description": "`signal_type_not_archived`: Signal type is not archived",
+            "description": "`signal_type_category_archived`: The category of the signal type is archived; `signal_type_not_archived`: Signal type is not archived",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SignalTypeNotArchivedProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/SignalTypeCategoryArchivedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SignalTypeNotArchivedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "signal_type_category_archived": "#/components/schemas/SignalTypeCategoryArchivedProblem",
+                      "signal_type_not_archived": "#/components/schemas/SignalTypeNotArchivedProblem"
+                    }
+                  }
                 }
               }
             }
@@ -7836,11 +7888,25 @@
             }
           },
           "400": {
-            "description": "`tag_name_taken`: Tag name already exists",
+            "description": "`tag_name_archived`: Tag name belongs to an archived tag; `tag_name_taken`: Tag name already exists",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TagNameTakenProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/TagNameArchivedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TagNameTakenProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "tag_name_archived": "#/components/schemas/TagNameArchivedProblem",
+                      "tag_name_taken": "#/components/schemas/TagNameTakenProblem"
+                    }
+                  }
                 }
               }
             }
@@ -10018,11 +10084,25 @@
             }
           },
           "409": {
-            "description": "`observation_not_archived`: Observation is not archived",
+            "description": "`observation_not_archived`: Observation is not archived; `observation_signal_type_archived`: The signal type of the observation is archived",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ObservationNotArchivedProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ObservationNotArchivedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ObservationSignalTypeArchivedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "observation_not_archived": "#/components/schemas/ObservationNotArchivedProblem",
+                      "observation_signal_type_archived": "#/components/schemas/ObservationSignalTypeArchivedProblem"
+                    }
+                  }
                 }
               }
             }
@@ -10176,11 +10256,25 @@
             }
           },
           "409": {
-            "description": "`observation_not_archived`: Observation is not archived",
+            "description": "`observation_not_archived`: Observation is not archived; `observation_signal_type_archived`: The signal type of the observation is archived",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ObservationNotArchivedProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ObservationNotArchivedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ObservationSignalTypeArchivedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "observation_not_archived": "#/components/schemas/ObservationNotArchivedProblem",
+                      "observation_signal_type_archived": "#/components/schemas/ObservationSignalTypeArchivedProblem"
+                    }
+                  }
                 }
               }
             }
@@ -22569,6 +22663,69 @@
         ],
         "title": "CategoryCreate"
       },
+      "CategoryHasSignalTypesProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Cannot archive a category that has signal types",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Cannot archive a category that has signal types"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "category_has_signal_types",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "CategoryHasSignalTypesProblem",
+        "description": "Cannot archive a category that has signal types (HTTP 409). Problem type category_has_signal_types.",
+        "examples": [
+          {
+            "code": "category_has_signal_types",
+            "detail": "Cannot archive a category that has signal types",
+            "instance": "/api/v1/...",
+            "status": 409,
+            "title": "Cannot archive a category that has signal types",
+            "type": "https://example.org/problems/category_has_signal_types"
+          }
+        ]
+      },
       "CategoryNameArchivedProblem": {
         "properties": {
           "type": {
@@ -28384,6 +28541,69 @@
         "title": "ObservationReportType",
         "description": "Selects report layout.\n\nOne row per frequency band.\nRC_FREQ_PART    - rc bands only: frequency_min, frequency_max\nVIDEO_FREQ_PART - video bands only: frequency_min, frequency_max\nALL_FIELDS      - every band with all fields: user, post, kind, emitter group, frequencies, bandwidth, duration, tags"
       },
+      "ObservationSignalTypeArchivedProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "The signal type of the observation is archived",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "The signal type of the observation is archived"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "observation_signal_type_archived",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "ObservationSignalTypeArchivedProblem",
+        "description": "The signal type of the observation is archived (HTTP 409). Problem type observation_signal_type_archived.",
+        "examples": [
+          {
+            "code": "observation_signal_type_archived",
+            "detail": "The signal type of the observation is archived",
+            "instance": "/api/v1/...",
+            "status": 409,
+            "title": "The signal type of the observation is archived",
+            "type": "https://example.org/problems/observation_signal_type_archived"
+          }
+        ]
+      },
       "ObservationStatistics": {
         "properties": {
           "total_in_period": {
@@ -31793,6 +32013,69 @@
           "expires_at"
         ],
         "title": "ShareLinkResponse"
+      },
+      "SignalTypeCategoryArchivedProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "The category of the signal type is archived",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "The category of the signal type is archived"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "signal_type_category_archived",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "SignalTypeCategoryArchivedProblem",
+        "description": "The category of the signal type is archived (HTTP 409). Problem type signal_type_category_archived.",
+        "examples": [
+          {
+            "code": "signal_type_category_archived",
+            "detail": "The category of the signal type is archived",
+            "instance": "/api/v1/...",
+            "status": 409,
+            "title": "The category of the signal type is archived",
+            "type": "https://example.org/problems/signal_type_category_archived"
+          }
+        ]
       },
       "SignalTypeCodeArchivedProblem": {
         "properties": {

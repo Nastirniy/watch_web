@@ -1,5 +1,4 @@
 from typing import List, Annotated
-from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request, Query
 from sqlalchemy import func
 from sqlmodel import select
@@ -47,7 +46,7 @@ async def list_tags(
 @router.post(
     TagRoutes.CREATE.value,
     response_model=TagResponse,
-    responses=problems(ErrorCode.TAG_NAME_TAKEN, *ADMIN),
+    responses=problems(ErrorCode.TAG_NAME_ARCHIVED, ErrorCode.TAG_NAME_TAKEN, *ADMIN),
 )
 async def create_tag(
         request: Request,
@@ -64,19 +63,10 @@ async def create_tag(
     existing_tag = existing_result.first()
 
     if existing_tag:
-        if not existing_tag.is_deleted:
-            raise ApiError(ErrorCode.TAG_NAME_TAKEN, name=tag_data.name)
-        
-        # Restore archived tag
-        old_values = existing_tag.model_dump()
-        existing_tag.is_deleted = False
-        existing_tag.created_at = datetime.now(timezone.utc)
-        tag = existing_tag
-        action = "restore"
-    else:
-        tag = Tag(name=tag_data.name)
-        old_values = None
-        action = "create"
+        code = ErrorCode.TAG_NAME_ARCHIVED if existing_tag.is_deleted else ErrorCode.TAG_NAME_TAKEN
+        raise ApiError(code, name=tag_data.name)
+
+    tag = Tag(name=tag_data.name)
 
     session.add(tag)
 
@@ -86,13 +76,13 @@ async def create_tag(
     # Create audit log
     await create_audit_log(
         session=session,
-        action=action,
+        action="create",
         resource_type="tag",
         resource_id=tag.id,
         user_id=current_user.id,
-        old_values=old_values,
+        old_values=None,
         new_values=tag.model_dump(),
-        details={"message": f"User {current_user.username} {action}d tag '{tag.name}'"},
+        details={"message": f"User {current_user.username} created tag '{tag.name}'"},
         **client_info(request, auth)
     )
     await session.commit()

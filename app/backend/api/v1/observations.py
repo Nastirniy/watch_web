@@ -263,7 +263,7 @@ async def update_observation(
     if observation.is_deleted:
         raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
 
-    if observation_data.signal_type_id is not None:
+    if observation_data.signal_type_id is not None and observation_data.signal_type_id != observation.signal_type_id:
         signal_type_result = await session.exec(
             select(SignalType).where(
                 SignalType.id == observation_data.signal_type_id,
@@ -474,6 +474,13 @@ async def _set_observation_archived(
     AccessControlService.check_post_write(auth, observation.post_id, "observation")
     AccessControlService.check_observation_ownership(auth, observation)
 
+    if not archived:
+        signal_type = (await session.exec(
+            select(SignalType).where(SignalType.id == observation.signal_type_id)
+        )).first()
+        if signal_type is not None and signal_type.is_deleted:
+            raise ApiError(ErrorCode.OBSERVATION_SIGNAL_TYPE_ARCHIVED)
+
     action = "archive" if archived else "restore"
     old_values = observation.model_dump()
     observation.is_deleted = archived
@@ -503,7 +510,7 @@ async def _set_observation_archived(
     responses=problems(
         AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_OWNER, AccessErrorCode.POST_ACCESS_DENIED,
         AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.OBSERVATION_NOT_ARCHIVED,
-        *GUARDED,
+        ErrorCode.OBSERVATION_SIGNAL_TYPE_ARCHIVED, *GUARDED,
     ),
 )
 async def archive_observation(
@@ -525,7 +532,7 @@ async def archive_observation(
     response_model=ObservationWithMedia,
     responses=problems(
         AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.OBSERVATION_NOT_OWNER, AccessErrorCode.POST_ACCESS_DENIED,
-        AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.OBSERVATION_NOT_ARCHIVED,
+        AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.OBSERVATION_NOT_ARCHIVED, ErrorCode.OBSERVATION_SIGNAL_TYPE_ARCHIVED,
         *GUARDED,
     ),
 )

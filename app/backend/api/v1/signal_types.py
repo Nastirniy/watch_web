@@ -49,7 +49,7 @@ async def list_signal_types(
     SignalTypeRoutes.CREATE.value,
     response_model=SignalTypeResponse,
     responses=problems(
-        ErrorCode.SIGNAL_TYPE_CODE_TAKEN, ErrorCode.CATEGORY_NOT_FOUND, *ADMIN,
+        ErrorCode.SIGNAL_TYPE_CODE_ARCHIVED, ErrorCode.SIGNAL_TYPE_CODE_TAKEN, ErrorCode.CATEGORY_NOT_FOUND, *ADMIN,
     ),
 )
 async def create_signal_type(
@@ -80,35 +80,19 @@ async def create_signal_type(
     existing_signal_type = existing_result.first()
 
     if existing_signal_type:
-        if not existing_signal_type.is_deleted:
-            raise ApiError(ErrorCode.SIGNAL_TYPE_CODE_TAKEN, signal_type_code=signal_type_data.code)
-        
-        # Restore archived signal type
-        old_values = existing_signal_type.model_dump()
-        
-        # Update fields from request
-        update_data = signal_type_data.model_dump()
-        for field, value in update_data.items():
-            setattr(existing_signal_type, field, value)
-            
-        existing_signal_type.is_deleted = False
-        existing_signal_type.created_at = datetime.now(timezone.utc)
-        existing_signal_type.updated_at = datetime.now(timezone.utc)
-        signal_type = existing_signal_type
-        action = "restore"
-    else:
-        signal_type = SignalType(
-            code=signal_type_data.code,
-            name=signal_type_data.name,
-            category_id=signal_type_data.category_id,
-            description=signal_type_data.description,
-            is_active=signal_type_data.is_active,
-            sort_order=signal_type_data.sort_order,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc)
-        )
-        old_values = None
-        action = "create"
+        code = ErrorCode.SIGNAL_TYPE_CODE_ARCHIVED if existing_signal_type.is_deleted else ErrorCode.SIGNAL_TYPE_CODE_TAKEN
+        raise ApiError(code, signal_type_code=signal_type_data.code)
+
+    signal_type = SignalType(
+        code=signal_type_data.code,
+        name=signal_type_data.name,
+        category_id=signal_type_data.category_id,
+        description=signal_type_data.description,
+        is_active=signal_type_data.is_active,
+        sort_order=signal_type_data.sort_order,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc)
+    )
 
     session.add(signal_type)
 
@@ -118,13 +102,13 @@ async def create_signal_type(
     # Create audit log
     await create_audit_log(
         session=session,
-        action=action,
+        action="create",
         resource_type="signal_type",
         resource_id=signal_type.id,
         user_id=current_user.id,
-        old_values=old_values,
+        old_values=None,
         new_values=signal_type.model_dump(),
-        details={"message": f"User {current_user.username} {action}d signal type '{signal_type.name}' ({signal_type.code})"},
+        details={"message": f"User {current_user.username} created signal type '{signal_type.name}' ({signal_type.code})"},
         **client_info(request, auth)
     )
     await session.commit()
@@ -286,7 +270,10 @@ async def archive_signal_type(
 @router.post(
     SignalTypeRoutes.SIGNAL_TYPE_RESTORE.value,
     response_model=SignalTypeResponse,
-    responses=problems(ErrorCode.SIGNAL_TYPE_NOT_FOUND, ErrorCode.SIGNAL_TYPE_NOT_ARCHIVED, *ADMIN),
+    responses=problems(
+        ErrorCode.SIGNAL_TYPE_CATEGORY_ARCHIVED, ErrorCode.SIGNAL_TYPE_NOT_FOUND, ErrorCode.SIGNAL_TYPE_NOT_ARCHIVED,
+        *ADMIN,
+    ),
 )
 async def restore_signal_type(
         request: Request,
@@ -302,6 +289,11 @@ async def restore_signal_type(
         raise ApiError(ErrorCode.SIGNAL_TYPE_NOT_FOUND)
     if not row.is_deleted:
         raise ApiError(ErrorCode.SIGNAL_TYPE_NOT_ARCHIVED)
+    if row.category_id is not None:
+        category_result = await session.exec(select(Category).where(Category.id == row.category_id))
+        category = category_result.first()
+        if category is not None and category.is_deleted:
+            raise ApiError(ErrorCode.SIGNAL_TYPE_CATEGORY_ARCHIVED)
 
     old_values = row.model_dump()
     row.is_deleted = False

@@ -227,6 +227,8 @@ class ErrorCode(ProblemType):
     CATEGORY_NOT_ARCHIVED = ("category_not_archived", problem(409, "Category is not archived"))
     CATEGORY_NAME_TAKEN = ("category_name_taken", problem(
         400, "Category name already exists", "Category with name '{name}' already exists", name=str))
+    CATEGORY_HAS_SIGNAL_TYPES = ("category_has_signal_types", problem(
+        409, "Cannot archive a category that has signal types"))
     CATEGORY_NAME_ARCHIVED = ("category_name_archived", problem(
         400, "Category name belongs to an archived category", "Category with name '{name}' already exists as an archived category", name=str))
     TAG_NOT_FOUND = ("tag_not_found", problem(404, "Tag not found"))
@@ -244,10 +246,14 @@ class ErrorCode(ProblemType):
         "Signal type with code '{signal_type_code}' already exists as an archived signal type", signal_type_code=str))
     SIGNAL_TYPE_INACTIVE = ("signal_type_inactive", problem(
         400, "Signal type is inactive", "Signal type '{signal_type_name}' is inactive and cannot be used", signal_type_name=str))
+    SIGNAL_TYPE_CATEGORY_ARCHIVED = ("signal_type_category_archived", problem(
+        409, "The category of the signal type is archived"))
     SIGNAL_TYPE_HAS_OBSERVATIONS = ("signal_type_has_observations", problem(400, "Cannot archive a signal type that has observations"))
 
     # ---------------------------------------------------------------- observations and frequencies
     OBSERVATION_NOT_FOUND = ("observation_not_found", problem(404, "Observation not found"))
+    OBSERVATION_SIGNAL_TYPE_ARCHIVED = ("observation_signal_type_archived", problem(
+        409, "The signal type of the observation is archived"))
     OBSERVATION_NOT_ARCHIVED = ("observation_not_archived", problem(409, "Observation is not archived"))
     FREQUENCY_NOT_FOUND = ("frequency_not_found", problem(404, "Frequency not found"))
     FREQUENCY_NOT_ARCHIVED = ("frequency_not_archived", problem(409, "Frequency is not archived"))

@@ -102,6 +102,17 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - `*_contains` filters match `%`, `_` and `\` literally (`name_contains=%` no longer matches every row).
 - `page` is at most 1000000 on every list and search (422 above it); a huge `page` answered 500.
 
+- `POST /tags/create`, `/categories/create` and `/signal-types/create` no longer restore an archived row with the same
+  name or code (and without `X.archive`): they answer `tag_name_archived`, `category_name_archived` and
+  `signal_type_code_archived`, as rename does; restore stays on `POST /{id}/restore`. Media formats keep their
+  restore-through-create.
+- `POST /categories/{id}/archive` answers 409 `category_has_signal_types` while the category has non-archived signal
+  types; `POST /signal-types/{id}/restore` answers 409 `signal_type_category_archived` while its category is archived;
+  `POST /observations/{id}/restore` answers 409 `observation_signal_type_archived` while its signal type is archived.
+- `PUT /observations/{id}` skips the existence and active checks of the signal type when `signal_type_id` equals the
+  current one, so an observation of a deactivated or archived type can still be edited.
+- OpenAPI contract: the four new codes and the archived-name codes on the three create routes are declared.
+
 ### Changed
 
 - New problem codes for the web localization package: `admin_role_not_renamable`, `admin_role_permissions_fixed`,

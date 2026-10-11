@@ -48,7 +48,7 @@ async def list_categories(
 @router.post(
     CategoryRoutes.CREATE.value,
     response_model=CategoryResponse,
-    responses=problems(ErrorCode.CATEGORY_NAME_TAKEN, *ADMIN),
+    responses=problems(ErrorCode.CATEGORY_NAME_ARCHIVED, ErrorCode.CATEGORY_NAME_TAKEN, *ADMIN),
 )
 async def create_category(
         request: Request,
@@ -65,22 +65,13 @@ async def create_category(
     existing_category = existing_result.first()
 
     if existing_category:
-        if not existing_category.is_deleted:
-            raise ApiError(ErrorCode.CATEGORY_NAME_TAKEN, name=category_data.name)
-        
-        # Restore archived category
-        old_values = existing_category.model_dump()
-        existing_category.is_deleted = False
-        existing_category.alias = category_data.alias
-        category = existing_category
-        action = "restore"
-    else:
-        category = Category(
-            name=category_data.name,
-            alias=category_data.alias
-        )
-        old_values = None
-        action = "create"
+        code = ErrorCode.CATEGORY_NAME_ARCHIVED if existing_category.is_deleted else ErrorCode.CATEGORY_NAME_TAKEN
+        raise ApiError(code, name=category_data.name)
+
+    category = Category(
+        name=category_data.name,
+        alias=category_data.alias
+    )
 
     session.add(category)
 
@@ -90,13 +81,13 @@ async def create_category(
     # Create audit log
     await create_audit_log(
         session=session,
-        action=action,
+        action="create",
         resource_type="category",
         resource_id=category.id,
         user_id=current_user.id,
-        old_values=old_values,
+        old_values=None,
         new_values=category.model_dump(),
-        details={"message": f"User {current_user.username} {action}d category '{category.name}'"},
+        details={"message": f"User {current_user.username} created category '{category.name}'"},
         **client_info(request, auth)
     )
     await session.commit()
@@ -200,7 +191,7 @@ async def update_category(
 @router.post(
     CategoryRoutes.CATEGORY_ARCHIVE.value,
     response_model=CategoryResponse,
-    responses=problems(ErrorCode.CATEGORY_NOT_FOUND, *ADMIN),
+    responses=problems(ErrorCode.CATEGORY_HAS_SIGNAL_TYPES, ErrorCode.CATEGORY_NOT_FOUND, *ADMIN),
 )
 async def archive_category(
         request: Request,
@@ -215,6 +206,12 @@ async def archive_category(
     row = result.first()
     if not row:
         raise ApiError(ErrorCode.CATEGORY_NOT_FOUND)
+
+    signal_type_result = await session.exec(
+        select(SignalType.id).where(SignalType.category_id == category_id, SignalType.is_deleted == False).limit(1)
+    )
+    if signal_type_result.first() is not None:
+        raise ApiError(ErrorCode.CATEGORY_HAS_SIGNAL_TYPES)
 
     old_values = row.model_dump()
     row.is_deleted = True
