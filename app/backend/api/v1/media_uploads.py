@@ -197,7 +197,7 @@ async def create_upload_session(
     observation = await load_observation_for_upload(session, auth, body.observation_id)
     registry = await formats.load_registry(session)
     spec = check_declared_format(registry, body.media_type, body.original_filename, body.content_type)
-    if body.expected_size > spec.max_file_size_bytes:
+    if body.expected_size > spec.effective_limit_bytes:
         raise too_large(spec, body.expected_size)
 
     row = uploads.new_session(

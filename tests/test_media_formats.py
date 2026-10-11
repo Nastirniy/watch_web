@@ -230,3 +230,89 @@ async def test_media_formats_searchable(client, db, headers):
     assert response.status_code == 200, response.text
     items = response.json().get("items", response.json())
     assert len(items) == 4
+
+
+# ----------------------------------------------------------------- seeding, cache generation, ceiling
+
+@pytest.mark.asyncio
+async def test_seeding_skips_a_default_whose_extension_or_alias_belongs_to_another_row(db):
+    jpeg = (await db.exec(select(MediaFormat).where(MediaFormat.content_type == "image/jpeg"))).one()
+    jpeg.content_type = "image/x-photo"          # an admin renamed the default
+    await db.commit()
+
+    assert await formats.seed_media_formats(db) == 0
+    owners = (await db.exec(select(MediaFormat).where(MediaFormat.is_deleted == False))).all()
+    jpg_owners = [row.content_type for row in owners if ".jpg" in (row.extensions or [])]
+    assert jpg_owners == ["image/x-photo"]
+    assert "image/jpeg" not in {row.content_type for row in owners}
+    assert await formats.seed_media_formats(db) == 0
+
+    # an alias clash is skipped as well
+    png = (await db.exec(select(MediaFormat).where(MediaFormat.content_type == "image/png"))).one()
+    png.content_type = "image/x-png"
+    png.aliases = ["image/webp"]
+    await db.commit()
+    await db.refresh(png)
+    webp = (await db.exec(select(MediaFormat).where(MediaFormat.content_type == "image/webp"))).one()
+    webp.content_type = "image/x-webp"
+    webp.extensions = [".wbp"]
+    await db.commit()
+    assert await formats.seed_media_formats(db) == 0   # image/webp is an alias of image/x-png now
+
+
+class _InvalidatingSession:
+    """Runs a write's invalidate_registry_cache() while the registry read is in flight"""
+
+    def __init__(self, session):
+        self._session = session
+
+    async def exec(self, *args, **kwargs):
+        result = await self._session.exec(*args, **kwargs)
+        formats.invalidate_registry_cache()
+        return result
+
+
+@pytest.mark.asyncio
+async def test_registry_read_before_an_invalidate_is_not_cached(db):
+    formats.invalidate_registry_cache()
+    stale = await formats.load_registry(_InvalidatingSession(db))
+    assert "image/png" in stale.content_types()
+    assert formats._cache[1] is None, "a registry read before the invalidate must not be stored"
+
+    png = (await db.exec(select(MediaFormat).where(MediaFormat.content_type == "image/png"))).one()
+    png.is_active = False
+    await db.commit()
+    fresh = await formats.load_registry(db)
+    assert "image/png" not in fresh.content_types()
+    assert formats._cache[1] is fresh
+
+
+@pytest.mark.asyncio
+async def test_lowered_ceiling_caps_every_limit(client, db, headers, monkeypatch):
+    user, observation = await _scene(db)
+    mp4 = (await db.exec(select(MediaFormat).where(MediaFormat.content_type == "video/mp4"))).one()
+    mp4.max_file_size_bytes = 5 * formats.GB
+    await db.commit()
+    formats.invalidate_registry_cache()
+    monkeypatch.setattr(settings.storage, "max_file_size_gb", 1)
+
+    registry = await formats.load_registry(db, use_cache=False)
+    spec = registry.resolve("video", "clip.mp4")
+    assert spec.max_file_size_bytes == 5 * formats.GB and spec.effective_limit_bytes == formats.GB
+    from app.backend.api.shared.helpers.upload_helper import validation_config_for
+    assert validation_config_for(registry, spec).max_size == formats.GB
+
+    listed = (await client.get(FORMATS, headers=headers(user))).json()
+    assert listed["max_file_size_bytes"] == formats.GB
+    assert all(f["max_file_size_bytes"] <= formats.GB for group in listed["formats"].values() for f in group)
+
+    created = await client.post(V1.path(MediaRoutes.UPLOADS), headers=headers(user), json={
+        "observation_id": observation.id, "media_type": "video", "original_filename": "clip.mp4",
+        "expected_size": 2 * formats.GB, "content_type": "video/mp4"})
+    assert created.status_code == 413, created.text
+    assert created.json()["max_file_size_bytes"] == formats.GB
+
+    accepted = await client.post(V1.path(MediaRoutes.UPLOADS), headers=headers(user), json={
+        "observation_id": observation.id, "media_type": "video", "original_filename": "clip.mp4",
+        "expected_size": formats.GB, "content_type": "video/mp4"})
+    assert accepted.status_code == 201, accepted.text

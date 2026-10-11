@@ -170,6 +170,7 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   directory of `GET /media/statistics` run in a thread instead of on the event loop; a copy of a large file to a
   network share blocked every other request. `GET /media/statistics` counts and sums in SQL instead of loading every
   media row; the response is unchanged.
+- Startup seeding of the default media formats skips a default whose extensions or MIME spellings already belong to a live row (the conflict check of `/media-formats`), so a renamed default is not added again next to it and two active rows never own `.jpg`; the skip is logged. The registry cache no longer stores a read that began before an invalidate, so a disabled format stops being accepted at once in the process that disabled it. The server ceiling `storage.max_file_size_gb` caps every format limit when it is read, not only when a row is written: session create, upload validation, the 413 answer and `GET /media/formats` all use min(format limit, ceiling).
 
 ### Changed
 

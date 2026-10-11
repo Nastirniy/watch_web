@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -24,6 +24,9 @@ from app.backend.enums.general import MediaType
 from app.backend.enums.errors import ErrorCode
 from app.backend.models.media_format import MediaFormat
 from app.backend.errors.coded import CodedError
+from app.backend.utils.logging_config import get_api_logger
+
+_logger = get_api_logger()
 
 # Declared Content-Type values that mean "detect from the bytes"; never stored
 OPAQUE_CONTENT_TYPES = {"application/octet-stream", "binary/octet-stream"}
@@ -48,6 +51,11 @@ class FormatSpec:
     id: Optional[int] = None
     is_active: bool = True
     sort_order: int = 0
+
+    @property
+    def effective_limit_bytes(self) -> int:
+        """The limit uploads are held to: the format's own, never above the server ceiling (it can be lowered after rows are written)"""
+        return min(self.max_file_size_bytes, hard_limit_bytes())
 
     @property
     def all_mimes(self) -> Tuple[str, ...]:
@@ -207,7 +215,7 @@ class FormatRegistry:
                 "extensions": list(spec.extensions),
                 "label": spec.label,
                 "aliases": list(spec.aliases),
-                "max_file_size_bytes": spec.max_file_size_bytes,
+                "max_file_size_bytes": spec.effective_limit_bytes,
             })
         return grouped
 
@@ -215,10 +223,13 @@ class FormatRegistry:
 # ---- loading ---------------------------------------------------------------
 
 _cache: Tuple[float, Optional[FormatRegistry]] = (0.0, None)
+# Bumped by every invalidate: a read that began before one must not be stored (it may predate the write)
+_generation = 0
 
 
 def invalidate_registry_cache() -> None:
-    global _cache
+    global _cache, _generation
+    _generation += 1
     _cache = (0.0, None)
 
 
@@ -228,29 +239,60 @@ async def load_registry(session: AsyncSession, use_cache: bool = True) -> Format
     expires, cached = _cache
     if use_cache and cached is not None and time.monotonic() < expires:
         return cached
+    generation = _generation
     rows = (await session.exec(
         select(MediaFormat)
         .where(MediaFormat.is_deleted == False, MediaFormat.is_active == True)
         .order_by(MediaFormat.sort_order, MediaFormat.id)
     )).all()
     registry = FormatRegistry([FormatSpec.from_row(row) for row in rows])
-    _cache = (time.monotonic() + REGISTRY_CACHE_TTL_SECONDS, registry)
+    if generation == _generation:
+        _cache = (time.monotonic() + REGISTRY_CACHE_TTL_SECONDS, registry)
     return registry
 
 
+def find_conflict(rows: Iterable[MediaFormat], extensions: Iterable[str], aliases: Iterable[str],
+                  content_type: str, exclude_id: Optional[int] = None) -> Optional[Tuple[ErrorCode, Dict[str, object]]]:
+    """The first non-deleted row sharing an extension or a MIME spelling with the candidate, as (code, params), else None"""
+    extensions = set(extensions)
+    mine = {content_type, *aliases}
+    for row in rows:
+        if row.is_deleted or row.id == exclude_id:
+            continue
+        clash_ext = sorted(extensions & set(row.extensions or []))
+        if clash_ext:
+            return ErrorCode.MEDIA_FORMAT_EXTENSION_CLASH, dict(
+                extensions=clash_ext, format_content_type=row.content_type, format_id=row.id)
+        clash_mime = sorted(mine & {row.content_type, *(row.aliases or [])})
+        if clash_mime:
+            return ErrorCode.MEDIA_FORMAT_CONTENT_TYPE_CLASH, dict(
+                content_types=clash_mime, format_content_type=row.content_type, format_id=row.id)
+    return None
+
+
 async def seed_media_formats(session: AsyncSession) -> int:
-    """Insert every default format whose content_type is missing (never touches existing rows). Returns the count added."""
-    existing = set((await session.exec(select(MediaFormat.content_type))).all())
+    """Insert every default format whose content_type is missing and whose extensions and aliases no live row owns
+    (an admin may have renamed a default). Never touches existing rows. Returns the count added."""
+    rows = list((await session.exec(select(MediaFormat))).all())
+    existing = {row.content_type for row in rows}
     added = 0
     for spec in default_formats():
         if spec.content_type in existing:
             continue
-        session.add(MediaFormat(
+        clash = find_conflict(rows, spec.extensions, spec.aliases, spec.content_type)
+        if clash is not None:
+            _logger.warning(f"Default media format {spec.content_type} not seeded: {clash[0].value} with "
+                            f"{clash[1]['format_content_type']}")
+            continue
+        row = MediaFormat(
             media_type=spec.media_type, content_type=spec.content_type, label=spec.label,
             extensions=list(spec.extensions), aliases=list(spec.aliases),
             max_file_size_bytes=min(spec.max_file_size_bytes, hard_limit_bytes()),
             is_active=True, sort_order=spec.sort_order,
-        ))
+        )
+        session.add(row)
+        rows.append(row)
+        existing.add(spec.content_type)
         added += 1
     if added:
         await session.commit()

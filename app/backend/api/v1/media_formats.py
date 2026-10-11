@@ -22,7 +22,7 @@ from app.backend.auth.access_control import AccessControlService
 from app.backend.models.media_format import MediaFormat
 from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
-from app.backend.services.media.formats import hard_limit_bytes, invalidate_registry_cache
+from app.backend.services.media.formats import find_conflict, hard_limit_bytes, invalidate_registry_cache
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import MediaFormatRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
@@ -43,19 +43,9 @@ async def _check_conflicts(session: AsyncSession, media_type: str, extensions: L
                            content_type: str, exclude_id: Optional[int] = None) -> None:
     """Extensions and MIME spellings must be unambiguous across the active, non-deleted formats"""
     rows = (await session.exec(select(MediaFormat).where(MediaFormat.is_deleted == False))).all()
-    for row in rows:
-        if row.id == exclude_id:
-            continue
-        clash_ext = sorted(set(extensions) & set(row.extensions or []))
-        if clash_ext:
-            raise ApiError(ErrorCode.MEDIA_FORMAT_EXTENSION_CLASH,
-                           extensions=clash_ext, format_content_type=row.content_type, format_id=row.id)
-        mine = {content_type, *aliases}
-        theirs = {row.content_type, *(row.aliases or [])}
-        clash_mime = sorted(mine & theirs)
-        if clash_mime:
-            raise ApiError(ErrorCode.MEDIA_FORMAT_CONTENT_TYPE_CLASH,
-                           content_types=clash_mime, format_content_type=row.content_type, format_id=row.id)
+    clash = find_conflict(rows, extensions, aliases, content_type, exclude_id=exclude_id)
+    if clash is not None:
+        raise ApiError(clash[0], **clash[1])
 
 
 async def _commit_content_type(session: AsyncSession, content_type: str) -> None:

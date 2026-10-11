@@ -31,7 +31,7 @@ _logger = get_api_logger()
 def validation_config_for(registry: formats.FormatRegistry, spec: formats.FormatSpec) -> FileValidationConfig:
     """Manager-side checks (size, extension, detected MIME) driven by the resolved format"""
     return FileValidationConfig(
-        max_size=spec.max_file_size_bytes,
+        max_size=spec.effective_limit_bytes,
         sanitize_filename=True,
         validate_content_headers=True,
         strict_mime_validation=True,
@@ -54,7 +54,7 @@ def too_large(spec: formats.FormatSpec, actual: int = None) -> ApiError:
     return ApiError(
         ErrorCode.MEDIA_FILE_TOO_LARGE,
         content_type=spec.content_type,
-        max_file_size_bytes=spec.max_file_size_bytes,
+        max_file_size_bytes=spec.effective_limit_bytes,
         file_size_bytes=actual,
     )
 

@@ -344,13 +344,13 @@ async def upload_complete_file(
     registry = await formats.load_registry(session)
     spec = check_declared_format(registry, media_type, original_filename, file.content_type)
     media_type = spec.media_type
-    if file.size and file.size > spec.max_file_size_bytes:
+    if file.size and file.size > spec.effective_limit_bytes:
         raise too_large(spec, file.size)
 
     media_manager = get_media_manager()
     temp_path = await media_manager.spool_upload(file)
     spooled = temp_path.stat().st_size
-    if spooled > spec.max_file_size_bytes:
+    if spooled > spec.effective_limit_bytes:
         temp_path.unlink(missing_ok=True)
         raise too_large(spec, spooled)
     _logger.info(f"Uploading file: '{original_filename}' ({spooled} bytes)")
