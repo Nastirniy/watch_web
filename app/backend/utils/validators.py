@@ -11,6 +11,9 @@ from email_validator import validate_email, EmailNotValidError
 from app.backend.errors.coded import invalid
 from app.backend.enums.errors import FieldErrorCode
 
+# Largest value of a MySQL INT column; request integers stored in one carry this as `le`
+INT_MAX = 2147483647
+
 
 class SecurityValidators:
     """Security-focused validators for common input types"""

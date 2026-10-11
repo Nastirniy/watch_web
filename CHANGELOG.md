@@ -76,6 +76,15 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - `GET /problems/{code}` for an unknown code no longer echoes the submitted value: `problem_type_not_found` has no
   params (the `problem_code` member and the code in `detail` are gone from the body and from its schema in
   `api-contract/v1/openapi.json`).
+- Uploads over 2 GiB no longer answer 500 on MySQL: `media_files.file_size` is BIGINT (it was INT, uploads allow 10 GB;
+  migration `018_media_file_size_bigint`). `upload_sessions` and `media_formats` already used BIGINT for sizes.
+- A long request URL or User-Agent no longer fails the audit INSERT (and with it the request) on strict MySQL:
+  `request_url` (500) and `user_agent` (255) of `audit_logs` and `user_agent` of `user_sessions` are cut to their column
+  lengths (`fit_column`, in `client_info`, `create_audit_log` and `create_session`).
+- `link_group` of the frequency bands and `duration_seconds` of observations accept at most 2147483647 (a MySQL INT);
+  a larger value answers 422 `validation_error` (it answered 500). `POST /observations/{id}/disappeared` answers 422
+  with field code `value_too_large` on `disappeared_at` when the duration it computes does not fit an INT. The
+  `maximum` of these fields is in `api-contract/v1/openapi.json`.
 
 ### Changed
 
@@ -95,6 +104,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ### Changed (operators)
 
+- Run the migration `018_media_file_size_bigint` (it runs at startup): on MySQL it alters `media_files.file_size` to
+  BIGINT, keeps every row and is skipped when the column is already BIGINT (sqlite needs no change). The downgrade turns
+  the column back into INT and fails while a file over 2 GiB is stored.
 - Every offloaded upload the API refuses after the path check (415, 413, 403, 404, busy store, invalid content) now
   deletes nginx's body file; before, nginx (`client_body_in_file_only`) left up to 10 GB behind for each. Requests
   rejected before the handler runs (401) still leave their file: `python -m app.backend.cli.media_tools

@@ -20,7 +20,8 @@ class AuditLog(SQLModel, table=True):
     details: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
 
     ip_address: Optional[str] = Field(default=None, max_length=45)
-    user_agent: Optional[str] = Field(default=None)
+    # AutoString was VARCHAR(255) on MySQL already; the length is explicit so that the cut can read it
+    user_agent: Optional[str] = Field(default=None, max_length=255)
     request_url: Optional[str] = Field(default=None, max_length=500)
 
     success: bool = Field(default=True, index=True)

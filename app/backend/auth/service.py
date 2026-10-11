@@ -19,6 +19,7 @@ from app.backend.auth.certificates import (
     create_pki_auth_audit_details
 )
 from app.backend.services.audit import create_audit_log
+from app.backend.utils.text import fit_column
 
 # Get authentication logger
 _logger = get_auth_logger()
@@ -150,7 +151,7 @@ class AuthService:
             id=session_id,
             user_id=user.id,
             ip_address=ip_address,
-            user_agent=user_agent,
+            user_agent=fit_column(UserSession.user_agent, user_agent),
             created_at=now,
             expires_at=now,
         )

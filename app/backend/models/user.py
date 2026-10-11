@@ -53,7 +53,7 @@ class UserSession(SQLModel, table=True):
     id: str = Field(primary_key=True, max_length=128)
     user_id: int = Field(foreign_key="users.id", index=True)
     ip_address: Optional[str] = Field(default=None, max_length=45)
-    user_agent: Optional[str] = Field(default=None)
+    user_agent: Optional[str] = Field(default=None, max_length=255)  # VARCHAR(255) on MySQL already
     last_activity: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
     # When the session ends unless a request comes: every request moves it (auth/sessions.touch)
     expires_at: datetime = Field(index=True)

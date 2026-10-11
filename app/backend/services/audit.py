@@ -5,6 +5,7 @@ from pydantic_core import to_jsonable_python
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.models.audit import AuditLog
+from app.backend.utils.text import fit_column
 
 
 def serialize_for_audit(obj: Any) -> Any:
@@ -65,8 +66,8 @@ async def create_audit_log(
         new_values=serialize_for_audit(new_values),
         details=serialize_for_audit(details),
         ip_address=ip_address,
-        user_agent=user_agent,
-        request_url=request_url,
+        user_agent=fit_column(AuditLog.user_agent, user_agent),
+        request_url=fit_column(AuditLog.request_url, request_url),
         success=success,
         error_message=error_message
     )

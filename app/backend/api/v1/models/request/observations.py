@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator, Positiv
 
 from app.backend.enums.general import ConfidenceLevel, FrequencyKind, ObservationReportType, TagMatch
 from app.backend.errors.coded import invalid
-from app.backend.utils.validators import not_null
+from app.backend.utils.validators import INT_MAX, not_null
 from app.backend.enums.errors import FieldErrorCode
 
 FREQUENCY_QUANTUM = Decimal("0.001")
@@ -33,6 +33,7 @@ class ObservationFrequencyCreate(BaseModel):
     link_group: Optional[int] = Field(
         None,
         ge=1,
+        le=INT_MAX,
         description="Optional: bands with the same number inside one observation belong to one emitter"
     )
 
@@ -53,7 +54,7 @@ class ObservationFrequencyUpdate(BaseModel):
     frequency_min: Optional[Decimal] = Field(None, gt=0, max_digits=12, decimal_places=3, description="Minimum frequency in MHz")
     frequency_max: Optional[Decimal] = Field(None, gt=0, max_digits=12, decimal_places=3, description="Maximum frequency in MHz")
     frequency_center: Optional[Decimal] = Field(None, gt=0, max_digits=12, decimal_places=3, description="Center frequency in MHz")
-    link_group: Optional[int] = Field(None, ge=1, description="Emitter group inside the observation; null clears it")
+    link_group: Optional[int] = Field(None, ge=1, le=INT_MAX, description="Emitter group inside the observation; null clears it")
 
     # Only link_group may be cleared with null
     refuse_null = not_null("kind", "frequency_min", "frequency_max", "frequency_center")
@@ -74,7 +75,7 @@ class ObservationCreate(BaseModel):
         default_factory=lambda: datetime.now(timezone.utc),
         description="When the signal was observed; the current UTC time when omitted"
     )
-    duration_seconds: Optional[int] = Field(None, ge=0, description="Duration must be non-negative")
+    duration_seconds: Optional[int] = Field(None, ge=0, le=INT_MAX, description="Duration must be non-negative")
     comment: Optional[str] = Field(None, max_length=1000, description="Comment limited to 1000 characters")
     confidence_level: Optional[str] = Field(
         None,
@@ -121,7 +122,7 @@ class ObservationUpdate(BaseModel):
     signal_type_id: Optional[int] = Field(None, gt=0, description="Signal Type ID must be positive")
 
     observed_at: Optional[datetime] = None
-    duration_seconds: Optional[int] = Field(None, ge=0, description="Duration must be non-negative")
+    duration_seconds: Optional[int] = Field(None, ge=0, le=INT_MAX, description="Duration must be non-negative")
     comment: Optional[str] = Field(None, max_length=1000, description="Comment limited to 1000 characters")
     confidence_level: Optional[str] = Field(
         None,

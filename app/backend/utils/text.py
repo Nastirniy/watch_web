@@ -7,7 +7,7 @@ These helpers turn stored or incoming entity sequences back into characters.
 """
 import html
 import re
-from typing import Any
+from typing import Any, Optional
 
 # Entity written without the leading '#', e.g. "&x27;" or "&39;": not valid
 # HTML, but it is what a stripped "&#x27;" looks like after some clients touch it.
@@ -63,3 +63,12 @@ def unescape_deep(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: unescape_deep(item) for key, item in value.items()}
     return value
+
+
+def fit_column(column: Any, value: Optional[str]) -> Optional[str]:
+    """A request-derived string cut to the length of its column (MySQL refuses a longer one in strict mode).
+    column is a model attribute such as AuditLog.request_url; a column without a length keeps the value."""
+    length = getattr(column.type, "length", None)
+    if value is None or length is None:
+        return value
+    return value[:length]

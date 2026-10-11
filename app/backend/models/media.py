@@ -1,6 +1,7 @@
 from typing import Optional, TYPE_CHECKING
 from datetime import datetime
 from pathlib import Path
+from sqlalchemy import BigInteger, Column
 from sqlmodel import Field, SQLModel, Relationship
 from app.backend.config import settings
 from app.backend.utils.datetime_utils import get_default_timezone_datetime
@@ -24,7 +25,7 @@ class MediaFile(SQLModel, table=True):
     original_filename: str = Field(max_length=255)
     stored_filename: str = Field(unique=True, max_length=255)
     file_path: str = Field(max_length=500)
-    file_size: int
+    file_size: int = Field(sa_column=Column(BigInteger, nullable=False))
     mime_type: str = Field(max_length=100)
     file_extension: str = Field(max_length=10)
 
