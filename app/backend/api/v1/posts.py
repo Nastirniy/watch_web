@@ -26,6 +26,7 @@ from app.backend.errors.problems import ApiError
 from app.backend.errors.coded import CodedError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.errors.openapi import ADMIN, GUARDED, problems
+from app.backend.utils.validators import UtcDatetime
 
 router = APIRouter(prefix=PostRoutes.BASE.value, tags=[PostRoutes.tag()])
 
@@ -144,8 +145,8 @@ async def get_post(
 )
 async def get_post_observation_stats(
         post_id: int,
-        date_from: Optional[datetime] = Query(None, description="Period start, created_at (default: date_to minus 30 days; naive values are UTC)"),
-        date_to: Optional[datetime] = Query(None, description="Period end, created_at (default: now)"),
+        date_from: Optional[UtcDatetime] = Query(None, description="Period start, created_at (default: date_to minus 30 days; naive values are UTC)"),
+        date_to: Optional[UtcDatetime] = Query(None, description="Period end, created_at (default: now)"),
         group_by: StatsGroupBy = Query(StatsGroupBy.DAY, description="Bucket size: hour (period up to 31 days) or day (up to 366 days)"),
         tz: Optional[str] = Query(None, description="IANA time zone of the buckets (default: server time zone setting)"),
         include_archived: bool = Query(False, description="Count archived observations separately; counts only, so observation.view is enough"),

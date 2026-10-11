@@ -18,6 +18,7 @@ from app.backend.models.observation import Observation, ObservationFrequency
 from app.backend.filters.observation_frequency_filter import ObservationFrequencyFilter
 from app.backend.filters.observation_tag_filter import ObservationTagFilter
 from app.backend.filters.simple_engine import as_criteria
+from app.backend.utils.datetime_utils import as_utc
 
 REPORT_TYPE_KIND = {
     ObservationReportType.RC_FREQ_PART: FrequencyKind.RC,
@@ -108,17 +109,15 @@ class ObservationReportFilter:
         if params.tag_ids:
             query = query.where(ObservationTagFilter.observation_has_tags(params.tag_ids, params.tag_match))
 
-        # Date range (observed_at)
+        # Date ranges, compared as UTC instants (the database holds naive UTC, the drivers drop tzinfo)
         if params.observed_at_from is not None:
-            query = query.where(Observation.observed_at >= params.observed_at_from)
+            query = query.where(Observation.observed_at >= as_utc(params.observed_at_from))
         if params.observed_at_to is not None:
-            query = query.where(Observation.observed_at <= params.observed_at_to)
-
-        # Date range (created_at)
+            query = query.where(Observation.observed_at <= as_utc(params.observed_at_to))
         if params.created_at_from is not None:
-            query = query.where(Observation.created_at >= params.created_at_from)
+            query = query.where(Observation.created_at >= as_utc(params.created_at_from))
         if params.created_at_to is not None:
-            query = query.where(Observation.created_at <= params.created_at_to)
+            query = query.where(Observation.created_at <= as_utc(params.created_at_to))
 
         # Default sort: by observation time ascending, bands of one observation together
         query = query.order_by(Observation.observed_at.asc(), Observation.id.asc(), ObservationFrequency.id.asc())

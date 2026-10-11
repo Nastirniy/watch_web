@@ -12,6 +12,7 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.exc import NoInspectionAvailable
 
 from app.backend.enums.general import SortOrder
+from app.backend.utils.datetime_utils import as_utc
 
 C = TypeVar("C")
 
@@ -119,7 +120,13 @@ class SimpleFilterEngine:
 
     @classmethod
     def _apply_range(cls, query: Select, column, from_val, to_val) -> Select:
-        """Apply range filter (from/to)"""
+        """Apply range filter (from/to). A datetime bound is compared as its UTC instant: the database holds naive
+        UTC and the drivers drop tzinfo, so 10:00+03:00 must reach SQL as 07:00 (criteria a version builds itself
+        may carry any offset)."""
+        if isinstance(from_val, datetime):
+            from_val = as_utc(from_val)
+        if isinstance(to_val, datetime):
+            to_val = as_utc(to_val)
         if from_val is not None:
             query = query.where(column >= from_val)
         if to_val is not None:

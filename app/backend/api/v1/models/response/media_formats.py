@@ -1,7 +1,6 @@
-from datetime import datetime
 from typing import List
 
-from app.backend.utils.validators import SecureBaseModel
+from app.backend.utils.validators import ResponseDatetime, SecureBaseModel
 
 
 class MediaFormatResponse(SecureBaseModel):
@@ -15,5 +14,5 @@ class MediaFormatResponse(SecureBaseModel):
     is_active: bool
     sort_order: int
     is_deleted: bool
-    created_at: datetime
-    updated_at: datetime
+    created_at: ResponseDatetime
+    updated_at: ResponseDatetime

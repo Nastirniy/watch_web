@@ -1,9 +1,8 @@
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional
-from datetime import datetime
 from decimal import Decimal
 
-from app.backend.utils.validators import PlainTextModel
+from app.backend.utils.validators import PlainTextModel, ResponseDatetime
 from app.backend.api.v1.models.response.users import UserPublicResponse
 from app.backend.api.v1.models.response.tags import TagBriefResponse
 
@@ -34,8 +33,8 @@ class ObservationFrequencyResponse(BaseModel):
     frequency_center: Decimal
     bandwidth: Optional[Decimal] = None
     is_deleted: bool
-    created_at: datetime
-    updated_at: datetime
+    created_at: ResponseDatetime
+    updated_at: ResponseDatetime
 
 
 class ObservationWithMedia(PlainTextModel):
@@ -46,15 +45,15 @@ class ObservationWithMedia(PlainTextModel):
     user_id: int
     post_id: int
     signal_type_id: int
-    observed_at: datetime
+    observed_at: ResponseDatetime
     duration_seconds: Optional[int] = None
     comment: Optional[str] = None
     status: str
     confidence_level: str
     is_deleted: bool
-    created_at: datetime
-    updated_at: datetime
-    disappeared_at: Optional[datetime] = None
+    created_at: ResponseDatetime
+    updated_at: ResponseDatetime
+    disappeared_at: Optional[ResponseDatetime] = None
     disappeared_by: Optional[int] = None
     media_ids: List[int] = []
     tag_ids: List[int] = []

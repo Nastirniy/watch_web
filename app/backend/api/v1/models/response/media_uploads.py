@@ -1,9 +1,9 @@
-from datetime import datetime
 from typing import Dict, Optional
 
 from pydantic import BaseModel
 
 from app.backend.api.shared.openapi_docs import header
+from app.backend.utils.validators import ResponseDatetime
 
 
 class UploadSessionResponse(BaseModel):
@@ -19,10 +19,10 @@ class UploadSessionResponse(BaseModel):
     max_chunk_bytes: int
     media_file_id: Optional[int] = None
     error: Optional[str] = None
-    created_at: datetime
-    last_activity_at: datetime
-    expires_at: datetime
-    completed_at: Optional[datetime] = None
+    created_at: ResponseDatetime
+    last_activity_at: ResponseDatetime
+    expires_at: ResponseDatetime
+    completed_at: Optional[ResponseDatetime] = None
     urls: Dict[str, str]
 
 

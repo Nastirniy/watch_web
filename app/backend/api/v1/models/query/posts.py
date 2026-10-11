@@ -3,10 +3,10 @@ PostFilterParams - Strongly typed filter parameters for Post
 """
 
 from typing import Optional, Literal
-from datetime import datetime
 from pydantic import Field
 
 from app.backend.api.v1.models.query.base import BaseFilterParams
+from app.backend.utils.validators import UtcDatetime
 
 # Fields the results can be sorted by; sort_by accepts exactly these (another value answers 422)
 PostSortField = Literal["id", "name", "code", "city", "created_at", "updated_at", "last_user_activity_at", "is_active", "online_user_count", "user_count"]
@@ -29,8 +29,8 @@ class PostFilterParams(BaseFilterParams):
     description_contains: Optional[str] = Field(default=None, max_length=100, description="Description contains text")
     is_active: Optional[bool] = Field(default=None, description="Filter by active status")
     has_online_users: Optional[bool] = Field(default=None, description="true: posts with at least one home user online now; false: posts without")
-    created_at_from: Optional[datetime] = Field(default=None, description="Created after")
-    created_at_to: Optional[datetime] = Field(default=None, description="Created before")
-    last_user_activity_from: Optional[datetime] = Field(default=None, description="Latest home user activity after")
-    last_user_activity_to: Optional[datetime] = Field(default=None, description="Latest home user activity before")
+    created_at_from: Optional[UtcDatetime] = Field(default=None, description="Created after")
+    created_at_to: Optional[UtcDatetime] = Field(default=None, description="Created before")
+    last_user_activity_from: Optional[UtcDatetime] = Field(default=None, description="Latest home user activity after")
+    last_user_activity_to: Optional[UtcDatetime] = Field(default=None, description="Latest home user activity before")
 

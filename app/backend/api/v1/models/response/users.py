@@ -1,7 +1,6 @@
 from typing import Optional
-from datetime import datetime
 
-from app.backend.utils.validators import SecureBaseModel
+from app.backend.utils.validators import ResponseDatetime, SecureBaseModel
 
 
 class UserResponse(SecureBaseModel):
@@ -10,11 +9,11 @@ class UserResponse(SecureBaseModel):
     username_alias: str
     post_id: Optional[int]
     is_active: bool
-    created_at: datetime
-    updated_at: Optional[datetime]
-    last_login_at: Optional[datetime]
+    created_at: ResponseDatetime
+    updated_at: Optional[ResponseDatetime]
+    last_login_at: Optional[ResponseDatetime]
     is_online: bool = False
-    last_activity_at: Optional[datetime] = None
+    last_activity_at: Optional[ResponseDatetime] = None
     is_deleted: bool = False
 
 
@@ -23,7 +22,7 @@ class UserRoleResponse(SecureBaseModel):
     id: int
     name: str
     display_name: str
-    assigned_at: datetime
+    assigned_at: ResponseDatetime
 
 
 class UserPublicResponse(SecureBaseModel):
@@ -32,7 +31,7 @@ class UserPublicResponse(SecureBaseModel):
     username: str
     username_alias: str
     is_online: bool = False
-    last_activity_at: Optional[datetime] = None
+    last_activity_at: Optional[ResponseDatetime] = None
     is_deleted: bool = False
 
 
@@ -41,4 +40,4 @@ class UserPostAccessResponse(SecureBaseModel):
     user_id: int
     post_id: int
     can_write: bool
-    created_at: datetime
+    created_at: ResponseDatetime

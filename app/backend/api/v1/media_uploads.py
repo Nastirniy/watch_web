@@ -39,6 +39,7 @@ from app.backend.services.media.formats import FileTooLarge, UnsupportedMediaFor
 from app.backend.services.media.manager import get_media_manager
 from app.backend.auth.require import Require, require
 from app.backend.utils.logging_config import get_api_logger
+from app.backend.utils.datetime_utils import assume_utc
 from app.backend.errors.problems import ApiError
 from app.backend.errors.coded import CodedError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
@@ -56,7 +57,7 @@ def _session_headers(row: UploadSession) -> dict:
     return {
         "Upload-Offset": str(int(row.received_bytes)),
         "Upload-Length": str(int(row.expected_size)),
-        "Upload-Expires": row.expires_at.isoformat() if row.expires_at else "",
+        "Upload-Expires": assume_utc(row.expires_at).isoformat() if row.expires_at else "",
         "Upload-Status": row.status,
         "Cache-Control": "no-store",
     }

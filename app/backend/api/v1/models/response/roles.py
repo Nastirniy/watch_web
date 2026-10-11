@@ -1,7 +1,6 @@
 from typing import Optional
-from datetime import datetime
 
-from app.backend.utils.validators import SecureBaseModel
+from app.backend.utils.validators import ResponseDatetime, SecureBaseModel
 
 
 class RoleResponse(SecureBaseModel):
@@ -9,8 +8,8 @@ class RoleResponse(SecureBaseModel):
     name: str
     display_name: str
     description: Optional[str]
-    created_at: datetime
-    updated_at: datetime
+    created_at: ResponseDatetime
+    updated_at: ResponseDatetime
     is_deleted: bool = False
 
 

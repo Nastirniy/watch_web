@@ -4,15 +4,33 @@ Following OWASP security guidelines and industry standards
 """
 
 import re
+from datetime import datetime
+from typing import Annotated
 from app.backend.utils.text import unescape_html, unescape_deep
+from app.backend.utils.datetime_utils import as_utc, assume_utc
 import bleach
-from pydantic import BaseModel, field_validator
+from pydantic import AfterValidator, BaseModel, WrapSerializer, field_validator
 from email_validator import validate_email, EmailNotValidError
 from app.backend.errors.coded import invalid
 from app.backend.enums.errors import FieldErrorCode
 
 # Largest value of a MySQL INT column; request integers stored in one carry this as `le`
 INT_MAX = 2147483647
+
+# A datetime a client sends (request body, query parameter, query model): the UTC instant, aware. A value without
+# an offset is UTC. The database holds naive UTC and the drivers drop tzinfo, so every datetime that is written or
+# compared in SQL must be the UTC instant: 10:00+03:00 is stored and filtered as 07:00.
+UtcDatetime = Annotated[datetime, AfterValidator(as_utc)]
+
+
+def _with_offset(value: datetime, handler):
+    # No return annotation: in JSON mode the handler returns the string, and the schema stays the one of datetime
+    return handler(assume_utc(value))
+
+
+# A datetime of a response model: always written with its offset. A value read from the database (naive, UTC) is
+# written as UTC ("Z"); an aware value keeps its offset (observation-stats buckets are in the requested zone).
+ResponseDatetime = Annotated[datetime, WrapSerializer(_with_offset)]
 
 
 class SecurityValidators:

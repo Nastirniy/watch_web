@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -6,7 +5,7 @@ from sqlalchemy import inspect as sa_inspect
 
 from app.backend.models.media import MediaFile
 from app.backend.api.v1.models.response.users import UserPublicResponse
-from app.backend.utils.validators import PlainTextModel
+from app.backend.utils.validators import PlainTextModel, ResponseDatetime
 from app.backend.config import settings
 from app.backend.services.media.storyboards import client_status
 from app.backend.services.media.urls import thumbnail_urls
@@ -61,7 +60,7 @@ class MediaFileInfo(PlainTextModel):
     media_type: str
     width: Optional[int]
     height: Optional[int]
-    uploaded_at: datetime
+    uploaded_at: ResponseDatetime
     observation_id: Optional[int] = None
     # Archived files stay linked to their observation but are hidden from it (POST /media/{id}/restore undoes)
     is_deleted: bool = False
@@ -71,7 +70,7 @@ class MediaFileInfo(PlainTextModel):
     # Present only while thumbnail_status is ready
     thumbnail_urls: Optional[ThumbnailUrls] = None
     # Video only: when the poster frame was extracted
-    poster_generated_at: Optional[datetime] = None
+    poster_generated_at: Optional[ResponseDatetime] = None
     # ready | pending | processing | failed | unsupported (see StoryboardStatus); GET /media/{id}/storyboard serves it
     storyboard_status: str = "unsupported"
 
@@ -99,7 +98,7 @@ class ShareLinkResponse(BaseModel):
     size: str
     format: str
     url: str
-    expires_at: datetime
+    expires_at: ResponseDatetime
 
 
 class WorkerInfo(BaseModel):
@@ -107,8 +106,8 @@ class WorkerInfo(BaseModel):
     kind: str
     hostname: str
     pid: int
-    started_at: datetime
-    last_seen_at: datetime
+    started_at: ResponseDatetime
+    last_seen_at: ResponseDatetime
     jobs_done: int
     jobs_failed: int
     stale: bool

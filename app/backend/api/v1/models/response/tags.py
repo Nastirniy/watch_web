@@ -1,5 +1,4 @@
-from datetime import datetime
-from app.backend.utils.validators import SecureBaseModel
+from app.backend.utils.validators import ResponseDatetime, SecureBaseModel
 
 
 class TagBriefResponse(SecureBaseModel):
@@ -13,4 +12,4 @@ class TagResponse(SecureBaseModel):
     id: int
     name: str
     is_deleted: bool
-    created_at: datetime
+    created_at: ResponseDatetime

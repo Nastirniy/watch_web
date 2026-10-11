@@ -31832,17 +31832,20 @@
           },
           "created_at": {
             "type": "string",
+            "format": "date-time",
             "title": "Created At"
           },
           "expires_at": {
             "type": "string",
+            "format": "date-time",
             "title": "Expires At",
             "description": "When the session ends unless a request comes before: every request and refresh moves it (never past login + security.session_max_hours when that is set)"
           },
           "last_activity_at": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
@@ -35419,7 +35422,8 @@
           "last_login_at": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
@@ -35430,7 +35434,8 @@
           "last_activity_at": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
@@ -35926,17 +35931,20 @@
           },
           "created_at": {
             "type": "string",
+            "format": "date-time",
             "title": "Created At"
           },
           "expires_at": {
             "type": "string",
+            "format": "date-time",
             "title": "Expires At",
             "description": "When the session ends unless a request comes before: every request and refresh moves it (never past login + security.session_max_hours when that is set)"
           },
           "last_activity_at": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
@@ -35947,7 +35955,8 @@
           "ended_at": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"

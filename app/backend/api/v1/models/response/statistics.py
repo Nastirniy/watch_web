@@ -1,11 +1,11 @@
 from typing import Dict, List, Optional
-from datetime import datetime
 from pydantic import BaseModel, Field
+from app.backend.utils.validators import ResponseDatetime
 
 
 class StatisticsPeriod(BaseModel):
-    date_from: datetime
-    date_to: datetime
+    date_from: ResponseDatetime
+    date_to: ResponseDatetime
 
 
 class PostStatistics(BaseModel):
@@ -42,7 +42,7 @@ class MediaStatistics(BaseModel):
 
 
 class StatisticsResponse(BaseModel):
-    generated_at: datetime
+    generated_at: ResponseDatetime
     period: StatisticsPeriod
     post_ids: Optional[List[int]] = Field(
         default=None,

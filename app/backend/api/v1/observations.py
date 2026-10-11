@@ -47,6 +47,7 @@ from app.backend.filters.observation_filter import ObservationFilterService
 from app.backend.filters.observation_report_filter import ObservationReportFilter
 from app.backend.services.observation_report_service import ObservationReportService
 from app.backend.utils.validators import INT_MAX
+from app.backend.utils.datetime_utils import as_utc
 from app.backend.errors.problems import ApiError, field_problem
 from app.backend.enums.errors import AccessErrorCode, ErrorCode, FieldErrorCode
 from app.backend.api.shared.openapi_docs import file_response, header
@@ -357,8 +358,7 @@ async def mark_observation_disappeared(
     observation.updated_at = datetime.now(timezone.utc)
 
     if observation.observed_at:
-        observed_at = observation.observed_at if observation.observed_at.tzinfo else observation.observed_at.replace(tzinfo=timezone.utc)
-        time_delta = disappeared_data.disappeared_at - observed_at
+        time_delta = disappeared_data.disappeared_at - as_utc(observation.observed_at)
         duration = int(time_delta.total_seconds())
         if abs(duration) > INT_MAX:
             raise field_problem(FieldErrorCode.VALUE_TOO_LARGE, ("body", "disappeared_at"), max_value=INT_MAX)

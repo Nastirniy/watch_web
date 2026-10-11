@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator, Positiv
 
 from app.backend.enums.general import ConfidenceLevel, FrequencyKind, ObservationReportType, TagMatch
 from app.backend.errors.coded import invalid
-from app.backend.utils.validators import INT_MAX, not_null
+from app.backend.utils.validators import INT_MAX, UtcDatetime, not_null
 from app.backend.enums.errors import FieldErrorCode
 
 FREQUENCY_QUANTUM = Decimal("0.001")
@@ -71,7 +71,7 @@ class ObservationCreate(BaseModel):
         description="Frequency bands of the observation, at least one (any kind)"
     )
 
-    observed_at: datetime = Field(
+    observed_at: UtcDatetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="When the signal was observed; the current UTC time when omitted"
     )
@@ -105,14 +105,6 @@ class ObservationCreate(BaseModel):
                 raise invalid(FieldErrorCode.CONFIDENCE_LEVEL_INVALID, accepted=list(valid_levels))
         return v
 
-    @field_validator('observed_at')
-    @classmethod
-    def validate_observed_at(cls, v: Optional[datetime]) -> Optional[datetime]:
-        """Ensure observed_at has timezone info"""
-        if v is not None and v.tzinfo is None:
-            return v.replace(tzinfo=timezone.utc)
-        return v
-
 
 class ObservationUpdate(BaseModel):
     """Update observation with proper validation matching DB constraints.
@@ -121,7 +113,7 @@ class ObservationUpdate(BaseModel):
 
     signal_type_id: Optional[int] = Field(None, gt=0, description="Signal Type ID must be positive")
 
-    observed_at: Optional[datetime] = None
+    observed_at: Optional[UtcDatetime] = None
     duration_seconds: Optional[int] = Field(None, ge=0, le=INT_MAX, description="Duration must be non-negative")
     comment: Optional[str] = Field(None, max_length=1000, description="Comment limited to 1000 characters")
     confidence_level: Optional[str] = Field(
@@ -154,27 +146,11 @@ class ObservationUpdate(BaseModel):
                 raise invalid(FieldErrorCode.CONFIDENCE_LEVEL_INVALID, accepted=list(valid_levels))
         return v
 
-    @field_validator('observed_at')
-    @classmethod
-    def validate_observed_at(cls, v: Optional[datetime]) -> Optional[datetime]:
-        """Ensure observed_at has timezone info"""
-        if v is not None and v.tzinfo is None:
-            return v.replace(tzinfo=timezone.utc)
-        return v
-
 
 class ObservationDisappeared(BaseModel):
     """Mark observation as disappeared with validation"""
 
-    disappeared_at: datetime = Field(description="Timestamp when observation disappeared")
-
-    @field_validator('disappeared_at')
-    @classmethod
-    def validate_disappeared_at(cls, v: datetime) -> datetime:
-        """Ensure disappeared_at has timezone info"""
-        if v.tzinfo is None:
-            return v.replace(tzinfo=timezone.utc)
-        return v
+    disappeared_at: UtcDatetime = Field(description="Timestamp when observation disappeared")
 
 
 class ObservationReportParams(BaseModel):
@@ -243,21 +219,21 @@ class ObservationReportParams(BaseModel):
     tag_match: TagMatch = Field(default=TagMatch.ANY, description="any: observations with at least one of tag_ids; all: with every one of them")
 
     # --- Date range (observed_at) ---
-    observed_at_from: Optional[datetime] = Field(
+    observed_at_from: Optional[UtcDatetime] = Field(
         default=None,
         description="Include observations with observed_at >= this value (ISO datetime, UTC)"
     )
-    observed_at_to: Optional[datetime] = Field(
+    observed_at_to: Optional[UtcDatetime] = Field(
         default=None,
         description="Include observations with observed_at <= this value (ISO datetime, UTC)"
     )
 
     # --- Date range (created_at) ---
-    created_at_from: Optional[datetime] = Field(
+    created_at_from: Optional[UtcDatetime] = Field(
         default=None,
         description="Include observations with created_at >= this value (ISO datetime, UTC)"
     )
-    created_at_to: Optional[datetime] = Field(
+    created_at_to: Optional[UtcDatetime] = Field(
         default=None,
         description="Include observations with created_at <= this value (ISO datetime, UTC)"
     )

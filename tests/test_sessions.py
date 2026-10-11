@@ -212,7 +212,7 @@ async def test_own_sessions_list_only_live_ones(client, db):
     body = (await client.get(OWN_SESSIONS, headers=bearer(user, live))).json()
     assert [s["id"] for s in body["sessions"]] == [live.id]
     assert body["sessions"][0]["status"] == "online"
-    assert body["sessions"][0]["expires_at"].endswith("+00:00"), "UTC with the offset"
+    assert body["sessions"][0]["expires_at"].endswith("Z"), "UTC with the offset (the shared response rule)"
 
 
 # ------------------------------------------------------------------ administrator routes

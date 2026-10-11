@@ -3,10 +3,10 @@ RoleFilterParams - Strongly typed filter parameters for Role
 """
 
 from typing import Optional, Literal
-from datetime import datetime
 from pydantic import Field
 
 from app.backend.api.v1.models.query.base import BaseFilterParams
+from app.backend.utils.validators import UtcDatetime
 
 # Fields the results can be sorted by; sort_by accepts exactly these (another value answers 422)
 RoleSortField = Literal["id", "name", "display_name", "created_at", "updated_at"]
@@ -24,5 +24,5 @@ class RoleFilterParams(BaseFilterParams):
     display_name: Optional[str] = Field(default=None, description="Exact display name")
     display_name_contains: Optional[str] = Field(default=None, max_length=50, description="Display name contains text")
     description_contains: Optional[str] = Field(default=None, max_length=100, description="Description contains text")
-    created_at_from: Optional[datetime] = Field(default=None, description="Created after")
-    created_at_to: Optional[datetime] = Field(default=None, description="Created before")
+    created_at_from: Optional[UtcDatetime] = Field(default=None, description="Created after")
+    created_at_to: Optional[UtcDatetime] = Field(default=None, description="Created before")

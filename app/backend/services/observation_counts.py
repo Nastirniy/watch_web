@@ -21,6 +21,7 @@ from app.backend.enums.general import StatsGroupBy
 from app.backend.models.observation import Observation
 from app.backend.errors.coded import CodedError
 from app.backend.enums.errors import ErrorCode
+from app.backend.utils.datetime_utils import as_utc
 
 LAST_24H = timedelta(hours=24)
 DEFAULT_STATS_PERIOD = timedelta(days=30)
@@ -77,13 +78,6 @@ def _utc_hour_key_mysql(element, compiler, **kw):
 def _utc_hour_key_sqlite(element, compiler, **kw):
     column = list(element.clauses)[0]
     return compiler.process(func.strftime("%Y-%m-%d %H", column), **kw)
-
-
-def as_utc(value: Optional[datetime]) -> Optional[datetime]:
-    """Naive values are UTC, aware ones are converted"""
-    if value is None:
-        return None
-    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
 def check_period(date_from: Optional[datetime], date_to: Optional[datetime], names: str) -> None:

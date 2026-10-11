@@ -113,6 +113,21 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   current one, so an observation of a deactivated or archived type can still be edited.
 - OpenAPI contract: the four new codes and the archived-name codes on the three create routes are declared.
 
+- A datetime with an offset is stored and compared as its UTC instant: `10:00+03:00` is stored as `07:00Z`. The
+  drivers drop the offset, so it used to be stored and read as `10:00Z`, and range filters (`*_from` / `*_to` of every
+  list and search, the report body), `POST /observations/{id}/disappeared` durations and `GET /statistics` were off by
+  the offset (`/posts/{id}/observation-stats`, which converted, disagreed with `/statistics`). A value without an
+  offset is UTC, as before. One shared input type, `UtcDatetime` in `utils/validators.py`, for every datetime of a
+  request body, query model and query parameter; the filters convert their datetime bounds too. Rows stored before
+  this fix from a non-UTC offset keep the shifted time (the offset was never stored).
+- Every datetime in a response carries an offset; values read from the database are UTC and written with `Z`
+  (observations, users, posts, tags, roles, media and the rest used to come without one, while create responses had
+  it), and `Upload-Expires` of the resumable uploads is written with `+00:00`. Bucket times of
+  `/posts/{id}/observation-stats` keep the offset of the requested `tz`. One shared response type,
+  `ResponseDatetime`. The session times (`GET /auth/sessions`, `GET /users/{id}/sessions`) now end in `Z` instead of
+  `+00:00`, and `last_login_at` / `last_activity_at` of `GET /auth/me` have the offset they lacked; these fields are
+  `format: date-time` in `api-contract/v1/openapi.json` now (the type stays a string).
+
 ### Changed
 
 - New problem codes for the web localization package: `admin_role_not_renamable`, `admin_role_permissions_fixed`,

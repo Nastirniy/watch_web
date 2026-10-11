@@ -3,10 +3,10 @@ MediaFilterParams - Strongly typed filter parameters for MediaFile
 """
 
 from typing import Optional, Literal
-from datetime import datetime
 from pydantic import Field
 
 from app.backend.api.v1.models.query.base import BaseFilterParams
+from app.backend.utils.validators import UtcDatetime
 
 # Fields the results can be sorted by; sort_by accepts exactly these (another value answers 422)
 MediaSortField = Literal["id", "original_filename", "file_size", "media_type", "uploaded_at", "observation_id"]
@@ -30,6 +30,6 @@ class MediaFilterParams(BaseFilterParams):
     height_from: Optional[int] = Field(default=None, ge=0, description="Height min (pixels)")
     height_to: Optional[int] = Field(default=None, ge=0, description="Height max (pixels)")
     has_thumbnail: Optional[bool] = Field(default=None, description="Has a thumbnail available (images always, videos once the poster is ready)")
-    uploaded_at_from: Optional[datetime] = Field(default=None, description="Uploaded after")
-    uploaded_at_to: Optional[datetime] = Field(default=None, description="Uploaded before")
+    uploaded_at_from: Optional[UtcDatetime] = Field(default=None, description="Uploaded after")
+    uploaded_at_to: Optional[UtcDatetime] = Field(default=None, description="Uploaded before")
     include_deleted: bool = Field(default=False, description="Include archived media (requires media.archive); media of archived observations are never listed")

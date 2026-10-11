@@ -1,6 +1,5 @@
 from typing import Optional
-from datetime import datetime
-from app.backend.utils.validators import SecureBaseModel
+from app.backend.utils.validators import ResponseDatetime, SecureBaseModel
 
 
 class SignalTypeResponse(SecureBaseModel):
@@ -11,8 +10,8 @@ class SignalTypeResponse(SecureBaseModel):
     description: Optional[str]
     is_active: bool
     sort_order: int
-    created_at: datetime
-    updated_at: datetime
+    created_at: ResponseDatetime
+    updated_at: ResponseDatetime
     is_deleted: bool
 
 
@@ -25,6 +24,6 @@ class SignalTypeWithCategoryResponse(SecureBaseModel):
     description: Optional[str]
     is_active: bool
     sort_order: int
-    created_at: datetime
-    updated_at: datetime
+    created_at: ResponseDatetime
+    updated_at: ResponseDatetime
     is_deleted: bool

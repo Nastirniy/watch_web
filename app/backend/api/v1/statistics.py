@@ -37,6 +37,7 @@ from app.backend.api.v1.models.response.statistics import (
 from app.backend.errors.problems import ApiError
 from app.backend.enums.errors import ErrorCode
 from app.backend.errors.openapi import GUARDED, problems
+from app.backend.utils.validators import UtcDatetime
 
 router = APIRouter(prefix=StatisticsRoutes.BASE.value, tags=[StatisticsRoutes.tag()])
 
@@ -54,8 +55,8 @@ async def _scalar(session: AsyncSession, query) -> int:
     responses=problems(ErrorCode.PERIOD_REVERSED, *GUARDED),
 )
 async def get_statistics(
-        date_from: Optional[datetime] = Query(None, description="Period start, observations by created_at (default: date_to minus 30 days)"),
-        date_to: Optional[datetime] = Query(None, description="Period end, observations by created_at (default: now)"),
+        date_from: Optional[UtcDatetime] = Query(None, description="Period start, observations by created_at (default: date_to minus 30 days)"),
+        date_to: Optional[UtcDatetime] = Query(None, description="Period end, observations by created_at (default: now)"),
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.STATISTICS_VIEW]))
 ):
@@ -63,10 +64,6 @@ async def get_statistics(
     now = datetime.now(timezone.utc)
     date_to = date_to or now
     date_from = date_from or date_to - timedelta(days=DEFAULT_PERIOD_DAYS)
-    if date_from.tzinfo is None:
-        date_from = date_from.replace(tzinfo=timezone.utc)
-    if date_to.tzinfo is None:
-        date_to = date_to.replace(tzinfo=timezone.utc)
     if date_from > date_to:
         raise ApiError(ErrorCode.PERIOD_REVERSED, fields="date_from / date_to")
 

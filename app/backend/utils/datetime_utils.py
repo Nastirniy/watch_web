@@ -26,6 +26,23 @@ def _get_timezone(timezone_name: str):
         return timezone.utc
 
 
+def as_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """The UTC instant of a datetime: naive values are taken as UTC, aware ones are converted.
+
+    The database holds naive UTC and the drivers drop tzinfo when they bind a value, so a datetime is converted
+    with this before it is written or compared (10:00+03:00 must reach SQL as 07:00)."""
+    if value is None:
+        return None
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
+def assume_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """A value read from the database (naive, UTC) marked as UTC; an aware value keeps its offset"""
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=timezone.utc)
+
+
 def get_default_timezone_datetime(dt: Optional[datetime] = None) -> datetime:
     """
     Handle datetime with timezone support based on project settings.

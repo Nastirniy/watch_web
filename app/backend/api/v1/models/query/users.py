@@ -3,10 +3,10 @@ UserFilterParams - Strongly typed filter parameters for User
 """
 
 from typing import Optional, Literal
-from datetime import datetime
 from pydantic import Field
 
 from app.backend.api.v1.models.query.base import BaseFilterParams
+from app.backend.utils.validators import UtcDatetime
 
 # Fields the results can be sorted by; sort_by accepts exactly these (another value answers 422)
 UserSortField = Literal["id", "username", "username_alias", "created_at", "updated_at", "last_login_at", "is_active", "last_activity_at"]
@@ -25,10 +25,10 @@ class UserFilterParams(BaseFilterParams):
     post_id: Optional[int] = Field(default=None, description="Filter by post ID")
     is_active: Optional[bool] = Field(default=None, description="Filter by active status")
     is_online: Optional[bool] = Field(default=None, description="Online now (session touched within the online threshold)")
-    created_at_from: Optional[datetime] = Field(default=None, description="Created after")
-    created_at_to: Optional[datetime] = Field(default=None, description="Created before")
-    last_login_from: Optional[datetime] = Field(default=None, description="Last login after")
-    last_login_to: Optional[datetime] = Field(default=None, description="Last login before")
+    created_at_from: Optional[UtcDatetime] = Field(default=None, description="Created after")
+    created_at_to: Optional[UtcDatetime] = Field(default=None, description="Created before")
+    last_login_from: Optional[UtcDatetime] = Field(default=None, description="Last login after")
+    last_login_to: Optional[UtcDatetime] = Field(default=None, description="Last login before")
 
     # --- Soft Delete ---
     include_deleted: bool = Field(default=False, description="Include archived records (requires user.archive)")

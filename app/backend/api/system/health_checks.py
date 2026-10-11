@@ -12,6 +12,7 @@ from app.backend.models.post import Post
 from app.backend.models.observation import Observation
 from app.backend.config import settings
 from app.backend.utils.logging_config import get_api_logger
+from app.backend.utils.validators import ResponseDatetime
 
 _logger = get_api_logger()
 
@@ -48,7 +49,7 @@ class ServicesHealthModel(BaseModel):
 class HealthResponse(BaseModel):
     """Main health check response model"""
     status: str = Field(..., description="Overall system status")
-    timestamp: datetime = Field(..., description="Current server timestamp")
+    timestamp: ResponseDatetime = Field(..., description="Current server timestamp")
     version: str = Field(..., description="Application version")
     environment: str = Field(..., description="Current environment")
     timezone: str = Field(..., description="Server timezone")

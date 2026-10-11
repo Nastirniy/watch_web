@@ -4,12 +4,12 @@ All fields visible and documented in FastAPI /docs
 """
 
 from typing import Optional, List, Literal
-from datetime import datetime
 from decimal import Decimal
 from pydantic import BaseModel, Field
 
 from app.backend.enums.general import FrequencyKind, TagMatch
 from app.backend.api.v1.models.query.base import BaseFilterParams
+from app.backend.utils.validators import UtcDatetime
 
 # Fields the results can be sorted by; sort_by accepts exactly these (another value answers 422)
 ObservationSortField = Literal["id", "observed_at", "created_at", "updated_at", "status", "post_id", "frequency_center"]
@@ -39,15 +39,15 @@ class ObservationFilterParams(BaseFilterParams):
     bandwidth_to: Optional[Decimal] = Field(default=None, description="Bandwidth max (MHz)")
 
     # --- Date Range (observed_at) ---
-    observed_at_from: Optional[datetime] = Field(default=None, description="Observed after (ISO datetime)")
-    observed_at_to: Optional[datetime] = Field(default=None, description="Observed before (ISO datetime)")
+    observed_at_from: Optional[UtcDatetime] = Field(default=None, description="Observed after (ISO datetime)")
+    observed_at_to: Optional[UtcDatetime] = Field(default=None, description="Observed before (ISO datetime)")
 
     # --- Relative Date (alternative to observed_at range) ---
     last_n_days: Optional[int] = Field(default=None, ge=1, le=365, description="Last N days from today")
 
     # --- Created/Updated Range ---
-    created_at_from: Optional[datetime] = Field(default=None, description="Created after")
-    created_at_to: Optional[datetime] = Field(default=None, description="Created before")
+    created_at_from: Optional[UtcDatetime] = Field(default=None, description="Created after")
+    created_at_to: Optional[UtcDatetime] = Field(default=None, description="Created before")
 
     # --- Disappeared ---
     is_disappeared: Optional[bool] = Field(default=None, description="True=disappeared, False=not disappeared")
