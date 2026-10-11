@@ -132,8 +132,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   file, and the loser could mark the session `aborted` after the winner had completed it. `complete` now claims the
   session with a conditional UPDATE before it reads the file (status `completing`); a concurrent `complete`, chunk or
   abort answers 409 `upload_session_completing` and changes nothing. A refused file still aborts the session;
-  `media_uploads_busy` and unexpected errors put it back to `open`. A claim whose request died is taken over after one
-  hour (`COMPLETION_STALE_SECONDS`).
+  `media_uploads_busy` and unexpected errors, a failed database flush or commit included (the request session is
+  rolled back first), put it back to `open`. A claim whose request died is taken over after one hour
+  (`COMPLETION_STALE_SECONDS`).
 - A chunk request (`PATCH /media/uploads/{upload_id}`) that stalled past the writer stale time (180 s) kept writing
   after another request had taken the session over: both appended to the part file, the first one's error path
   truncated the second one's bytes and the next chunk filled the gap with zeros, so without the optional `sha256` the
@@ -141,7 +142,8 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   every write, before truncating and before releasing; one that lost the session writes, truncates and releases
   nothing and answers 400 `upload_chunk_not_stored` (`offset` and `Upload-Offset` are the session's offset). A part
   file shorter than `received_bytes` is never extended: the session is aborted and the chunk answers 410
-  `upload_bytes_missing`, as `complete` already did.
+  `upload_bytes_missing`, as `complete` already did. A database error while a chunk streams rolls the request session
+  back before the cleanup, so the bytes are truncated and the session is free at once (it stayed held for 180 s).
 - A repeated `complete` on a completed upload session returns the stored result without another `create` audit row
   (and without probing the file again).
 - `error` of the upload session bodies (`GET /media/uploads`, `GET /media/uploads/{upload_id}`, `POST .../abort`)

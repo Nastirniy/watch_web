@@ -326,6 +326,8 @@ async def append_upload_chunk(
     try:
         new_offset = await uploads.append_chunk(session, row, token, storage_root(), request.stream(), offset, max_chunk)
     except uploads.ChunkTooLarge as exc:
+        # append_chunk rolled the session back (which expires the row) and truncated the file to `offset`
+        row = await uploads.get_session_row(session, upload_id)
         raise ApiError.from_coded(exc, headers=_session_headers(row), offset=offset)
     except uploads.BytesMissing as exc:
         _logger.warning(f"upload session {upload_id}: the part file holds fewer than the {offset} bytes received; session aborted")
@@ -391,8 +393,11 @@ async def complete_upload_session(
     try:
         media_file_id = await _store_claimed(session, row, token)
     except BaseException:
-        # Not the file's fault (a refused file aborted the session already): open again, complete can be retried
-        await uploads.release_completion(session, row.id, token)
+        # Not the file's fault (a refused file aborted the session already): open again, complete can be retried.
+        # The failure may have come from the request session (a failed flush or commit, a lost connection), which
+        # takes no statement before a rollback
+        await session.rollback()
+        await uploads.release_completion(session, upload_id, token)
         raise
 
     media_file = await record_upload(request, session, auth, media_file_id, row.observation_id, row.original_filename, background_tasks, "resumable")
@@ -426,8 +431,16 @@ async def _abort_claimed(session: AsyncSession, row: UploadSession, token: str, 
     return await uploads.get_session_row(session, row.id)
 
 
+async def _rolled_back(session: AsyncSession, upload_id: str) -> UploadSession:
+    """The session row after a failed store: the request session is rolled back first (the manager used it, and a
+    failed flush or commit takes no statement before a rollback), which expires the row, so it is read again"""
+    await session.rollback()
+    return await uploads.get_session_row(session, upload_id)
+
+
 async def _store_claimed(session: AsyncSession, row: UploadSession, token: str) -> int:
     """Check and store the part file of a session this request claimed; the media file id"""
+    upload_id = row.id
     part = uploads.resolve_part(row, storage_root())
     if not part.exists() or part.stat().st_size != int(row.expected_size):
         row = await _abort_claimed(session, row, token, ErrorCode.UPLOAD_BYTES_MISSING, "part file missing or inconsistent")
@@ -449,23 +462,24 @@ async def _store_claimed(session: AsyncSession, row: UploadSession, token: str) 
             validation_config=validation_config_for(registry, spec),
         )
     except FileTooLarge as e:
-        await _abort_claimed(session, row, token, ErrorCode.MEDIA_FILE_TOO_LARGE, str(e))
+        await _abort_claimed(session, await _rolled_back(session, upload_id), token, ErrorCode.MEDIA_FILE_TOO_LARGE, str(e))
         raise too_large(spec, e.actual_bytes)
     except UnsupportedMediaFormat as e:
-        await _abort_claimed(session, row, token, e.code, str(e))
+        await _abort_claimed(session, await _rolled_back(session, upload_id), token, e.code, str(e))
         raise format_rejected(registry, e)
     except CodedError as e:
+        row = await _rolled_back(session, upload_id)
         if e.code == ErrorCode.MEDIA_UPLOADS_BUSY:
             # Busy is the server's state, not the file's: keep the bytes so complete can be retried
-            await uploads.release_completion(session, row.id, token)
-            row = await uploads.get_session_row(session, row.id)
+            await uploads.release_completion(session, upload_id, token)
+            row = await uploads.get_session_row(session, upload_id)
         else:
             row = await _abort_claimed(session, row, token, e.code, str(e))
         raise store_rejected(e, headers=_session_headers(row))
 
-    if not await uploads.finish_completion(session, row.id, token, media_file_id):
+    if not await uploads.finish_completion(session, upload_id, token, media_file_id):
         # Only after COMPLETION_STALE_SECONDS: another complete took the session over meanwhile
-        _logger.warning(f"upload session {row.id}: stored as media {media_file_id} after its completion claim went stale")
+        _logger.warning(f"upload session {upload_id}: stored as media {media_file_id} after its completion claim went stale")
     return media_file_id
 
 

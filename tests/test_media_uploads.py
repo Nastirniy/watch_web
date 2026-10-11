@@ -260,6 +260,41 @@ async def test_broken_chunk_is_rolled_back(client, db, headers, storage, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_a_database_error_mid_chunk_frees_the_session_at_once(client, db, headers, storage, monkeypatch):
+    """A failure of the request's database session while a chunk streams is rolled back before the writer cleans
+    up: the bytes are truncated away and the next PATCH at the same offset is taken at once, not after
+    WRITER_STALE_SECONDS"""
+    _, user, observation = await _scene(db)
+    data = make_png(400, 300)
+    upload_id = (await client.post(CREATE, json=_create_body(observation.id, data), headers=headers(user))).json()["id"]
+    cut = len(data) // 2
+    first = await client.patch(SESSION.format(upload_id=upload_id), content=data[:cut], headers={**CHUNK, "Upload-Offset": "0", **headers(user)})
+    assert first.status_code == 204
+
+    real_append = uploads.append_chunk
+
+    async def database_fails_after_some_bytes(session, body):
+        async for piece in body:
+            yield piece[:10]
+            break
+        session.add(MediaFile())  # NOT NULL columns left empty: the commit fails, the session needs a rollback
+        await session.commit()
+
+    async def append_then_fail(session, row, token, root, body, offset, max_chunk):
+        return await real_append(session, row, token, root, database_fails_after_some_bytes(session, body), offset, max_chunk)
+
+    monkeypatch.setattr(uploads, "append_chunk", append_then_fail)
+    broken = await client.patch(SESSION.format(upload_id=upload_id), content=data[cut:], headers={**CHUNK, "Upload-Offset": str(cut), **headers(user)})
+    assert broken.status_code == 500 and broken.json()["code"] == "internal_error", broken.text
+    monkeypatch.setattr(uploads, "append_chunk", real_append)
+
+    assert (storage / "_tmp" / "uploads" / f"{upload_id}.part").stat().st_size == cut
+    rest = await client.patch(SESSION.format(upload_id=upload_id), content=data[cut:], headers={**CHUNK, "Upload-Offset": str(cut), **headers(user)})
+    assert rest.status_code == 204, rest.text
+    assert rest.headers["upload-offset"] == str(len(data))
+
+
+@pytest.mark.asyncio
 async def test_claim_writer_is_exclusive(db, storage):
     post, user, observation = await _scene(db)
     row = uploads.new_session(user.id, observation.id, post.id, "image", "a.png", 100, "image/png", None)
@@ -447,24 +482,37 @@ async def test_expiry_spares_a_live_completion(db, storage, clock):
     assert (await uploads.get_session_row(db, row.id)).status == "expired"
 
 
+async def _storage_busy(**kwargs):
+    raise CodedError(ErrorCode.MEDIA_UPLOADS_BUSY)
+
+
+async def _a_bug(**kwargs):
+    raise RuntimeError("a bug, not a refused file")
+
+
+async def _database_error(session, **kwargs):
+    """A failure of the request's own database session: the commit fails and the session needs a rollback"""
+    session.add(MediaFile())  # NOT NULL columns left empty
+    await session.commit()
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure, status_code, code", [
-    (CodedError(ErrorCode.MEDIA_UPLOADS_BUSY), 503, "media_uploads_busy"),
-    (RuntimeError("a bug, not a refused file"), 500, "internal_error"),
-])
+@pytest.mark.parametrize("store, status_code, code", [
+    (_storage_busy, 503, "media_uploads_busy"),
+    (_a_bug, 500, "internal_error"),
+    (_database_error, 500, "internal_error"),
+], ids=["busy", "bug", "database-error"])
 async def test_a_server_side_failure_at_completion_keeps_the_session_open(
-        client, db, headers, storage, monkeypatch, failure, status_code, code):
-    """Busy storage or a bug releases the completion claim: the session is open again and complete can be retried"""
+        client, db, headers, storage, monkeypatch, store, status_code, code):
+    """Busy storage, a bug or a database error releases the completion claim: the session is open again and
+    complete can be retried"""
     _, user, observation = await _scene(db)
     data = make_png()
     upload_id = await _received_session(client, headers, user, observation, data)
     manager = get_media_manager()
     real_store = manager.store_file_from_path
 
-    async def fails(**kwargs):
-        raise failure
-
-    monkeypatch.setattr(manager, "store_file_from_path", fails)
+    monkeypatch.setattr(manager, "store_file_from_path", store)
     refused = await client.post(COMPLETE.format(upload_id=upload_id), headers=headers(user))
     assert refused.status_code == status_code and refused.json()["code"] == code, refused.text
     state = (await client.get(SESSION.format(upload_id=upload_id), headers=headers(user))).json()
@@ -487,17 +535,18 @@ async def test_a_writer_that_lost_its_token_never_touches_the_session(db, storag
     """Writer A stalls past WRITER_STALE_SECONDS, writer B takes the session and stores its chunk. Whatever A
     does next (more bytes or a broken transfer), it writes nothing, truncates nothing and releases nothing"""
     row = await _open_row(db)
+    upload_id = row.id  # a failed chunk rolls the session back, which expires the row
     part = uploads.resolve_part(row, storage)
-    token_a = await uploads.claim_writer(db, row.id, 0)
+    token_a = await uploads.claim_writer(db, upload_id, 0)
 
     async def b_takes_over():
         clock.advance(uploads.WRITER_STALE_SECONDS + 1)
-        token_b = await uploads.claim_writer(db, row.id, 0)
+        token_b = await uploads.claim_writer(db, upload_id, 0)
         assert await uploads.append_chunk(db, row, token_b, storage, _body(b"b" * 30), 0, 1000) == 30
 
     outcome = await _outcome(uploads.append_chunk(db, row, token_a, storage, _body(b"a" * 10, b_takes_over, after_takeover), 0, 1000))
     assert part.read_bytes() == b"b" * 30
-    fresh = await uploads.get_session_row(db, row.id)
+    fresh = await uploads.get_session_row(db, upload_id)
     assert fresh.received_bytes == 30 and fresh.writer_token is None and fresh.status == "open"
     expected = uploads.WriterLost if isinstance(after_takeover, bytes) else ClientDisconnect
     assert isinstance(outcome, expected), repr(outcome)

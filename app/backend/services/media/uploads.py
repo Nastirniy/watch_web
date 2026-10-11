@@ -218,9 +218,13 @@ async def append_chunk(
     The part file must hold exactly `offset` bytes first: the leftover of a chunk that broke off is cut away, a
     file that is shorter aborts the session (BytesMissing; a gap is never filled). While streaming, the claim is
     renewed every WRITER_RENEW_SECONDS, checked before the next write; a writer that lost it raises WriterLost and
-    leaves the file and the row alone. On any other failure the file is truncated back to offset and the token
-    released, when this writer still holds it, so the session stays consistent with received_bytes.
+    leaves the file and the row alone. On any other failure the session is rolled back (the failure may have come
+    from it; this expires its ORM objects, `row` included: callers read the row again), then the file is truncated
+    back to offset and the token released, when this writer still holds it, so the session stays consistent with
+    received_bytes.
     """
+    upload_id = row.id
+    expected_size = int(row.expected_size)
     part = resolve_part(row, storage_root)
     part.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -232,7 +236,7 @@ async def append_chunk(
             raise WriterLost()
         raise BytesMissing(ErrorCode.UPLOAD_BYTES_MISSING, session_status=STATUS_ABORTED)
 
-    remaining = int(row.expected_size) - offset
+    remaining = expected_size - offset
     written = 0
     renewed_at = utcnow()
     try:
@@ -246,31 +250,32 @@ async def append_chunk(
                 if written > max_chunk_bytes:
                     raise ChunkTooLarge(ErrorCode.UPLOAD_CHUNK_TOO_LARGE, max_chunk_bytes=max_chunk_bytes)
                 if written > remaining:
-                    raise ChunkTooLarge(ErrorCode.UPLOAD_CHUNK_OVERRUN, expected_size=int(row.expected_size))
+                    raise ChunkTooLarge(ErrorCode.UPLOAD_CHUNK_OVERRUN, expected_size=expected_size)
                 now = utcnow()
                 if now - renewed_at >= timedelta(seconds=WRITER_RENEW_SECONDS):
-                    if not await renew_writer(session, row.id, token):
+                    if not await renew_writer(session, upload_id, token):
                         raise WriterLost()
                     renewed_at = now
                 await handle.write(piece)
                 # Nothing may wait in a buffer: closing the file after a lost claim must not write it
                 await handle.flush()
+        new_offset = offset + written
+        if not await release_writer(session, upload_id, token, new_offset):
+            raise WriterLost()
     except WriterLost:
         raise
     except BaseException:
+        # A failed flush or commit leaves the session unusable until it is rolled back
+        await session.rollback()
         # Renewing checks the claim and keeps it for WRITER_STALE_SECONDS: no one else can write meanwhile
-        if await renew_writer(session, row.id, token):
+        if await renew_writer(session, upload_id, token):
             try:
                 async with aiofiles.open(part, "r+b") as handle:
                     await handle.truncate(offset)
             except FileNotFoundError:
                 pass
-            await release_writer(session, row.id, token, offset)
+            await release_writer(session, upload_id, token, offset)
         raise
-
-    new_offset = offset + written
-    if not await release_writer(session, row.id, token, new_offset):
-        raise WriterLost()
     return new_offset
 
 
