@@ -310,3 +310,35 @@ def test_017_creates_video_storyboards_on_upgrade(tmp_path):
     assert "ix_video_storyboards_status_locked" in indexes
     assert conn.execute("select version_num from alembic_version").fetchone()[0] == HEAD
     conn.close()
+
+
+@pytest.mark.slow
+@pytest.mark.filterwarnings("ignore:Computed default")   # bandwidth is a generated column
+def test_autogenerate_leaves_out_the_tables_the_migrations_own(tmp_path):
+    """migrations_manager revision autogenerates against the models: the logs of 022 / 023 and the *_v1 tables are
+    no models, and env.py's include_object keeps autogenerate from proposing to drop them"""
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+    from sqlalchemy import create_engine
+    from sqlmodel import SQLModel
+    import app.backend.models  # noqa: F401  (registers every table)
+    from app.backend.migrations.support.autogenerate import UNMODELLED_TABLES, include_object
+
+    db_file = tmp_path / "autogen.db"
+    result = run_migrate(db_file)
+    assert result.returncode == 0, result.stdout + result.stderr
+    conn = sqlite3.connect(db_file)   # a fresh install never had user_roles; an upgraded database keeps it as *_v1
+    conn.execute("create table user_roles_v1 (id integer primary key, user_id integer not null,"
+                 " role_id integer not null, assigned_at datetime not null)")
+    conn.commit()
+    conn.close()
+    engine = create_engine(f"sqlite:///{db_file.as_posix()}")
+
+    def dropped_tables(opts) -> set:
+        with engine.connect() as conn:
+            diffs = compare_metadata(MigrationContext.configure(conn, opts=opts), SQLModel.metadata)
+        return {diff[1].name for diff in diffs if isinstance(diff, tuple) and diff[0] == "remove_table"}
+
+    assert UNMODELLED_TABLES <= dropped_tables({}), "without the filter autogenerate proposes to drop them"
+    assert not UNMODELLED_TABLES & dropped_tables({"include_object": include_object})
+    engine.dispose()

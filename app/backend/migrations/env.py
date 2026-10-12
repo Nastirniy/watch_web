@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 
 from app.backend.config import settings
+from app.backend.migrations.support.autogenerate import include_object
 from app.backend.models import *
 from sqlmodel import SQLModel
 
@@ -39,6 +40,8 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
         compare_server_default=True,
+        # autogenerate leaves out the tables the migrations own (logs, *_v1): never propose dropping them
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -51,6 +54,8 @@ def do_run_migrations(connection: Connection) -> None:
         target_metadata=target_metadata,
         compare_type=True,
         compare_server_default=True,
+        # autogenerate leaves out the tables the migrations own (logs, *_v1): never propose dropping them
+        include_object=include_object,
     )
 
     with context.begin_transaction():

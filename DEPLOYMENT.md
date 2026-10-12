@@ -185,21 +185,33 @@ user: roles, home post and access rows become role assignments (a role at the ro
 7. The web client moves to the new auth fields at the same deploy: `is_admin`, `accessible_post_ids`, `roles` and the
    post-access routes are gone (CHANGELOG.md, "Migration guide for the web client").
 
-Downgrade (with the new code, before the old one starts): `python -m alembic downgrade 020_post_archive`. 023 restores
-exactly what it converted, from the kept tables and its log: `user_roles` and `user_post_access` come back from
-`user_roles_v1` / `user_post_access_v1`, `admin.true`, `post.access_all` and their grants are inserted again with
-their ids, the derived roles, `role_assignments`, `users.user_type` and `authz_v2_migration_log` are dropped. 022
-restores from its own log (`builtin_roles_migration_log`): the built-in roles seeding created are deleted with their
-grants (the `admin` role stays: it existed before and gets its texts back), every role it renamed to `<key>_custom`
-gets its old name back, the permission texts seeding refreshed come back, `media.monitor` is deleted with its grants,
-then `roles.builtin_key` and the log are dropped. 021 deletes `scope_group.*` with their grants and drops
-`posts.group_id` and `scope_groups`: the groups are lost. So a downgrade after the new version has started restores
-`permissions`, `roles`, `role_permissions`, `users`, `user_roles` and `user_post_access` exactly (same rows, ids and
-names; checked live on MySQL 8 and MariaDB 11), and a later upgrade adds no stray roles. A line in the output names a
-built-in role kept because a `user_roles` row refers to it, or a role that keeps `<key>_custom` because another role
-took the old name. Everything done through the new API since the upgrade is lost with the assignments: users created
-after the upgrade have no legacy roles and lose access on a downgrade, type changes and new assignments are gone, and
-roles created through the API stay as roles without holders.
+Downgrade (with the new code, before the old one starts): `python -m alembic downgrade 020_post_archive`. It undoes
+what the migrations 021 - 023 and the seeding of the new version changed, and nothing else:
+
+- 023, from the kept tables and its log: `user_roles` and `user_post_access` come back from `user_roles_v1` /
+  `user_post_access_v1`, `admin.true`, `post.access_all` and their grants are inserted again with their ids, the
+  derived roles, `role_assignments`, `users.user_type` and `authz_v2_migration_log` are dropped.
+- 022, from its own log (`builtin_roles_migration_log`): the built-in roles seeding created are deleted with their
+  grants (the `admin` role stays: on an upgraded database it existed before, and it gets its texts back), every role
+  it renamed to `<key>_custom` gets its old name back (as stored, its case included), the permission texts seeding
+  refreshed come back, `media.monitor` is deleted with its grants, then `roles.builtin_key` and the log are dropped.
+- 021 deletes `scope_group.*` with their grants and drops `posts.group_id` and `scope_groups`: the groups are lost.
+
+So when nothing was changed through the API, `permissions`, `roles`, `role_permissions`, `users`, `user_roles` and
+`user_post_access` come back exactly as they were (same rows, ids and names; checked live on MySQL 8 and MariaDB 11),
+and a later upgrade adds no stray roles. A line in the output names a built-in role kept because a `user_roles` row
+refers to it, or a role that keeps `<key>_custom` because another role took the old name.
+
+What was done through the API since the upgrade is not undone, it stays as it is:
+
+- changes to roles and grants (permission sets of legacy roles, renames, archives and restores) and to users (home
+  post, deactivation, archive, certificates, new users);
+- a legacy role deleted permanently (`DELETE /roles/{role_id}`, an archived role) does not come back, and neither do
+  its `user_roles` rows: the delete removes its rows of `user_roles_v1` too (the audit row of the delete keeps a full
+  copy of them);
+- roles created through the API stay, as roles without holders;
+- what lived only in the new model is lost with it: assignments, type changes, scope groups. Users created after the
+  upgrade have no legacy roles and lose access on a downgrade.
 
 ### Scheduled cleanup (cron)
 

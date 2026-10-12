@@ -153,7 +153,7 @@ The login, the refresh and `GET /api/v1/auth/me` carry what the interface is bui
 
 | Field | Use it for |
 |-------|------------|
-| `user_type` | Which pages the web shows. The catalog is `GET /api/v1/user-types` (`key`, `display_name`, `description`, `base_role`, `base_permissions`, `allowed_permissions` = the ceiling of the type). The API never authorizes by type: a page still checks its buttons. |
+| `user_type` | Which pages the web shows. The catalog is `GET /api/v1/user-types/` (`key`, `display_name`, `description`, `base_role`, `base_permissions`, `allowed_permissions` = the ceiling of the type). The API never authorizes by type: a page still checks its buttons. |
 | `permissions` | Permissions held at some node: the menu (an entry whose route the user can call somewhere). |
 | `root_permissions` | Permissions held at the root: in effect at every post. |
 | `post_permissions` | `{"7": ["observation.create", ...]}`: per post (key: the post id as a string), the permissions that assignments at groups and at the post put in effect there, for every post they reach. |
@@ -187,7 +187,7 @@ the user (`session_expired`, `revoke_cause` `user_type_changed`): the new pages 
 - A new user (`POST /api/v1/users/`, form fields `user_type` and an optional `post_id`) gets the built-in role of the
   type at the home post (at the root without one, or for the `admin` type); add more with the assignment routes.
   `PATCH /api/v1/users/{user_id}` with `user_type` changes the type and replaces the old built-in role with the new
-  one at the same nodes.
+  one at the same nodes, or at the root when the new built-in role holds system permissions (the `admin` type).
 - Built-in roles (`is_builtin`, `builtin_key`: one per type) are read-only; `POST /api/v1/roles/{role_id}/clone`
   makes an editable copy.
 
