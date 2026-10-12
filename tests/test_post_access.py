@@ -1,9 +1,13 @@
-"""Data scope: home post, user_post_access rows, post.access_all, foreign filters."""
+"""Data scope of users shaped like the old model (home post, access rows, post.access_all, admin.true), converted to
+role assignments by the factory exactly as migration 023 does; foreign filters. The access-row routes are gone (the
+assignment API replaces them)."""
 import pytest
 
 from app.backend.enums.routes import AuthRoutes, ObservationRoutes, PostRoutes, SearchRoutes, UserRoutes
 from app.backend.api.v1 import V1
-from tests.helpers import make_post, make_user, make_admin, make_dictionary, make_observation, observation_payload
+from tests.helpers import (
+    ACCESS_ALL, ADMIN_TRUE, make_post, make_user, make_admin, make_dictionary, make_observation, observation_payload,
+)
 
 LIST = V1.path(ObservationRoutes.LIST_ALL)
 CREATE = V1.path(ObservationRoutes.CREATE)
@@ -19,10 +23,6 @@ async def world(db):
     obs_a = await make_observation(db, admin, post_a, ids["signal_type_id"])
     obs_b = await make_observation(db, admin, post_b, ids["signal_type_id"])
     return post_a, post_b, ids, admin, user, obs_a, obs_b
-
-
-def post_access_url(user_id: int, post_id: int) -> str:
-    return V1.path(UserRoutes.USER_POST_ACCESS_BY_POST, user_id=user_id, post_id=post_id)
 
 
 @pytest.mark.asyncio
@@ -74,61 +74,33 @@ async def test_no_post_assigned(client, db, headers):
 
 @pytest.mark.asyncio
 async def test_extra_post_access_read_then_write(client, db, headers):
+    """A read-only access row reads the post's data, a writable one writes it too"""
     post_a, post_b, ids, admin, user, obs_a, obs_b = await world(db)
-    url = post_access_url(user.id, post_b.id)
+    reader = await make_user(db, perms=OPERATOR, post_id=post_a.id, extra_access={post_b.id: False})
+    writer = await make_user(db, perms=OPERATOR, post_id=post_a.id, extra_access={post_b.id: True})
 
-    grant = await client.put(url, json={"can_write": False}, headers=headers(admin))
-    assert grant.status_code == 200, grant.text
-    assert grant.json()["can_write"] is False
+    for member in (reader, writer):
+        listed = (await client.get(LIST, headers=headers(member))).json()
+        assert {o["id"] for o in listed} == {obs_a.id, obs_b.id}
+        me = (await client.get(V1.path(AuthRoutes.ME), headers=headers(member))).json()
+        assert me["accessible_post_ids"] == sorted([post_a.id, post_b.id])
 
-    listed = (await client.get(LIST, headers=headers(user))).json()
-    assert {o["id"] for o in listed} == {obs_a.id, obs_b.id}
-
-    me = (await client.get(V1.path(AuthRoutes.ME), headers=headers(user))).json()
-    assert me["accessible_post_ids"] == sorted([post_a.id, post_b.id])
-
-    read_only = await client.post(CREATE, json=observation_payload(post_b.id, ids["signal_type_id"]), headers=headers(user))
+    read_only = await client.post(CREATE, json=observation_payload(post_b.id, ids["signal_type_id"]), headers=headers(reader))
     assert read_only.status_code == 403
     assert read_only.json()["code"] == "post_write_denied"
 
-    upgrade = await client.put(url, json={"can_write": True}, headers=headers(admin))
-    assert upgrade.status_code == 200 and upgrade.json()["can_write"] is True
-
-    created = await client.post(CREATE, json=observation_payload(post_b.id, ids["signal_type_id"]), headers=headers(user))
+    created = await client.post(CREATE, json=observation_payload(post_b.id, ids["signal_type_id"]), headers=headers(writer))
     assert created.status_code == 200, created.text
     body = created.json()
     assert body["post_id"] == post_b.id
-    assert {k: body["user"][k] for k in ("id", "username", "username_alias")} == {"id": user.id, "username": user.username, "username_alias": user.username_alias}
+    assert {k: body["user"][k] for k in ("id", "username", "username_alias")} == {"id": writer.id, "username": writer.username, "username_alias": writer.username_alias}
     assert body["disappeared_by_user"] is None
-
-    listing = await client.get(V1.path(UserRoutes.USER_POST_ACCESS, user_id=user.id), headers=headers(admin))
-    assert [row["post_id"] for row in listing.json()] == [post_b.id]
-
-    revoke = await client.delete(url, headers=headers(admin))
-    assert revoke.status_code == 204
-    listed = (await client.get(LIST, headers=headers(user))).json()
-    assert {o["id"] for o in listed} == {obs_a.id}
-
-    again = await client.delete(url, headers=headers(admin))
-    assert again.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_post_access_management_validation(client, db, headers):
-    post_a, post_b, ids, admin, user, obs_a, obs_b = await world(db)
-    home = await client.put(post_access_url(user.id, post_a.id), json={"can_write": True}, headers=headers(admin))
-    assert home.status_code == 400
-    missing_post = await client.put(post_access_url(user.id, 999999), json={}, headers=headers(admin))
-    assert missing_post.status_code == 404
-    not_admin = await client.put(post_access_url(user.id, post_b.id), json={}, headers=headers(user))
-    assert not_admin.status_code == 403
-    assert not_admin.json()["code"] == "permission_denied"
 
 
 @pytest.mark.asyncio
 async def test_post_access_all_sees_everything(client, db, headers):
     post_a, post_b, ids, admin, user, obs_a, obs_b = await world(db)
-    supervisor = await make_user(db, perms=OPERATOR + ["post.access_all"], post_id=post_a.id)
+    supervisor = await make_user(db, perms=OPERATOR + [ACCESS_ALL], post_id=post_a.id)
     listed = (await client.get(LIST, headers=headers(supervisor))).json()
     assert {o["id"] for o in listed} == {obs_a.id, obs_b.id}
     filtered = await client.get(LIST, params={"post_id": post_b.id}, headers=headers(supervisor))
@@ -157,7 +129,7 @@ async def test_user_visibility(client, db, headers):
 async def test_administrators_see_every_post_record_but_not_its_data(client, db, headers):
     """admin.true + post.view: every post record; observations stay limited to the data scope"""
     post_a, post_b, ids, admin, user, obs_a, obs_b = await world(db)
-    manager = await make_user(db, perms=["admin.true", "post.view", "post.update", "observation.view"], post_id=post_a.id)
+    manager = await make_user(db, perms=[ADMIN_TRUE, "post.view", "post.update", "observation.view"], post_id=post_a.id)
     posts_url = V1.path(PostRoutes.ROOT)
 
     listed = await client.get(posts_url, headers=headers(manager))
@@ -184,7 +156,7 @@ async def test_administrators_see_every_user_record(client, db, headers):
     """admin.true + user.view: users of every post; others keep their post scope"""
     post_a, post_b, ids, admin, user, obs_a, obs_b = await world(db)
     stranger = await make_user(db, perms=["observation.view"], post_id=post_b.id)
-    manager = await make_user(db, perms=["admin.true", "user.view"], post_id=post_a.id)
+    manager = await make_user(db, perms=[ADMIN_TRUE, "user.view"], post_id=post_a.id)
     reader = await make_user(db, perms=["user.view"], post_id=post_a.id)
     users_url = V1.path(UserRoutes.ROOT)
     user_url = V1.path(UserRoutes.USER_BY_ID, user_id=stranger.id)

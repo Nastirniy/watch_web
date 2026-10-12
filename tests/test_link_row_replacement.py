@@ -1,4 +1,5 @@
-"""Replacing the permissions of a role and the roles of a user keeps the rows that stay, by difference."""
+"""Replacing the permissions of a role keeps the rows that stay, by difference. A user's roles are role assignments,
+one link row each (the assignment API, no replacement)."""
 import sqlite3
 
 import pytest
@@ -10,8 +11,8 @@ from app.backend.api.v1.users import taken_error_code
 from app.backend.enums.errors import ErrorCode
 from app.backend.enums.routes import RoleRoutes, UserRoutes
 from app.backend.models.audit import AuditLog
-from app.backend.models.role import Permission, RolePermission, UserRole
-from tests.helpers import make_admin, make_role, make_user
+from app.backend.models.role import Permission, RolePermission
+from tests.helpers import make_admin, make_role
 
 ROLES = V1.path(RoleRoutes.ROOT)
 ROLE = V1.path(RoleRoutes.ROLE_BY_ID)
@@ -25,11 +26,6 @@ async def permission_ids(db, names):
 
 async def stored_permissions(db, role_id):
     rows = await db.exec(select(RolePermission.permission_id).where(RolePermission.role_id == role_id))
-    return sorted(rows.all())
-
-
-async def stored_roles(db, user_id):
-    rows = await db.exec(select(UserRole.role_id).where(UserRole.user_id == user_id))
     return sorted(rows.all())
 
 
@@ -80,31 +76,6 @@ async def test_repeated_permission_ids_answer_the_field_error(client, db, header
     assert error["pointer"] == "#/permission_ids"
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("keep, add, drop", [(True, True, False), (False, True, False), (True, False, False)])
-async def test_user_roles_replaced_by_difference(client, db, headers, keep, add, drop):
-    admin = await make_admin(db)
-    kept = await make_role(db, ["tag.view"])
-    other = await make_role(db, ["tag.create"])
-    user = await make_user(db, role=kept)
-    wanted = ([kept.id] if keep else []) + ([other.id] if add else [])
-
-    response = await client.patch(USER.format(user_id=user.id), headers=headers(admin), data={"role_ids": wanted})
-
-    assert response.status_code == 200, response.text
-    assert await stored_roles(db, user.id) == sorted(wanted)
-
-
-@pytest.mark.asyncio
-async def test_user_roles_identical_set(client, db, headers):
-    admin = await make_admin(db)
-    role = await make_role(db, ["tag.view"])
-    user = await make_user(db, role=role)
-    response = await client.patch(USER.format(user_id=user.id), headers=headers(admin), data={"role_ids": [role.id]})
-    assert response.status_code == 200, response.text
-    assert await stored_roles(db, user.id) == [role.id]
-
-
 class MySQLError(Exception):
     """Shape of pymysql.err.*: args = (errno, message)"""
 
@@ -121,5 +92,7 @@ def test_unique_violation_mapping():
     assert taken_error_code(integrity(MySQLError(1062, "Duplicate entry 'a' for key 'users.ix_users_username'"))) == ErrorCode.USERNAME_TAKEN
     assert taken_error_code(integrity(MySQLError(1062, "Duplicate entry 'a' for key 'users.pki_certificate_serial_hash'"))) == ErrorCode.CERTIFICATE_TAKEN
     # a violation of another table's unique constraint is not a taken username or certificate
-    assert taken_error_code(integrity(sqlite_error("UNIQUE constraint failed: user_roles.user_id, user_roles.role_id"))) is None
-    assert taken_error_code(integrity(MySQLError(1062, "Duplicate entry '1-2' for key 'user_roles.uq_user_roles_user_role'"))) is None
+    assert taken_error_code(integrity(sqlite_error(
+        "UNIQUE constraint failed: role_assignments.user_id, role_assignments.role_id, role_assignments.scope_key"))) is None
+    assert taken_error_code(integrity(MySQLError(
+        1062, "Duplicate entry '1-2-root' for key 'role_assignments.uq_role_assignments_user_role_scope'"))) is None

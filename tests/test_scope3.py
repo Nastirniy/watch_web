@@ -12,7 +12,8 @@ from app.backend.api.v1 import V1
 from app.backend.models.user import UserSession
 from app.backend.models.role import Permission
 from app.backend.auth.service import AuthService
-from tests.helpers import make_post, make_user, make_admin, make_role, make_dictionary, make_observation, make_media
+from app.backend.auth.scope import ROOT
+from tests.helpers import assign, make_post, make_user, make_admin, make_role, make_dictionary, make_observation, make_media
 
 ME = V1.path(AuthRoutes.ME)
 LIST = V1.path(ObservationRoutes.LIST_ALL)
@@ -80,7 +81,8 @@ async def test_refresh_rejects_expired_session(client, db):
 async def test_role_permission_toggle(client, db, headers):
     admin = await make_admin(db)
     role = await make_role(db, [])
-    user = await make_user(db, role=role)
+    user = await make_user(db)
+    await assign(db, user, role, ROOT)   # an empty legacy role converts to no assignment: assign it directly
     permission = (await db.exec(select(Permission).where(Permission.name == "tag.view"))).one()
     url = V1.path(RoleRoutes.ROLE_PERMISSION_BY_ID, role_id=role.id, permission_id=permission.id)
 
@@ -132,7 +134,7 @@ async def test_statistics_endpoint(client, db, headers):
     bad = await client.get(url, params={"date_from": "2030-01-01T00:00:00", "date_to": "2020-01-01T00:00:00"}, headers=headers(admin))
     assert bad.status_code == 400
 
-    # Without admin.true the figures cover the caller's post scope only
+    # statistics.view at the home post only: the figures cover the posts where it is in effect
     other_post = await make_post(db)
     other_user = await make_user(db, perms=["observation.view"], post_id=other_post.id)
     other_observation = await make_observation(db, other_user, other_post, ids["signal_type_id"])

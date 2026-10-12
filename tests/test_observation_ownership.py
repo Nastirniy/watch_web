@@ -6,7 +6,8 @@ from sqlmodel import select
 
 from app.backend.enums.routes import ObservationRoutes, MediaRoutes
 from app.backend.api.v1 import V1
-from app.backend.models.role import Permission, RolePermission, UserRole
+from app.backend.models.role import Permission, RolePermission
+from app.backend.models.role_assignment import RoleAssignment
 from tests.helpers import make_post, make_user, make_dictionary, make_observation, make_media
 
 UPDATE = V1.path(ObservationRoutes.OBSERVATION_BY_ID)
@@ -15,7 +16,7 @@ OPERATOR = ["observation.view", "observation.update", "media.view", "media.archi
 
 
 async def grant(db, user, permission_name: str):
-    role_id = (await db.exec(select(UserRole.role_id).where(UserRole.user_id == user.id))).first()
+    role_id = (await db.exec(select(RoleAssignment.role_id).where(RoleAssignment.user_id == user.id))).first()
     permission = (await db.exec(select(Permission).where(Permission.name == permission_name))).one()
     db.add(RolePermission(role_id=role_id, permission_id=permission.id))
     await db.commit()

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-HEAD = "022_builtin_roles"
+HEAD = "023_authorization_v2"
 
 
 def run_migrate(db_file: Path, cwd: Path = PROJECT_ROOT) -> subprocess.CompletedProcess:
@@ -76,7 +76,8 @@ def test_migration_chain_on_empty_database(tmp_path):
 
     conn = sqlite3.connect(db_file)
     tables = {row[0] for row in conn.execute("select name from sqlite_master where type='table'")}
-    assert {"users", "roles", "permissions", "observations", "media_files", "user_post_access", "worker_heartbeats", "media_formats", "upload_sessions", "observation_frequencies", "video_storyboards", "scope_groups"} <= tables
+    assert {"users", "roles", "permissions", "observations", "media_files", "user_post_access_v1", "worker_heartbeats", "media_formats", "upload_sessions", "observation_frequencies", "video_storyboards", "scope_groups", "role_assignments"} <= tables
+    assert not {"user_roles", "user_post_access"} & tables, "023 keeps the legacy tables as *_v1; a fresh install never had user_roles"
     assert conn.execute("select version_num from alembic_version").fetchone()[0] == HEAD
     assert "group_id" in {row[1] for row in conn.execute("pragma table_info(posts)")}
     media_columns = {row[1] for row in conn.execute("pragma table_info(media_files)")}
@@ -181,8 +182,8 @@ def test_migration_head(tmp_path):
     assert conn.execute("select version_num from alembic_version").fetchone()[0] == HEAD
     columns = {row[1] for row in conn.execute("pragma table_info(roles)")}
     assert "is_deleted" in columns
-    unique_indexes = [row for row in conn.execute("pragma index_list(user_roles)") if row[2] == 1]
-    assert unique_indexes, "user_roles must have a unique index"
+    unique_indexes = [row for row in conn.execute("pragma index_list(role_assignments)") if row[2] == 1]
+    assert unique_indexes, "role_assignments must have a unique index"
     conn.close()
 
 

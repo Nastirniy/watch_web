@@ -1164,7 +1164,7 @@
           "USERS"
         ],
         "summary": "Create User",
-        "description": "Create new user with PKI certificate authentication\n\nThe certificate file will be parsed to extract:\n- Common Name (CN)\n- Serial Number\n- SHA256 Fingerprint\n\nThese fields are hashed before storage for security.\n\nThe form fields are described by UserCreateForm; role_ids is repeated once per role. The caller must hold\nevery permission of the roles (403 grant_exceeds_own_permissions). An archived post cannot be the home post\n(409 post_archived).",
+        "description": "Create new user with PKI certificate authentication\n\nThe certificate file will be parsed to extract:\n- Common Name (CN)\n- Serial Number\n- SHA256 Fingerprint\n\nThese fields are hashed before storage for security.\n\nThe form fields are described by UserCreateForm. The user gets one assignment: the built-in base role of\nuser_type at the home post (post_id), or at the root without a home post or when the base role holds system\npermissions (admin). The caller needs user.create covering that node (403 permission_required_for_action) and\nevery permission of the role there (403 grant_exceeds_own_permissions). An archived post cannot be the home post\n(409 post_archived).",
         "operationId": "create_user",
         "security": [
           {
@@ -1271,7 +1271,7 @@
             }
           },
           "400": {
-            "description": "`certificate_file_empty`: Certificate file is empty; `certificate_invalid`: Invalid certificate; `certificate_taken`: Certificate already exists for another user; `role_archived_not_assignable`: Archived role cannot be assigned; `username_or_certificate_taken`: User with this username or certificate already exists; `username_taken`: User with this username already exists",
+            "description": "`certificate_file_empty`: Certificate file is empty; `certificate_invalid`: Invalid certificate; `certificate_taken`: Certificate already exists for another user; `username_or_certificate_taken`: User with this username or certificate already exists; `username_taken`: User with this username already exists",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1286,9 +1286,6 @@
                       "$ref": "#/components/schemas/CertificateTakenProblem"
                     },
                     {
-                      "$ref": "#/components/schemas/RoleArchivedNotAssignableProblem"
-                    },
-                    {
                       "$ref": "#/components/schemas/UsernameOrCertificateTakenProblem"
                     },
                     {
@@ -1301,7 +1298,6 @@
                       "certificate_file_empty": "#/components/schemas/CertificateFileEmptyProblem",
                       "certificate_invalid": "#/components/schemas/CertificateInvalidProblem",
                       "certificate_taken": "#/components/schemas/CertificateTakenProblem",
-                      "role_archived_not_assignable": "#/components/schemas/RoleArchivedNotAssignableProblem",
                       "username_or_certificate_taken": "#/components/schemas/UsernameOrCertificateTakenProblem",
                       "username_taken": "#/components/schemas/UsernameTakenProblem"
                     }
@@ -1311,7 +1307,7 @@
             }
           },
           "403": {
-            "description": "`grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions",
+            "description": "`grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1321,13 +1317,17 @@
                     },
                     {
                       "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionRequiredForActionProblem"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
                       "grant_exceeds_own_permissions": "#/components/schemas/GrantExceedsOwnPermissionsProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "permission_required_for_action": "#/components/schemas/PermissionRequiredForActionProblem"
                     }
                   }
                 }
@@ -1335,25 +1335,11 @@
             }
           },
           "404": {
-            "description": "`post_not_found`: Post not found; `role_not_found`: Role not found",
+            "description": "`post_not_found`: Post not found",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/PostNotFoundProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/RoleNotFoundProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "post_not_found": "#/components/schemas/PostNotFoundProblem",
-                      "role_not_found": "#/components/schemas/RoleNotFoundProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PostNotFoundProblem"
                 }
               }
             }
@@ -1522,7 +1508,7 @@
           "USERS"
         ],
         "summary": "Update User",
-        "description": "Update user fields - all fields are optional\n\nSupports updating:\n- username: Unique username (3-50 characters)\n- username_alias: User's display name (1-255 characters)\n- post_id: User's post/position ID; moving the user onto an archived post answers 409 post_archived (sending\n  the current home post again changes nothing and is accepted)\n- is_active: User's active status (boolean)\n- role_ids: Replace all user roles, one form field per role (role_ids=1&role_ids=2)\n- certificate: Update PKI certificate authentication data (file upload). A different certificate ends every\n  session of the user, like deactivation: the old certificate's tokens stop working.\n\nOnly provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).\nThe fields are form fields: any other body (JSON included) answers 415 instead of being ignored.\n\nChanging another user needs a user who holds no permission the caller lacks (403\ntarget_user_more_privileged), new roles only permissions the caller holds (403\ngrant_exceeds_own_permissions). A role change or a deactivation must leave an active administrator and the\ncaller's own admin.true (409 last_admin_required, cannot_remove_own_admin).",
+        "description": "Update user fields - all fields are optional\n\nSupports updating:\n- username: Unique username (3-50 characters)\n- username_alias: User's display name (1-255 characters)\n- post_id: Home post (membership: who manages the user; it grants nothing by itself). Moving the user needs\n  user.update covering the new post too (403 permission_required_for_action) and answers 409 post_archived\n  for an archived post (sending the current home post again changes nothing and is accepted)\n- is_active: User's active status (boolean)\n- certificate: Update PKI certificate authentication data (file upload). A different certificate ends every\n  session of the user, like deactivation: the old certificate's tokens stop working.\n\nOnly provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).\nThe fields are form fields: any other body (JSON included) answers 415 instead of being ignored.\n\nChanging a user needs user.update covering them (their home post, the root for a user without one) and, for\nanother user, that the caller could grant every assignment they have (403 target_user_more_privileged). A\ndeactivation must leave an active holder of the built-in admin role at the root (409 last_admin_required,\ncannot_remove_own_admin).",
         "operationId": "update_user",
         "security": [
           {
@@ -1627,7 +1613,7 @@
             }
           },
           "400": {
-            "description": "`cannot_deactivate_self`: You cannot deactivate your own account; `certificate_file_empty`: Certificate file is empty; `certificate_invalid`: Invalid certificate; `certificate_taken`: Certificate already exists for another user; `role_archived_not_assignable`: Archived role cannot be assigned; `username_taken`: User with this username already exists",
+            "description": "`cannot_deactivate_self`: You cannot deactivate your own account; `certificate_file_empty`: Certificate file is empty; `certificate_invalid`: Invalid certificate; `certificate_taken`: Certificate already exists for another user; `username_taken`: User with this username already exists",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1645,9 +1631,6 @@
                       "$ref": "#/components/schemas/CertificateTakenProblem"
                     },
                     {
-                      "$ref": "#/components/schemas/RoleArchivedNotAssignableProblem"
-                    },
-                    {
                       "$ref": "#/components/schemas/UsernameTakenProblem"
                     }
                   ],
@@ -1658,7 +1641,6 @@
                       "certificate_file_empty": "#/components/schemas/CertificateFileEmptyProblem",
                       "certificate_invalid": "#/components/schemas/CertificateInvalidProblem",
                       "certificate_taken": "#/components/schemas/CertificateTakenProblem",
-                      "role_archived_not_assignable": "#/components/schemas/RoleArchivedNotAssignableProblem",
                       "username_taken": "#/components/schemas/UsernameTakenProblem"
                     }
                   }
@@ -1667,16 +1649,16 @@
             }
           },
           "403": {
-            "description": "`grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold",
+            "description": "`permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action; `target_user_more_privileged`: This user holds permissions you do not hold",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
                     {
-                      "$ref": "#/components/schemas/GrantExceedsOwnPermissionsProblem"
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
                     },
                     {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                      "$ref": "#/components/schemas/PermissionRequiredForActionProblem"
                     },
                     {
                       "$ref": "#/components/schemas/TargetUserMorePrivilegedProblem"
@@ -1685,8 +1667,8 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "grant_exceeds_own_permissions": "#/components/schemas/GrantExceedsOwnPermissionsProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "permission_required_for_action": "#/components/schemas/PermissionRequiredForActionProblem",
                       "target_user_more_privileged": "#/components/schemas/TargetUserMorePrivilegedProblem"
                     }
                   }
@@ -1695,16 +1677,13 @@
             }
           },
           "404": {
-            "description": "`post_not_found`: Post not found; `role_not_found`: Role not found; `user_not_found`: User not found",
+            "description": "`post_not_found`: Post not found; `user_not_found`: User not found",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
                     {
                       "$ref": "#/components/schemas/PostNotFoundProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/RoleNotFoundProblem"
                     },
                     {
                       "$ref": "#/components/schemas/UserNotFoundProblem"
@@ -1714,7 +1693,6 @@
                     "propertyName": "code",
                     "mapping": {
                       "post_not_found": "#/components/schemas/PostNotFoundProblem",
-                      "role_not_found": "#/components/schemas/RoleNotFoundProblem",
                       "user_not_found": "#/components/schemas/UserNotFoundProblem"
                     }
                   }
@@ -1773,633 +1751,13 @@
         }
       }
     },
-    "/api/v1/users/{user_id}/roles": {
-      "get": {
-        "tags": [
-          "USERS"
-        ],
-        "summary": "List User Roles",
-        "description": "List all roles assigned to a user - requires user.view (covering the user: 403 user_self_only otherwise) and\nrole.view",
-        "operationId": "list_user_roles",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "title": "User Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/UserRoleResponse"
-                  },
-                  "title": "Response List User Roles"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "`internal_error`: Internal server error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InternalErrorProblem"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountDeletedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountNotFoundProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InvalidTokenProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SessionExpiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
-                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
-                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
-                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
-                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
-                      "session_expired": "#/components/schemas/SessionExpiredProblem",
-                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "`validation_error`: Request validation failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ValidationErrorProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`permission_denied`: Insufficient permissions; `user_self_only`: You can only view your own account or users of your assigned posts",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/UserSelfOnlyProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
-                      "user_self_only": "#/components/schemas/UserSelfOnlyProblem"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "`user_not_found`: User not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserNotFoundProblem"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/users/{user_id}/post-access": {
-      "get": {
-        "tags": [
-          "USERS"
-        ],
-        "summary": "List User Post Access",
-        "description": "Extra post access rows of a user (the home post is users.post_id and is not listed here). user.view must\ncover the user (403 user_self_only otherwise).",
-        "operationId": "list_user_post_access",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "User Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/UserPostAccessResponse"
-                  },
-                  "title": "Response List User Post Access"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "`internal_error`: Internal server error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InternalErrorProblem"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountDeletedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountNotFoundProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InvalidTokenProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SessionExpiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
-                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
-                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
-                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
-                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
-                      "session_expired": "#/components/schemas/SessionExpiredProblem",
-                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "`validation_error`: Request validation failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ValidationErrorProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`permission_denied`: Insufficient permissions; `user_self_only`: You can only view your own account or users of your assigned posts",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/UserSelfOnlyProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
-                      "user_self_only": "#/components/schemas/UserSelfOnlyProblem"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "`user_not_found`: User not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserNotFoundProblem"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/users/{user_id}/post-access/{post_id}": {
-      "put": {
-        "tags": [
-          "USERS"
-        ],
-        "summary": "Upsert User Post Access",
-        "description": "Grant a user read (can_write=false) or read+write (can_write=true) access to an additional post.\nA user holding permissions the caller lacks: 403 target_user_more_privileged. An archived post: 409 post_archived\n(its existing rows stay and apply again after a restore; DELETE still revokes them).",
-        "operationId": "upsert_user_post_access",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "User Id"
-            }
-          },
-          {
-            "name": "post_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Post Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UserPostAccessUpsert"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserPostAccessResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "`internal_error`: Internal server error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InternalErrorProblem"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountDeletedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountNotFoundProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InvalidTokenProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SessionExpiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
-                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
-                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
-                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
-                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
-                      "session_expired": "#/components/schemas/SessionExpiredProblem",
-                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "`validation_error`: Request validation failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ValidationErrorProblem"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "`post_access_home_post`: This post is the home post of the user and already grants full access",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PostAccessHomePostProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/TargetUserMorePrivilegedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
-                      "target_user_more_privileged": "#/components/schemas/TargetUserMorePrivilegedProblem"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "`post_not_found`: Post not found; `user_not_found`: User not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/PostNotFoundProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/UserNotFoundProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "post_not_found": "#/components/schemas/PostNotFoundProblem",
-                      "user_not_found": "#/components/schemas/UserNotFoundProblem"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "`post_archived`: Post is archived",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PostArchivedProblem"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "USERS"
-        ],
-        "summary": "Delete User Post Access",
-        "description": "Revoke access of a user to an additional post.\nA user holding permissions the caller lacks: 403 target_user_more_privileged.",
-        "operationId": "delete_user_post_access",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "User Id"
-            }
-          },
-          {
-            "name": "post_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Post Id"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "500": {
-            "description": "`internal_error`: Internal server error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InternalErrorProblem"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountDeletedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountNotFoundProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InvalidTokenProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SessionExpiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
-                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
-                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
-                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
-                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
-                      "session_expired": "#/components/schemas/SessionExpiredProblem",
-                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "`validation_error`: Request validation failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ValidationErrorProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/TargetUserMorePrivilegedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
-                      "target_user_more_privileged": "#/components/schemas/TargetUserMorePrivilegedProblem"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "`post_access_not_found`: Post access not found; `user_not_found`: User not found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/PostAccessNotFoundProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/UserNotFoundProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "post_access_not_found": "#/components/schemas/PostAccessNotFoundProblem",
-                      "user_not_found": "#/components/schemas/UserNotFoundProblem"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/users/{user_id}/archive": {
       "post": {
         "tags": [
           "USERS"
         ],
         "summary": "Archive User",
-        "description": "Archive a user (is_deleted=true): deactivates the account and invalidates its sessions.\n\nNothing is removed: observations, media and role assignments of the user stay. The user is hidden from\nlists unless include_deleted=true. Undo with POST /{user_id}/restore. Already archived or unknown: 404.\nA user holding permissions the caller lacks: 403 target_user_more_privileged; the last administrator: 409.",
+        "description": "Archive a user (is_deleted=true): deactivates the account and invalidates its sessions.\n\nNothing is removed: observations, media and role assignments of the user stay. The user is hidden from\nlists unless include_deleted=true. Undo with POST /{user_id}/restore. Already archived or unknown: 404.\nNeeds user.archive covering the user and every assignment of the user grantable by the caller (403\ntarget_user_more_privileged); the last administrator: 409.",
         "operationId": "archive_user",
         "security": [
           {
@@ -2555,7 +1913,7 @@
           "USERS"
         ],
         "summary": "Restore User",
-        "description": "Restore an archived user (is_deleted=false, is_active=true): the account can log in again. Not archived: 409.\nA user holding permissions the caller lacks: 403 target_user_more_privileged.",
+        "description": "Restore an archived user (is_deleted=false, is_active=true): the account can log in again. Not archived: 409.\nNeeds user.archive covering the user and every assignment of the user grantable by the caller (403\ntarget_user_more_privileged).",
         "operationId": "restore_user",
         "security": [
           {
@@ -2868,7 +2226,7 @@
           "USERS"
         ],
         "summary": "End User Sessions",
-        "description": "Revoke every live session of a user (revoke_cause ended_by_admin); the account stays as it is and can log\nin again. The caller's own session ends too when user_id is the caller. Archived users: 404.\nA user holding permissions the caller lacks: 403 target_user_more_privileged.",
+        "description": "Revoke every live session of a user (revoke_cause ended_by_admin); the account stays as it is and can log\nin again. The caller's own session ends too when user_id is the caller. Archived users: 404.\nNeeds user.update covering the user and every assignment of the user grantable by the caller (403\ntarget_user_more_privileged).",
         "operationId": "end_user_sessions",
         "security": [
           {
@@ -3005,7 +2363,7 @@
           "USERS"
         ],
         "summary": "End User Session",
-        "description": "Revoke one live session of a user (revoke_cause ended_by_admin). Ended already: 409 with its end_reason.\nA user holding permissions the caller lacks: 403 target_user_more_privileged.",
+        "description": "Revoke one live session of a user (revoke_cause ended_by_admin). Ended already: 409 with its end_reason.\nNeeds user.update covering the user and every assignment of the user grantable by the caller (403\ntarget_user_more_privileged).",
         "operationId": "end_user_session",
         "security": [
           {
@@ -3919,7 +3277,7 @@
           "ROLES"
         ],
         "summary": "Update Role",
-        "description": "Update role and optionally replace all permissions. Archived roles answer 404 until restored (POST /{role_id}/restore).\n\nA built-in role keeps its name and its permissions (409); clone it to change them. The caller must hold every permission\npermission_ids adds or removes (403 grant_exceeds_own_permissions); removing admin.true must leave an active\nadministrator and the caller's own admin.true (409).",
+        "description": "Update role and optionally replace all permissions. Archived roles answer 404 until restored (POST /{role_id}/restore).\n\nA built-in role keeps its name and its permissions (409); clone it to change them. The caller must hold every permission\npermission_ids adds or removes (403 grant_exceeds_own_permissions).",
         "operationId": "update_role",
         "security": [
           {
@@ -4082,7 +3440,7 @@
             }
           },
           "409": {
-            "description": "`builtin_role_not_renamable`: Built-in roles cannot be renamed; `builtin_role_permissions_fixed`: The permissions of built-in roles cannot be changed; `cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no active administrator; `role_name_archived`: Role name belongs to an archived role",
+            "description": "`builtin_role_not_renamable`: Built-in roles cannot be renamed; `builtin_role_permissions_fixed`: The permissions of built-in roles cannot be changed; `role_name_archived`: Role name belongs to an archived role",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4094,12 +3452,6 @@
                       "$ref": "#/components/schemas/BuiltinRolePermissionsFixedProblem"
                     },
                     {
-                      "$ref": "#/components/schemas/CannotRemoveOwnAdminProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/LastAdminRequiredProblem"
-                    },
-                    {
                       "$ref": "#/components/schemas/RoleNameArchivedProblem"
                     }
                   ],
@@ -4108,8 +3460,6 @@
                     "mapping": {
                       "builtin_role_not_renamable": "#/components/schemas/BuiltinRoleNotRenamableProblem",
                       "builtin_role_permissions_fixed": "#/components/schemas/BuiltinRolePermissionsFixedProblem",
-                      "cannot_remove_own_admin": "#/components/schemas/CannotRemoveOwnAdminProblem",
-                      "last_admin_required": "#/components/schemas/LastAdminRequiredProblem",
                       "role_name_archived": "#/components/schemas/RoleNameArchivedProblem"
                     }
                   }
@@ -4268,7 +3618,7 @@
           "ROLES"
         ],
         "summary": "Archive Role",
-        "description": "Archive a role (is_deleted=true). Nothing is removed: user assignments and permissions stay in the database.\n\nAn archived role stops granting permissions immediately, cannot be assigned and is hidden from lists\nunless include_deleted=true. Undo with POST /{role_id}/restore. Already archived or unknown: 404.\nThe caller must hold every permission of the role (it is revoked from every holder, 403), and archiving\nmust leave an active administrator and the caller's own admin.true (409).",
+        "description": "Archive a role (is_deleted=true). Nothing is removed: user assignments and permissions stay in the database.\n\nAn archived role stops granting permissions immediately, cannot be assigned and is hidden from lists\nunless include_deleted=true. Undo with POST /{role_id}/restore. Already archived or unknown: 404.\nThe caller must hold every permission of the role (it is revoked from every holder, 403). Built-in roles (the\nadministrator is the built-in admin role at the root) are never archived (409).",
         "operationId": "archive_role",
         "security": [
           {
@@ -4397,29 +3747,11 @@
             }
           },
           "409": {
-            "description": "`builtin_role_not_archivable`: Built-in roles cannot be archived; `cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no active administrator",
+            "description": "`builtin_role_not_archivable`: Built-in roles cannot be archived",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/BuiltinRoleNotArchivableProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CannotRemoveOwnAdminProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/LastAdminRequiredProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "builtin_role_not_archivable": "#/components/schemas/BuiltinRoleNotArchivableProblem",
-                      "cannot_remove_own_admin": "#/components/schemas/CannotRemoveOwnAdminProblem",
-                      "last_admin_required": "#/components/schemas/LastAdminRequiredProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/BuiltinRoleNotArchivableProblem"
                 }
               }
             }
@@ -5047,7 +4379,7 @@
           "ROLES"
         ],
         "summary": "Remove Role Permission",
-        "description": "Revoke one permission from a role. Returns the role's remaining permissions.\nOnly a permission the caller holds can be revoked (403); a built-in role keeps its permissions (409);\nrevoking admin.true must leave an active administrator and the caller's own admin.true (409).",
+        "description": "Revoke one permission from a role. Returns the role's remaining permissions.\nOnly a permission the caller holds can be revoked (403); a built-in role keeps its permissions (409).",
         "operationId": "remove_role_permission",
         "security": [
           {
@@ -5208,29 +4540,11 @@
             }
           },
           "409": {
-            "description": "`builtin_role_permissions_fixed`: The permissions of built-in roles cannot be changed; `cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no active administrator",
+            "description": "`builtin_role_permissions_fixed`: The permissions of built-in roles cannot be changed",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/BuiltinRolePermissionsFixedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CannotRemoveOwnAdminProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/LastAdminRequiredProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "builtin_role_permissions_fixed": "#/components/schemas/BuiltinRolePermissionsFixedProblem",
-                      "cannot_remove_own_admin": "#/components/schemas/CannotRemoveOwnAdminProblem",
-                      "last_admin_required": "#/components/schemas/LastAdminRequiredProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/BuiltinRolePermissionsFixedProblem"
                 }
               }
             }
@@ -12366,7 +11680,7 @@
           "POSTS"
         ],
         "summary": "Archive Post",
-        "description": "Archive a post (is_deleted=true). post.archive must be in effect at the post.\n\nNothing is removed and no user row changes. Permissions granted on the post itself (its home users, its\nuser_post_access rows) stop applying until it is restored; permissions inherited from a group or the root keep\nread access to its data. Its observations and media become read-only history: writes answer 409 post_archived,\nexcept that callers with post.archive in effect at the post (plus observation.view, observation.archive and\nownership or observation.manage_any) still archive and restore its observations. It cannot\nbecome a home post or get new access rows. Hidden from lists unless include_deleted=true.\nUndo with POST /{post_id}/restore. Already archived or unknown: 404.",
+        "description": "Archive a post (is_deleted=true). post.archive must be in effect at the post.\n\nNothing is removed and no user row changes. Role assignments made on the post itself stop applying until it is\nrestored; assignments inherited from a group or the root keep read access to its data. Its observations and media\nbecome read-only history: writes answer 409 post_archived, except that callers with post.archive in effect at the\npost (plus observation.view, observation.archive and ownership or observation.manage_any) still archive and\nrestore its observations. It cannot become a home post. Hidden from lists unless include_deleted=true.\nUndo with POST /{post_id}/restore. Already archived or unknown: 404.",
         "operationId": "archive_post",
         "security": [
           {
@@ -12506,7 +11820,7 @@
           "POSTS"
         ],
         "summary": "Restore Post",
-        "description": "Restore an archived post (is_deleted=false): its home users and access rows read and write its data again.\npost.archive must be in effect at the post through a group or the root (a grant on the archived post itself\ndoes not apply). Unknown: 404. Not archived: 409.",
+        "description": "Restore an archived post (is_deleted=false): role assignments made on it apply again.\npost.archive must be in effect at the post through a group or the root (a grant on the archived post itself\ndoes not apply). Unknown: 404. Not archived: 409.",
         "operationId": "restore_post",
         "security": [
           {
@@ -25313,7 +24627,6 @@
           "coordinates_not_numeric",
           "latitude_out_of_range",
           "longitude_out_of_range",
-          "role_ids_duplicate",
           "permission_ids_duplicate",
           "permissions_unknown",
           "certificate_cn_invalid",
@@ -26331,7 +25644,7 @@
           "is_admin": {
             "type": "boolean",
             "title": "Is Admin",
-            "description": "Holds admin.true (legacy flag: no route checks it, every route checks its own permissions)"
+            "description": "Holds the built-in admin role at the root (no route checks it, every route checks its own permissions)"
           },
           "permissions": {
             "items": {
@@ -26339,14 +25652,15 @@
             },
             "type": "array",
             "title": "Permissions",
-            "description": "Effective permission names"
+            "description": "Permissions held at some node of the scope tree"
           },
           "roles": {
             "items": {
               "$ref": "#/components/schemas/RoleBriefResponse"
             },
             "type": "array",
-            "title": "Roles"
+            "title": "Roles",
+            "description": "The roles of the user's assignments"
           },
           "accessible_post_ids": {
             "anyOf": [
@@ -26361,7 +25675,7 @@
               }
             ],
             "title": "Accessible Post Ids",
-            "description": "Posts whose data the user may read: the home post and the extra post access, archived posts left out. null means every post (post.access_all)"
+            "description": "Posts where observation.view is in effect (archived posts only through a group or the root). null means every post (observation.view at the root)"
           },
           "access_token": {
             "type": "string",
@@ -31066,132 +30380,6 @@
           }
         ]
       },
-      "PostAccessHomePostProblem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "title": "Type",
-            "description": "URI of the problem type; dereference it for its documentation"
-          },
-          "title": {
-            "type": "string",
-            "const": "This post is the home post of the user and already grants full access",
-            "title": "Title",
-            "description": "Summary of the problem type"
-          },
-          "status": {
-            "type": "integer",
-            "const": 400,
-            "title": "Status",
-            "description": "HTTP status code"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "Explanation of this occurrence",
-            "examples": [
-              "This post is the home post of the user and already grants full access"
-            ]
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "description": "Path of the request that failed"
-          },
-          "code": {
-            "type": "string",
-            "const": "post_access_home_post",
-            "title": "Code",
-            "description": "Key of exactly this problem in the localization package"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "code"
-        ],
-        "title": "PostAccessHomePostProblem",
-        "description": "This post is the home post of the user and already grants full access (HTTP 400). Problem type post_access_home_post.",
-        "examples": [
-          {
-            "code": "post_access_home_post",
-            "detail": "This post is the home post of the user and already grants full access",
-            "instance": "/api/v1/...",
-            "status": 400,
-            "title": "This post is the home post of the user and already grants full access",
-            "type": "https://example.org/problems/post_access_home_post"
-          }
-        ]
-      },
-      "PostAccessNotFoundProblem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "title": "Type",
-            "description": "URI of the problem type; dereference it for its documentation"
-          },
-          "title": {
-            "type": "string",
-            "const": "Post access not found",
-            "title": "Title",
-            "description": "Summary of the problem type"
-          },
-          "status": {
-            "type": "integer",
-            "const": 404,
-            "title": "Status",
-            "description": "HTTP status code"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "Explanation of this occurrence",
-            "examples": [
-              "Post access not found"
-            ]
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "description": "Path of the request that failed"
-          },
-          "code": {
-            "type": "string",
-            "const": "post_access_not_found",
-            "title": "Code",
-            "description": "Key of exactly this problem in the localization package"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "code"
-        ],
-        "title": "PostAccessNotFoundProblem",
-        "description": "Post access not found (HTTP 404). Problem type post_access_not_found.",
-        "examples": [
-          {
-            "code": "post_access_not_found",
-            "detail": "Post access not found",
-            "instance": "/api/v1/...",
-            "status": 404,
-            "title": "Post access not found",
-            "type": "https://example.org/problems/post_access_not_found"
-          }
-        ]
-      },
       "PostArchivedProblem": {
         "properties": {
           "type": {
@@ -32189,75 +31377,6 @@
         "type": "object",
         "title": "RequiredPermissions",
         "description": "Permission requirement of a route, mirrors auth.require.Require"
-      },
-      "RoleArchivedNotAssignableProblem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "title": "Type",
-            "description": "URI of the problem type; dereference it for its documentation"
-          },
-          "title": {
-            "type": "string",
-            "const": "Archived role cannot be assigned",
-            "title": "Title",
-            "description": "Summary of the problem type"
-          },
-          "status": {
-            "type": "integer",
-            "const": 400,
-            "title": "Status",
-            "description": "HTTP status code"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "Explanation of this occurrence",
-            "examples": [
-              "Role {role_id} is archived and cannot be assigned"
-            ]
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "description": "Path of the request that failed"
-          },
-          "code": {
-            "type": "string",
-            "const": "role_archived_not_assignable",
-            "title": "Code",
-            "description": "Key of exactly this problem in the localization package"
-          },
-          "role_id": {
-            "type": "integer",
-            "title": "Role Id"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "code",
-          "role_id"
-        ],
-        "title": "RoleArchivedNotAssignableProblem",
-        "description": "Archived role cannot be assigned (HTTP 400). Problem type role_archived_not_assignable.",
-        "examples": [
-          {
-            "code": "role_archived_not_assignable",
-            "detail": "Role 1024 is archived and cannot be assigned",
-            "instance": "/api/v1/...",
-            "role_id": 1024,
-            "status": 400,
-            "title": "Archived role cannot be assigned",
-            "type": "https://example.org/problems/role_archived_not_assignable"
-          }
-        ]
       },
       "RoleBriefResponse": {
         "properties": {
@@ -37849,17 +36968,12 @@
                 "type": "null"
               }
             ],
-            "title": "Post Id"
+            "title": "Post Id",
+            "description": "Home post: who manages the user; null for none"
           },
-          "role_ids": {
-            "items": {
-              "type": "integer",
-              "exclusiveMinimum": 0.0
-            },
-            "type": "array",
-            "minItems": 1,
-            "title": "Role Ids",
-            "description": "Role ids, one form field per role: role_ids=1&role_ids=2"
+          "user_type": {
+            "$ref": "#/components/schemas/UserType",
+            "description": "The type of the user (GET /user-types): its base role is assigned at the home post, at the root without one or when the base role holds system permissions"
           },
           "certificate": {
             "type": "string",
@@ -37872,7 +36986,7 @@
         "required": [
           "username",
           "username_alias",
-          "role_ids",
+          "user_type",
           "certificate"
         ],
         "title": "UserCreateForm",
@@ -37895,7 +37009,7 @@
           "is_admin": {
             "type": "boolean",
             "title": "Is Admin",
-            "description": "Holds admin.true (legacy flag: no route checks it, every route checks its own permissions)"
+            "description": "Holds the built-in admin role at the root (no route checks it, every route checks its own permissions)"
           },
           "permissions": {
             "items": {
@@ -37903,14 +37017,15 @@
             },
             "type": "array",
             "title": "Permissions",
-            "description": "Effective permission names"
+            "description": "Permissions held at some node of the scope tree"
           },
           "roles": {
             "items": {
               "$ref": "#/components/schemas/RoleBriefResponse"
             },
             "type": "array",
-            "title": "Roles"
+            "title": "Roles",
+            "description": "The roles of the user's assignments"
           },
           "accessible_post_ids": {
             "anyOf": [
@@ -37925,7 +37040,7 @@
               }
             ],
             "title": "Accessible Post Ids",
-            "description": "Posts whose data the user may read: the home post and the extra post access, archived posts left out. null means every post (post.access_all)"
+            "description": "Posts where observation.view is in effect (archived posts only through a group or the root). null means every post (observation.view at the root)"
           },
           "id": {
             "type": "integer",
@@ -38116,54 +37231,6 @@
           }
         ]
       },
-      "UserPostAccessResponse": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "user_id": {
-            "type": "integer",
-            "title": "User Id"
-          },
-          "post_id": {
-            "type": "integer",
-            "title": "Post Id"
-          },
-          "can_write": {
-            "type": "boolean",
-            "title": "Can Write"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "id",
-          "user_id",
-          "post_id",
-          "can_write",
-          "created_at"
-        ],
-        "title": "UserPostAccessResponse"
-      },
-      "UserPostAccessUpsert": {
-        "properties": {
-          "can_write": {
-            "type": "boolean",
-            "title": "Can Write",
-            "description": "Allow creating and updating data in that post",
-            "default": false
-          }
-        },
-        "type": "object",
-        "title": "UserPostAccessUpsert",
-        "description": "Grant or update access of a user to an additional post"
-      },
       "UserPublicResponse": {
         "properties": {
           "id": {
@@ -38323,37 +37390,6 @@
           "last_login_at"
         ],
         "title": "UserResponse"
-      },
-      "UserRoleResponse": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "display_name": {
-            "type": "string",
-            "title": "Display Name"
-          },
-          "assigned_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Assigned At"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "id",
-          "name",
-          "display_name",
-          "assigned_at"
-        ],
-        "title": "UserRoleResponse",
-        "description": "Response model for roles assigned to users (includes assignment timestamp)"
       },
       "UserSelfOnlyProblem": {
         "properties": {
@@ -38706,23 +37742,6 @@
               }
             ],
             "title": "Is Active"
-          },
-          "role_ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "integer",
-                  "exclusiveMinimum": 0.0
-                },
-                "type": "array",
-                "minItems": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Role Ids",
-            "description": "Replaces every role of the user, one form field per role: role_ids=1&role_ids=2"
           },
           "certificate": {
             "anyOf": [

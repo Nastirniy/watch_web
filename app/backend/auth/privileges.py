@@ -1,33 +1,35 @@
-"""Privilege rules of the administration routes for roles and users.
+"""Delegation rules of the administration routes for roles and users (spec section 6).
 
-admin.true opens the administration area; these rules keep it from being a way to more permissions:
+Nobody becomes able to do more than they could by changing access:
 
-- check_grant: the caller holds every permission a change grants or revokes (roles assigned to a user,
-  permissions added to or removed from a role, a role archived or restored for its holders). 403
-  grant_exceeds_own_permissions with the permissions the caller lacks.
-- check_target_user: the caller writes to another user (any field, post access, archive state, sessions) only
-  when that user holds no permission the caller lacks. 403 target_user_more_privileged.
-- check_an_admin_remains / check_admin_kept: run after the change is written to the session (flushed here,
-  committed by the route): an active, non-archived user still holds admin.true through a role that is not
-  archived (409 last_admin_required), and the caller has not taken admin.true from themselves (409
-  cannot_remove_own_admin).
+- check_grant: role edits (permissions added to or removed from a role, a role archived, restored or cloned) need
+  every permission the change grants or revokes, held anywhere (role.* are system permissions: only holders at the
+  root edit roles). 403 grant_exceeds_own_permissions with the permissions the caller lacks.
+- check_grant_at: an assignment at a node (a new user's default assignment, the assignment API) needs every permission
+  of the role covered at that node (AuthContext.covers). 403 grant_exceeds_own_permissions.
+- check_target_user: a change to another user (fields, home post, sessions, archive state) needs the route's user.*
+  permission covering the user (their home post, the root for a user without one) and that the caller could grant
+  every assignment the user has (each role's permissions covered at its node). 403 target_user_more_privileged.
+- check_an_admin_remains / check_admin_kept: run after the change is written to the session (flushed here, committed
+  by the route): an active, non-archived user still holds the built-in admin role at the root (409
+  last_admin_required), and the caller has not taken it from themselves (409 cannot_remove_own_admin).
 
-The seeded admin role holds every permission (its name and permission set are fixed, the role routes refuse to
-change them), so its holders pass every grant and target check. What a user holds is context.held_permissions,
-the same definition as their AuthContext.
+What a user holds is context.grant_rows, the same definition as their AuthContext.
 """
-from typing import FrozenSet, Iterable
+from typing import FrozenSet, Iterable, List, Set, Union
 
 from loguru import logger
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.auth.access_errors import access_denied
-from app.backend.auth.context import AuthContext, effective_permissions, held_permissions
+from app.backend.auth.context import AuthContext, load_grants, permission_name
+from app.backend.auth.scope import Node, ROOT
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
-from app.backend.enums.general import Permissions
+from app.backend.enums.general import Permissions, UserType
 from app.backend.errors.problems import ApiError
-from app.backend.models.role import Permission, RolePermission, UserRole
+from app.backend.models.role import Permission, Role, RolePermission
+from app.backend.models.role_assignment import RoleAssignment
 from app.backend.models.user import User
 
 
@@ -45,30 +47,60 @@ async def role_permission_names(session: AsyncSession, role_ids: Iterable[int]) 
 
 
 def check_grant(auth: AuthContext, permissions: Iterable[str]) -> None:
-    """The caller holds every permission the change grants or revokes"""
+    """The caller holds every permission the change grants or revokes (anywhere: role edits)"""
     missing = sorted(set(permissions) - auth.permissions)
     if missing:
         logger.warning(f"User {auth.user.username} tried to grant or revoke permissions they lack: {missing}")
         raise access_denied(AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, missing=missing)
 
 
-async def check_target_user(session: AsyncSession, auth: AuthContext, target: User) -> None:
-    """The target user holds no permission the caller lacks"""
-    if target.id == auth.user.id:
-        return
-    missing = sorted(await effective_permissions(session, target.id) - auth.permissions)
+def _not_covered(auth: AuthContext, permissions: Iterable[str], node: Node) -> Set[str]:
+    return {name for name in set(permissions) if not auth.covers(name, node)}
+
+
+def check_grant_at(auth: AuthContext, permissions: Iterable[str], node: Node) -> None:
+    """The caller holds every permission at the node (inside a subtree where it is held): they may assign a role with
+    these permissions there"""
+    missing = sorted(_not_covered(auth, permissions, node))
     if missing:
-        logger.warning(f"User {auth.user.username} tried to change user {target.id}, who holds more: {missing}")
+        logger.warning(f"User {auth.user.username} tried to grant at {node.key} permissions they lack there: {missing}")
+        raise access_denied(AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, missing=missing)
+
+
+async def check_target_user(session: AsyncSession, auth: AuthContext, target: User,
+                            permission: Union[Permissions, str] = Permissions.USER_UPDATE) -> None:
+    """The caller's permission covers the target user, and the caller could grant every assignment of the target
+    (the caller themselves always could)"""
+    name = permission_name(permission)
+    missing: List[str] = []
+    if not auth.covers_user(name, target):
+        missing = [name]
+    elif target.id != auth.user.id:
+        lacking: Set[str] = set()
+        for grant in await load_grants(session, target.id):
+            lacking |= _not_covered(auth, grant.permissions, grant.node)
+        missing = sorted(lacking)
+    if missing:
+        logger.warning(f"User {auth.user.username} tried to change user {target.id} beyond their reach: {missing}")
         raise access_denied(AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, missing=missing)
 
 
+def _admin_at_root():
+    """Assignments of the built-in admin role at the root"""
+    return (
+        select(RoleAssignment.user_id)
+        .join(Role, Role.id == RoleAssignment.role_id)
+        .where(Role.builtin_key == UserType.ADMIN.value, Role.is_deleted == False,
+               RoleAssignment.scope_key == ROOT.key)
+    )
+
+
 async def check_an_admin_remains(session: AsyncSession) -> None:
-    """After the change: an active, non-archived user holds admin.true through a role that is not archived"""
+    """After the change: an active, non-archived user holds the built-in admin role at the root"""
     await session.flush()
     admin = (await session.exec(
-        held_permissions(UserRole.user_id)
-        .join(User, User.id == UserRole.user_id)
-        .where(User.is_active == True, User.is_deleted == False, Permission.name == Permissions.IS_ADMIN.value)
+        _admin_at_root().join(User, User.id == RoleAssignment.user_id)
+        .where(User.is_active == True, User.is_deleted == False)
         .limit(1)
     )).first()
     if admin is None:
@@ -77,8 +109,11 @@ async def check_an_admin_remains(session: AsyncSession) -> None:
 
 
 async def check_admin_kept(session: AsyncSession, auth: AuthContext) -> None:
-    """After a change that may take admin.true from its holders: someone keeps it, and the caller keeps theirs"""
+    """After a change that may take the admin role at the root from its holders: someone keeps it, and the caller
+    keeps theirs"""
     await check_an_admin_remains(session)
-    if auth.is_admin and Permissions.IS_ADMIN.value not in await effective_permissions(session, auth.user.id):
-        logger.warning(f"User {auth.user.username} tried to remove admin.true from themselves")
-        raise ApiError(ErrorCode.CANNOT_REMOVE_OWN_ADMIN)
+    if auth.is_admin:
+        kept = (await session.exec(_admin_at_root().where(RoleAssignment.user_id == auth.user.id).limit(1))).first()
+        if kept is None:
+            logger.warning(f"User {auth.user.username} tried to remove the admin role at the root from themselves")
+            raise ApiError(ErrorCode.CANNOT_REMOVE_OWN_ADMIN)

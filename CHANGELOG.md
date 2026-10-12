@@ -31,6 +31,25 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   (403 `grant_exceeds_own_permissions` when the caller lacks one); audit `create` with `cloned_from`.
 - Permission `media.monitor` (system level): `GET /media/statistics`, `GET /media/posters/status` and
   `POST /media/posters/reconcile`.
+- Role assignments (migration `023_authorization_v2`, table `role_assignments`): a user holds a role at one node of
+  the scope tree, the root, a scope group or a post (`scope_group_id`, `scope_post_id`: both null at the root, never
+  both set; `scope_key` `root` / `g:<id>` / `p:<id>`, unique per user and role; `created_at`, `created_by`). They are
+  the only source of access: an assignment applies to its node and everything below it, archived roles grant
+  nothing. The home post (`users.post_id`) is membership only (who manages the user).
+- `users.user_type` (NOT NULL): one of the types of `GET /user-types`.
+- Migration `023_authorization_v2` converts every user with the frozen conversion of spec section 8
+  (`app/backend/migrations/support/authz_v2.py`): the inferred `user_type`, assignments at the root and at the posts
+  of the home post and the access rows (derived roles `<role>_system`, `<role>_posts`, `<role>_view` where a role's
+  permissions split), permissions that did nothing left out. One audit row per user (`action` `migrate`,
+  `resource_type` `user`, `details`: type, roles and posts before, assignments after, dropped permissions,
+  differences). `user_roles` and `user_post_access` are kept as `user_roles_v1` and `user_post_access_v1`; what the
+  conversion removed and created is recorded in `authz_v2_migration_log`, so the downgrade restores the legacy rows,
+  the removed permissions and their grants exactly and removes the derived roles. A permission the conversion needs
+  and the database lacks (`media.monitor` before the first start of this version) is inserted by it.
+- `python -m app.backend.cli.authz_report [--json] [--url URL]`: dry run of the conversion on a database at
+  `022_builtin_roles` (run it on a copy of production before the upgrade; read-only): the plan of every user, as the
+  migration's audit rows will record it, and the derived roles. A database at 023 or later answers
+  `already converted`; one before 022 is refused (exit code 2).
 
 ### Changed
 
@@ -41,8 +60,8 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   (`posts.group_id` -> `scope_groups`), so a fresh MySQL install gets the foreign key.
 - Permission at the post. Every route requirement (`require(all=..., any=...)`, `POST /auth/check-permission`,
   `GET /auth/route-access`) and the `include_deleted` check now count a permission only when it is held at some node
-  of the scope tree (computed from the existing roles, home posts and access rows). A permission that did nothing
-  without `admin.true` (`post.create/update/archive`, `user.create/update/archive`, `role.*`, dictionary writes,
+  of the scope tree (the role assignments; migration 023 converts the roles, home posts and access rows). A
+  permission that did nothing without `admin.true` (`post.create/update/archive`, `user.create/update/archive`, `role.*`, dictionary writes,
   `media.update`, `export.create`, `audit.view`, `scope_group.*`) no longer counts for a role without `admin.true`:
   such a user gets 403 `permission_denied` (with `missing`) instead of `admin_required`, and `include_deleted` with
   such an `X.archive` answers 403 `permission_required_for_action`. A user with no home post and no access rows holds
@@ -109,12 +128,44 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `user_not_found` otherwise).
 - Regenerating the thumbnail of a media file without an observation needs `media.update` at the root (403
   `permission_required_for_action`).
+- `POST /users/` takes a required `user_type` (form field) and gives the new user one assignment: the built-in role of
+  the type at the home post, or at the root without a home post or when the role holds system permissions (`admin`).
+  The caller needs `user.create` covering that node (403 `permission_required_for_action`, `action` `create_user`)
+  and every permission of the role there (403 `grant_exceeds_own_permissions`). An unknown type answers 422
+  (`#/user_type`, `enum`). The audit row records `user_type` and `assignments` instead of `role_ids`.
+- Changing a user (`PATCH /users/{user_id}`, `POST /users/{user_id}/sessions/end` and
+  `/sessions/{session_id}/end` with `user.update`; `POST /users/{user_id}/archive` and `/restore` with
+  `user.archive`) needs that permission covering the user (their home post, the root for a user without one) and,
+  for another user, every assignment of the user grantable by the caller at its node; otherwise 403
+  `target_user_more_privileged` with `missing`. Moving the home post (`post_id`) needs `user.update` covering the new
+  post too (403 `permission_required_for_action`, `action` `move_user`); a move no longer touches access rows.
+- The last administrator is an active, non-archived user holding the built-in `admin` role at the root:
+  deactivating or archiving them answers 409 `last_admin_required`. Role edits can no longer take it away (the
+  built-in role is immutable), so `PATCH /roles/{role_id}`, `POST /roles/{role_id}/archive` and
+  `DELETE /roles/{role_id}/permissions/{permission_id}` no longer declare `last_admin_required` /
+  `cannot_remove_own_admin`.
+- `DELETE /roles/{role_id}` removes the role's assignments (the holders are read from `role_assignments`); the audit
+  copy lists them under `assignments`.
+- `/auth/me` and the login response (until the auth fields of the next step): `permissions` are the permissions held
+  at some node, `roles` the roles of the user's assignments, `is_admin` means the built-in `admin` role at the root,
+  `accessible_post_ids` the posts where `observation.view` is in effect (null: held at the root).
+- The permission catalog no longer has `admin.true` and `post.access_all` (migration 023 removes the rows and their
+  grants; `POST /auth/check-permission` with them answers 422 like any unknown permission).
+- `cli/init_user`: `--user-type` (the base role of the type at the root) instead of `--role-ids`, `--list-types`
+  instead of `--list-roles`. The development admin seeded at start is of type `admin` with the `admin` role at the
+  root.
 
 ### Removed
 
 - 403 `admin_required`: the problem type and every declaration of it.
 - The admin flag of a requirement: `required` in 403 bodies and in `GET /auth/route-access` entries is `{all, any}`;
   `POST /auth/check-permission` no longer takes `admin` and no longer answers `admin_required`.
+- `GET /users/{user_id}/roles`, `GET /users/{user_id}/post-access` and `PUT` / `DELETE
+  /users/{user_id}/post-access/{post_id}` (role assignments replace roles and access rows; their API follows), with
+  the schemas `UserRoleResponse`, `UserPostAccessResponse` and `UserPostAccessUpsert`.
+- `role_ids` of the user forms (`UserCreateForm`, `UserUpdateForm`) and its field code `role_ids_duplicate`.
+- Problem types `post_access_home_post`, `post_access_not_found` and `role_archived_not_assignable`.
+- Tables `user_roles` and `user_post_access` (kept as `*_v1` by migration 023 until a later cleanup revision).
 
 ## Post archiving and certificate name hash
 

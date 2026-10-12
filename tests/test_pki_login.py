@@ -14,7 +14,6 @@ from app.backend.auth.certificates import hash_data, parse_cn
 from app.backend.config import settings
 from app.backend.enums.general import AppEnvironment
 from app.backend.enums.routes import AuthRoutes, UserRoutes
-from app.backend.models.role import Role
 from app.backend.models.user import User, UserSession
 from tests.helpers import make_admin
 
@@ -88,11 +87,10 @@ def production(monkeypatch):
 
 async def _create_user(client, db, headers, username: str, cert: x509.Certificate) -> int:
     admin = await make_admin(db)
-    role_id = (await db.exec(select(Role).where(Role.name == "admin"))).one().id
     created = await client.post(
         CREATE_USER, headers=headers(admin),
         files={"certificate": ("cert.pem", pem(cert), "application/x-pem-file")},
-        data={"username": username, "username_alias": "Alias", "role_ids": [role_id]},
+        data={"username": username, "username_alias": "Alias", "user_type": "admin"},
     )
     assert created.status_code == 200, created.text
     return created.json()["id"]

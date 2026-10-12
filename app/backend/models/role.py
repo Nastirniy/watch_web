@@ -4,7 +4,7 @@ from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, SQLModel, Relationship
 
 if TYPE_CHECKING:
-    from app.backend.models.user import User
+    from app.backend.models.role_assignment import RoleAssignment
 
 
 class Role(SQLModel, table=True):
@@ -22,7 +22,7 @@ class Role(SQLModel, table=True):
 
     # Relationships
     role_permissions: List["RolePermission"] = Relationship(back_populates="role", cascade_delete=True)
-    user_roles: List["UserRole"] = Relationship(back_populates="role", cascade_delete=True)
+    assignments: List["RoleAssignment"] = Relationship(back_populates="role", cascade_delete=True)
 
 
 class Permission(SQLModel, table=True):
@@ -49,16 +49,3 @@ class RolePermission(SQLModel, table=True):
     role: Role = Relationship(back_populates="role_permissions")
     permission: Permission = Relationship(back_populates="role_permissions")
 
-
-class UserRole(SQLModel, table=True):
-    __tablename__ = "user_roles"
-    __table_args__ = (UniqueConstraint("user_id", "role_id", name="uq_user_roles_user_role"),)
-
-    id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: int = Field(foreign_key="users.id", index=True)
-    role_id: int = Field(foreign_key="roles.id", index=True)
-    assigned_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-    # Relationships
-    user: "User" = Relationship(back_populates="user_roles")
-    role: Role = Relationship(back_populates="user_roles")

@@ -5,7 +5,9 @@
 - unique index on user_roles(user_id, role_id), duplicates removed first
 
 Every step is guarded with an inspector check because 002_sync_schema already
-creates the column and the unique constraints on fresh installs.
+creates the column and the unique constraints on fresh installs. A fresh install
+has no user_roles table at all (023_authorization_v2 replaced it by role_assignments
+and 002 builds the tables of the current models): that step is skipped.
 
 Revision ID: 004_role_soft_delete
 Revises: 003_add_user_post_access
@@ -69,11 +71,12 @@ def upgrade() -> None:
     if "ix_roles_is_deleted" not in role_indexes:
         op.create_index("ix_roles_is_deleted", "roles", ["is_deleted"])
 
+    tables = set(inspector.get_table_names())
     for table, columns, name in (
         ("role_permissions", ("role_id", "permission_id"), UNIQUE_ROLE_PERMISSIONS),
         ("user_roles", ("user_id", "role_id"), UNIQUE_USER_ROLES),
     ):
-        if _has_unique(inspector, table, columns):
+        if table not in tables or _has_unique(inspector, table, columns):
             continue
         removed = _remove_duplicates(bind, table, columns)
         if removed:
@@ -85,8 +88,9 @@ def upgrade() -> None:
 def downgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
+    tables = set(inspector.get_table_names())
     for table, name in (("user_roles", UNIQUE_USER_ROLES), ("role_permissions", UNIQUE_ROLE_PERMISSIONS)):
-        if name in {i["name"] for i in inspector.get_indexes(table)}:
+        if table in tables and name in {i["name"] for i in inspector.get_indexes(table)}:
             op.drop_index(name, table_name=table)
     if "ix_roles_is_deleted" in {i["name"] for i in inspector.get_indexes("roles")}:
         op.drop_index("ix_roles_is_deleted", table_name="roles")

@@ -5,8 +5,9 @@ must either pass the permission gate (status not 401/403) or be rejected with
 a 403 carrying the expected code and missing list. Data scope is satisfied by
 building every referenced resource inside the persona's own post. The expected
 answer is the route's requirement evaluated on the persona's real AuthContext
-(its grants: a permission that is dead without admin.true does not count). There is no admin gate: admin.true
-alone passes no route, every refusal is permission_denied.
+(its role assignments, written by the legacy-shaped factory exactly as migration 023 converts them: a permission
+that was dead without admin.true is held nowhere). There is no admin gate: admin.true alone gives nothing, every
+refusal is permission_denied.
 """
 import pytest
 from sqlmodel import select
@@ -16,7 +17,8 @@ from app.backend.auth.route_access import route_access_map
 from app.backend.auth.context import load_auth_context
 from app.backend.models.observation import ObservationFrequency
 from app.backend.models.role import Permission
-from tests.helpers import make_post, make_user, make_dictionary, make_observation, make_media, make_role
+from app.backend.models.role_assignment import RoleAssignment
+from tests.helpers import ADMIN_TRUE, make_post, make_user, make_dictionary, make_observation, make_media
 
 ENTRIES = list(route_access_map(fastapi_app))
 PERSONAS = ["no_perms", "granular", "granular_admin", "admin_only"]
@@ -27,8 +29,8 @@ def persona_permissions(entry, persona) -> list:
     return {
         "no_perms": [],
         "granular": granular,
-        "granular_admin": granular + ["admin.true"],
-        "admin_only": ["admin.true"],
+        "granular_admin": granular + [ADMIN_TRUE],
+        "admin_only": [ADMIN_TRUE],
     }[persona]
 
 
@@ -46,14 +48,14 @@ async def test_route_gate(client, db, headers, entry, persona):
     ids = await make_dictionary(db)
     observation = await make_observation(db, user, post, ids["signal_type_id"])
     media = await make_media(db, observation, user)
-    role_id = (await db.exec(__import__("sqlmodel").select(__import__("app.backend.models.role", fromlist=["UserRole"]).UserRole.role_id).where(
-        __import__("app.backend.models.role", fromlist=["UserRole"]).UserRole.user_id == user.id))).first()
+    role_id = (await db.exec(select(RoleAssignment.role_id).where(RoleAssignment.user_id == user.id)
+                             .order_by(RoleAssignment.id))).first() or 1
     ids.update({
         "user_id": user.id,
         "post_id": post.id,
         "observation_id": observation.id,
         "media_id": media.id,
-        "frequency_id": (await db.exec(__import__("sqlmodel").select(ObservationFrequency.id).where(
+        "frequency_id": (await db.exec(select(ObservationFrequency.id).where(
             ObservationFrequency.observation_id == observation.id))).first(),
         "role_id": role_id,
         # a permission the persona holds: granting or revoking one the caller lacks is refused past the gate

@@ -57,9 +57,10 @@ async def seed_database():
     # Create initial admin user and role with proper PKI certificates
     session_maker = await get_session_maker()
     async with session_maker() as session:
+        from app.backend.auth.scope import ROOT
         from app.backend.models.user import User
-        from app.backend.models.role import Role, Permission, RolePermission, UserRole
-        from app.backend.enums.general import Permissions
+        from app.backend.models.role_assignment import RoleAssignment, scope_columns
+        from app.backend.enums.general import UserType
         from app.backend.utils.pki_generator import generate_admin_pki_credentials
 
         # 1. Seed roles and permissions (required in all modes)
@@ -117,17 +118,14 @@ async def seed_database():
                     pki_certificate_cn_hash_scheme=CN_SCHEME_CURRENT,
                     pki_certificate_serial_hash=await hash_data(admin_pki["pki_certificate_serial"]),
                     pki_certificate_fingerprint_hash=await hash_data(admin_pki["pki_certificate_fingerprint"]),
+                    user_type=UserType.ADMIN.value,
                     is_active=True
                 )
                 session.add(admin_user)
                 await session.flush()
 
-                # Assign admin role to user
-                user_role = UserRole(
-                    user_id=admin_user.id,
-                    role_id=admin_role.id
-                )
-                session.add(user_role)
+                # The built-in admin role at the root
+                session.add(RoleAssignment(user_id=admin_user.id, role_id=admin_role.id, **scope_columns(ROOT)))
 
                 await session.commit()
                 _logger.info(f"Admin user created successfully (mode: {'generated' if use_generated else 'configured'})")

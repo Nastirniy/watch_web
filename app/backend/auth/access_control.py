@@ -97,7 +97,7 @@ class AccessControlService:
 
     @staticmethod
     def check_user_view(auth: AuthContext, target: User) -> None:
-        """A user record (and what belongs to it: sessions, roles, post access) is visible to the user itself and to
+        """A user record (and what belongs to it: sessions, assignments) is visible to the user itself and to
         callers with user.view in effect at the user's home post (at the root for a user without one), otherwise 403
         user_self_only"""
         if target.id == auth.user.id or auth.covers_user(Permissions.USER_VIEW, target):

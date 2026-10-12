@@ -6,7 +6,6 @@ from sqlmodel import Field, SQLModel, Relationship
 if TYPE_CHECKING:
     from app.backend.models.observation import Observation
     from app.backend.models.user import User
-    from app.backend.models.user_post_access import UserPostAccess
 
 
 class Post(SQLModel, table=True):
@@ -19,7 +18,7 @@ class Post(SQLModel, table=True):
     region: Optional[str] = Field(default=None, max_length=255)
     city: Optional[str] = Field(default=None, max_length=255)
     is_active: bool = Field(default=True, index=True)
-    # Archived (POST /posts/{id}/archive): leaves every home-post and access-row data scope, its data is read-only.
+    # Archived (POST /posts/{id}/archive): assignments made on it stop applying, its data is read-only.
     # NOT NULL with a server default like the column 020 adds, so a fresh install (built by 002) gets the same column
     is_deleted: bool = Field(default=False, index=True, sa_column_kwargs={"server_default": false(), "nullable": False})
     # Place in the scope tree (scope_groups); null: directly under the root
@@ -30,6 +29,5 @@ class Post(SQLModel, table=True):
     # Relationships
     users: List["User"] = Relationship(back_populates="post")
     observations: List["Observation"] = Relationship(back_populates="post")
-    user_access: List["UserPostAccess"] = Relationship(back_populates="post")
 
     # online_user_count, user_count and last_user_activity_at are column properties attached in models/presence_properties.py

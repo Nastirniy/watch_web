@@ -1,8 +1,8 @@
 from .user import User, UserSession
-from .role import Role, Permission, RolePermission, UserRole
+from .role import Role, Permission, RolePermission
+from .role_assignment import RoleAssignment
 from .scope_group import ScopeGroup
 from .post import Post
-from .user_post_access import UserPostAccess
 from .observation import (
     SignalType, Category,
     Observation, ObservationFrequency, Tag, ObservationTag
@@ -16,8 +16,8 @@ from .storyboard import VideoStoryboard
 
 __all__ = [
     'User', 'UserSession',
-    'Role', 'Permission', 'RolePermission', 'UserRole',
-    'Post', 'ScopeGroup', 'UserPostAccess',
+    'Role', 'Permission', 'RolePermission', 'RoleAssignment',
+    'Post', 'ScopeGroup',
     'SignalType', 'Category',
     'Observation', 'ObservationFrequency', 'Tag', 'ObservationTag', 'MediaFile',
     'AuditLog', 'ExportJob', 'WorkerHeartbeat', 'MediaFormat', 'UploadSession', 'VideoStoryboard'

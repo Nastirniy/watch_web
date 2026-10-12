@@ -1,18 +1,19 @@
-from typing import List, Optional
+from typing import Optional
 from fastapi import UploadFile
-from pydantic import BaseModel, ConfigDict, Field, PositiveInt, field_validator
+from pydantic import ConfigDict, Field, field_validator
 
+from app.backend.enums.general import UserType
 from app.backend.utils.validators import SecureBaseModel, SecurityValidators
-from app.backend.errors.coded import invalid
-from app.backend.enums.errors import FieldErrorCode
 
 
 class UserCreateData(SecureBaseModel):
     """Pydantic model for user creation validation"""
     username: str = Field(..., min_length=3, max_length=50)
     username_alias: str = Field(..., min_length=1, max_length=255)
-    post_id: Optional[int] = Field(default=None, gt=0)
-    role_ids: List[PositiveInt] = Field(..., min_length=1, description="Role ids, one form field per role: role_ids=1&role_ids=2")
+    post_id: Optional[int] = Field(default=None, gt=0, description="Home post: who manages the user; null for none")
+    user_type: UserType = Field(description="The type of the user (GET /user-types): its base role is assigned at the "
+                                            "home post, at the root without one or when the base role holds system "
+                                            "permissions")
 
     @field_validator('username')
     @classmethod
@@ -24,13 +25,6 @@ class UserCreateData(SecureBaseModel):
     def validate_username_alias(cls, v: str) -> str:
         return SecurityValidators.sanitize_string(v, max_length=255)
 
-    @field_validator('role_ids')
-    @classmethod
-    def validate_role_ids(cls, v: List[int]) -> List[int]:
-        if len(v) != len(set(v)):
-            raise invalid(FieldErrorCode.ROLE_IDS_DUPLICATE)
-        return v
-
 
 class UserUpdateData(SecureBaseModel):
     """Pydantic model for user update validation - all fields optional"""
@@ -38,7 +32,6 @@ class UserUpdateData(SecureBaseModel):
     username_alias: Optional[str] = Field(default=None, min_length=1, max_length=255)
     post_id: Optional[int] = Field(default=None, gt=0)
     is_active: Optional[bool] = Field(default=None)
-    role_ids: Optional[List[PositiveInt]] = Field(default=None, min_length=1, description="Replaces every role of the user, one form field per role: role_ids=1&role_ids=2")
 
     @field_validator('username')
     @classmethod
@@ -52,14 +45,6 @@ class UserUpdateData(SecureBaseModel):
     def validate_username_alias(cls, v: Optional[str]) -> Optional[str]:
         if v is not None:
             return SecurityValidators.sanitize_string(v, max_length=255)
-        return v
-
-    @field_validator('role_ids')
-    @classmethod
-    def validate_role_ids(cls, v: Optional[List[int]]) -> Optional[List[int]]:
-        if v is not None:
-            if len(v) != len(set(v)):
-                raise invalid(FieldErrorCode.ROLE_IDS_DUPLICATE)
         return v
 
 
@@ -76,8 +61,3 @@ class UserUpdateForm(UserUpdateData):
     model_config = ConfigDict(extra="ignore")
 
     certificate: Optional[UploadFile] = Field(default=None, description="New PKI certificate file (PEM or DER format)")
-
-
-class UserPostAccessUpsert(BaseModel):
-    """Grant or update access of a user to an additional post"""
-    can_write: bool = Field(default=False, description="Allow creating and updating data in that post")

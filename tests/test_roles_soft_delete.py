@@ -5,11 +5,13 @@ from sqlmodel import select
 
 from app.backend.bootstrap.permissions import seed_roles_and_permissions
 from app.backend.enums.general import Permissions
-from app.backend.enums.routes import RoleRoutes, TagRoutes, UserRoutes, AuthRoutes
+from app.backend.enums.routes import RoleRoutes, TagRoutes, AuthRoutes
 from app.backend.api.v1 import V1
 from app.backend.models.audit import AuditLog
-from app.backend.models.role import Role, UserRole, Permission, RolePermission
-from tests.helpers import make_post, make_user, make_admin, make_role
+from app.backend.auth.scope import Node, ROOT
+from app.backend.models.role import Role, Permission, RolePermission
+from app.backend.models.role_assignment import RoleAssignment, scope_columns
+from tests.helpers import ADMIN_TRUE, assign, make_group, make_post, make_user, make_admin, make_role
 
 ROLES = V1.path(RoleRoutes.ROOT)
 ROLE = V1.path(RoleRoutes.ROLE_BY_ID)
@@ -50,20 +52,15 @@ async def test_archive_lifecycle(client, db, headers):
     assert (await client.patch(ROLE.format(role_id=role.id), json={"display_name": "x"}, headers=headers(admin))).status_code == 404
     assert (await client.patch(ROLE.format(role_id=role.id), json={"is_deleted": False}, headers=headers(admin))).status_code == 422, "is_deleted left the body"
 
-    # cannot be archived twice, cannot be assigned, name cannot be reused
+    # cannot be archived twice, name cannot be reused
     assert (await client.post(ARCHIVE.format(role_id=role.id), headers=headers(admin))).status_code == 404
-    assign = await client.patch(V1.path(UserRoutes.USER_BY_ID, user_id=user.id),
-                                data={"role_ids": [role.id]}, headers=headers(admin))
-    assert assign.status_code == 400, assign.text
     reuse = await client.post(ROLES, json={"name": "reviewer", "display_name": "Reviewer"}, headers=headers(admin))
     assert reuse.status_code == 409
 
-    # the user's role list hides it, /auth/me shows no roles; the assignment row itself is kept
-    user_roles = (await client.get(V1.path(UserRoutes.USER_ROLES, user_id=user.id), headers=headers(admin))).json()
-    assert user_roles == []
+    # /auth/me shows no roles; the assignment row itself is kept
     me = (await client.get(V1.path(AuthRoutes.ME), headers=headers(user))).json()
     assert me["roles"] == [] and me["permissions"] == []
-    assert (await db.exec(select(UserRole).where(UserRole.role_id == role.id))).first() is not None
+    assert (await db.exec(select(RoleAssignment).where(RoleAssignment.role_id == role.id))).first() is not None
 
     # restore
     restored = await client.post(RESTORE.format(role_id=role.id), headers=headers(admin))
@@ -78,8 +75,8 @@ async def test_archive_lifecycle(client, db, headers):
 @pytest.mark.asyncio
 async def test_archive_requires_role_archive_not_role_delete(client, db, headers):
     role = await make_role(db, [])
-    archiver = await make_user(db, perms=["admin.true", "role.view", "role.archive"])
-    deleter = await make_user(db, perms=["admin.true", "role.view", "role.delete"])
+    archiver = await make_user(db, perms=[ADMIN_TRUE, "role.view", "role.archive"])
+    deleter = await make_user(db, perms=[ADMIN_TRUE, "role.view", "role.delete"])
 
     denied = await client.post(ARCHIVE.format(role_id=role.id), headers=headers(deleter))
     assert denied.status_code == 403 and denied.json()["missing"] == ["role.archive"]
@@ -100,8 +97,9 @@ async def test_permanent_delete_preconditions_and_effect(client, db, headers):
     post = await make_post(db)
     admin = await make_admin(db)
     role = await make_role(db, ["tag.view", "tag.create"], name="temporary")
-    holder = await make_user(db, role=role, post_id=post.id)
-    archived_holder = await make_user(db, role=role, post_id=post.id)
+    holder, archived_holder = await make_user(db, post_id=post.id), await make_user(db, post_id=post.id)
+    for user in (holder, archived_holder):
+        await assign(db, user, role, Node.post(post.id))
     url = ROLE.format(role_id=role.id)
 
     # must be archived first
@@ -118,7 +116,8 @@ async def test_permanent_delete_preconditions_and_effect(client, db, headers):
     ]
 
     # unassign the active holder, archive the other one: its assignment row will be removed by the delete
-    await db.execute(UserRole.__table__.delete().where(UserRole.user_id == holder.id, UserRole.role_id == role.id))
+    await db.execute(RoleAssignment.__table__.delete().where(
+        RoleAssignment.user_id == holder.id, RoleAssignment.role_id == role.id))
     archived_holder.is_deleted = True
     db.add(archived_holder)
     await db.commit()
@@ -128,7 +127,7 @@ async def test_permanent_delete_preconditions_and_effect(client, db, headers):
 
     assert (await db.exec(select(Role).where(Role.id == role.id))).first() is None
     assert (await db.exec(select(RolePermission).where(RolePermission.role_id == role.id))).all() == []
-    assert (await db.exec(select(UserRole).where(UserRole.role_id == role.id))).all() == []
+    assert (await db.exec(select(RoleAssignment).where(RoleAssignment.role_id == role.id))).all() == []
     assert (await client.get(url, headers=headers(admin))).status_code == 404
     assert (await client.delete(url, headers=headers(admin))).status_code == 404
     assert (await client.get(TAGS, headers=headers(holder))).status_code == 403, "nothing is granted any more"
@@ -143,6 +142,7 @@ async def test_permanent_delete_preconditions_and_effect(client, db, headers):
     assert log.old_values["name"] == "temporary"
     assert log.old_values["permissions"] == ["tag.create", "tag.view"]
     assert log.old_values["assigned_archived_users"] == [{"id": archived_holder.id, "username": archived_holder.username}]
+    assert [(a["user_id"], a["scope"]) for a in log.old_values["assignments"]] == [(archived_holder.id, f"p:{post.id}")]
     assert log.details["permanent"] is True
 
 
@@ -183,8 +183,19 @@ async def test_seed_refreshes_permission_texts(db):
 async def test_assignments_are_unique(db):
     role = await make_role(db, [])
     user = await make_user(db, role=role)
-    role_id, user_id = role.id, user.id
-    db.add(UserRole(user_id=user_id, role_id=role_id))
+    group, post = await make_group(db), await make_post(db)
+    role_id, user_id, group_id, post_id = role.id, user.id, group.id, post.id
+    for node in (ROOT, Node.group(group_id), Node.post(post_id)):
+        db.add(RoleAssignment(user_id=user_id, role_id=role_id, **scope_columns(node)))
+    await db.commit()
+    for node in (ROOT, Node.group(group_id), Node.post(post_id)):   # one role at one node per user
+        db.add(RoleAssignment(user_id=user_id, role_id=role_id, **scope_columns(node)))
+        with pytest.raises(IntegrityError):
+            await db.commit()
+        await db.rollback()
+    # never a group and a post at once
+    db.add(RoleAssignment(user_id=user_id, role_id=role_id, scope_group_id=group_id, scope_post_id=post_id,
+                          scope_key="g:0"))
     with pytest.raises(IntegrityError):
         await db.commit()
     await db.rollback()

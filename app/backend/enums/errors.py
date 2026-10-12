@@ -136,11 +136,12 @@ class AccessErrorCode(ProblemType):
     MEDIA_NOT_OWNER = ("media_not_owner", problem(403, "You can only archive or restore media files you uploaded", **_ACCESS))
     UPLOAD_SESSION_NOT_OWNER = ("upload_session_not_owner", problem(403, "You can only use upload sessions you opened", **_ACCESS))
     USER_SELF_ONLY = ("user_self_only", problem(403, "You can only view your own account or users of your assigned posts", **_ACCESS))
-    # Roles assigned to a user, permissions added to or removed from a role, a role archived or restored:
-    # missing lists the permissions of the change the caller does not hold
+    # A role assigned at a node (missing: its permissions the caller does not hold there), permissions added to or
+    # removed from a role, a role archived or restored (missing: what the caller does not hold anywhere)
     GRANT_EXCEEDS_OWN_PERMISSIONS = ("grant_exceeds_own_permissions", problem(
         403, "You can only grant or revoke permissions you hold yourself", **_ACCESS))
-    # Roles, certificate, active or archive state of a user holding permissions the caller lacks (missing)
+    # Fields, home post, sessions or archive state of a user the caller's user.* permission does not cover, or who
+    # has an assignment the caller could not grant (missing)
     TARGET_USER_MORE_PRIVILEGED = ("target_user_more_privileged", problem(
         403, "This user holds permissions you do not hold", **_ACCESS))
     OBSERVATION_NOT_ACTIVE = ("observation_not_active", problem(
@@ -190,14 +191,10 @@ class ErrorCode(ProblemType):
     CERTIFICATE_INVALID = ("certificate_invalid", problem(400, "Invalid certificate"))
     CANNOT_DEACTIVATE_SELF = ("cannot_deactivate_self", problem(400, "You cannot deactivate your own account"))
     CANNOT_ARCHIVE_SELF = ("cannot_archive_self", problem(400, "You cannot archive your own account"))
-    POST_ACCESS_HOME_POST = ("post_access_home_post", problem(400, "This post is the home post of the user and already grants full access"))
-    POST_ACCESS_NOT_FOUND = ("post_access_not_found", problem(404, "Post access not found"))
 
     # ---------------------------------------------------------------- roles and permissions
     ROLE_NOT_FOUND = ("role_not_found", problem(404, "Role not found", role_id=Optional[int]))
     ROLE_NOT_ARCHIVED = ("role_not_archived", problem(409, "Role is not archived"))
-    ROLE_ARCHIVED_NOT_ASSIGNABLE = ("role_archived_not_assignable", problem(
-        400, "Archived role cannot be assigned", "Role {role_id} is archived and cannot be assigned", role_id=int))
     ROLE_NAME_TAKEN = ("role_name_taken", problem(400, "Role with this name already exists"))
     ROLE_NAME_ARCHIVED = ("role_name_archived", problem(
         409, "Role name belongs to an archived role",
@@ -220,7 +217,7 @@ class ErrorCode(ProblemType):
     POST_NOT_FOUND = ("post_not_found", problem(404, "Post not found", post_id=Optional[int]))
     POST_CODE_TAKEN = ("post_code_taken", problem(400, "Post with this code already exists"))
     POST_NOT_ARCHIVED = ("post_not_archived", problem(409, "Post is not archived"))
-    # The data of an archived post is read-only history; it cannot become a home post or get access rows either
+    # The data of an archived post is read-only history; it cannot become a home post either
     POST_ARCHIVED = ("post_archived", problem(
         409, "Post is archived", "Post {post_id} is archived: its data is read-only", post_id=int))
 
@@ -406,7 +403,6 @@ class FieldErrorCode(FieldCode):
     COORDINATES_NOT_NUMERIC = ("coordinates_not_numeric", field("Coordinates must be numeric"))
     LATITUDE_OUT_OF_RANGE = ("latitude_out_of_range", field("Latitude must be between -90 and 90"))
     LONGITUDE_OUT_OF_RANGE = ("longitude_out_of_range", field("Longitude must be between -180 and 180"))
-    ROLE_IDS_DUPLICATE = ("role_ids_duplicate", field("Duplicate role IDs are not allowed"))
     PERMISSION_IDS_DUPLICATE = ("permission_ids_duplicate", field("Duplicate permission IDs are not allowed"))
     PERMISSIONS_UNKNOWN = ("permissions_unknown", field("Unknown permissions: {permissions}", permissions=List[str]))
     CERTIFICATE_CN_INVALID = ("certificate_cn_invalid", field("Invalid certificate CN format"))

@@ -16,7 +16,6 @@ from app.backend.auth.certificates import CertificateParser, hash_cn, hash_data,
 from app.backend.config import settings
 from app.backend.enums.general import AppEnvironment
 from app.backend.enums.routes import AuthRoutes, UserRoutes
-from app.backend.models.role import Role
 from app.backend.models.user import User
 from tests.helpers import make_admin
 from tests.test_column_bounds import _run_downgrade
@@ -34,11 +33,10 @@ async def _row(db, username: str) -> User:
 
 async def _post_certificate(client, db, headers, username: str, cert: x509.Certificate):
     admin = await make_admin(db)
-    role_id = (await db.exec(select(Role).where(Role.name == "admin"))).one().id
     return await client.post(
         CREATE_USER, headers=headers(admin),
         files={"certificate": ("cert.pem", pem(cert), "application/x-pem-file")},
-        data={"username": username, "username_alias": "Alias", "role_ids": [role_id]},
+        data={"username": username, "username_alias": "Alias", "user_type": "admin"},
     )
 
 
@@ -190,9 +188,10 @@ def test_019_adds_the_column_keeps_old_rows_at_scheme_1_and_downgrades(tmp_path)
     assert first.returncode == 0, first.stdout + first.stderr
     conn = sqlite3.connect(db_file)
     conn.execute("alter table users drop column pki_certificate_cn_hash_scheme")
+    # the rest of the schema is at the head: users.user_type (023) is NOT NULL
     conn.execute("insert into users (pki_certificate_cn_hash, pki_certificate_serial_hash,"
                  " pki_certificate_fingerprint_hash, username, username_alias, is_active, is_deleted, created_at,"
-                 " updated_at) values ('c', 's', 'f', 'legacy', 'L', 1, 0, '2026-01-01', '2026-01-01')")
+                 " updated_at, user_type) values ('c', 's', 'f', 'legacy', 'L', 1, 0, '2026-01-01', '2026-01-01', 'viewer')")
     conn.execute("update alembic_version set version_num = '018_media_file_size_bigint'")
     conn.commit()
     conn.close()

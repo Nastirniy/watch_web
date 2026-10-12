@@ -1,17 +1,11 @@
 ﻿"""POST /users/ and PATCH /users/{id}: request body and certificate errors answer 4xx, never a silent 200 or a 500."""
 import pytest
-from sqlmodel import select
 
-from app.backend.models.role import Role
 from app.backend.models.user import User
 from tests.helpers import make_admin, make_user
 from tests.test_username_validation import CREATE, USER, make_certificate
 
 MAX_CERT_SIZE = 5 * 1024 * 1024
-
-
-async def admin_role_id(db) -> int:
-    return (await db.exec(select(Role).where(Role.name == "admin"))).one().id
 
 
 @pytest.mark.asyncio
@@ -45,7 +39,7 @@ async def test_create_certificate_file_errors(client, db, headers, content, code
     response = await client.post(
         CREATE, headers=headers(admin),
         files={"certificate": ("cert.pem", content, "application/x-pem-file")},
-        data={"username": "cert_case", "username_alias": "Alias", "role_ids": [await admin_role_id(db)]},
+        data={"username": "cert_case", "username_alias": "Alias", "user_type": "viewer"},
     )
     assert response.status_code == code, response.text
 
@@ -65,12 +59,11 @@ async def test_update_certificate_file_errors(client, db, headers, content, code
 @pytest.mark.asyncio
 async def test_update_with_certificate_of_another_user_answers_400(client, db, headers):
     admin = await make_admin(db)
-    role_id = await admin_role_id(db)
     certificate = make_certificate("cn-shared")
     created = await client.post(
         CREATE, headers=headers(admin),
         files={"certificate": ("cert.pem", certificate, "application/x-pem-file")},
-        data={"username": "cert_owner", "username_alias": "Alias", "role_ids": [role_id]},
+        data={"username": "cert_owner", "username_alias": "Alias", "user_type": "viewer"},
     )
     assert created.status_code == 200, created.text
 

@@ -332,12 +332,11 @@ async def archive_post(
 ):
     """Archive a post (is_deleted=true). post.archive must be in effect at the post.
 
-    Nothing is removed and no user row changes. Permissions granted on the post itself (its home users, its
-    user_post_access rows) stop applying until it is restored; permissions inherited from a group or the root keep
-    read access to its data. Its observations and media become read-only history: writes answer 409 post_archived,
-    except that callers with post.archive in effect at the post (plus observation.view, observation.archive and
-    ownership or observation.manage_any) still archive and restore its observations. It cannot
-    become a home post or get new access rows. Hidden from lists unless include_deleted=true.
+    Nothing is removed and no user row changes. Role assignments made on the post itself stop applying until it is
+    restored; assignments inherited from a group or the root keep read access to its data. Its observations and media
+    become read-only history: writes answer 409 post_archived, except that callers with post.archive in effect at the
+    post (plus observation.view, observation.archive and ownership or observation.manage_any) still archive and
+    restore its observations. It cannot become a home post. Hidden from lists unless include_deleted=true.
     Undo with POST /{post_id}/restore. Already archived or unknown: 404.
     """
     return await _set_post_archived(request, session, auth, post_id, archived=True)
@@ -357,7 +356,7 @@ async def restore_post(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW, Permissions.POST_ARCHIVE]))
 ):
-    """Restore an archived post (is_deleted=false): its home users and access rows read and write its data again.
+    """Restore an archived post (is_deleted=false): role assignments made on it apply again.
     post.archive must be in effect at the post through a group or the root (a grant on the archived post itself
     does not apply). Unknown: 404. Not archived: 409."""
     return await _set_post_archived(request, session, auth, post_id, archived=False)

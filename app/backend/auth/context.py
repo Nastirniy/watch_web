@@ -1,30 +1,25 @@
 """Per-request authorization context.
 
-Loaded once per request by dependencies.get_auth_context. Every permission and
-post scope check reads from this object; nothing queries the database again
-during the request.
+Loaded once per request by dependencies.get_auth_context (three queries: the user's role assignments with their roles
+and permissions, every group, every post). Every permission and scope check reads from this object; nothing queries
+the database again during the request.
 
-Two views of the same access live here during the move to authorization v2:
-- grants on the scope tree (grants, tree, held_anywhere, has_at_post, posts_with, covers, ...), computed from the
-  old tables through the frozen conversion (legacy_grants.py) until role assignments replace them: every route
-  and every AccessControlService check reads only these;
-- the legacy fields (permissions, roles, readable_post_ids, writable_post_ids and the methods on them), with their
-  old semantics, read only by the auth response (is_admin, accessible_post_ids) and auth/privileges.py.
+Access is the user's role assignments (role_assignments: role + node of the scope tree), each a Grant: its
+permissions apply to the node and everything below it (auth/scope.py). Archived roles grant nothing.
 """
 from dataclasses import dataclass, field
-from typing import Dict, FrozenSet, List, Optional, Set, Tuple, Union
+from typing import Dict, FrozenSet, Iterable, Optional, Set, Tuple, Union
 
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.backend.auth.legacy_grants import legacy_grants
 from app.backend.auth.scope import Grant, Node, ROOT, ScopeTree
 from app.backend.enums.general import Permissions, UserType
 from app.backend.models.user import User
 from app.backend.models.post import Post
-from app.backend.models.role import Role, Permission, RolePermission, UserRole
+from app.backend.models.role import Role, Permission, RolePermission
+from app.backend.models.role_assignment import RoleAssignment, node_of
 from app.backend.models.scope_group import ScopeGroup
-from app.backend.models.user_post_access import UserPostAccess
 
 
 def permission_name(permission: Union[Permissions, str]) -> str:
@@ -42,13 +37,9 @@ class RoleBrief:
 @dataclass(frozen=True)
 class AuthContext:
     user: User
-    permissions: FrozenSet[str]
-    roles: Tuple[RoleBrief, ...]
-    readable_post_ids: FrozenSet[int]   # home post + every user_post_access row, archived posts left out
-    writable_post_ids: FrozenSet[int]   # home post + user_post_access rows with can_write, archived posts left out
-    session_id: Optional[str] = None    # user_sessions.id of the access token (audit, logout)
-    grants: Tuple[Grant, ...] = ()      # what the user holds where (authorization v2)
+    grants: Tuple[Grant, ...] = ()      # what the user holds where: one per role assignment of a role not archived
     tree: ScopeTree = field(default_factory=ScopeTree.empty)
+    session_id: Optional[str] = None    # user_sessions.id of the access token (audit, logout)
     # every permission of the grants, computed once (require() reads it on every request)
     _held_anywhere: FrozenSet[str] = field(init=False, repr=False, compare=False, default=frozenset())
 
@@ -57,34 +48,24 @@ class AuthContext:
         object.__setattr__(self, "_held_anywhere", held)
 
     @property
+    def permissions(self) -> FrozenSet[str]:
+        """Every permission held at some node (held_anywhere): the menu of the web client, role edits"""
+        return self._held_anywhere
+
+    @property
+    def roles(self) -> Tuple[RoleBrief, ...]:
+        """The distinct roles of the grants, by id"""
+        roles: Dict[int, RoleBrief] = {}
+        for grant in self.grants:
+            roles.setdefault(grant.role_id, RoleBrief(grant.role_id, grant.role_name, grant.role_display_name))
+        return tuple(roles[role_id] for role_id in sorted(roles))
+
+    @property
     def is_admin(self) -> bool:
-        """Holds admin.true (legacy): only the auth response and auth/privileges.py read it, no route does"""
-        return Permissions.IS_ADMIN.value in self.permissions
-
-    @property
-    def has_post_access_all(self) -> bool:
-        return Permissions.POST_ACCESS_ALL.value in self.permissions
-
-    @property
-    def role_ids(self) -> FrozenSet[int]:
-        return frozenset(role.id for role in self.roles)
-
-    def has(self, permission: Union[Permissions, str]) -> bool:
-        return permission_name(permission) in self.permissions
-
-    def can_view_post(self, post_id: int) -> bool:
-        return self.has_post_access_all or post_id in self.readable_post_ids
-
-    def can_write_post(self, post_id: int) -> bool:
-        return self.has_post_access_all or post_id in self.writable_post_ids
-
-    def post_scope(self) -> Optional[FrozenSet[int]]:
-        """Post ids the user may read. None means unrestricted (post.access_all)."""
-        return None if self.has_post_access_all else self.readable_post_ids
-
-    def accessible_post_ids_api(self) -> Optional[List[int]]:
-        """Value exposed to API clients. None means all posts."""
-        return None if self.has_post_access_all else sorted(self.readable_post_ids)
+        """Holds the built-in admin role at the root (a built-in role is named by its key). Only the auth response and
+        auth/privileges.py read it; no route authorizes by it"""
+        return any(grant.node == ROOT and grant.role_is_builtin and grant.role_name == UserType.ADMIN.value
+                   for grant in self.grants)
 
     # ------------------------------------------------------------------ grants on the scope tree
     @property
@@ -135,36 +116,37 @@ class AuthContext:
         return self.has_at_post(permission, user.post_id)
 
 
-def held_permissions(*columns):
-    """The one definition of what users hold: select(*columns) over every role assignment (UserRole) of a role that
-    is not archived, one row per permission of the role (Permission columns None for a role without any).
-    load_auth_context, effective_permissions and privileges.py add their own columns and filters."""
+def grant_rows(user_id: int):
+    """The one definition of what a user holds: every role assignment of a role that is not archived, one row per
+    permission of the role (permission None for a role without any): (assignment id, group id, post id, role id,
+    name, display name, builtin_key, permission name)"""
     return (
-        select(*columns)
-        .select_from(UserRole)
-        .join(Role, Role.id == UserRole.role_id)
+        select(RoleAssignment.id, RoleAssignment.scope_group_id, RoleAssignment.scope_post_id,
+               Role.id, Role.name, Role.display_name, Role.builtin_key, Permission.name)
+        .select_from(RoleAssignment)
+        .join(Role, Role.id == RoleAssignment.role_id)
         .outerjoin(RolePermission, RolePermission.role_id == Role.id)
         .outerjoin(Permission, Permission.id == RolePermission.permission_id)
-        .where(Role.is_deleted == False)
+        .where(RoleAssignment.user_id == user_id, Role.is_deleted == False)
     )
 
 
-def role_permission_rows(user_id: int):
-    """What a user holds: (role id, name, display name, builtin_key, permission name or None) for every role of the
-    user that is not archived"""
-    return held_permissions(Role.id, Role.name, Role.display_name, Role.builtin_key, Permission.name).where(
-        UserRole.user_id == user_id)
+def grants_of(rows: Iterable) -> Tuple[Grant, ...]:
+    """The grants of grant_rows, in assignment id order"""
+    heads: Dict[int, tuple] = {}            # assignment id -> role id, name, display name, built-in, node
+    permissions: Dict[int, Set[str]] = {}
+    for assignment_id, group_id, post_id, role_id, name, display_name, builtin_key, permission in rows:
+        heads.setdefault(assignment_id, (role_id, name, display_name, builtin_key is not None, node_of(group_id, post_id)))
+        held = permissions.setdefault(assignment_id, set())
+        if permission:
+            held.add(permission)
+    return tuple(Grant(*heads[assignment_id], frozenset(permissions[assignment_id]), assignment_id=assignment_id)
+                 for assignment_id in sorted(heads))
 
 
-async def effective_permissions(session: AsyncSession, user_id: int) -> FrozenSet[str]:
-    """Permission names a user holds through roles that are not archived (AuthContext.permissions of that user)"""
-    rows = (await session.exec(role_permission_rows(user_id))).all()
-    return frozenset(name for *_, name in rows if name)
-
-
-def access_rows(user_id: int):
-    """(post id, can_write) of every user_post_access row of the user, archived posts included"""
-    return select(UserPostAccess.post_id, UserPostAccess.can_write).where(UserPostAccess.user_id == user_id)
+async def load_grants(session: AsyncSession, user_id: int) -> Tuple[Grant, ...]:
+    """What a user holds where (one query)"""
+    return grants_of((await session.exec(grant_rows(user_id))).all())
 
 
 async def load_scope_tree(session: AsyncSession) -> ScopeTree:
@@ -179,45 +161,7 @@ async def load_scope_tree(session: AsyncSession) -> ScopeTree:
     )
 
 
-def _legacy_data_scope(user: User, rows: List[Tuple[int, bool]], tree: ScopeTree) -> Tuple[FrozenSet[int], FrozenSet[int]]:
-    """readable and writable post ids: the home post (read and write) and every access row (write with can_write).
-    An archived post is in no home-post or access-row scope (only post.access_all still reads its data); the rows
-    stay and apply again after a restore. A post that does not exist is in no scope."""
-    readable: Set[int] = set()
-    writable: Set[int] = set()
-    for post_id, can_write in ([(user.post_id, True)] if user.post_id is not None else []) + list(rows):
-        if post_id not in tree.post_group or post_id in tree.archived_posts:
-            continue
-        readable.add(post_id)
-        if can_write:
-            writable.add(post_id)
-    return frozenset(readable), frozenset(writable)
-
-
 async def load_auth_context(session: AsyncSession, user: User, session_id: Optional[str] = None) -> AuthContext:
-    """Four queries: roles with their permissions, the access rows, the scope tree (groups, posts)."""
-    role_rows = (await session.exec(role_permission_rows(user.id))).all()
-    rows = [(post_id, bool(can_write)) for post_id, can_write in (await session.exec(access_rows(user.id))).all()]
-    tree = await load_scope_tree(session)
-
-    roles: Dict[int, RoleBrief] = {}
-    permissions: Set[str] = set()
-    admin_role_id: Optional[int] = None
-    for role_id, role_name, role_display_name, builtin_key, name in role_rows:
-        roles.setdefault(role_id, RoleBrief(id=role_id, name=role_name, display_name=role_display_name))
-        if builtin_key == UserType.ADMIN.value:
-            admin_role_id = role_id
-        if name:
-            permissions.add(name)
-
-    readable, writable = _legacy_data_scope(user, rows, tree)
-    return AuthContext(
-        user=user,
-        permissions=frozenset(permissions),
-        roles=tuple(sorted(roles.values(), key=lambda role: role.id)),
-        readable_post_ids=readable,
-        writable_post_ids=writable,
-        session_id=session_id,
-        grants=legacy_grants(user, role_rows, rows, admin_role_id),
-        tree=tree,
-    )
+    """Three queries: the grants, the scope tree (groups, posts)"""
+    grants = await load_grants(session, user.id)
+    return AuthContext(user=user, grants=grants, tree=await load_scope_tree(session), session_id=session_id)

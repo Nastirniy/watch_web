@@ -1,13 +1,14 @@
-"""Transitional AuthContext: grants computed from the old tables (auth/legacy_grants.py) and the scope tree, next
-to the legacy fields with today's semantics. Built with the legacy factories of tests/helpers.py."""
+"""AuthContext: the grants of the user's role assignments on the scope tree. Users are built with the legacy-shaped
+factory of tests/helpers.py (written as migration 023 converts them) or with real assignments (assign)."""
 from sqlmodel import select
 
 from app.backend.auth.context import load_auth_context, load_scope_tree
 from app.backend.auth.scope import Node, ROOT
 from app.backend.enums.general import Permissions as P
 from app.backend.models.role import Role
+from app.backend.models.role_assignment import RoleAssignment
 from app.backend.models.scope_group import ScopeGroup
-from tests.helpers import make_admin, make_post, make_role, make_user
+from tests.helpers import ACCESS_ALL, ADMIN_TRUE, assign, make_admin, make_group, make_post, make_role, make_user
 
 
 async def _archive_post(db, post):
@@ -30,8 +31,8 @@ async def test_grants_match_legacy_scope(db):
     user = await make_user(db, perms=[P.OBSERVATION_VIEW, P.OBSERVATION_UPDATE], post_id=a.id,
                            extra_access={b.id: True, c.id: False})
     auth = await load_auth_context(db, user)
-    assert auth.posts_with(P.OBSERVATION_VIEW) == auth.readable_post_ids == {a.id, b.id, c.id}
-    assert auth.posts_with(P.OBSERVATION_UPDATE) == auth.writable_post_ids == {a.id, b.id}
+    assert auth.posts_with(P.OBSERVATION_VIEW) == {a.id, b.id, c.id}
+    assert auth.posts_with(P.OBSERVATION_UPDATE) == {a.id, b.id}
     assert auth.has_at_post(P.OBSERVATION_UPDATE, b.id) and not auth.has_at_post(P.OBSERVATION_UPDATE, c.id)
     assert auth.has_at_post("observation.view", c.id)
     assert auth.held_anywhere == {"observation.view", "observation.update"}
@@ -48,13 +49,14 @@ async def test_admin_sees_every_post_record(db):
     assert grant.node == ROOT and grant.role_is_builtin and grant.role_id == admin_role.id
     assert "admin.true" not in grant.permissions and "post.access_all" not in grant.permissions
     assert auth.covers(P.USER_UPDATE, ROOT) and auth.covers_user(P.USER_UPDATE, admin)
+    assert auth.is_admin and [role.name for role in auth.roles] == ["admin"]
 
 
 async def test_admin_true_record_exception_and_post_scope(db):
     a, b = await make_post(db), await make_post(db)
-    user = await make_user(db, perms=[P.IS_ADMIN, P.POST_VIEW, P.USER_VIEW, P.OBSERVATION_VIEW], post_id=a.id)
+    user = await make_user(db, perms=[ADMIN_TRUE, P.POST_VIEW, P.USER_VIEW, P.OBSERVATION_VIEW], post_id=a.id)
     auth = await load_auth_context(db, user)
-    assert auth.is_admin                                     # legacy fields unchanged
+    assert not auth.is_admin                                 # the built-in admin role at the root only
     assert auth.posts_with(P.POST_VIEW) is None              # post records: every post, like post_record_scope
     assert auth.posts_with(P.OBSERVATION_VIEW) == {a.id}     # data: the home post only
     assert not auth.has_at_post(P.OBSERVATION_VIEW, b.id)
@@ -63,13 +65,12 @@ async def test_admin_true_record_exception_and_post_scope(db):
 
 async def test_access_all_is_every_post(db):
     a = await make_post(db)
-    user = await make_user(db, perms=[P.POST_ACCESS_ALL, P.OBSERVATION_VIEW, P.OBSERVATION_CREATE])
+    user = await make_user(db, perms=[ACCESS_ALL, P.OBSERVATION_VIEW, P.OBSERVATION_CREATE])
     auth = await load_auth_context(db, user)
-    assert auth.post_scope() is None
     assert auth.posts_with(P.OBSERVATION_VIEW) is None and auth.posts_with(P.OBSERVATION_CREATE) is None
     assert auth.has_at_post(P.OBSERVATION_CREATE, a.id)
-    # like can_view_post: every id, even one no post has (the route answers 404 after the scope check)
-    assert auth.has_at_post(P.OBSERVATION_VIEW, 0) == auth.can_view_post(0) is True
+    # every id, even one no post has (the route answers 404 after the scope check)
+    assert auth.has_at_post(P.OBSERVATION_VIEW, 0) is True
 
 
 async def test_unknown_post_ids_never_fail(db):
@@ -77,14 +78,14 @@ async def test_unknown_post_ids_never_fail(db):
     user = await make_user(db, perms=[P.OBSERVATION_VIEW], post_id=a.id)
     auth = await load_auth_context(db, user)
     for post_id in (0, -1, a.id + 1000):
-        assert auth.has_at_post(P.OBSERVATION_VIEW, post_id) == auth.can_view_post(post_id) is False
+        assert auth.has_at_post(P.OBSERVATION_VIEW, post_id) is False
 
 
-async def test_dead_permissions_are_held_only_in_the_legacy_set(db):
+async def test_dead_permissions_are_held_nowhere(db):
     a = await make_post(db)
     user = await make_user(db, perms=[P.OBSERVATION_VIEW, P.TAG_CREATE, P.USER_UPDATE], post_id=a.id)
     auth = await load_auth_context(db, user)
-    assert auth.has(P.TAG_CREATE) and auth.has(P.USER_UPDATE)          # today's semantics
+    assert auth.permissions == {"observation.view"}
     assert not auth.has_anywhere(P.TAG_CREATE) and not auth.has_anywhere(P.USER_UPDATE)
     assert auth.posts_with(P.USER_UPDATE) == frozenset()
 
@@ -94,7 +95,7 @@ async def test_dictionary_reader_without_post_holds_views_at_root(db):
     auth = await load_auth_context(db, user)
     assert auth.has_at_root(P.CATEGORY_VIEW) and auth.has_at_root(P.TAG_VIEW)
     assert not auth.has_anywhere(P.OBSERVATION_VIEW)
-    assert auth.readable_post_ids == frozenset()
+    assert auth.posts_with(P.OBSERVATION_VIEW) == frozenset()
 
 
 async def test_archived_post_leaves_the_direct_scope(db):
@@ -103,7 +104,7 @@ async def test_archived_post_leaves_the_direct_scope(db):
                            extra_access={b.id: False})
     await _archive_post(db, b)
     auth = await load_auth_context(db, user)
-    assert auth.readable_post_ids == {a.id} and auth.posts_with(P.OBSERVATION_VIEW) == {a.id}
+    assert auth.posts_with(P.OBSERVATION_VIEW) == {a.id}
     assert not auth.has_at_post(P.OBSERVATION_VIEW, b.id)
     assert b.id in auth.tree.archived_posts
     # the grant stays (applies again after a restore) and the permission is still held
@@ -151,3 +152,28 @@ async def test_load_scope_tree(db):
     user = await make_user(db, perms=[P.OBSERVATION_VIEW], post_id=seven.id)
     auth = await load_auth_context(db, user)
     assert auth.tree == tree
+
+
+async def test_grants_come_from_role_assignments(db):
+    """One grant per assignment of a role that is not archived, at the node of its scope columns"""
+    east = await make_group(db, "East")
+    a, b, outside = await make_post(db, group_id=east.id), await make_post(db, group_id=east.id), await make_post(db)
+    viewer, editor = await make_role(db, [P.OBSERVATION_VIEW]), await make_role(db, [P.OBSERVATION_VIEW, P.OBSERVATION_UPDATE])
+    user = await make_user(db)
+    at_group = await assign(db, user, viewer, Node.group(east.id))
+    at_post = await assign(db, user, editor, Node.post(outside.id))
+    at_root = await assign(db, user, viewer, ROOT)
+
+    auth = await load_auth_context(db, user)
+    assert [(g.assignment_id, g.node) for g in auth.grants] == [
+        (at_group.id, Node.group(east.id)), (at_post.id, Node.post(outside.id)), (at_root.id, ROOT)]
+    assert [role.id for role in auth.roles] == sorted([viewer.id, editor.id])
+    assert auth.posts_with(P.OBSERVATION_UPDATE) == {outside.id}
+    assert auth.posts_with(P.OBSERVATION_VIEW) is None
+
+    await db.delete(at_root)
+    await db.commit()
+    auth = await load_auth_context(db, user)
+    assert auth.posts_with(P.OBSERVATION_VIEW) == {a.id, b.id, outside.id}
+    assert auth.covers(P.OBSERVATION_VIEW, Node.post(a.id)) and not auth.covers(P.OBSERVATION_VIEW, ROOT)
+    assert (await db.exec(select(RoleAssignment.scope_key).where(RoleAssignment.id == at_group.id))).one() == f"g:{east.id}"

@@ -2,7 +2,7 @@ from typing import Optional, List
 from pydantic import BaseModel, Field
 
 from app.backend.enums.errors import RequiredPermissions
-from app.backend.enums.general import SessionEndReason, SessionRevokeCause, SessionStatus
+from app.backend.enums.general import Permissions, SessionEndReason, SessionRevokeCause, SessionStatus
 from app.backend.models.user import UserSession
 from app.backend.auth.context import AuthContext
 from app.backend.auth.presence import online_threshold_seconds
@@ -19,14 +19,14 @@ class RoleBriefResponse(PlainTextModel):
 class AuthorizationInfo(PlainTextModel):
     """Authorization data the GUI needs to build its interface"""
     post_id: Optional[int] = Field(default=None, description="Home post of the user")
-    is_admin: bool = Field(description="Holds admin.true (legacy flag: no route checks it, every route checks its "
-                                       "own permissions)")
-    permissions: List[str] = Field(default_factory=list, description="Effective permission names")
-    roles: List[RoleBriefResponse] = Field(default_factory=list)
+    is_admin: bool = Field(description="Holds the built-in admin role at the root (no route checks it, every route "
+                                       "checks its own permissions)")
+    permissions: List[str] = Field(default_factory=list, description="Permissions held at some node of the scope tree")
+    roles: List[RoleBriefResponse] = Field(default_factory=list, description="The roles of the user's assignments")
     accessible_post_ids: Optional[List[int]] = Field(
         default=None,
-        description="Posts whose data the user may read: the home post and the extra post access, archived posts left out. "
-                    "null means every post (post.access_all)"
+        description="Posts where observation.view is in effect (archived posts only through a group or the root). "
+                    "null means every post (observation.view at the root)"
     )
 
 
@@ -102,12 +102,13 @@ class RouteAccessResponse(BaseModel):
 
 
 def _authorization_fields(auth: AuthContext) -> dict:
+    readable = auth.posts_with(Permissions.OBSERVATION_VIEW)
     return {
         "post_id": auth.user.post_id,
         "is_admin": auth.is_admin,
         "permissions": sorted(auth.permissions),
         "roles": [RoleBriefResponse(id=r.id, name=r.name, display_name=r.display_name) for r in auth.roles],
-        "accessible_post_ids": auth.accessible_post_ids_api(),
+        "accessible_post_ids": None if readable is None else sorted(readable),
     }
 
 

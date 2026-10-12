@@ -16,7 +16,7 @@ def test_levels():
     assert permission_level("observation.view") == PermissionLevel.SCOPED
     assert permission_level("role.view") == PermissionLevel.SCOPED
     for name in ("role.create", "tag.archive", "media_format.update", "scope_group.create", "media.monitor",
-                 "audit.view", "admin.true"):
+                 "audit.view"):
         assert permission_level(name) == PermissionLevel.SYSTEM, name
 
 

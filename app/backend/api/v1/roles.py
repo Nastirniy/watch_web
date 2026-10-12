@@ -8,12 +8,13 @@ from datetime import datetime, timezone
 
 from app.backend.api.shared.helpers.db_errors import is_unique_violation, unique_violation_as
 from app.backend.database import get_session
-from app.backend.models.role import Role, Permission, RolePermission, UserRole
+from app.backend.models.role import Role, Permission, RolePermission
+from app.backend.models.role_assignment import RoleAssignment
 from app.backend.models.user import User
 from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
 from app.backend.auth.access_control import AccessControlService
-from app.backend.auth.privileges import check_admin_kept, check_grant, role_permission_names
+from app.backend.auth.privileges import check_grant, role_permission_names
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import RoleRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
@@ -167,8 +168,7 @@ async def get_role(
     responses=problems(
         ErrorCode.ROLE_NAME_TAKEN, ErrorCode.PERMISSION_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND,
         ErrorCode.ROLE_NAME_ARCHIVED, ErrorCode.BUILTIN_ROLE_NOT_RENAMABLE, ErrorCode.BUILTIN_ROLE_PERMISSIONS_FIXED,
-        ErrorCode.LAST_ADMIN_REQUIRED, ErrorCode.CANNOT_REMOVE_OWN_ADMIN, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS,
-        *GUARDED,
+        AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
     ),
 )
 async def update_role(
@@ -181,8 +181,7 @@ async def update_role(
     """Update role and optionally replace all permissions. Archived roles answer 404 until restored (POST /{role_id}/restore).
 
     A built-in role keeps its name and its permissions (409); clone it to change them. The caller must hold every permission
-    permission_ids adds or removes (403 grant_exceeds_own_permissions); removing admin.true must leave an active
-    administrator and the caller's own admin.true (409).
+    permission_ids adds or removes (403 grant_exceeds_own_permissions).
     """
     current_user = auth.user
     role = await get_role_or_404(session, role_id)
@@ -228,8 +227,6 @@ async def update_role(
         for perm_id in role_update.permission_ids:
             if perm_id not in present:
                 session.add(RolePermission(role_id=role_id, permission_id=perm_id))
-        if Permissions.IS_ADMIN.value in removed:
-            await check_admin_kept(session, auth)
 
         _logger.info(
             f"User {current_user.username} updated role {role.name} with {len(role_update.permission_ids)} permissions"
@@ -266,8 +263,8 @@ async def update_role(
     RoleRoutes.ROLE_ARCHIVE.value,
     response_model=RoleResponse,
     responses=problems(
-        ErrorCode.ROLE_NOT_FOUND, ErrorCode.BUILTIN_ROLE_NOT_ARCHIVABLE, ErrorCode.LAST_ADMIN_REQUIRED,
-        ErrorCode.CANNOT_REMOVE_OWN_ADMIN, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
+        ErrorCode.ROLE_NOT_FOUND, ErrorCode.BUILTIN_ROLE_NOT_ARCHIVABLE, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS,
+        *GUARDED,
     ),
 )
 async def archive_role(
@@ -280,8 +277,8 @@ async def archive_role(
 
     An archived role stops granting permissions immediately, cannot be assigned and is hidden from lists
     unless include_deleted=true. Undo with POST /{role_id}/restore. Already archived or unknown: 404.
-    The caller must hold every permission of the role (it is revoked from every holder, 403), and archiving
-    must leave an active administrator and the caller's own admin.true (409).
+    The caller must hold every permission of the role (it is revoked from every holder, 403). Built-in roles (the
+    administrator is the built-in admin role at the root) are never archived (409).
     """
     current_user = auth.user
     role = await get_role_or_404(session, role_id)
@@ -294,8 +291,6 @@ async def archive_role(
     role.is_deleted = True
     role.updated_at = datetime.now(timezone.utc)
     session.add(role)
-    if Permissions.IS_ADMIN.value in granted:
-        await check_admin_kept(session, auth)
     await create_audit_log(
         session=session,
         action="archive",
@@ -442,8 +437,9 @@ async def delete_role(
 
     assigned = await session.exec(
         select(User.id, User.username, User.is_deleted)
-        .join(UserRole, UserRole.user_id == User.id)
-        .where(UserRole.role_id == role_id)
+        .join(RoleAssignment, RoleAssignment.user_id == User.id)
+        .where(RoleAssignment.role_id == role_id)
+        .distinct()
         .order_by(User.id)
     )
     assigned_rows = assigned.all()
@@ -451,6 +447,10 @@ async def delete_role(
     if active_users:
         raise ApiError(ErrorCode.ROLE_HAS_ACTIVE_USERS, assigned_users=active_users)
     archived_users = [{"id": uid, "username": name} for uid, name, deleted in assigned_rows if deleted]
+    assignments = (await session.exec(
+        select(RoleAssignment.id, RoleAssignment.user_id, RoleAssignment.scope_key)
+        .where(RoleAssignment.role_id == role_id).order_by(RoleAssignment.id)
+    )).all()
 
     permissions = await session.exec(
         select(Permission.name)
@@ -459,11 +459,14 @@ async def delete_role(
         .order_by(Permission.name)
     )
     permission_names = list(permissions.all())
-    old_values = {**role.model_dump(), "permissions": permission_names, "assigned_archived_users": archived_users}
+    old_values = {
+        **role.model_dump(), "permissions": permission_names, "assigned_archived_users": archived_users,
+        "assignments": [{"id": aid, "user_id": uid, "scope": key} for aid, uid, key in assignments],
+    }
 
     # Core statements on purpose: no ORM cascade (no lazy loads in an async session), every row is removed explicitly
     await session.execute(sa_delete(RolePermission).where(RolePermission.role_id == role_id))
-    await session.execute(sa_delete(UserRole).where(UserRole.role_id == role_id))
+    await session.execute(sa_delete(RoleAssignment).where(RoleAssignment.role_id == role_id))
     await session.execute(sa_delete(Role).where(Role.id == role_id))
     await create_audit_log(
         session=session,
@@ -475,7 +478,8 @@ async def delete_role(
         details={
             "message": (
                 f"User {current_user.username} permanently deleted role '{old_values['name']}' "
-                f"({len(permission_names)} permissions, {len(archived_users)} assignments to archived users)"
+                f"({len(permission_names)} permissions, {len(assignments)} assignments of {len(archived_users)} "
+                f"archived users)"
             ),
             "permanent": True,
         },
@@ -584,8 +588,7 @@ async def add_role_permission(
     response_model=List[PermissionResponse],
     responses=problems(
         ErrorCode.PERMISSION_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.ROLE_PERMISSION_NOT_ASSIGNED,
-        ErrorCode.BUILTIN_ROLE_PERMISSIONS_FIXED, ErrorCode.LAST_ADMIN_REQUIRED, ErrorCode.CANNOT_REMOVE_OWN_ADMIN,
-        AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
+        ErrorCode.BUILTIN_ROLE_PERMISSIONS_FIXED, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
     ),
 )
 async def remove_role_permission(
@@ -596,8 +599,7 @@ async def remove_role_permission(
         auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW, Permissions.ROLE_UPDATE]))
 ):
     """Revoke one permission from a role. Returns the role's remaining permissions.
-    Only a permission the caller holds can be revoked (403); a built-in role keeps its permissions (409);
-    revoking admin.true must leave an active administrator and the caller's own admin.true (409)."""
+    Only a permission the caller holds can be revoked (403); a built-in role keeps its permissions (409)."""
     current_user = auth.user
     role = await get_role_or_404(session, role_id)
     permission = await get_permission_or_404(session, permission_id)
@@ -615,8 +617,6 @@ async def remove_role_permission(
     await session.delete(row)
     role.updated_at = datetime.now(timezone.utc)
     session.add(role)
-    if permission.name == Permissions.IS_ADMIN.value:
-        await check_admin_kept(session, auth)
     await session.commit()
     await create_audit_log(
         session=session,

@@ -14,15 +14,12 @@ from sqlmodel import select
 from app.backend.api.shared.helpers.db_errors import unique_violation_as
 from app.backend.api.v1 import V1
 from app.backend.api.v1 import users as users_module
-from app.backend.enums.routes import (
-    CategoryRoutes, MediaFormatRoutes, RoleRoutes, SignalTypeRoutes, TagRoutes, UserRoutes,
-)
+from app.backend.enums.routes import CategoryRoutes, MediaFormatRoutes, RoleRoutes, SignalTypeRoutes, TagRoutes
 from app.backend.models.media_format import MediaFormat
 from app.backend.models.observation import Category, SignalType, Tag
 from app.backend.models.role import Permission, Role, RolePermission
 from app.backend.models.user import User
-from app.backend.models.user_post_access import UserPostAccess
-from tests.helpers import make_admin, make_post, make_role, make_user
+from tests.helpers import make_admin, make_role, make_user
 from tests.test_username_validation import create_user
 
 
@@ -213,29 +210,11 @@ async def test_role_permission_put_race_is_idempotent(client, db, headers):
 # ----------------------------------------------------------------- users
 
 @pytest.mark.asyncio
-async def test_post_access_put_race_is_idempotent(client, db, headers):
-    admin = await make_admin(db)
-    post = await make_post(db)
-    user = await make_user(db, perms=["tag.view"])
-    db.add(UserPostAccess(user_id=user.id, post_id=post.id, can_write=False))
-    await db.commit()
-    url = V1.path(UserRoutes.USER_POST_ACCESS_BY_POST, user_id=user.id, post_id=post.id)
-    with blind_select("from user_post_access", "user_post_access.post_id = :") as fired:
-        response = await client.put(url, json={"can_write": True}, headers=headers(admin))
-    assert fired
-    assert response.status_code == 200, response.text
-    assert response.json()["can_write"] is True
-    rows = (await db.exec(select(UserPostAccess).where(UserPostAccess.user_id == user.id))).all()
-    assert len(rows) == 1
-
-
-@pytest.mark.asyncio
 async def test_user_create_race_answers_taken_and_leaves_one_user(client, db, headers):
     admin = await make_admin(db)
-    role = await make_role(db, ["tag.view"])
     await make_user(db, username="racing")
     with blind_select("lower(users.username)") as fired:
-        response = await create_user(client, headers(admin), role.id, "racing")
+        response = await create_user(client, headers(admin), "racing")
     assert fired
     assert response.status_code == 400, response.text
     assert response.json()["code"] == "username_or_certificate_taken"
@@ -244,15 +223,14 @@ async def test_user_create_race_answers_taken_and_leaves_one_user(client, db, he
 
 
 @pytest.mark.asyncio
-async def test_user_create_writes_user_and_roles_in_one_commit(client, db, headers, monkeypatch):
+async def test_user_create_writes_user_and_assignment_in_one_commit(client, db, headers, monkeypatch):
     admin = await make_admin(db)
-    role = await make_role(db, ["tag.view"])
 
     def refuse(**fields):
-        raise RuntimeError("role row refused")
+        raise RuntimeError("assignment row refused")
 
-    monkeypatch.setattr(users_module, "UserRole", refuse)
-    response = await create_user(client, headers(admin), role.id, "halfmade")
+    monkeypatch.setattr(users_module, "RoleAssignment", refuse)
+    response = await create_user(client, headers(admin), "halfmade")
     assert response.status_code == 500
     assert (await db.exec(select(User).where(User.username == "halfmade"))).first() is None
 

@@ -10,7 +10,6 @@ from sqlmodel import select
 
 from app.backend.enums.routes import UserRoutes
 from app.backend.api.v1 import V1
-from app.backend.models.role import Role
 from tests.helpers import make_admin, make_user
 
 CREATE = V1.path(UserRoutes.ROOT)
@@ -31,16 +30,12 @@ def make_certificate(common_name: str) -> bytes:
     return cert.public_bytes(serialization.Encoding.PEM)
 
 
-async def create_user(client, headers, role_id: int, username: str):
+async def create_user(client, headers, username: str, user_type: str = "viewer"):
     return await client.post(
         CREATE, headers=headers,
         files={"certificate": ("cert.pem", make_certificate(f"cn-{username}"), "application/x-pem-file")},
-        data={"username": username, "username_alias": "Alias", "role_ids": [role_id]},
+        data={"username": username, "username_alias": "Alias", "user_type": user_type},
     )
-
-
-async def admin_role_id(db) -> int:
-    return (await db.exec(select(Role).where(Role.name == "admin"))).one().id
 
 
 def username_error(response) -> dict:
@@ -56,7 +51,7 @@ def username_error(response) -> dict:
 async def test_too_short_username_answers_the_field_error(client, db, headers, username):
     """One letter fails the form check, one letter padded with spaces fails after stripping; both say why."""
     admin = await make_admin(db)
-    error = username_error(await create_user(client, headers(admin), await admin_role_id(db), username))
+    error = username_error(await create_user(client, headers(admin), username))
     assert error == {"code": "string_too_short", "detail": "String should have at least 3 characters",
                      "pointer": "#/username", "min_length": 3}
 
@@ -68,8 +63,7 @@ async def test_too_short_username_answers_the_field_error(client, db, headers, u
 ])
 async def test_rule_violations_are_not_hidden(client, db, headers, username, code):
     admin = await make_admin(db)
-    role_id = await admin_role_id(db)
-    create_error = username_error(await create_user(client, headers(admin), role_id, username))
+    create_error = username_error(await create_user(client, headers(admin), username))
     assert create_error["code"] == code
     assert not create_error["detail"].startswith("Value error")
 
@@ -80,20 +74,19 @@ async def test_rule_violations_are_not_hidden(client, db, headers, username, cod
 
 
 @pytest.mark.asyncio
-async def test_invalid_role_ids_answer_the_field_error(client, db, headers):
+async def test_unknown_user_type_answers_the_field_error(client, db, headers):
     admin = await make_admin(db)
-    target = await make_user(db)
-    response = await client.patch(USER.format(user_id=target.id), headers=headers(admin), data={"role_ids": [1, 1]})
+    response = await create_user(client, headers(admin), "typed.user", user_type="superuser")
     assert response.status_code == 422
     error = response.json()["errors"][0]
-    assert error["pointer"] == "#/role_ids"
-    assert error["code"] == "role_ids_duplicate"
+    assert error["pointer"] == "#/user_type"
+    assert error["code"] == "enum"
 
 
 @pytest.mark.asyncio
 async def test_username_keeps_its_case(client, db, headers):
     admin = await make_admin(db)
-    created = await create_user(client, headers(admin), await admin_role_id(db), "Ivan.Petrenko")
+    created = await create_user(client, headers(admin), "Ivan.Petrenko")
     assert created.status_code == 200, created.text
     assert created.json()["username"] == "Ivan.Petrenko"
 
@@ -109,7 +102,7 @@ async def test_username_uniqueness_ignores_case(client, db, headers):
     await make_user(db, username="Taken.Name")
     other = await make_user(db)
 
-    created = await create_user(client, headers(admin), await admin_role_id(db), "taken.name")
+    created = await create_user(client, headers(admin), "taken.name")
     assert created.status_code == 400
     assert created.json()["code"] == "username_taken"
 

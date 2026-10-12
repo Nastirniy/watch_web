@@ -10,11 +10,10 @@ from app.backend.api.v1 import V1
 from app.backend.config import settings
 from app.backend.enums.general import SessionEndReason, SessionRevokeCause, SessionStatus
 from app.backend.enums.routes import AuthRoutes, UserRoutes
-from app.backend.models.role import Role
 from app.backend.models.user import User, UserSession
 from app.backend.auth import sessions as session_lifetimes
 from app.backend.auth.service import AuthService
-from tests.helpers import make_admin, make_user
+from tests.helpers import make_admin, make_post, make_user
 
 ME = V1.path(AuthRoutes.ME)
 REFRESH = V1.path(AuthRoutes.REFRESH)
@@ -284,19 +283,19 @@ async def test_admin_ends_all_sessions_the_account_stays(client, db, headers):
 
 # ------------------------------------------------------------------ PATCH /users/{id}
 @pytest.mark.asyncio
-async def test_refused_role_leaves_the_patch_unsaved(client, db, headers):
+async def test_refused_move_leaves_the_patch_unsaved(client, db, headers):
     admin_headers = headers(await make_admin(db))
     user = await make_user(db)
     user_id, username = user.id, user.username
-    archived_role = Role(name="old_role", display_name="Old", is_deleted=True)
-    db.add(archived_role)
+    archived = await make_post(db)
+    archived.is_deleted = True
+    db.add(archived)
     await db.commit()
-    await db.refresh(archived_role)
 
-    for role_id, code in ((999999, "role_not_found"), (archived_role.id, "role_archived_not_assignable")):
+    for post_id, code in ((999999, "post_not_found"), (archived.id, "post_archived")):
         response = await client.patch(USER.format(user_id=user_id), headers=admin_headers,
-                                      data={"username": "renamed_user", "role_ids": [role_id]})
+                                      data={"username": "renamed_user", "post_id": str(post_id)})
         assert response.json()["code"] == code, response.text
         db.expire_all()
         assert (await db.exec(select(User).where(User.id == user_id))).one().username == username, \
-            "a refused role leaves the other fields unsaved"
+            "a refused home post leaves the other fields unsaved"

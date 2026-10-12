@@ -29,11 +29,11 @@ async def test_me_exposes_permissions_roles_and_scope(client, db, headers):
 
 
 @pytest.mark.asyncio
-async def test_me_for_admin_with_post_access_all(client, db, headers):
+async def test_me_for_the_admin_at_the_root(client, db, headers):
     admin = await make_admin(db)
     body = (await client.get(ME, headers=headers(admin))).json()
     assert body["is_admin"] is True
-    assert "post.access_all" in body["permissions"]
+    assert "post.access_all" not in body["permissions"] and "admin.true" not in body["permissions"]
     assert "observation.manage_any" in body["permissions"]
     assert "media.manage_any" in body["permissions"]
     assert body["accessible_post_ids"] is None

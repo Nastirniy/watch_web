@@ -35,6 +35,7 @@ TABLES_OWNED_BY_LATER_REVISIONS = {
     "observation_frequencies",  # 012_observation_frequencies
     "video_storyboards",  # 017_video_storyboards
     "scope_groups",  # 021_scope_groups
+    "role_assignments",  # 023_authorization_v2
 }
 down_revision = "001_relativize_media_paths"
 branch_labels = None

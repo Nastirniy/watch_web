@@ -1,14 +1,12 @@
 """Check order: scope and ownership answer before the state of a row or the existence of a post, so an outsider
-learns nothing about ids. User visibility follows the list, archived users stay hidden, a home post move drops the
-now redundant access row."""
+learns nothing about ids. User visibility follows the list, archived users stay hidden."""
 import pytest
-from sqlmodel import select
 
 from app.backend.api.v1 import V1
 from app.backend.enums.routes import MediaRoutes, ObservationRoutes, UserRoutes
-from app.backend.models.audit import AuditLog
-from app.backend.models.user_post_access import UserPostAccess
-from tests.helpers import make_post, make_user, make_admin, make_dictionary, make_observation, make_media, observation_payload
+from tests.helpers import (
+    ACCESS_ALL, ADMIN_TRUE, make_post, make_user, make_dictionary, make_observation, make_media, observation_payload,
+)
 
 MEDIA_PERMS = ["media.view", "media.archive"]
 OBS_PERMS = ["observation.view", "observation.archive"]
@@ -90,7 +88,7 @@ async def test_create_observation_unknown_and_foreign_post_answer_alike(client, 
 @pytest.mark.asyncio
 async def test_create_observation_unknown_post_is_404_for_access_all(client, db, headers):
     ids = await make_dictionary(db)
-    user = await make_user(db, perms=["observation.view", "observation.create", "post.access_all"])
+    user = await make_user(db, perms=["observation.view", "observation.create", ACCESS_ALL])
     response = await client.post(V1.path(ObservationRoutes.CREATE), json=observation_payload(999999, ids["signal_type_id"]), headers=headers(user))
     assert response.status_code == 404
     assert response.json()["code"] == "post_not_found"
@@ -98,7 +96,7 @@ async def test_create_observation_unknown_post_is_404_for_access_all(client, db,
 
 @pytest.mark.asyncio
 async def test_access_all_opens_a_user_without_a_post(client, db, headers):
-    viewer = await make_user(db, perms=["user.view", "post.access_all"])
+    viewer = await make_user(db, perms=["user.view", ACCESS_ALL])
     target = await make_user(db)
     assert target.post_id is None
 
@@ -117,11 +115,11 @@ async def test_archived_user_is_hidden_without_user_archive(client, db, headers)
     await db.commit()
     url = V1.path(UserRoutes.USER_BY_ID, user_id=target.id)
 
-    plain = await make_user(db, perms=["user.view", "post.access_all"])
-    archiver = await make_user(db, perms=["user.view", "user.archive", "admin.true"])
+    plain = await make_user(db, perms=["user.view", ACCESS_ALL])
+    archiver = await make_user(db, perms=["user.view", "user.archive", ADMIN_TRUE])
     # admin.true alone no longer shows archived records; user.archive without admin.true is held nowhere
-    admin = await make_user(db, perms=["user.view", "admin.true"])
-    dead_archive = await make_user(db, perms=["user.view", "user.archive", "post.access_all"])
+    admin = await make_user(db, perms=["user.view", ADMIN_TRUE])
+    dead_archive = await make_user(db, perms=["user.view", "user.archive", ACCESS_ALL])
     for user in (plain, admin, dead_archive):
         assert (await client.get(url, headers=headers(user))).status_code == 404
     assert (await client.get(url, headers=headers(archiver))).status_code == 200
@@ -141,23 +139,3 @@ async def test_user_outsider_gets_the_same_403_for_an_archived_and_a_live_user(c
         response = await client.get(V1.path(UserRoutes.USER_BY_ID, user_id=target.id), headers=headers(outsider))
         assert response.status_code == 403, (target.is_deleted, response.text)
         assert response.json()["code"] == "user_self_only"
-
-
-@pytest.mark.asyncio
-async def test_home_post_move_drops_the_access_row(client, db, headers):
-    old_home, new_home = await make_post(db), await make_post(db)
-    admin = await make_admin(db)
-    target = await make_user(db, post_id=old_home.id, extra_access={new_home.id: True})
-    target_id, new_home_id = target.id, new_home.id
-
-    response = await client.patch(V1.path(UserRoutes.USER_BY_ID, user_id=target_id), data={"post_id": str(new_home_id)}, headers=headers(admin))
-    assert response.status_code == 200, response.text
-    assert response.json()["post_id"] == new_home_id
-
-    db.expire_all()
-    rows = (await db.exec(select(UserPostAccess).where(UserPostAccess.user_id == target_id))).all()
-    assert rows == []
-    audit = (await db.exec(
-        select(AuditLog).where(AuditLog.resource_type == "user", AuditLog.resource_id == target_id, AuditLog.action == "update")
-    )).all()
-    assert audit and audit[-1].new_values["removed_post_access"] == [{"post_id": new_home_id, "can_write": True}]

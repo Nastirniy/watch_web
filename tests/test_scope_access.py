@@ -2,20 +2,17 @@
 counters observation.view, statistics statistics.view, the upload list media.manage_any; archived rows only where
 X.archive is in effect; no administrator exception and no admin gate on these routes.
 
-The legacy factories of tests/helpers.py build users the frozen conversion turns into grants at the root and at
-posts. Grants at a group (and a permission at one post only) cannot be built from the old tables yet; the
-`with_grants` fixture gives a user exactly the grants a test names, through the real request chain, until the
-assignment API exists.
+The legacy-shaped factory of tests/helpers.py writes users as migration 023 converts them (assignments at the root
+and at posts). Grants at a group, or a permission at one post only, come from the `with_grants` fixture: it replaces
+the user's role assignments with one role per named grant, at its node.
 """
-import dataclasses
 import io
 
 import openpyxl
 import pytest
-from sqlmodel import select
+from sqlmodel import delete, select
 
 from app.backend.api.v1 import V1
-from app.backend.auth import dependencies
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.context import AuthContext
 from app.backend.auth.scope import Grant, Node, ROOT, ScopeTree
@@ -30,11 +27,13 @@ from app.backend.enums.routes import (
 from app.backend.filters.post_filter import PostCriteria, PostFilterService
 from app.backend.filters.user_filter import UserCriteria, UserFilterService
 from app.backend.models.post import Post
+from app.backend.models.role_assignment import RoleAssignment
 from app.backend.models.scope_group import ScopeGroup
 from app.backend.models.user import User
 from app.backend.services.media import uploads
 from tests.helpers import (
-    make_admin, make_dictionary, make_media, make_observation, make_post, make_user, observation_payload, perm_name,
+    ACCESS_ALL, ADMIN_TRUE, assign, make_admin, make_dictionary, make_media, make_observation, make_post, make_role,
+    make_user, observation_payload, perm_name,
 )
 
 POSTS = V1.path(PostRoutes.ROOT)
@@ -62,22 +61,14 @@ def grant(node: Node, *perms) -> Grant:
 
 
 @pytest.fixture
-def with_grants(monkeypatch):
-    """with_grants(user, *grants): the AuthContext of every request of the user carries exactly these grants (the
-    legacy fields stay as the old tables say; the routes of this module read only the grants)"""
-    table = {}
-    original = dependencies.load_auth_context
-
-    async def patched(session, user, session_id=None):
-        auth = await original(session, user, session_id=session_id)
-        if user.id in table:
-            auth = dataclasses.replace(auth, grants=table[user.id])
-        return auth
-
-    monkeypatch.setattr(dependencies, "load_auth_context", patched)
-
-    def set_grants(user, *grants):
-        table[user.id] = tuple(grants)
+def with_grants(db):
+    """await with_grants(user, *grants): the user's role assignments become exactly these, one new role holding the
+    grant's permissions at the grant's node each"""
+    async def set_grants(user, *grants):
+        await db.exec(delete(RoleAssignment).where(RoleAssignment.user_id == user.id))
+        await db.commit()
+        for granted in grants:
+            await assign(db, user, await make_role(db, granted.permissions), granted.node)
     return set_grants
 
 
@@ -122,7 +113,7 @@ async def test_post_records_follow_post_view(client, db, headers):
     assert _ids(await client.get(SEARCH_POSTS, headers=headers(user))) == {a.id}
 
     # admin.true with post.view: post.view at the root (the record administration the conversion keeps)
-    manager = await make_user(db, perms=[P.IS_ADMIN, P.POST_VIEW], post_id=a.id)
+    manager = await make_user(db, perms=[ADMIN_TRUE, P.POST_VIEW], post_id=a.id)
     assert (await client.get(_post_url(b.id), headers=headers(manager))).status_code == 200
     assert {a.id, b.id} <= _ids(await client.get(POSTS, headers=headers(manager)))
 
@@ -134,7 +125,7 @@ async def test_observation_stats_follow_observation_view(client, db, headers):
     _denied(await client.get(_stats_url(b.id), headers=headers(user)), "post_access_denied", ["observation.view"])
 
     # admin.true sees every post record, but counters are observation data: the home post only
-    manager = await make_user(db, perms=[P.IS_ADMIN, P.POST_VIEW, P.OBSERVATION_VIEW], post_id=a.id)
+    manager = await make_user(db, perms=[ADMIN_TRUE, P.POST_VIEW, P.OBSERVATION_VIEW], post_id=a.id)
     assert (await client.get(_post_url(b.id), headers=headers(manager))).status_code == 200
     _denied(await client.get(_stats_url(b.id), headers=headers(manager)), "post_access_denied", ["observation.view"])
 
@@ -146,8 +137,8 @@ async def test_observation_stats_follow_observation_view(client, db, headers):
 async def test_archived_post_needs_post_archive_at_post(client, db, headers):
     post = await make_post(db)
     home = await make_user(db, perms=[P.POST_VIEW], post_id=post.id)
-    viewer = await make_user(db, perms=[P.IS_ADMIN, P.POST_VIEW])
-    archiver = await make_user(db, perms=[P.IS_ADMIN, P.POST_VIEW, P.POST_ARCHIVE])
+    viewer = await make_user(db, perms=[ADMIN_TRUE, P.POST_VIEW])
+    archiver = await make_user(db, perms=[ADMIN_TRUE, P.POST_VIEW, P.POST_ARCHIVE])
     admin = await make_admin(db)
     await _archive(db, post)
 
@@ -168,7 +159,7 @@ async def test_archived_posts_are_listed_only_where_post_archive_is_held(client,
     await _archive(db, in_east)
     await _archive(db, outside)
     manager = await make_user(db, perms=[P.POST_VIEW, P.POST_ARCHIVE])
-    with_grants(manager, grant(ROOT, P.POST_VIEW), grant(Node.group(east.id), P.POST_ARCHIVE))
+    await with_grants(manager, grant(ROOT, P.POST_VIEW), grant(Node.group(east.id), P.POST_ARCHIVE))
 
     for path in (POSTS, SEARCH_POSTS):
         listed = _ids(await client.get(path, params={"include_deleted": "true"}, headers=headers(manager)))
@@ -187,7 +178,7 @@ async def test_removed_gate_does_not_widen(client, db, headers):
     editor = await make_user(db, perms=[P.POST_VIEW, P.POST_UPDATE], post_id=post.id)
     _denied(await client.put(_post_url(post.id), json={"name": "x"}, headers=headers(editor)),
             "permission_denied", ["post.update"])
-    archiver = await make_user(db, perms=[P.POST_VIEW, P.POST_ARCHIVE, P.POST_ACCESS_ALL])
+    archiver = await make_user(db, perms=[P.POST_VIEW, P.POST_ARCHIVE, ACCESS_ALL])
     _denied(await client.post(V1.path(PostRoutes.POST_ARCHIVE, post_id=post.id), headers=headers(archiver)),
             "permission_denied", ["post.archive"])
 
@@ -197,7 +188,7 @@ async def test_create_and_move_need_the_permission_at_the_target(client, db, hea
     sector = await _group(db, "Sector", parent_id=east.id)
     in_east, in_west = await make_post(db, group_id=east.id), await make_post(db, group_id=west.id)
     manager = await make_user(db, perms=[P.POST_VIEW, P.POST_CREATE, P.POST_UPDATE])
-    with_grants(manager, grant(Node.group(east.id), P.POST_VIEW, P.POST_CREATE, P.POST_UPDATE))
+    await with_grants(manager, grant(Node.group(east.id), P.POST_VIEW, P.POST_CREATE, P.POST_UPDATE))
 
     created = await client.post(POSTS, json={"name": "A", "code": "EAST-1", "group_id": sector.id}, headers=headers(manager))
     assert created.status_code == 200 and created.json()["group_id"] == sector.id, created.text
@@ -225,7 +216,7 @@ async def test_a_move_needs_post_update_covering_the_old_and_the_new_location(cl
     post = await make_post(db, group_id=east.id)
     puller = await make_user(db, perms=[P.POST_VIEW, P.POST_UPDATE])
     # post.update on the post itself and at West: in effect at the post, but East is not covered
-    with_grants(puller, grant(Node.post(post.id), P.POST_VIEW, P.POST_UPDATE),
+    await with_grants(puller, grant(Node.post(post.id), P.POST_VIEW, P.POST_UPDATE),
                 grant(Node.group(west.id), P.POST_VIEW, P.POST_UPDATE))
     body = _denied(await client.put(_post_url(post.id), json={"group_id": west.id}, headers=headers(puller)),
                    "permission_required_for_action", ["post.update"])
@@ -236,7 +227,7 @@ async def test_a_move_needs_post_update_covering_the_old_and_the_new_location(cl
     assert (await client.put(_post_url(post.id), json={"name": "Renamed"}, headers=headers(puller))).status_code == 200
 
     mover = await make_user(db, perms=[P.POST_VIEW, P.POST_UPDATE])
-    with_grants(mover, grant(Node.group(east.id), P.POST_VIEW, P.POST_UPDATE),
+    await with_grants(mover, grant(Node.group(east.id), P.POST_VIEW, P.POST_UPDATE),
                 grant(Node.group(west.id), P.POST_VIEW, P.POST_UPDATE))
     moved = await client.put(_post_url(post.id), json={"group_id": west.id}, headers=headers(mover))
     assert moved.status_code == 200 and moved.json()["group_id"] == west.id, moved.text
@@ -249,7 +240,7 @@ async def test_archive_and_restore_follow_post_archive_at_the_post(client, db, h
     in_east, outside = await make_post(db, group_id=east.id), await make_post(db)
     direct = await make_post(db)
     manager = await make_user(db, perms=[P.POST_VIEW, P.POST_ARCHIVE])
-    with_grants(manager, grant(Node.group(east.id), P.POST_VIEW, P.POST_ARCHIVE),
+    await with_grants(manager, grant(Node.group(east.id), P.POST_VIEW, P.POST_ARCHIVE),
                 grant(Node.post(direct.id), P.POST_VIEW, P.POST_ARCHIVE))
     archive, restore = PostRoutes.POST_ARCHIVE, PostRoutes.POST_RESTORE
 
@@ -289,8 +280,8 @@ async def test_archived_user_needs_user_archive_covering_them(client, db, header
     a = await make_post(db)
     gone = await make_user(db, post_id=a.id)
     await _archive(db, gone)
-    viewer = await make_user(db, perms=[P.IS_ADMIN, P.USER_VIEW], post_id=a.id)
-    archiver = await make_user(db, perms=[P.IS_ADMIN, P.USER_VIEW, P.USER_ARCHIVE], post_id=a.id)
+    viewer = await make_user(db, perms=[ADMIN_TRUE, P.USER_VIEW], post_id=a.id)
+    archiver = await make_user(db, perms=[ADMIN_TRUE, P.USER_VIEW, P.USER_ARCHIVE], post_id=a.id)
 
     hidden = await client.get(_user_url(gone.id), headers=headers(viewer))
     assert hidden.status_code == 404 and hidden.json()["code"] == "user_not_found", hidden.text
@@ -299,10 +290,9 @@ async def test_archived_user_needs_user_archive_covering_them(client, db, header
 
 
 def _context(tree: ScopeTree, *grants: Grant) -> AuthContext:
-    """A context with exactly these grants (no legacy permissions) for a caller that is not in the database"""
-    caller = User(id=10**6, username="unit_caller", username_alias="Unit caller")
-    return AuthContext(user=caller, permissions=frozenset(), roles=(), readable_post_ids=frozenset(),
-                       writable_post_ids=frozenset(), grants=grants, tree=tree)
+    """A context with exactly these grants for a caller that is not in the database"""
+    caller = User(id=10**6, username="unit_caller", username_alias="Unit caller", user_type="viewer")
+    return AuthContext(user=caller, grants=grants, tree=tree)
 
 
 async def test_include_deleted_shows_archived_only_where_archive_is_held(client, db, headers, with_grants):
@@ -351,7 +341,7 @@ async def test_include_deleted_shows_archived_only_where_archive_is_held(client,
 
     # end to end, with the same grants
     caller = await make_user(db, perms=[P.USER_VIEW, P.USER_ARCHIVE])
-    with_grants(caller, *grants)
+    await with_grants(caller, *grants)
     for path in (USERS, SEARCH_USERS):
         shown = _ids(await client.get(path, params={"include_deleted": "true"}, headers=headers(caller)))
         assert {live_a.id, gone_a.id, live_b.id} <= shown, path
@@ -369,11 +359,11 @@ async def test_statistics_follow_statistics_view(client, db, headers, with_grant
     in_east, other_east, outside = (await make_post(db, group_id=east.id), await make_post(db, group_id=east.id),
                                     await make_post(db))
     analyst = await make_user(db, perms=[P.STATISTICS_VIEW], post_id=outside.id)
-    with_grants(analyst, grant(Node.group(east.id), P.STATISTICS_VIEW))
+    await with_grants(analyst, grant(Node.group(east.id), P.STATISTICS_VIEW))
     body = (await client.get(STATISTICS, headers=headers(analyst))).json()
     assert body["post_ids"] == sorted([in_east.id, other_east.id])
 
-    manager = await make_user(db, perms=[P.IS_ADMIN, P.STATISTICS_VIEW], post_id=outside.id)
+    manager = await make_user(db, perms=[ADMIN_TRUE, P.STATISTICS_VIEW], post_id=outside.id)
     assert (await client.get(STATISTICS, headers=headers(manager))).json()["post_ids"] is None
 
 
@@ -383,7 +373,7 @@ async def test_upload_list_follows_manage_any_at_its_posts(client, db, headers):
     perms = [P.MEDIA_VIEW, P.MEDIA_CREATE]
     uploader_a = await make_user(db, perms=perms, post_id=a.id)
     uploader_b = await make_user(db, perms=perms, post_id=b.id)
-    manager = await make_user(db, perms=[P.IS_ADMIN, *perms, P.MEDIA_MANAGE_ANY], post_id=a.id)
+    manager = await make_user(db, perms=[ADMIN_TRUE, *perms, P.MEDIA_MANAGE_ANY], post_id=a.id)
 
     async def opened(user, post):
         observation = await make_observation(db, user, post, ids["signal_type_id"])
@@ -442,7 +432,7 @@ async def test_export_without_gate(client, db, headers):
     admin = await make_admin(db)
     assert (await client.post(REPORT, json=ALL_FIELDS, headers=headers(admin))).status_code == 200
     # admin.true with both permissions keeps the export (the conversion puts export.create where observation.view is)
-    manager = await make_user(db, perms=[P.IS_ADMIN, P.OBSERVATION_VIEW, P.EXPORT_CREATE], post_id=post.id)
+    manager = await make_user(db, perms=[ADMIN_TRUE, P.OBSERVATION_VIEW, P.EXPORT_CREATE], post_id=post.id)
     assert (await client.post(REPORT, json=ALL_FIELDS, headers=headers(manager))).status_code == 200
 
 
@@ -452,9 +442,9 @@ async def test_export_covers_observation_view_and_export_create(client, db, head
     owner = await make_admin(db)
     await _observation(db, owner, a, ids["signal_type_id"], comment="seen at A")
     await _observation(db, owner, b, ids["signal_type_id"], comment="seen at B")
-    exporter = await make_user(db, perms=[P.IS_ADMIN, P.OBSERVATION_VIEW, P.EXPORT_CREATE], post_id=a.id,
+    exporter = await make_user(db, perms=[ADMIN_TRUE, P.OBSERVATION_VIEW, P.EXPORT_CREATE], post_id=a.id,
                                extra_access={b.id: False})
-    with_grants(exporter, grant(Node.post(a.id), P.OBSERVATION_VIEW, P.EXPORT_CREATE),
+    await with_grants(exporter, grant(Node.post(a.id), P.OBSERVATION_VIEW, P.EXPORT_CREATE),
                 grant(Node.post(b.id), P.OBSERVATION_VIEW))
 
     texts = _report_texts(await client.post(REPORT, json=ALL_FIELDS, headers=headers(exporter)))
@@ -472,9 +462,9 @@ async def test_export_includes_archived_rows_only_where_observation_archive_is_h
     await _observation(db, owner, b, ids["signal_type_id"], comment="archived at B", archived=True)
     await _observation(db, owner, b, ids["signal_type_id"], comment="live at B")
     perms = [P.OBSERVATION_VIEW, P.EXPORT_CREATE]
-    exporter = await make_user(db, perms=[P.IS_ADMIN, *perms, P.OBSERVATION_ARCHIVE], post_id=a.id,
+    exporter = await make_user(db, perms=[ADMIN_TRUE, *perms, P.OBSERVATION_ARCHIVE], post_id=a.id,
                                extra_access={b.id: True})
-    with_grants(exporter, grant(Node.post(a.id), *perms, P.OBSERVATION_ARCHIVE), grant(Node.post(b.id), *perms))
+    await with_grants(exporter, grant(Node.post(a.id), *perms, P.OBSERVATION_ARCHIVE), grant(Node.post(b.id), *perms))
 
     texts = _report_texts(await client.post(REPORT, json={**ALL_FIELDS, "include_deleted": True}, headers=headers(exporter)))
     assert {"archived at A", "live at B"} <= texts and "archived at B" not in texts
@@ -485,7 +475,7 @@ async def test_media_monitor_route(client, db, headers):
     viewer = await make_user(db, perms=[P.MEDIA_VIEW], post_id=post.id)
     admin = await make_admin(db)
     # storage monitoring was media.view behind the admin gate: an admin.true holder with media.view keeps it
-    manager = await make_user(db, perms=[P.IS_ADMIN, P.MEDIA_VIEW], post_id=post.id)
+    manager = await make_user(db, perms=[ADMIN_TRUE, P.MEDIA_VIEW], post_id=post.id)
     for path in MONITOR_ROUTES:
         body = _denied(await client.get(path, headers=headers(viewer)), "permission_denied", ["media.monitor"])
         assert body["required"] == {"all": ["media.monitor"], "any": []}
@@ -500,14 +490,14 @@ async def test_poster_reconcile_needs_media_monitor(client, db, headers, with_gr
     east = await _group(db, "East")
     post = await make_post(db, group_id=east.id)
     perms = [P.MEDIA_VIEW, P.MEDIA_UPDATE]
-    post_admin = await make_user(db, perms=[P.IS_ADMIN, *perms], post_id=post.id)
-    with_grants(post_admin, grant(Node.group(east.id), *perms))
+    post_admin = await make_user(db, perms=[ADMIN_TRUE, *perms], post_id=post.id)
+    await with_grants(post_admin, grant(Node.group(east.id), *perms))
     body = _denied(await client.post(reconcile, json={}, headers=headers(post_admin)), "permission_denied", ["media.monitor"])
     assert body["required"] == {"all": ["media.view", "media.update", "media.monitor"], "any": []}
 
     assert (await client.post(reconcile, json={}, headers=headers(await make_admin(db)))).status_code == 200
     # a converted administrator with media.view holds media.monitor at the root (R10) and keeps the route
-    manager = await make_user(db, perms=[P.IS_ADMIN, *perms], post_id=post.id)
+    manager = await make_user(db, perms=[ADMIN_TRUE, *perms], post_id=post.id)
     assert (await client.post(reconcile, json={}, headers=headers(manager))).status_code == 200
 
 
@@ -519,7 +509,7 @@ async def test_manage_any_applies_at_its_posts_only(client, db, headers, with_gr
     at_b = await _observation(db, owner, b, ids["signal_type_id"])
     manager = await make_user(db, perms=[P.OBSERVATION_VIEW, P.OBSERVATION_ARCHIVE, P.OBSERVATION_MANAGE_ANY],
                               post_id=a.id, extra_access={b.id: True})
-    with_grants(manager, grant(Node.post(a.id), P.OBSERVATION_VIEW, P.OBSERVATION_ARCHIVE, P.OBSERVATION_MANAGE_ANY),
+    await with_grants(manager, grant(Node.post(a.id), P.OBSERVATION_VIEW, P.OBSERVATION_ARCHIVE, P.OBSERVATION_MANAGE_ANY),
                 grant(Node.post(b.id), P.OBSERVATION_VIEW, P.OBSERVATION_ARCHIVE))
 
     _denied(await client.post(_observation_url(ObservationRoutes.OBSERVATION_ARCHIVE, at_b.id), headers=headers(manager)),
@@ -536,7 +526,7 @@ async def test_media_manage_any_applies_at_its_posts_only(client, db, headers, w
     media_b = await make_media(db, await _observation(db, owner, b, ids["signal_type_id"]), owner)
     manager = await make_user(db, perms=[P.MEDIA_VIEW, P.MEDIA_ARCHIVE, P.MEDIA_MANAGE_ANY], post_id=a.id,
                               extra_access={b.id: True})
-    with_grants(manager, grant(Node.post(a.id), P.MEDIA_VIEW, P.MEDIA_ARCHIVE, P.MEDIA_MANAGE_ANY),
+    await with_grants(manager, grant(Node.post(a.id), P.MEDIA_VIEW, P.MEDIA_ARCHIVE, P.MEDIA_MANAGE_ANY),
                 grant(Node.post(b.id), P.MEDIA_VIEW, P.MEDIA_ARCHIVE))
 
     _denied(await client.post(V1.path(MediaRoutes.MEDIA_ARCHIVE, media_id=media_b.id), headers=headers(manager)),
@@ -558,7 +548,7 @@ async def test_upload_session_of_another_user_needs_manage_any_at_its_post(clien
         await db.commit()
         sessions[post.id] = row.id
     manager = await make_user(db, perms=[*perms, P.MEDIA_MANAGE_ANY], post_id=a.id, extra_access={b.id: True})
-    with_grants(manager, grant(Node.post(a.id), *perms, P.MEDIA_MANAGE_ANY), grant(Node.post(b.id), *perms))
+    await with_grants(manager, grant(Node.post(a.id), *perms, P.MEDIA_MANAGE_ANY), grant(Node.post(b.id), *perms))
 
     _denied(await client.get(V1.path(MediaRoutes.UPLOAD_SESSION, upload_id=sessions[b.id]), headers=headers(manager)),
             "upload_session_not_owner", ["media.manage_any"])
@@ -571,7 +561,7 @@ async def test_observation_writes_need_their_permission_at_the_post(client, db, 
     ids = await make_dictionary(db)
     perms = [P.OBSERVATION_VIEW, P.OBSERVATION_CREATE, P.OBSERVATION_UPDATE]
     editor = await make_user(db, perms=perms, post_id=a.id, extra_access={b.id: True})
-    with_grants(editor, grant(Node.post(a.id), *perms), grant(Node.post(b.id), P.OBSERVATION_VIEW))
+    await with_grants(editor, grant(Node.post(a.id), *perms), grant(Node.post(b.id), P.OBSERVATION_VIEW))
     at_a = await _observation(db, editor, a, ids["signal_type_id"])
     at_b = await _observation(db, editor, b, ids["signal_type_id"])
 
@@ -593,14 +583,14 @@ async def test_observations_of_an_archived_post_need_post_archive_at_it(client, 
     owner = await make_admin(db)
     observation = await _observation(db, owner, post, ids["signal_type_id"])
     await _archive(db, post)
-    perms = [P.IS_ADMIN, P.POST_ACCESS_ALL, P.OBSERVATION_VIEW, P.OBSERVATION_ARCHIVE, P.OBSERVATION_MANAGE_ANY]
+    perms = [ADMIN_TRUE, ACCESS_ALL, P.OBSERVATION_VIEW, P.OBSERVATION_ARCHIVE, P.OBSERVATION_MANAGE_ANY]
     archiver = await make_user(db, perms=perms)
-    with_grants(archiver, grant(ROOT, P.OBSERVATION_VIEW, P.OBSERVATION_ARCHIVE, P.OBSERVATION_MANAGE_ANY))
+    await with_grants(archiver, grant(ROOT, P.OBSERVATION_VIEW, P.OBSERVATION_ARCHIVE, P.OBSERVATION_MANAGE_ANY))
     url = _observation_url(ObservationRoutes.OBSERVATION_ARCHIVE, observation.id)
 
     refused = await client.post(url, headers=headers(archiver))
     assert refused.status_code == 409 and refused.json()["code"] == "post_archived", refused.text
-    with_grants(archiver, grant(ROOT, P.OBSERVATION_VIEW, P.OBSERVATION_ARCHIVE, P.OBSERVATION_MANAGE_ANY, P.POST_ARCHIVE))
+    await with_grants(archiver, grant(ROOT, P.OBSERVATION_VIEW, P.OBSERVATION_ARCHIVE, P.OBSERVATION_MANAGE_ANY, P.POST_ARCHIVE))
     assert (await client.post(url, headers=headers(archiver))).status_code == 200
 
 
@@ -614,7 +604,7 @@ async def test_archived_observations_are_listed_only_where_observation_archive_i
     gone_b = await _observation(db, owner, b, ids["signal_type_id"], archived=True)
     perms = [P.OBSERVATION_VIEW, P.OBSERVATION_ARCHIVE]
     reader = await make_user(db, perms=perms, post_id=a.id, extra_access={b.id: True})
-    with_grants(reader, grant(Node.post(a.id), *perms), grant(Node.post(b.id), P.OBSERVATION_VIEW))
+    await with_grants(reader, grant(Node.post(a.id), *perms), grant(Node.post(b.id), P.OBSERVATION_VIEW))
 
     for path in (OBSERVATIONS, SEARCH_OBSERVATIONS):
         listed = _ids(await client.get(path, params={"include_deleted": "true"}, headers=headers(reader)))
@@ -639,7 +629,7 @@ async def test_archived_media_is_listed_only_where_media_archive_is_held(client,
     await make_media(db, obs_b, owner, is_deleted=True)
     perms = [P.MEDIA_VIEW, P.MEDIA_ARCHIVE]
     reader = await make_user(db, perms=perms, post_id=a.id, extra_access={b.id: True})
-    with_grants(reader, grant(Node.post(a.id), *perms), grant(Node.post(b.id), P.MEDIA_VIEW))
+    await with_grants(reader, grant(Node.post(a.id), *perms), grant(Node.post(b.id), P.MEDIA_VIEW))
 
     for path in (MEDIA, SEARCH_MEDIA):
         listed = _ids(await client.get(path, params={"include_deleted": "true"}, headers=headers(reader)))
@@ -655,8 +645,8 @@ async def test_regenerate_needs_media_update_at_the_post(client, db, headers, wi
                                media_type="video", poster_status="ready")
     video_a = await make_media(db, await _observation(db, owner, a, ids["signal_type_id"]), owner,
                                media_type="video", poster_status="ready")
-    editor = await make_user(db, perms=[P.IS_ADMIN, P.MEDIA_VIEW, P.MEDIA_UPDATE], post_id=a.id, extra_access={b.id: True})
-    with_grants(editor, grant(Node.post(a.id), P.MEDIA_VIEW, P.MEDIA_UPDATE), grant(Node.post(b.id), P.MEDIA_VIEW))
+    editor = await make_user(db, perms=[ADMIN_TRUE, P.MEDIA_VIEW, P.MEDIA_UPDATE], post_id=a.id, extra_access={b.id: True})
+    await with_grants(editor, grant(Node.post(a.id), P.MEDIA_VIEW, P.MEDIA_UPDATE), grant(Node.post(b.id), P.MEDIA_VIEW))
 
     _denied(await client.post(V1.path(MediaRoutes.MEDIA_THUMBNAIL_REGENERATE, media_id=video_b.id), headers=headers(editor)),
             "post_write_denied", ["media.update"])
@@ -665,13 +655,13 @@ async def test_regenerate_needs_media_update_at_the_post(client, db, headers, wi
 
 
 async def test_user_reads_of_another_user_need_user_view_covering_them(client, db, headers, with_grants):
-    """The session, role and post-access lists of a user lost the admin gate: user.view must cover the target"""
+    """The session list of a user lost the admin gate: user.view must cover the target"""
     a, b = await make_post(db), await make_post(db)
     colleague, stranger = await make_user(db, post_id=a.id), await make_user(db, post_id=b.id)
     viewer = await make_user(db, perms=[P.USER_VIEW, P.POST_VIEW, P.ROLE_VIEW], post_id=a.id)
-    with_grants(viewer, grant(Node.post(a.id), P.USER_VIEW, P.POST_VIEW), grant(ROOT, P.ROLE_VIEW))
+    await with_grants(viewer, grant(Node.post(a.id), P.USER_VIEW, P.POST_VIEW), grant(ROOT, P.ROLE_VIEW))
 
-    for route in (UserRoutes.USER_SESSIONS, UserRoutes.USER_POST_ACCESS, UserRoutes.USER_ROLES):
+    for route in (UserRoutes.USER_SESSIONS,):
         _denied(await client.get(V1.path(route, user_id=stranger.id), headers=headers(viewer)), "user_self_only", [])
         for target in (colleague, viewer):
             shown = await client.get(V1.path(route, user_id=target.id), headers=headers(viewer))
@@ -700,7 +690,7 @@ async def test_sessions_of_an_archived_user_need_user_archive_covering_them(clie
     assert hidden.status_code == 404 and hidden.json()["code"] == "user_not_found", hidden.text
 
     archiver = await make_user(db, perms=[P.USER_VIEW, P.USER_ARCHIVE], post_id=a.id)
-    with_grants(archiver, grant(Node.post(a.id), P.USER_VIEW, P.USER_ARCHIVE))
+    await with_grants(archiver, grant(Node.post(a.id), P.USER_VIEW, P.USER_ARCHIVE))
     shown = await client.get(sessions, headers=headers(archiver))
     assert shown.status_code == 200, shown.text
 
@@ -708,7 +698,7 @@ async def test_sessions_of_an_archived_user_need_user_archive_covering_them(clie
 async def test_administration_routes_need_only_their_permissions(client, db, headers, with_grants):
     """Dictionaries, formats, roles and groups: the permissions of the route at some node, no admin.true"""
     editor = await make_user(db, perms=[P.TAG_VIEW, P.TAG_CREATE, P.SCOPE_GROUP_VIEW, P.ROLE_VIEW])
-    with_grants(editor, grant(ROOT, P.TAG_VIEW, P.TAG_CREATE, P.SCOPE_GROUP_VIEW, P.ROLE_VIEW))
+    await with_grants(editor, grant(ROOT, P.TAG_VIEW, P.TAG_CREATE, P.SCOPE_GROUP_VIEW, P.ROLE_VIEW))
     created = await client.post(V1.path(TagRoutes.CREATE), json={"name": "no-gate"}, headers=headers(editor))
     assert created.status_code == 200, created.text
     assert (await client.get(V1.path(ScopeGroupRoutes.TREE), headers=headers(editor))).status_code == 200

@@ -19,9 +19,9 @@ from app.backend.models.media import MediaFile
 from app.backend.models.observation import Observation
 from app.backend.models.post import Post
 from app.backend.models.user import User
-from app.backend.models.user_post_access import UserPostAccess
+from app.backend.models.role_assignment import RoleAssignment
 from tests.helpers import (
-    make_admin, make_dictionary, make_media, make_observation, make_post, make_role, make_user, observation_payload,
+    ACCESS_ALL, ADMIN_TRUE, make_admin, make_dictionary, make_media, make_observation, make_post, make_user, observation_payload,
 )
 from tests.test_column_bounds import _run_downgrade
 from tests.test_media_uploads import CHUNK, _create_body, make_png, storage  # noqa: F401
@@ -35,7 +35,7 @@ DATA_PERMS = [
     P.OBSERVATION_VIEW, P.OBSERVATION_CREATE, P.OBSERVATION_UPDATE, P.OBSERVATION_ARCHIVE,
     P.MEDIA_VIEW, P.MEDIA_CREATE, P.MEDIA_ARCHIVE,
 ]
-ACCESS_ALL_PERMS = DATA_PERMS + [P.POST_ACCESS_ALL, P.OBSERVATION_MANAGE_ANY, P.MEDIA_MANAGE_ANY]
+ACCESS_ALL_PERMS = DATA_PERMS + [ACCESS_ALL, P.OBSERVATION_MANAGE_ANY, P.MEDIA_MANAGE_ANY]
 
 OBSERVATIONS = V1.path(ObservationRoutes.LIST_ALL)
 ME = V1.path(AuthRoutes.ME)
@@ -47,7 +47,7 @@ class Scene:
     post: Post            # the post the tests archive
     other: Post
     home: User            # home post = post
-    reader: User          # home post = other, a user_post_access row (can_write) for post
+    reader: User          # home post = other, a legacy access row (can_write) for post: assignments at both
     access_all: User      # post.access_all, not an administrator
     admin: User           # the seeded admin role: every permission, post.access_all included
     observation: Observation
@@ -137,8 +137,8 @@ async def test_archive_and_restore_a_post(client, db, headers):
 async def test_archive_and_restore_need_post_view_and_post_archive(client, db, headers):
     """No admin gate; post.archive of a role without admin.true was dead behind the gate and still counts nowhere"""
     post = await make_post(db)
-    not_admin = await make_user(db, perms=[P.POST_VIEW, P.POST_ARCHIVE, P.POST_ACCESS_ALL])
-    without_archive = await make_user(db, perms=[P.IS_ADMIN, P.POST_VIEW, P.POST_UPDATE])
+    not_admin = await make_user(db, perms=[P.POST_VIEW, P.POST_ARCHIVE, ACCESS_ALL])
+    without_archive = await make_user(db, perms=[ADMIN_TRUE, P.POST_VIEW, P.POST_UPDATE])
     for path in (_archive_path(post.id), _restore_path(post.id)):
         for user in (not_admin, without_archive):
             refused = await client.post(path, headers=headers(user))
@@ -168,10 +168,10 @@ async def test_an_archived_post_answers_404_on_update_and_is_deleted_is_never_re
 async def test_lists_hide_archived_posts_unless_include_deleted(client, db, headers, path):
     live, gone = await make_post(db), await make_post(db)
     await _set_archived(db, gone)
-    manager = await make_user(db, perms=[P.IS_ADMIN, P.POST_VIEW, P.POST_ARCHIVE])
-    viewer = await make_user(db, perms=[P.POST_VIEW, P.POST_ACCESS_ALL])
+    manager = await make_user(db, perms=[ADMIN_TRUE, P.POST_VIEW, P.POST_ARCHIVE])
+    viewer = await make_user(db, perms=[P.POST_VIEW, ACCESS_ALL])
     # post.archive without admin.true is held nowhere (it was dead behind the gate)
-    dead_archive = await make_user(db, perms=[P.POST_VIEW, P.POST_ARCHIVE, P.POST_ACCESS_ALL])
+    dead_archive = await make_user(db, perms=[P.POST_VIEW, P.POST_ARCHIVE, ACCESS_ALL])
 
     def ids(response) -> list:
         assert response.status_code == 200, response.text
@@ -192,9 +192,9 @@ async def test_get_an_archived_post(client, db, headers):
     is out of scope (a grant on the archived post itself stops applying)"""
     post = await make_post(db)
     home = await make_user(db, perms=[P.POST_VIEW, P.POST_ARCHIVE], post_id=post.id)
-    viewer = await make_user(db, perms=[P.POST_VIEW, P.POST_ACCESS_ALL])
-    manager = await make_user(db, perms=[P.IS_ADMIN, P.POST_VIEW, P.POST_ARCHIVE])
-    admin = await make_user(db, perms=[P.IS_ADMIN, P.POST_VIEW])
+    viewer = await make_user(db, perms=[P.POST_VIEW, ACCESS_ALL])
+    manager = await make_user(db, perms=[ADMIN_TRUE, P.POST_VIEW, P.POST_ARCHIVE])
+    admin = await make_user(db, perms=[ADMIN_TRUE, P.POST_VIEW])
     path = V1.path(PostRoutes.POST_BY_ID, post_id=post.id)
     for user in (home, viewer, manager, admin):
         assert (await client.get(path, headers=headers(user))).status_code == 200
@@ -222,7 +222,7 @@ async def test_home_and_access_row_users_lose_the_data_and_get_it_back_after_res
         assert scene.post.id not in me["accessible_post_ids"]
     # The access row is kept; the reader still reads its home post
     assert (await client.get(ME, headers=headers(scene.reader))).json()["accessible_post_ids"] == [scene.other.id]
-    assert (await db.exec(select(UserPostAccess).where(UserPostAccess.post_id == scene.post.id))).all() != []
+    assert (await db.exec(select(RoleAssignment).where(RoleAssignment.scope_post_id == scene.post.id))).all() != []
 
     assert (await client.post(_restore_path(scene.post.id), headers=headers(scene.admin))).status_code == 200
     for user in (scene.home, scene.reader):
@@ -241,7 +241,7 @@ async def test_access_all_still_reads_the_data_of_an_archived_post(client, db, h
 async def test_an_administrator_without_access_all_loses_the_data_too(client, db, headers):
     """Observations, media and reports never get the administrator exception"""
     scene = await _scene(db)
-    admin = await make_user(db, perms=DATA_PERMS + [P.IS_ADMIN], post_id=scene.post.id)
+    admin = await make_user(db, perms=DATA_PERMS + [ADMIN_TRUE], post_id=scene.post.id)
     assert await _reads_the_data(client, headers, scene, admin)
     await _set_archived(db, scene.post)
     assert not await _reads_the_data(client, headers, scene, admin)
@@ -431,30 +431,26 @@ async def test_an_archived_post_cannot_be_assigned(client, db, headers):
     scene = await _scene(db)
     await _set_archived(db, scene.post)
     admin, target = scene.admin, scene.access_all
-    role = await make_role(db, [P.OBSERVATION_VIEW])
 
     created = await client.post(
         V1.path(UserRoutes.ROOT), headers=headers(admin),
         files={"certificate": ("cert.pem", make_certificate("cn-archived-post"), "application/x-pem-file")},
-        data={"username": "on_archived_post", "username_alias": "Alias", "post_id": str(scene.post.id), "role_ids": [role.id]},
+        data={"username": "on_archived_post", "username_alias": "Alias", "post_id": str(scene.post.id),
+              "user_type": "viewer"},
     )
     _is_post_archived(created, scene.post)
 
     moved = await client.patch(V1.path(UserRoutes.USER_BY_ID, user_id=target.id), headers=headers(admin), data={"post_id": str(scene.post.id)})
     _is_post_archived(moved, scene.post)
-
-    access = V1.path(UserRoutes.USER_POST_ACCESS_BY_POST, user_id=target.id, post_id=scene.post.id)
-    _is_post_archived(await client.put(access, headers=headers(admin), json={"can_write": False}), scene.post)
     target_id = target.id
     db.expire_all()
     assert (await db.get(User, target_id)).post_id is None
-    assert (await db.exec(select(UserPostAccess).where(UserPostAccess.user_id == target_id))).all() == []
 
 
 @pytest.mark.asyncio
 async def test_existing_assignments_of_an_archived_post_stay(client, db, headers):
-    """Archiving changes no user row: the home post stays (a form that sends it again is no new assignment), the
-    access row stays and can be revoked"""
+    """Archiving changes no user row: the home post stays (a form that sends it again is no new assignment), and so
+    do the assignments made on the post"""
     scene = await _scene(db)
     await _set_archived(db, scene.post)
     kept = await client.patch(V1.path(UserRoutes.USER_BY_ID, user_id=scene.home.id), headers=headers(scene.admin),
@@ -463,10 +459,7 @@ async def test_existing_assignments_of_an_archived_post_stay(client, db, headers
     moved = await client.patch(V1.path(UserRoutes.USER_BY_ID, user_id=scene.home.id), headers=headers(scene.admin),
                                data={"post_id": str(scene.other.id)})
     assert moved.status_code == 200, moved.text
-
-    revoked = await client.delete(
-        V1.path(UserRoutes.USER_POST_ACCESS_BY_POST, user_id=scene.reader.id, post_id=scene.post.id), headers=headers(scene.admin))
-    assert revoked.status_code == 204, revoked.text
+    assert (await db.exec(select(RoleAssignment).where(RoleAssignment.scope_post_id == scene.post.id))).all() != []
 
 
 # ----------------------------------------------------------------- migration

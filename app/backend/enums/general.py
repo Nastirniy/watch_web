@@ -33,8 +33,7 @@ class Permissions(Enum):
     ROLE_ARCHIVE = "role.archive"
     ROLE_DELETE = "role.delete"  # permanent removal, the only hard delete in the API
 
-    # Admin permissions
-    IS_ADMIN = "admin.true"
+    # Administration (admin.true is gone since authorization v2: administration is these granular permissions)
     AUDIT_VIEW = "audit.view"
     EXPORT_CREATE = "export.create"
 
@@ -68,8 +67,7 @@ class Permissions(Enum):
     MEDIA_UPDATE = "media.update"
     MEDIA_ARCHIVE = "media.archive"
 
-    # Data scope and ownership permissions
-    POST_ACCESS_ALL = "post.access_all"
+    # Ownership overrides (post.access_all is gone: every post is an assignment at the root)
     OBSERVATION_MANAGE_ANY = "observation.manage_any"
     MEDIA_MANAGE_ANY = "media.manage_any"
 
