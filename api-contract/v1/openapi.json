@@ -1508,7 +1508,7 @@
           "USERS"
         ],
         "summary": "Update User",
-        "description": "Update user fields - all fields are optional\n\nSupports updating:\n- username: Unique username (3-50 characters)\n- username_alias: User's display name (1-255 characters)\n- post_id: Home post (membership: who manages the user; it grants nothing by itself). Moving the user needs\n  user.update covering the new post too (403 permission_required_for_action, the same for an unknown or\n  archived post outside the caller's scope); inside it an unknown post answers 404 post_not_found and an\n  archived one 409 post_archived (sending the current home post again changes nothing and is accepted)\n- is_active: User's active status (boolean)\n- certificate: Update PKI certificate authentication data (file upload). A different certificate ends every\n  session of the user, like deactivation: the old certificate's tokens stop working.\n\nOnly provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).\nThe fields are form fields: any other body (JSON included) answers 415 instead of being ignored.\n\nChanging a user needs user.update covering them (their home post, the root for a user without one) and, for\nanother user, that the caller could grant every assignment they have (403 target_user_more_privileged). A\ndeactivation must leave an active holder of the built-in admin role at the root (409 last_admin_required,\ncannot_remove_own_admin).",
+        "description": "Update user fields - all fields are optional\n\nSupports updating:\n- username: Unique username (3-50 characters)\n- username_alias: User's display name (1-255 characters)\n- post_id: Home post (membership: who manages the user; it grants nothing by itself). Moving the user needs\n  user.update covering the new post too (403 permission_required_for_action, the same for an unknown or\n  archived post outside the caller's scope); inside it an unknown post answers 404 post_not_found and an\n  archived one 409 post_archived (sending the current home post again changes nothing and is accepted)\n- is_active: User's active status (boolean)\n- certificate: Update PKI certificate authentication data (file upload). A different certificate ends every\n  session of the user, like deactivation: the old certificate's tokens stop working.\n\nOnly provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).\nThe fields are form fields: any other body (JSON included) answers 415 instead of being ignored.\n\nChanging a user needs user.update covering them (their home post, the root for a user without one) and, for\nanother user, that the caller could grant every assignment they have (403 target_user_more_privileged). A\ndeactivation must leave an active holder of the built-in admin role at the root (409 last_admin_required).",
         "operationId": "update_user",
         "security": [
           {
@@ -1701,14 +1701,11 @@
             }
           },
           "409": {
-            "description": "`cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no active administrator; `post_archived`: Post is archived",
+            "description": "`last_admin_required`: This change would leave no active administrator; `post_archived`: Post is archived",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/CannotRemoveOwnAdminProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/LastAdminRequiredProblem"
                     },
@@ -1719,7 +1716,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "cannot_remove_own_admin": "#/components/schemas/CannotRemoveOwnAdminProblem",
                       "last_admin_required": "#/components/schemas/LastAdminRequiredProblem",
                       "post_archived": "#/components/schemas/PostArchivedProblem"
                     }
@@ -2521,6 +2517,532 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/SessionAlreadyEndedProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/{user_id}/assignments": {
+      "get": {
+        "tags": [
+          "USERS"
+        ],
+        "summary": "List User Assignments",
+        "description": "The role assignments of a user, by id: the role and the node it applies to (root, group or post, with its\nname; the application name at the root), assignments of archived roles included (they grant nothing until the\nrole is restored). user.view must cover the user (403 user_self_only otherwise); an archived user, like\nGET /{user_id}, only for callers with user.archive covering them (404 otherwise).",
+        "operationId": "list_user_assignments",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AssignmentResponse"
+                  },
+                  "title": "Response List User Assignments"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`: Insufficient permissions; `user_self_only`: You can only view your own account or users of your assigned posts",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UserSelfOnlyProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "user_self_only": "#/components/schemas/UserSelfOnlyProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`user_not_found`: User not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserNotFoundProblem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "USERS"
+        ],
+        "summary": "Create User Assignment",
+        "description": "Give the user a role at a node of the scope tree: scope {kind: root} or {kind: group | post, id}. The role\napplies to the node and everything below it, posts added later included.\n\nChecked in this order, so that a node outside the caller's scope answers the same 403 whether it exists, is\narchived or not: user.update covering the user and every assignment of the user grantable by the caller (403\ntarget_user_more_privileged); an archived user 404 user_not_found; an unknown or archived role 404\nrole_not_found; every permission of the role held by the caller at the node (403 grant_exceeds_own_permissions);\nan unknown or archived group or post 404 scope_group_not_found / post_not_found; a role with a system permission\nbelow the root 409 role_requires_root_scope; a role above the ceiling of the user's type 409\nrole_exceeds_user_type; the same role at the same node 409 assignment_exists.",
+        "operationId": "create_user_assignment",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignmentCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssignmentResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/GrantExceedsOwnPermissionsProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TargetUserMorePrivilegedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "grant_exceeds_own_permissions": "#/components/schemas/GrantExceedsOwnPermissionsProblem",
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "target_user_more_privileged": "#/components/schemas/TargetUserMorePrivilegedProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`post_not_found`: Post not found; `role_not_found`: Role not found; `scope_group_not_found`: Scope group not found; `user_not_found`: User not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PostNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RoleNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ScopeGroupNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UserNotFoundProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "post_not_found": "#/components/schemas/PostNotFoundProblem",
+                      "role_not_found": "#/components/schemas/RoleNotFoundProblem",
+                      "scope_group_not_found": "#/components/schemas/ScopeGroupNotFoundProblem",
+                      "user_not_found": "#/components/schemas/UserNotFoundProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`assignment_exists`: The user already holds this role at this scope; `role_exceeds_user_type`: The role holds permissions the user's type does not allow; `role_requires_root_scope`: This role can be assigned only at the root",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AssignmentExistsProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RoleExceedsUserTypeProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RoleRequiresRootScopeProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "assignment_exists": "#/components/schemas/AssignmentExistsProblem",
+                      "role_exceeds_user_type": "#/components/schemas/RoleExceedsUserTypeProblem",
+                      "role_requires_root_scope": "#/components/schemas/RoleRequiresRootScopeProblem"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/{user_id}/assignments/{assignment_id}": {
+      "delete": {
+        "tags": [
+          "USERS"
+        ],
+        "summary": "Delete User Assignment",
+        "description": "Remove one role assignment of the user (the link row; the role stays). The audit log keeps a full copy of the\nremoved row.\n\nChecked in this order: user.update covering the user and every assignment of the user grantable by the caller\n(403 target_user_more_privileged); an archived user 404 user_not_found; an assignment that is not this user's\n404 assignment_not_found; every permission of its role held by the caller at its node (403\ngrant_exceeds_own_permissions); the user's last assignment 409 last_assignment_required; the built-in admin role\nat the root must stay with an active user (409 last_admin_required) and cannot be taken from oneself (409\ncannot_remove_own_admin).",
+        "operationId": "delete_user_assignment",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "assignment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Assignment Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/GrantExceedsOwnPermissionsProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TargetUserMorePrivilegedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "grant_exceeds_own_permissions": "#/components/schemas/GrantExceedsOwnPermissionsProblem",
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "target_user_more_privileged": "#/components/schemas/TargetUserMorePrivilegedProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`assignment_not_found`: Role assignment not found; `user_not_found`: User not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AssignmentNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UserNotFoundProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "assignment_not_found": "#/components/schemas/AssignmentNotFoundProblem",
+                      "user_not_found": "#/components/schemas/UserNotFoundProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no active administrator; `last_assignment_required`: The last role assignment of a user cannot be removed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CannotRemoveOwnAdminProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LastAdminRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LastAssignmentRequiredProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "cannot_remove_own_admin": "#/components/schemas/CannotRemoveOwnAdminProblem",
+                      "last_admin_required": "#/components/schemas/LastAdminRequiredProblem",
+                      "last_assignment_required": "#/components/schemas/LastAssignmentRequiredProblem"
+                    }
+                  }
                 }
               }
             }
@@ -11970,7 +12492,7 @@
           "SCOPE_GROUPS"
         ],
         "summary": "List Scope Groups",
-        "description": "List scope groups with filters. Archived ones only with include_deleted (requires scope_group.archive).",
+        "description": "List scope groups with filters: the groups inside the subtrees where the caller holds scope_group.view (every\ngroup with it at the root). Archived ones only with include_deleted (requires scope_group.archive).",
         "operationId": "list_scope_groups",
         "security": [
           {
@@ -12219,7 +12741,7 @@
           "SCOPE_GROUPS"
         ],
         "summary": "Create Scope Group",
-        "description": "Create a group under parent_id (null: directly under the root). Names are unique within a parent; groups\nnest at most 6 levels deep.",
+        "description": "Create a group under parent_id (null: directly under the root). Names are unique within a parent; groups\nnest at most 6 levels deep. A parent outside the caller's scope_group.view answers 404 like an unknown one.",
         "operationId": "create_scope_group",
         "security": [
           {
@@ -12368,7 +12890,7 @@
           "SCOPE_GROUPS"
         ],
         "summary": "Get Scope Tree",
-        "description": "The whole tree below the root: groups with their subgroups and posts, then the posts directly under the\nroot. Archived groups and posts are left out.",
+        "description": "The part of the scope tree the caller sees, for the scope picker: the subtrees where the caller holds\nscope_group.view, with the posts where post.view is in effect. The top level holds the topmost nodes the caller\nsees: with scope_group.view at the root the groups and the posts directly under the root; otherwise the topmost\ngroups (and posts) where it is held. Archived groups and posts are left out, and so is everything below an\narchived group (a post restored while its group is archived keeps its group_id: it is not shown as a post of\nthe root).",
         "operationId": "get_scope_tree",
         "responses": {
           "200": {
@@ -12483,7 +13005,7 @@
           "SCOPE_GROUPS"
         ],
         "summary": "Get Scope Group",
-        "description": "Get a scope group by ID. An archived group answers 404.",
+        "description": "Get a scope group by ID. An archived group, and a group outside the subtrees where the caller holds\nscope_group.view, answer 404 like an unknown one.",
         "operationId": "get_scope_group",
         "security": [
           {
@@ -12603,7 +13125,7 @@
           "SCOPE_GROUPS"
         ],
         "summary": "Update Scope Group",
-        "description": "Rename, describe or move a group (parent_id null: directly under the root). Only the fields sent change.\nA group cannot move into its own subtree, and the moved subtree must still fit 6 levels. Archived: 404.",
+        "description": "Rename, describe or move a group (parent_id null: directly under the root). Only the fields sent change.\nA group cannot move into its own subtree, and the moved subtree must still fit 6 levels. Archived, or outside\nthe caller's scope_group.view (the group or the new parent): 404.",
         "operationId": "update_scope_group",
         "security": [
           {
@@ -12763,7 +13285,7 @@
           "SCOPE_GROUPS"
         ],
         "summary": "Archive Scope Group",
-        "description": "Archive a group (is_deleted=true). Only an empty group: no active subgroup and no active post (409\nscope_group_not_empty). Already archived or unknown: 404. Undo with POST /{group_id}/restore.",
+        "description": "Archive a group (is_deleted=true). Only an empty group: no active subgroup and no active post (409\nscope_group_not_empty). Already archived, unknown or outside the caller's scope_group.view: 404. Undo with\nPOST /{group_id}/restore.",
         "operationId": "archive_scope_group",
         "security": [
           {
@@ -12895,7 +13417,7 @@
           "SCOPE_GROUPS"
         ],
         "summary": "Restore Scope Group",
-        "description": "Restore an archived group (is_deleted=false) under its former parent. Unknown: 404, and 404 when the\nparent is archived (restore the parent first). Not archived: 409.",
+        "description": "Restore an archived group (is_deleted=false) under its former parent. Unknown: 404, and 404 when the\nparent is archived (restore the parent first); outside the caller's scope_group.view: 404. Not archived: 409.",
         "operationId": "restore_scope_group",
         "security": [
           {
@@ -23018,6 +23540,211 @@
           }
         ]
       },
+      "AssignmentCreate": {
+        "properties": {
+          "role_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Role Id"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ScopeRef"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "role_id",
+          "scope"
+        ],
+        "title": "AssignmentCreate",
+        "description": "A role for the user at a node of the scope tree"
+      },
+      "AssignmentExistsProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "The user already holds this role at this scope",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "The user already holds this role at this scope"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "assignment_exists",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "AssignmentExistsProblem",
+        "description": "The user already holds this role at this scope (HTTP 409). Problem type assignment_exists.",
+        "examples": [
+          {
+            "code": "assignment_exists",
+            "detail": "The user already holds this role at this scope",
+            "instance": "/api/v1/...",
+            "status": 409,
+            "title": "The user already holds this role at this scope",
+            "type": "https://example.org/problems/assignment_exists"
+          }
+        ]
+      },
+      "AssignmentNotFoundProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Role assignment not found",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 404,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Role assignment not found"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "assignment_not_found",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "AssignmentNotFoundProblem",
+        "description": "Role assignment not found (HTTP 404). Problem type assignment_not_found.",
+        "examples": [
+          {
+            "code": "assignment_not_found",
+            "detail": "Role assignment not found",
+            "instance": "/api/v1/...",
+            "status": 404,
+            "title": "Role assignment not found",
+            "type": "https://example.org/problems/assignment_not_found"
+          }
+        ]
+      },
+      "AssignmentResponse": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "role": {
+            "$ref": "#/components/schemas/AssignmentRole"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ScopeResponse"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "role",
+          "scope",
+          "created_at"
+        ],
+        "title": "AssignmentResponse",
+        "description": "A role a user holds at one node of the scope tree. Build it from auth/assignments.py AssignmentView:\nAssignmentResponse.model_validate(view, from_attributes=True)"
+      },
+      "AssignmentRole": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "is_builtin": {
+            "type": "boolean",
+            "title": "Is Builtin",
+            "description": "A built-in role of a user type (owned by the system)"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "display_name",
+          "is_builtin"
+        ],
+        "title": "AssignmentRole"
+      },
       "Body_upload_complete_file": {
         "properties": {
           "observation_id": {
@@ -24629,6 +25356,8 @@
           "longitude_out_of_range",
           "permission_ids_duplicate",
           "permissions_unknown",
+          "scope_id_required",
+          "scope_id_not_allowed",
           "certificate_cn_invalid",
           "certificate_serial_invalid",
           "certificate_fingerprint_invalid",
@@ -25456,6 +26185,69 @@
             "status": 409,
             "title": "This change would leave no active administrator",
             "type": "https://example.org/problems/last_admin_required"
+          }
+        ]
+      },
+      "LastAssignmentRequiredProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "The last role assignment of a user cannot be removed",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "The last role assignment of a user cannot be removed"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "last_assignment_required",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "LastAssignmentRequiredProblem",
+        "description": "The last role assignment of a user cannot be removed (HTTP 409). Problem type last_assignment_required.",
+        "examples": [
+          {
+            "code": "last_assignment_required",
+            "detail": "The last role assignment of a user cannot be removed",
+            "instance": "/api/v1/...",
+            "status": 409,
+            "title": "The last role assignment of a user cannot be removed",
+            "type": "https://example.org/problems/last_assignment_required"
           }
         ]
       },
@@ -31550,6 +32342,84 @@
           }
         ]
       },
+      "RoleExceedsUserTypeProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "The role holds permissions the user's type does not allow",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "A user of type {user_type} cannot hold: {excess_permissions}"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "role_exceeds_user_type",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          },
+          "user_type": {
+            "type": "string",
+            "title": "User Type"
+          },
+          "excess_permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Excess Permissions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code",
+          "user_type",
+          "excess_permissions"
+        ],
+        "title": "RoleExceedsUserTypeProblem",
+        "description": "The role holds permissions the user's type does not allow (HTTP 409). Problem type role_exceeds_user_type.",
+        "examples": [
+          {
+            "code": "role_exceeds_user_type",
+            "detail": "A user of type <user_type> cannot hold: <excess_permissions>",
+            "excess_permissions": "<excess_permissions>",
+            "instance": "/api/v1/...",
+            "status": 409,
+            "title": "The role holds permissions the user's type does not allow",
+            "type": "https://example.org/problems/role_exceeds_user_type",
+            "user_type": "<user_type>"
+          }
+        ]
+      },
       "RoleHasActiveUsersProblem": {
         "properties": {
           "type": {
@@ -31949,6 +32819,78 @@
             "status": 404,
             "title": "Permission is not assigned to this role",
             "type": "https://example.org/problems/role_permission_not_assigned"
+          }
+        ]
+      },
+      "RoleRequiresRootScopeProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "This role can be assigned only at the root",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "The role holds system permissions ({system_permissions}): it can be assigned only at the root"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "role_requires_root_scope",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          },
+          "system_permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "System Permissions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code",
+          "system_permissions"
+        ],
+        "title": "RoleRequiresRootScopeProblem",
+        "description": "This role can be assigned only at the root (HTTP 409). Problem type role_requires_root_scope.",
+        "examples": [
+          {
+            "code": "role_requires_root_scope",
+            "detail": "The role holds system permissions (<system_permissions>): it can be assigned only at the root",
+            "instance": "/api/v1/...",
+            "status": 409,
+            "system_permissions": "<system_permissions>",
+            "title": "This role can be assigned only at the root",
+            "type": "https://example.org/problems/role_requires_root_scope"
           }
         ]
       },
@@ -32668,6 +33610,79 @@
         "title": "ScopeGroupUpdate",
         "description": "Only the fields sent are changed; parent_id null moves the group directly under the root"
       },
+      "ScopeRef": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "root",
+              "group",
+              "post"
+            ],
+            "title": "Kind",
+            "description": "root: the whole system; group: a scope group and everything below it; post: one post"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id",
+            "description": "Id of the group or the post; left out for the root"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "title": "ScopeRef",
+        "description": "A node of the scope tree: the root (no id), a scope group or a post (its id)"
+      },
+      "ScopeResponse": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "root",
+              "group",
+              "post"
+            ],
+            "title": "Kind"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id",
+            "description": "Id of the group or the post; null at the root"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Name of the group or the post; the application name at the root"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "id",
+          "name"
+        ],
+        "title": "ScopeResponse",
+        "description": "The node an assignment applies to (and everything below it)"
+      },
       "ScopeTreeGroup": {
         "properties": {
           "id": {
@@ -32747,7 +33762,8 @@
               "$ref": "#/components/schemas/ScopeTreeGroup"
             },
             "type": "array",
-            "title": "Groups"
+            "title": "Groups",
+            "description": "The topmost groups the caller sees: the groups directly under the root with scope_group.view at the root, otherwise the groups where it is held"
           },
           "posts": {
             "items": {
@@ -32755,7 +33771,7 @@
             },
             "type": "array",
             "title": "Posts",
-            "description": "Posts directly under the root"
+            "description": "The topmost posts the caller sees outside these groups: the posts directly under the root with scope_group.view at the root, and posts where it is held on the post itself"
           }
         },
         "additionalProperties": false,
@@ -32765,7 +33781,7 @@
           "posts"
         ],
         "title": "ScopeTreeResponse",
-        "description": "The scope tree below the root; archived groups and posts are left out"
+        "description": "The part of the scope tree the caller sees (scope_group.view, posts with post.view); archived groups and posts\nand everything below an archived group are left out"
       },
       "SearchResponse_CategoryResponse_": {
         "properties": {

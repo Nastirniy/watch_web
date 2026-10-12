@@ -16,6 +16,7 @@ from app.backend.api.v1.models.response.scope_groups import (
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
+from app.backend.auth.scope import Node
 from app.backend.database import get_session
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.enums.general import Permissions
@@ -48,7 +49,15 @@ async def _name_taken(session: AsyncSession, name: str, parent_id: Optional[int]
     return (await session.exec(query)).first() is not None
 
 
-async def _group_or_404(session: AsyncSession, group_id: int, include_deleted: bool = False) -> ScopeGroup:
+def _check_visible(auth: AuthContext, group_id: int) -> None:
+    """Scope before existence: a group outside every subtree where the caller holds scope_group.view answers like an
+    unknown id (an outsider learns nothing about ids)"""
+    if not auth.covers(Permissions.SCOPE_GROUP_VIEW, Node.group(group_id)):
+        raise ApiError(ErrorCode.SCOPE_GROUP_NOT_FOUND)
+
+
+async def _group_or_404(session: AsyncSession, auth: AuthContext, group_id: int, include_deleted: bool = False) -> ScopeGroup:
+    _check_visible(auth, group_id)
     try:
         return await groups_service.get_group(session, group_id, include_deleted)
     except CodedError as exc:
@@ -60,6 +69,15 @@ async def _check_parent(session: AsyncSession, group_id: Optional[int], parent_i
         await groups_service.check_new_parent(session, group_id, parent_id)
     except CodedError as exc:
         raise ApiError.from_coded(exc)
+
+
+async def _check_chosen_parent(session: AsyncSession, auth: AuthContext, group_id: Optional[int],
+                               parent_id: Optional[int]) -> None:
+    """A parent the caller names (create, move): outside the caller's scope_group.view it answers 404 like an
+    unknown one, before the tree rules"""
+    if parent_id is not None:
+        _check_visible(auth, parent_id)
+    await _check_parent(session, group_id, parent_id)
 
 
 async def _audit(request: Request, session: AsyncSession, auth: AuthContext, action: str, group: ScopeGroup,
@@ -87,9 +105,12 @@ async def list_scope_groups(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW]))
 ):
-    """List scope groups with filters. Archived ones only with include_deleted (requires scope_group.archive)."""
+    """List scope groups with filters: the groups inside the subtrees where the caller holds scope_group.view (every
+    group with it at the root). Archived ones only with include_deleted (requires scope_group.archive)."""
     AccessControlService.check_include_deleted(auth, filters, Permissions.SCOPE_GROUP_ARCHIVE)
-    query = ScopeGroupFilterService.apply_filters(select(ScopeGroup), filters)
+    query = ScopeGroupFilterService.apply_filters(
+        select(ScopeGroup), filters, auth.groups_with(Permissions.SCOPE_GROUP_VIEW),
+    )
     result = await session.exec(query)
     return [ScopeGroupResponse.model_validate(g) for g in result.all()]
 
@@ -107,8 +128,8 @@ async def create_scope_group(
             all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_CREATE]))
 ):
     """Create a group under parent_id (null: directly under the root). Names are unique within a parent; groups
-    nest at most 6 levels deep."""
-    await _check_parent(session, None, data.parent_id)
+    nest at most 6 levels deep. A parent outside the caller's scope_group.view answers 404 like an unknown one."""
+    await _check_chosen_parent(session, auth, None, data.parent_id)
     if await _name_taken(session, data.name, data.parent_id):
         raise ApiError(ErrorCode.SCOPE_GROUP_NAME_TAKEN)
 
@@ -134,14 +155,26 @@ async def get_scope_tree(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW]))
 ):
-    """The whole tree below the root: groups with their subgroups and posts, then the posts directly under the
-    root. Archived groups and posts are left out."""
-    groups = (await session.exec(
+    """The part of the scope tree the caller sees, for the scope picker: the subtrees where the caller holds
+    scope_group.view, with the posts where post.view is in effect. The top level holds the topmost nodes the caller
+    sees: with scope_group.view at the root the groups and the posts directly under the root; otherwise the topmost
+    groups (and posts) where it is held. Archived groups and posts are left out, and so is everything below an
+    archived group (a post restored while its group is archived keeps its group_id: it is not shown as a post of
+    the root)."""
+    tree = auth.tree
+    viewable_posts = auth.posts_with(Permissions.POST_VIEW)
+
+    def shown(node: Node) -> bool:
+        """Inside a subtree where scope_group.view is held, below no archived group"""
+        return auth.covers(Permissions.SCOPE_GROUP_VIEW, node) and not any(
+            tree.is_archived(above) for above in tree.ancestors(node)[1:])
+
+    groups = [g for g in (await session.exec(
         select(ScopeGroup).where(ScopeGroup.is_deleted == False).order_by(ScopeGroup.name, ScopeGroup.id)  # noqa: E712
-    )).all()
-    posts = (await session.exec(
+    )).all() if shown(Node.group(g.id))]
+    posts = [p for p in (await session.exec(
         select(Post).where(Post.is_deleted == False).order_by(Post.name, Post.id)  # noqa: E712
-    )).all()
+    )).all() if (viewable_posts is None or p.id in viewable_posts) and shown(Node.post(p.id))]
 
     nodes: Dict[int, ScopeTreeGroup] = {
         g.id: ScopeTreeGroup(id=g.id, name=g.name, description=g.description, groups=[], posts=[]) for g in groups
@@ -165,8 +198,9 @@ async def get_scope_group(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW]))
 ):
-    """Get a scope group by ID. An archived group answers 404."""
-    return ScopeGroupResponse.model_validate(await _group_or_404(session, group_id))
+    """Get a scope group by ID. An archived group, and a group outside the subtrees where the caller holds
+    scope_group.view, answer 404 like an unknown one."""
+    return ScopeGroupResponse.model_validate(await _group_or_404(session, auth, group_id))
 
 
 @router.patch(
@@ -183,15 +217,16 @@ async def update_scope_group(
             all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_UPDATE]))
 ):
     """Rename, describe or move a group (parent_id null: directly under the root). Only the fields sent change.
-    A group cannot move into its own subtree, and the moved subtree must still fit 6 levels. Archived: 404."""
-    group = await _group_or_404(session, group_id)
+    A group cannot move into its own subtree, and the moved subtree must still fit 6 levels. Archived, or outside
+    the caller's scope_group.view (the group or the new parent): 404."""
+    group = await _group_or_404(session, auth, group_id)
     update_data = data.model_dump(exclude_unset=True)
     old_values = group.model_dump()
 
     new_parent = update_data.get("parent_id", group.parent_id)
     new_name = update_data.get("name", group.name)
     if "parent_id" in update_data and new_parent != group.parent_id:
-        await _check_parent(session, group.id, new_parent)
+        await _check_chosen_parent(session, auth, group.id, new_parent)
     if ("parent_id" in update_data or "name" in update_data) and await _name_taken(
             session, new_name, new_parent, exclude_id=group.id):
         raise ApiError(ErrorCode.SCOPE_GROUP_NAME_TAKEN)
@@ -223,8 +258,9 @@ async def archive_scope_group(
             all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_ARCHIVE]))
 ):
     """Archive a group (is_deleted=true). Only an empty group: no active subgroup and no active post (409
-    scope_group_not_empty). Already archived or unknown: 404. Undo with POST /{group_id}/restore."""
-    group = await _group_or_404(session, group_id)
+    scope_group_not_empty). Already archived, unknown or outside the caller's scope_group.view: 404. Undo with
+    POST /{group_id}/restore."""
+    group = await _group_or_404(session, auth, group_id)
     try:
         await groups_service.check_empty(session, group.id)
     except CodedError as exc:
@@ -253,8 +289,8 @@ async def restore_scope_group(
             all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_ARCHIVE]))
 ):
     """Restore an archived group (is_deleted=false) under its former parent. Unknown: 404, and 404 when the
-    parent is archived (restore the parent first). Not archived: 409."""
-    group = await _group_or_404(session, group_id, include_deleted=True)
+    parent is archived (restore the parent first); outside the caller's scope_group.view: 404. Not archived: 409."""
+    group = await _group_or_404(session, auth, group_id, include_deleted=True)
     if not group.is_deleted:
         raise ApiError(ErrorCode.SCOPE_GROUP_NOT_ARCHIVED)
     await _check_parent(session, group.id, group.parent_id)

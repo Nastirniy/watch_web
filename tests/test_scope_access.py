@@ -26,6 +26,7 @@ from app.backend.enums.routes import (
 )
 from app.backend.filters.post_filter import PostCriteria, PostFilterService
 from app.backend.filters.user_filter import UserCriteria, UserFilterService
+from app.backend.models.observation import ObservationFrequency
 from app.backend.models.post import Post
 from app.backend.models.role_assignment import RoleAssignment
 from app.backend.models.scope_group import ScopeGroup
@@ -652,6 +653,78 @@ async def test_regenerate_needs_media_update_at_the_post(client, db, headers, wi
             "post_write_denied", ["media.update"])
     ok = await client.post(V1.path(MediaRoutes.MEDIA_THUMBNAIL_REGENERATE, media_id=video_a.id), headers=headers(editor))
     assert ok.status_code == 200, ok.text
+
+
+# ----------------------------------------------------------------- the view and the change permission at different posts
+async def _band_ids(db, observation) -> list:
+    rows = await db.exec(select(ObservationFrequency.id).where(ObservationFrequency.observation_id == observation.id)
+                         .order_by(ObservationFrequency.id))
+    return list(rows.all())
+
+
+TWO_BANDS = [("rc", "100.000", "200.000"), ("video", "300.000", "400.000")]
+
+
+async def test_band_archive_needs_observation_archive_at_the_post(client, db, headers, with_grants):
+    """observation.update at A does not archive a band at A; observation.archive held at B (so the route is
+    reachable) archives bands at B only"""
+    a, b = await make_post(db), await make_post(db)
+    ids = await make_dictionary(db)
+    editor = await make_user(db, post_id=a.id)
+    await with_grants(editor, grant(Node.post(a.id), P.OBSERVATION_VIEW, P.OBSERVATION_UPDATE),
+                      grant(Node.post(b.id), P.OBSERVATION_VIEW, P.OBSERVATION_ARCHIVE))
+    at_a = await make_observation(db, editor, a, ids["signal_type_id"], bands=TWO_BANDS)
+    at_b = await make_observation(db, editor, b, ids["signal_type_id"], bands=TWO_BANDS)
+    band_a, band_b = (await _band_ids(db, at_a))[0], (await _band_ids(db, at_b))[0]
+
+    def band_url(route, observation, band_id):
+        return V1.path(route, observation_id=observation.id, frequency_id=band_id)
+
+    _denied(await client.post(band_url(ObservationRoutes.OBSERVATION_FREQUENCY_ARCHIVE, at_a, band_a), headers=headers(editor)),
+            "post_write_denied", ["observation.archive"])
+    updated = await client.put(band_url(ObservationRoutes.OBSERVATION_FREQUENCY_BY_ID, at_a, band_a),
+                               json={"frequency_max": "250.000"}, headers=headers(editor))
+    assert updated.status_code == 200, updated.text
+    archived = await client.post(band_url(ObservationRoutes.OBSERVATION_FREQUENCY_ARCHIVE, at_b, band_b), headers=headers(editor))
+    assert archived.status_code == 200, archived.text
+    _denied(await client.put(band_url(ObservationRoutes.OBSERVATION_FREQUENCY_BY_ID, at_b, (await _band_ids(db, at_b))[1]),
+                             json={"frequency_max": "450.000"}, headers=headers(editor)),
+            "post_write_denied", ["observation.update"])
+
+
+async def test_media_view_without_media_archive_at_the_post(client, db, headers, with_grants):
+    """media.view at A shows the caller's own file there, archiving it needs media.archive at A (held at B only)"""
+    a, b = await make_post(db), await make_post(db)
+    ids = await make_dictionary(db)
+    uploader = await make_user(db, post_id=a.id)
+    await with_grants(uploader, grant(Node.post(a.id), P.OBSERVATION_VIEW, P.MEDIA_VIEW, P.MEDIA_CREATE),
+                      grant(Node.post(b.id), P.MEDIA_VIEW, P.MEDIA_ARCHIVE))
+    media = await make_media(db, await _observation(db, uploader, a, ids["signal_type_id"]), uploader)
+
+    shown = await client.get(V1.path(MediaRoutes.MEDIA_INFO, media_id=media.id), headers=headers(uploader))
+    assert shown.status_code == 200, shown.text
+    assert media.id in _ids(await client.get(MEDIA, headers=headers(uploader)))
+    _denied(await client.post(V1.path(MediaRoutes.MEDIA_ARCHIVE, media_id=media.id), headers=headers(uploader)),
+            "post_write_denied", ["media.archive"])
+
+
+async def test_observation_view_without_media_view_at_the_post(client, db, headers, with_grants):
+    """observation.view at A lists the observation; its media needs media.view at A (held at B only)"""
+    a, b = await make_post(db), await make_post(db)
+    ids = await make_dictionary(db)
+    owner = await make_admin(db)
+    observation = await _observation(db, owner, a, ids["signal_type_id"])
+    media = await make_media(db, observation, owner)
+    reader = await make_user(db, post_id=a.id)
+    await with_grants(reader, grant(Node.post(a.id), P.OBSERVATION_VIEW), grant(Node.post(b.id), P.MEDIA_VIEW))
+
+    assert observation.id in _ids(await client.get(OBSERVATIONS, headers=headers(reader)))
+    _denied(await client.post(V1.path(MediaRoutes.LIST_ALL_ATTACHED_MEDIA), json={"observation_id": observation.id},
+                              headers=headers(reader)), "post_access_denied", ["media.view"])
+    _denied(await client.get(V1.path(MediaRoutes.MEDIA_INFO, media_id=media.id), headers=headers(reader)),
+            "post_access_denied", ["media.view"])
+    for path in (MEDIA, SEARCH_MEDIA):
+        assert media.id not in _ids(await client.get(path, headers=headers(reader))), path
 
 
 async def test_user_reads_of_another_user_need_user_view_covering_them(client, db, headers, with_grants):

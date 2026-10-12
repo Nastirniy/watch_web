@@ -1,12 +1,12 @@
 from typing import List, Optional, Annotated, Tuple
-from fastapi import APIRouter, Depends, Form, Request, Query, Path
+from fastapi import APIRouter, Depends, Form, Request, Query, Path, status
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError, DataError
 from sqlmodel import select
 from datetime import datetime, timezone
 
-from app.backend.api.shared.helpers.db_errors import is_data_too_long, is_unique_violation
+from app.backend.api.shared.helpers.db_errors import is_data_too_long, is_unique_violation, unique_violation_as
 from app.backend.api.shared.helpers.post_helper import refuse_archived_post
 from app.backend.database import get_session
 from app.backend.models.user import User, UserSession
@@ -16,8 +16,9 @@ from app.backend.models.post import Post
 from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
 from app.backend.auth.access_control import AccessControlService
+from app.backend.auth.assignments import assignment_views, create_assignment, delete_assignment
 from app.backend.auth.privileges import (
-    check_admin_kept, check_an_admin_remains, check_grant_at, check_target_user, role_permission_names,
+    check_an_admin_remains, check_grant_at, check_target_user, role_permission_names,
 )
 from app.backend.auth.scope import Node, ROOT
 from app.backend.bootstrap.permissions import role_level
@@ -34,7 +35,9 @@ from app.backend.enums.routes import UserRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.services.audit import create_audit_log
 from app.backend.utils.logging_config import get_api_logger
+from app.backend.api.v1.models.request.assignments import AssignmentCreate
 from app.backend.api.v1.models.request.users import UserCreateForm, UserUpdateForm
+from app.backend.api.v1.models.response.assignments import AssignmentResponse
 from app.backend.api.v1.models.response.users import UserResponse
 from app.backend.api.v1.models.query.users import UserFilterParams
 from app.backend.filters.user_filter import UserFilterService
@@ -304,7 +307,7 @@ async def get_user(
         ErrorCode.CANNOT_DEACTIVATE_SELF, ErrorCode.CERTIFICATE_FILE_EMPTY, ErrorCode.CERTIFICATE_INVALID,
         ErrorCode.CERTIFICATE_TAKEN, ErrorCode.USERNAME_TAKEN, ErrorCode.POST_NOT_FOUND, ErrorCode.POST_ARCHIVED,
         ErrorCode.USER_NOT_FOUND, ErrorCode.CERTIFICATE_FILE_TOO_LARGE, ErrorCode.FORM_CONTENT_TYPE_REQUIRED,
-        ErrorCode.LAST_ADMIN_REQUIRED, ErrorCode.CANNOT_REMOVE_OWN_ADMIN,
+        ErrorCode.LAST_ADMIN_REQUIRED,
         AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION,
         *GUARDED,
     ),
@@ -335,8 +338,7 @@ async def update_user(
 
     Changing a user needs user.update covering them (their home post, the root for a user without one) and, for
     another user, that the caller could grant every assignment they have (403 target_user_more_privileged). A
-    deactivation must leave an active holder of the built-in admin role at the root (409 last_admin_required,
-    cannot_remove_own_admin).
+    deactivation must leave an active holder of the built-in admin role at the root (409 last_admin_required).
     """
     current_user = auth.user
     content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
@@ -469,8 +471,9 @@ async def update_user(
 
     try:
         if deactivating:
-            # A change that may take the admin role at the root from its last holder
-            await check_admin_kept(session, auth)
+            # A change that may take the admin role at the root from its last holder (deactivating oneself is
+            # refused above)
+            await check_an_admin_remains(session)
 
         await session.commit()
 
@@ -725,3 +728,126 @@ async def end_user_session(
     await session.commit()
     await session.refresh(row)
     return build_session_response(row, session_lifetimes.session_state(row))
+
+
+# Role assignments: a role held at one node of the scope tree (auth/assignments.py has the rules and their order)
+
+async def _get_user_or_404(session: AsyncSession, user_id: int) -> User:
+    """The user, archived or not (each route decides what an archived user means after its scope check)"""
+    user = (await session.exec(select(User).where(User.id == user_id))).first()
+    if not user:
+        raise ApiError(ErrorCode.USER_NOT_FOUND)
+    return user
+
+
+@router.get(
+    UserRoutes.USER_ASSIGNMENTS.value,
+    response_model=List[AssignmentResponse],
+    responses=problems(ErrorCode.USER_NOT_FOUND, AccessErrorCode.USER_SELF_ONLY, *GUARDED),
+)
+async def list_user_assignments(
+        user_id: Annotated[int, Path(ge=1)],
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW]))
+):
+    """The role assignments of a user, by id: the role and the node it applies to (root, group or post, with its
+    name; the application name at the root), assignments of archived roles included (they grant nothing until the
+    role is restored). user.view must cover the user (403 user_self_only otherwise); an archived user, like
+    GET /{user_id}, only for callers with user.archive covering them (404 otherwise)."""
+    target = await _get_user_or_404(session, user_id)
+    # Visibility before the state: an outsider gets the same 403 for an archived and a live user
+    AccessControlService.check_user_view(auth, target)
+    if target.is_deleted and not auth.covers_user(Permissions.USER_ARCHIVE, target):
+        raise ApiError(ErrorCode.USER_NOT_FOUND)
+    return [AssignmentResponse.model_validate(view, from_attributes=True)
+            for view in await assignment_views(session, target.id)]
+
+
+@router.post(
+    UserRoutes.USER_ASSIGNMENTS.value,
+    response_model=AssignmentResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses=problems(
+        ErrorCode.USER_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.SCOPE_GROUP_NOT_FOUND, ErrorCode.POST_NOT_FOUND,
+        ErrorCode.ROLE_REQUIRES_ROOT_SCOPE, ErrorCode.ROLE_EXCEEDS_USER_TYPE, ErrorCode.ASSIGNMENT_EXISTS,
+        AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
+    ),
+)
+async def create_user_assignment(
+        request: Request,
+        user_id: Annotated[int, Path(ge=1)],
+        data: AssignmentCreate,
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE]))
+):
+    """Give the user a role at a node of the scope tree: scope {kind: root} or {kind: group | post, id}. The role
+    applies to the node and everything below it, posts added later included.
+
+    Checked in this order, so that a node outside the caller's scope answers the same 403 whether it exists, is
+    archived or not: user.update covering the user and every assignment of the user grantable by the caller (403
+    target_user_more_privileged); an archived user 404 user_not_found; an unknown or archived role 404
+    role_not_found; every permission of the role held by the caller at the node (403 grant_exceeds_own_permissions);
+    an unknown or archived group or post 404 scope_group_not_found / post_not_found; a role with a system permission
+    below the root 409 role_requires_root_scope; a role above the ceiling of the user's type 409
+    role_exceeds_user_type; the same role at the same node 409 assignment_exists.
+    """
+    target = await _get_user_or_404(session, user_id)
+    assignment = await create_assignment(session, auth, target, data.role_id, data.scope.node)
+    async with unique_violation_as(session, ErrorCode.ASSIGNMENT_EXISTS):
+        await session.flush()
+    await create_audit_log(
+        session=session,
+        action="create",
+        resource_type="role_assignment",
+        resource_id=assignment.id,
+        user_id=auth.user.id,
+        new_values=assignment.model_dump(),
+        details={"message": f"User {auth.user.username} assigned role {assignment.role_id} at {assignment.scope_key} "
+                            f"to user {target.username}"},
+        **client_info(request, auth)
+    )
+    await session.commit()
+    (view,) = await assignment_views(session, target.id, assignment_id=assignment.id)
+    return AssignmentResponse.model_validate(view, from_attributes=True)
+
+
+@router.delete(
+    UserRoutes.USER_ASSIGNMENT_BY_ID.value,
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=problems(
+        ErrorCode.USER_NOT_FOUND, ErrorCode.ASSIGNMENT_NOT_FOUND, ErrorCode.LAST_ASSIGNMENT_REQUIRED,
+        ErrorCode.LAST_ADMIN_REQUIRED, ErrorCode.CANNOT_REMOVE_OWN_ADMIN,
+        AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
+    ),
+)
+async def delete_user_assignment(
+        request: Request,
+        user_id: Annotated[int, Path(ge=1)],
+        assignment_id: Annotated[int, Path(ge=1)],
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE]))
+):
+    """Remove one role assignment of the user (the link row; the role stays). The audit log keeps a full copy of the
+    removed row.
+
+    Checked in this order: user.update covering the user and every assignment of the user grantable by the caller
+    (403 target_user_more_privileged); an archived user 404 user_not_found; an assignment that is not this user's
+    404 assignment_not_found; every permission of its role held by the caller at its node (403
+    grant_exceeds_own_permissions); the user's last assignment 409 last_assignment_required; the built-in admin role
+    at the root must stay with an active user (409 last_admin_required) and cannot be taken from oneself (409
+    cannot_remove_own_admin).
+    """
+    target = await _get_user_or_404(session, user_id)
+    removed = await delete_assignment(session, auth, target, assignment_id)
+    await create_audit_log(
+        session=session,
+        action="delete",
+        resource_type="role_assignment",
+        resource_id=assignment_id,
+        user_id=auth.user.id,
+        old_values=removed,
+        details={"message": f"User {auth.user.username} removed the assignment of role {removed['role_id']} at "
+                            f"{removed['scope_key']} from user {target.username}"},
+        **client_info(request, auth)
+    )
+    await session.commit()

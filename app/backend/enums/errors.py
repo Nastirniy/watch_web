@@ -213,6 +213,23 @@ class ErrorCode(ProblemType):
     ROLE_PERMISSION_NOT_ASSIGNED = ("role_permission_not_assigned", problem(404, "Permission is not assigned to this role"))
     PERMISSION_NOT_FOUND = ("permission_not_found", problem(404, "Permission not found"))
 
+    # ---------------------------------------------------------------- role assignments
+    ASSIGNMENT_NOT_FOUND = ("assignment_not_found", problem(404, "Role assignment not found"))
+    ASSIGNMENT_EXISTS = ("assignment_exists", problem(409, "The user already holds this role at this scope"))
+    # Every user keeps at least one assignment (spec section 6 rule 6)
+    LAST_ASSIGNMENT_REQUIRED = ("last_assignment_required", problem(
+        409, "The last role assignment of a user cannot be removed"))
+    # A role holding a system permission is assignable only at the root (spec section 3)
+    ROLE_REQUIRES_ROOT_SCOPE = ("role_requires_root_scope", problem(
+        409, "This role can be assigned only at the root",
+        "The role holds system permissions ({system_permissions}): it can be assigned only at the root",
+        system_permissions=List[str]))
+    # Every role a user holds fits the ceiling of the user's type (spec section 4)
+    ROLE_EXCEEDS_USER_TYPE = ("role_exceeds_user_type", problem(
+        409, "The role holds permissions the user's type does not allow",
+        "A user of type {user_type} cannot hold: {excess_permissions}",
+        user_type=str, excess_permissions=List[str]))
+
     # ---------------------------------------------------------------- posts
     POST_NOT_FOUND = ("post_not_found", problem(404, "Post not found", post_id=Optional[int]))
     POST_CODE_TAKEN = ("post_code_taken", problem(400, "Post with this code already exists"))
@@ -405,6 +422,8 @@ class FieldErrorCode(FieldCode):
     LONGITUDE_OUT_OF_RANGE = ("longitude_out_of_range", field("Longitude must be between -180 and 180"))
     PERMISSION_IDS_DUPLICATE = ("permission_ids_duplicate", field("Duplicate permission IDs are not allowed"))
     PERMISSIONS_UNKNOWN = ("permissions_unknown", field("Unknown permissions: {permissions}", permissions=List[str]))
+    SCOPE_ID_REQUIRED = ("scope_id_required", field("A group or post scope needs the id of the group or post"))
+    SCOPE_ID_NOT_ALLOWED = ("scope_id_not_allowed", field("The root scope has no id"))
     CERTIFICATE_CN_INVALID = ("certificate_cn_invalid", field("Invalid certificate CN format"))
     CERTIFICATE_SERIAL_INVALID = ("certificate_serial_invalid", field("Invalid certificate serial format"))
     CERTIFICATE_FINGERPRINT_INVALID = ("certificate_fingerprint_invalid", field("Invalid certificate fingerprint format"))

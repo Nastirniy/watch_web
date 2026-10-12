@@ -50,6 +50,8 @@ async def test_route_gate(client, db, headers, entry, persona):
     media = await make_media(db, observation, user)
     role_id = (await db.exec(select(RoleAssignment.role_id).where(RoleAssignment.user_id == user.id)
                              .order_by(RoleAssignment.id))).first() or 1
+    assignment_id = (await db.exec(select(RoleAssignment.id).where(RoleAssignment.user_id == user.id)
+                                   .order_by(RoleAssignment.id))).first() or 1
     ids.update({
         "user_id": user.id,
         "post_id": post.id,
@@ -58,6 +60,7 @@ async def test_route_gate(client, db, headers, entry, persona):
         "frequency_id": (await db.exec(select(ObservationFrequency.id).where(
             ObservationFrequency.observation_id == observation.id))).first(),
         "role_id": role_id,
+        "assignment_id": assignment_id,
         # a permission the persona holds: granting or revoking one the caller lacks is refused past the gate
         "permission_id": (await db.exec(select(Permission.id).where(
             Permission.name.in_(perms)).order_by(Permission.id))).first() or 1,

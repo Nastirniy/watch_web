@@ -501,10 +501,27 @@ async def test_last_admin_is_the_builtin_admin_at_root(db):
 @pytest.mark.asyncio
 async def test_the_only_admin_cannot_drop_their_admin_at_root(db):
     """Reproduced: the only administrator replaced their roles and nobody held admin.true any more. The check the
-    assignment API runs after removing an assignment of the admin role at the root"""
+    assignment API runs after removing an assignment of the admin role at the root: taking it from oneself answers
+    cannot_remove_own_admin, the last administrator included (the more specific answer)"""
     admin = await make_admin(db)
     auth = await load_auth_context(db, admin)
     assert auth.is_admin
+    await db.exec(delete(RoleAssignment).where(RoleAssignment.user_id == admin.id))
+    with pytest.raises(ApiError) as caught:
+        await check_admin_kept(db, auth)
+    assert caught.value.code is ErrorCode.CANNOT_REMOVE_OWN_ADMIN
+    await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_the_last_admin_role_at_root_cannot_go_by_someone_else(db):
+    """A caller who is not the administrator (every permission through a custom role) removing the only
+    administrator's admin role at the root: last_admin_required"""
+    admin = await make_admin(db)
+    every = await make_role(db, await stored_permissions(db, (await builtin_role(db)).id))
+    manager = await make_user(db, role=every)
+    auth = await load_auth_context(db, manager)
+    assert not auth.is_admin
     await db.exec(delete(RoleAssignment).where(RoleAssignment.user_id == admin.id))
     with pytest.raises(ApiError) as caught:
         await check_admin_kept(db, auth)

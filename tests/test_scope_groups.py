@@ -5,10 +5,13 @@ import pytest
 from sqlmodel import select
 
 from app.backend.api.v1 import V1
+from app.backend.auth.scope import Node, ROOT as ROOT_NODE
+from app.backend.enums.general import Permissions, UserType
 from app.backend.enums.routes import PostRoutes, ScopeGroupRoutes
 from app.backend.models.audit import AuditLog
+from app.backend.models.role import Role
 from app.backend.services.scope_groups import MAX_GROUP_DEPTH
-from tests.helpers import make_admin, make_post
+from tests.helpers import assign, make_admin, make_group, make_post, make_role, make_user
 from tests.test_column_bounds import _run_downgrade
 from tests.test_migrations import HEAD, run_migrate
 
@@ -156,6 +159,137 @@ async def test_list_groups_filters_and_archived_guard(client, db, headers):
     assert [g["name"] for g in r.json()] == ["Kharkiv"]
     r = await client.get(ROOT, params={"name_contains": "ast", "include_deleted": True}, headers=h)
     assert r.status_code == 200 and [g["name"] for g in r.json()] == ["East"]
+
+
+# ----------------------------------------------------------------- visibility by scope (authorization v2)
+async def _caller(db, node: Node, *perms, user_type: UserType = UserType.ANALYST):
+    """A user holding a custom role with the permissions at the node"""
+    user = await make_user(db, user_type=user_type)
+    await assign(db, user, await make_role(db, perms), node)
+    return user
+
+
+async def _group_admin(db, node: Node):
+    """Type post_admin with the built-in post_admin role (scope_group.view, post.view, ...) at the node"""
+    user = await make_user(db, user_type=UserType.POST_ADMIN)
+    role = (await db.exec(select(Role).where(Role.builtin_key == UserType.POST_ADMIN.value))).one()
+    await assign(db, user, role, node)
+    return user
+
+
+def _names(groups) -> list:
+    return [g["name"] for g in groups]
+
+
+def _post_ids(posts) -> list:
+    return [p["id"] for p in posts]
+
+
+def _every_post_id(tree: dict) -> set:
+    """Every post id of a tree response, at any level"""
+    ids, stack = set(_post_ids(tree["posts"])), list(tree["groups"])
+    while stack:
+        group = stack.pop()
+        ids |= set(_post_ids(group["posts"]))
+        stack.extend(group["groups"])
+    return ids
+
+
+async def test_tree_limited_to_scope(client, db, headers):
+    """A group admin of East sees East's subtree only: no West, no post directly under the root"""
+    east = await make_group(db, "East")
+    kharkiv = await make_group(db, "Kharkiv", parent_id=east.id)
+    west = await make_group(db, "West")
+    a, a2 = await make_post(db, "A", group_id=kharkiv.id), await make_post(db, "A2", group_id=east.id)
+    await make_post(db, "B", group_id=west.id)
+    await make_post(db, "Top")
+    h = headers(await _group_admin(db, Node.group(east.id)))
+
+    tree = (await client.get(V1.path(ScopeGroupRoutes.TREE), headers=h)).json()
+    assert _names(tree["groups"]) == ["East"] and tree["posts"] == []
+    (east_node,) = tree["groups"]
+    assert _post_ids(east_node["posts"]) == [a2.id]
+    assert _names(east_node["groups"]) == ["Kharkiv"] and _post_ids(east_node["groups"][0]["posts"]) == [a.id]
+    assert _every_post_id(tree) == {a.id, a2.id}
+
+    # A group admin of Kharkiv: Kharkiv is the root of what they see
+    h_kharkiv = headers(await _group_admin(db, Node.group(kharkiv.id)))
+    tree = (await client.get(V1.path(ScopeGroupRoutes.TREE), headers=h_kharkiv)).json()
+    assert _names(tree["groups"]) == ["Kharkiv"] and _post_ids(tree["groups"][0]["posts"]) == [a.id]
+
+    # The flat list and one group follow the same scope; outside it a group is not found, like an unknown id
+    assert sorted(_names((await client.get(ROOT, headers=h)).json())) == ["East", "Kharkiv"]
+    assert (await client.get(_group(kharkiv.id), headers=h)).status_code == 200
+    for group_id in (west.id, 999999):
+        r = await client.get(_group(group_id), headers=h)
+        assert r.status_code == 404 and r.json()["code"] == "scope_group_not_found", r.text
+    r = await client.get(ROOT, params={"parent_id": west.id}, headers=h)
+    assert r.status_code == 200 and r.json() == []
+
+
+async def test_group_writes_need_scope_group_view_at_the_group(client, db, headers):
+    """The structure permissions are held at the root; a group or a named parent outside scope_group.view answers
+    404 like an unknown one"""
+    east = await make_group(db, "East")
+    west = await make_group(db, "West")
+    editor = await _caller(db, ROOT_NODE, Permissions.SCOPE_GROUP_CREATE, Permissions.SCOPE_GROUP_UPDATE,
+                           Permissions.SCOPE_GROUP_ARCHIVE, user_type=UserType.ADMIN)
+    await assign(db, editor, await make_role(db, [Permissions.SCOPE_GROUP_VIEW]), Node.group(east.id))
+    h = headers(editor)
+
+    for method, url, body in (
+            (client.patch, _group(west.id), {"name": "W"}),
+            (client.patch, _group(east.id), {"parent_id": west.id}),
+            (client.post, V1.path(ScopeGroupRoutes.GROUP_ARCHIVE, group_id=west.id), None),
+            (client.post, ROOT, {"name": "Under West", "parent_id": west.id}),
+    ):
+        r = await (method(url, json=body, headers=h) if body is not None else method(url, headers=h))
+        assert r.status_code == 404 and r.json()["code"] == "scope_group_not_found", (url, r.text)
+
+    created = await client.post(ROOT, json={"name": "Under East", "parent_id": east.id}, headers=h)
+    assert created.status_code == 200, created.text
+    renamed = await client.patch(_group(east.id), json={"name": "East 2"}, headers=h)
+    assert renamed.status_code == 200, renamed.text
+
+
+async def test_tree_posts_follow_post_view(client, db, headers):
+    """Groups follow scope_group.view, posts post.view in effect"""
+    east = await make_group(db, "East")
+    west = await make_group(db, "West")
+    a, b = await make_post(db, "A", group_id=east.id), await make_post(db, "B", group_id=west.id)
+    await make_post(db, "Top")
+    caller = await _caller(db, ROOT_NODE, Permissions.SCOPE_GROUP_VIEW)
+    await assign(db, caller, await make_role(db, [Permissions.POST_VIEW]), Node.post(b.id))
+
+    tree = (await client.get(V1.path(ScopeGroupRoutes.TREE), headers=headers(caller))).json()
+    groups = {g["name"]: g for g in tree["groups"]}
+    assert set(groups) >= {"East", "West"}
+    assert groups["East"]["posts"] == [] and _post_ids(groups["West"]["posts"]) == [b.id]
+    assert _every_post_id(tree) == {b.id}
+
+    # A post-level holder sees no group, only the posts where both permissions hold, at the top of what they see
+    holder = await _caller(db, Node.post(a.id), Permissions.SCOPE_GROUP_VIEW, Permissions.POST_VIEW)
+    tree = (await client.get(V1.path(ScopeGroupRoutes.TREE), headers=headers(holder))).json()
+    assert tree["groups"] == [] and _post_ids(tree["posts"]) == [a.id]
+    assert (await client.get(ROOT, headers=headers(holder))).json() == []
+
+
+async def test_tree_leaves_out_a_live_post_of_an_archived_group(client, db, headers):
+    """A post restored while its group is archived keeps its group_id: it is not shown as a post of the root"""
+    admin = await make_admin(db)
+    h = headers(admin)
+    old = await make_group(db, "Old")
+    post = await make_post(db, "Orphan", group_id=old.id)
+    for url in (V1.path(PostRoutes.POST_ARCHIVE, post_id=post.id), V1.path(ScopeGroupRoutes.GROUP_ARCHIVE, group_id=old.id),
+                V1.path(PostRoutes.POST_RESTORE, post_id=post.id)):
+        r = await client.post(url, headers=h)
+        assert r.status_code == 200, r.text
+    await db.refresh(post)
+    assert post.is_deleted is False and post.group_id == old.id
+
+    tree = (await client.get(V1.path(ScopeGroupRoutes.TREE), headers=h)).json()
+    assert "Old" not in _names(tree["groups"])
+    assert post.id not in _every_post_id(tree)
 
 
 @pytest.mark.slow

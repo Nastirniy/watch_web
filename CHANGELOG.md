@@ -52,6 +52,30 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `022_builtin_roles` (run it on a copy of production before the upgrade; read-only): the plan of every user, as the
   migration's audit rows will record it, and the derived roles. A database at 023 or later answers
   `already converted`; one before 022 is refused (exit code 2).
+- Role assignments API. `GET /users/{user_id}/assignments` (`user.view` covering the user, 403 `user_self_only`;
+  an archived user only with `user.archive` covering them, 404 `user_not_found` otherwise): every assignment of the
+  user by id, assignments of archived roles included, as `AssignmentResponse` (`id`, `role` {`id`, `name`,
+  `display_name`, `is_builtin`}, `scope` {`kind` `root` / `group` / `post`, `id` (null at the root), `name` (the
+  application name at the root)}, `created_at`).
+  `POST /users/{user_id}/assignments` (`user.view` + `user.update`, 201, body `AssignmentCreate` {`role_id`,
+  `scope`: {`kind`, `id`}}; `id` is required for `group` / `post` and refused for `root`: 422 field codes
+  `scope_id_required`, `scope_id_not_allowed`). Checked in this order: `user.update` covering the user and every
+  assignment of the user grantable by the caller (403 `target_user_more_privileged`); an archived user 404
+  `user_not_found`; an unknown or archived role 404 `role_not_found`; every permission of the role held by the caller
+  at the node (403 `grant_exceeds_own_permissions`: a group or post outside the caller's scope answers this whether
+  it exists, is archived or is live); an unknown or archived group or post 404 `scope_group_not_found` /
+  `post_not_found`; a role holding a system permission below the root 409 `role_requires_root_scope`
+  (`system_permissions`); a role above the ceiling of the user's type 409 `role_exceeds_user_type` (`user_type`,
+  `excess_permissions`); the same role at the same node 409 `assignment_exists`.
+  `DELETE /users/{user_id}/assignments/{assignment_id}` (`user.view` + `user.update`, 204): the same user checks,
+  then an assignment that is not this user's 404 `assignment_not_found`, every permission of its role held by the
+  caller at its node (403 `grant_exceeds_own_permissions`), the user's last assignment 409
+  `last_assignment_required`, and for the built-in `admin` role at the root 409 `cannot_remove_own_admin` (the
+  caller's own) / `last_admin_required` (no active administrator would remain).
+  Audit rows `create` / `delete` with `resource_type` `role_assignment`; the delete row keeps a full copy of the
+  removed row (every column) in `old_values`.
+- Problem types `assignment_not_found`, `assignment_exists`, `last_assignment_required`, `role_requires_root_scope`,
+  `role_exceeds_user_type`; field codes `scope_id_required`, `scope_id_not_allowed`.
 
 ### Changed
 
@@ -163,6 +187,17 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - `cli/init_user`: `--user-type` (the base role of the type at the root) instead of `--role-ids`, `--list-types`
   instead of `--list-roles`. The development admin seeded at start is of type `admin` with the `admin` role at the
   root.
+- Scope groups follow `scope_group.view` at its node. `GET /scope-groups/` lists the groups inside the subtrees where
+  the caller holds it (every group with it at the root); `GET /scope-groups/{group_id}` answers 404
+  `scope_group_not_found` for a group outside them, like an unknown id, and so do `PATCH`, `/archive` and `/restore`
+  of such a group and a `parent_id` outside them on create or move. `GET /scope-groups/tree` shows the subtrees
+  where the caller holds `scope_group.view`, with only the posts where `post.view` is in effect: its top level is
+  the topmost groups the caller sees (the groups directly under the root with `scope_group.view` at the root) and,
+  in `posts`, the posts directly under the root (with `scope_group.view` at the root) and the posts where it is held
+  on the post itself. A post or group below an archived group is left out (a post restored while its group is
+  archived was shown as a post of the root).
+- `PATCH /users/{user_id}` no longer declares `cannot_remove_own_admin` (deactivating oneself is refused with
+  `cannot_deactivate_self` before); a deactivation answers only `last_admin_required`.
 
 ### Removed
 

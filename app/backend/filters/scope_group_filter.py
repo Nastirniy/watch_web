@@ -31,11 +31,11 @@ class ScopeGroupFilterService(SimpleFilterEngine):
         cls,
         query: Select,
         params: ScopeGroupCriteria,
-        access_post_ids: Optional[Iterable[int]] = None
+        group_ids: Optional[Iterable[int]] = None
     ) -> Select:
-        """Apply all filters from ScopeGroupCriteria"""
+        """Apply all filters from ScopeGroupCriteria. group_ids: the groups the caller sees (None: every group)"""
         params = cls.criteria(params)
-        query = cls.apply_filters_for_count(query, params)
+        query = cls.apply_filters_for_count(query, params, group_ids)
         query = cls._apply_sorting(query, params)
         return cls._apply_pagination(query, params)
 
@@ -44,10 +44,12 @@ class ScopeGroupFilterService(SimpleFilterEngine):
         cls,
         query: Select,
         params: ScopeGroupCriteria,
-        access_post_ids: Optional[Iterable[int]] = None
+        group_ids: Optional[Iterable[int]] = None
     ) -> Select:
         """Apply filters without sorting and pagination"""
         params = cls.criteria(params)
+        if group_ids is not None:
+            query = query.where(ScopeGroup.id.in_(sorted(group_ids)))
         query = cls._apply_soft_delete(query, params)
         query = cls._apply_exact(query, ScopeGroup.id, params.id)
         query = cls._apply_exact(query, ScopeGroup.parent_id, params.parent_id)

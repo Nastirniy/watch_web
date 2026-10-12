@@ -148,6 +148,9 @@ class UserRoutes(str, Enum):
     USER_SESSIONS = "/{user_id}/sessions"
     USER_SESSIONS_END = "/{user_id}/sessions/end"
     USER_SESSION_END = "/{user_id}/sessions/{session_id}/end"
+    # Role assignments of a user: a role held at a node of the scope tree (root, scope group, post)
+    USER_ASSIGNMENTS = "/{user_id}/assignments"
+    USER_ASSIGNMENT_BY_ID = "/{user_id}/assignments/{assignment_id}"
 
     @staticmethod
     def tag() -> str:

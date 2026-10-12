@@ -29,6 +29,11 @@ class ScopeTreeGroup(SecureBaseModel):
 
 
 class ScopeTreeResponse(SecureBaseModel):
-    """The scope tree below the root; archived groups and posts are left out"""
-    groups: List[ScopeTreeGroup]
-    posts: List[ScopeTreePost] = Field(description="Posts directly under the root")
+    """The part of the scope tree the caller sees (scope_group.view, posts with post.view); archived groups and posts
+    and everything below an archived group are left out"""
+    groups: List[ScopeTreeGroup] = Field(
+        description="The topmost groups the caller sees: the groups directly under the root with scope_group.view "
+                    "at the root, otherwise the groups where it is held")
+    posts: List[ScopeTreePost] = Field(
+        description="The topmost posts the caller sees outside these groups: the posts directly under the root with "
+                    "scope_group.view at the root, and posts where it is held on the post itself")

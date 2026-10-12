@@ -109,6 +109,13 @@ class AuthContext:
             for grant in self.grants
         )
 
+    def groups_with(self, permission: Union[Permissions, str]) -> Optional[FrozenSet[int]]:
+        """Groups inside a subtree where the permission is held (covers), archived ones included. None means every
+        group (held at the root)."""
+        if self.has_at_root(permission):
+            return None
+        return frozenset(group_id for group_id in self.tree.group_parent if self.covers(permission, Node.group(group_id)))
+
     def covers_user(self, permission: Union[Permissions, str], user: User) -> bool:
         """The permission is in effect at the user's home post, or at the root for a user without one"""
         if user.post_id is None:

@@ -12,8 +12,9 @@ Nobody becomes able to do more than they could by changing access:
   every assignment the user has (each role's permissions covered at its node), assignments of archived roles
   included (they come back with the role's restore). 403 target_user_more_privileged.
 - check_an_admin_remains / check_admin_kept: run after the change is written to the session (flushed here, committed
-  by the route): an active, non-archived user still holds the built-in admin role at the root (409
-  last_admin_required), and the caller has not taken it from themselves (409 cannot_remove_own_admin).
+  by the route): the caller has not taken the built-in admin role at the root from themselves (409
+  cannot_remove_own_admin, check_admin_kept, answered first), and an active, non-archived user still holds it (409
+  last_admin_required).
 
 What a user holds is context.grant_rows, the same definition as their AuthContext (check_target_user reads it with
 the archived roles too).
@@ -117,11 +118,12 @@ async def check_an_admin_remains(session: AsyncSession) -> None:
 
 
 async def check_admin_kept(session: AsyncSession, auth: AuthContext) -> None:
-    """After a change that may take the admin role at the root from its holders: someone keeps it, and the caller
-    keeps theirs"""
-    await check_an_admin_remains(session)
+    """After a change that may take the admin role at the root from its holders: the caller keeps theirs (checked
+    first: the answer to an administrator taking it from themselves, the last one included), and someone keeps it"""
+    await session.flush()
     if auth.is_admin:
         kept = (await session.exec(_admin_at_root().where(RoleAssignment.user_id == auth.user.id).limit(1))).first()
         if kept is None:
             logger.warning(f"User {auth.user.username} tried to remove the admin role at the root from themselves")
             raise ApiError(ErrorCode.CANNOT_REMOVE_OWN_ADMIN)
+    await check_an_admin_remains(session)
