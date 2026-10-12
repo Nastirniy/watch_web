@@ -39,6 +39,38 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `builtin_role_not_archivable`, `builtin_role_not_deletable` (one message each, now for every built-in role).
 - `002_sync_schema` creates a table owned by a later revision first when the table it creates refers to it
   (`posts.group_id` -> `scope_groups`), so a fresh MySQL install gets the foreign key.
+- Permission at the post. Every route requirement (`require(all=..., any=...)`, `POST /auth/check-permission`,
+  `GET /auth/route-access`) and the `include_deleted` check now count a permission only when it is held at some node
+  of the scope tree (computed from the existing roles, home posts and access rows). A permission that did nothing
+  without `admin.true` (`post.create/update/archive`, `user.create/update/archive`, `role.*`, dictionary writes,
+  `media.update`, `export.create`, `audit.view`, `scope_group.*`) no longer counts for a role without `admin.true`:
+  such a user gets 403 `permission_denied` (with `missing`) instead of `admin_required`, and `include_deleted` with
+  such an `X.archive` answers 403 `permission_required_for_action`. A user with no home post and no access rows holds
+  no post-scoped permission (`post.view`, `observation.*`, `media.*`, `user.view`, ...): routes needing one answer
+  403 `permission_denied` instead of `no_post_assigned` or an empty list. `no_post_assigned` now means: the
+  permission applies at no post (for example the only post is archived).
+- The admin gate is removed from `POST /posts/`, `PUT /posts/{post_id}`, `POST /posts/{post_id}/archive` and
+  `/restore` (403 `admin_required` is no longer declared there). Each checks its permission at the post:
+  `post.update` / `post.archive` in effect at the post (403 `post_write_denied`, `no_post_assigned`); creating a post
+  needs `post.create` at its group or above (at the root for a post without a group), moving one (`group_id`)
+  `post.update` at the new location: otherwise 403 `permission_required_for_action` (`action` `create_post` /
+  `move_post`). Restoring an archived post needs `post.archive` inherited from a group or the root (a grant on the
+  post itself stops applying while it is archived). Administrators keep all of this: `admin.true` with these
+  permissions holds them at the root.
+- Post records follow `post.view` (`GET /posts/`, `GET /search/posts`, `GET /posts/{post_id}`: 403
+  `post_access_denied` now with `required` and `missing`), user records `user.view` (`GET /users/`,
+  `GET /search/users`, `GET /users/{user_id}`); users without a home post are listed and shown only with `user.view`
+  at the root. The caller is always in their own user list (before: only when their home post was in scope).
+- Archived records: an archived post or user is shown only to a holder of `post.archive` / `user.archive` in effect
+  at it (before: also to any `admin.true` holder), and `include_deleted` lists archived posts and users only where
+  `X.archive` is in effect.
+- `GET /posts/{post_id}/observation-stats` follows `observation.view` at the post (403 with `missing`
+  `["observation.view"]`): an `admin.true` holder no longer counts posts outside their data scope; holders of the
+  built-in `admin` role (or `post.access_all`) still count every post.
+- `GET /statistics/` covers the posts where `statistics.view` is in effect (`admin.true` holders: every post, as
+  before).
+- `GET /media/uploads`: other users' sessions only at the posts where `media.manage_any` is in effect (`admin.true`
+  no longer widens the list to every post); the caller's own sessions are always listed.
 
 ## Post archiving and certificate name hash
 

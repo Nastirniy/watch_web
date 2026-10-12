@@ -3,14 +3,16 @@
 For each route in the generated route access map and each persona, the call
 must either pass the permission gate (status not 401/403) or be rejected with
 a 403 carrying the expected code and missing list. Data scope is satisfied by
-building every referenced resource inside the persona's own post.
+building every referenced resource inside the persona's own post. The expected
+answer is the route's requirement evaluated on the persona's real AuthContext
+(its grants: a permission that is dead without admin.true does not count).
 """
 import pytest
 from sqlmodel import select
 
 from app.main import fastapi_app
 from app.backend.auth.route_access import route_access_map
-from app.backend.auth.context import AuthContext
+from app.backend.auth.context import load_auth_context
 from app.backend.models.observation import ObservationFrequency
 from app.backend.models.role import Permission
 from tests.helpers import make_post, make_user, make_dictionary, make_observation, make_media, make_role
@@ -29,10 +31,8 @@ def persona_permissions(entry, persona) -> list:
     }[persona]
 
 
-def expected(entry, perms):
-    ctx = AuthContext(user=None, permissions=frozenset(perms), roles=(),
-                      readable_post_ids=frozenset(), writable_post_ids=frozenset())
-    return entry.require.evaluate(ctx)
+async def expected(db, entry, user):
+    return entry.require.evaluate(await load_auth_context(db, user))
 
 
 @pytest.mark.asyncio
@@ -68,9 +68,9 @@ async def test_route_gate(client, db, headers, entry, persona):
     kwargs = {"headers": headers(user)}
     if entry.method in ("POST", "PUT", "PATCH"):
         kwargs["json"] = {}
+    result = await expected(db, entry, user)   # before the call: it may change the persona's own role
     response = await client.request(entry.method, path, **kwargs)
 
-    result = expected(entry, perms)
     if result.allowed:
         assert response.status_code not in (401, 403), f"{persona} should pass the gate: {response.text}"
     else:

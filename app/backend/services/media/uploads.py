@@ -34,7 +34,7 @@ from typing import AsyncIterator, Dict, Iterable, List, Optional
 
 import aiofiles
 import aiofiles.os
-from sqlalchemy import update
+from sqlalchemy import or_, update
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -132,17 +132,18 @@ async def get_session_row(session: AsyncSession, upload_id: str) -> Optional[Upl
 
 async def list_sessions(
     session: AsyncSession,
-    user_id: Optional[int],
+    user_id: int,
     status: Optional[str],
     observation_id: Optional[int],
-    post_ids: Optional[Iterable[int]] = None,
+    others_post_ids: Optional[Iterable[int]] = frozenset(),
 ) -> List[UploadSession]:
-    """user_id limits to one uploader, post_ids to sessions opened for those posts (None: no limit)"""
+    """The sessions of user_id, plus other users' sessions opened for others_post_ids (None: every post; empty:
+    none)"""
     query = select(UploadSession)
-    if user_id is not None:
-        query = query.where(UploadSession.user_id == user_id)
-    if post_ids is not None:
-        query = query.where(UploadSession.post_id.in_(list(post_ids)))
+    if others_post_ids is not None:
+        own = UploadSession.user_id == user_id
+        others = sorted(others_post_ids)
+        query = query.where(or_(own, UploadSession.post_id.in_(others)) if others else own)
     if status:
         query = query.where(UploadSession.status == status)
     if observation_id is not None:

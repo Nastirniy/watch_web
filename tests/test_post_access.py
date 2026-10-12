@@ -51,12 +51,25 @@ async def test_home_post_scope(client, db, headers):
 
 @pytest.mark.asyncio
 async def test_no_post_assigned(client, db, headers):
+    """no_post_assigned: the permission is in effect at no post (its only post is archived). A user with no post at
+    all holds scoped permissions nowhere: the routes refuse them (permission_denied)"""
     post_a, post_b, ids, admin, user, obs_a, obs_b = await world(db)
+    gone = await make_post(db)
+    unassigned = await make_user(db, perms=OPERATOR, post_id=gone.id)
+    gone.is_deleted = True
+    db.add(gone)
+    await db.commit()
+    response = await client.get(V1.path(PostRoutes.POST_BY_ID, post_id=post_a.id), headers=headers(unassigned))
+    assert response.status_code == 403
+    assert response.json()["code"] == "no_post_assigned"
+    assert (await client.get(LIST, headers=headers(unassigned))).json() == []
+
     homeless = await make_user(db, perms=OPERATOR)
     response = await client.get(V1.path(PostRoutes.POST_BY_ID, post_id=post_a.id), headers=headers(homeless))
     assert response.status_code == 403
-    assert response.json()["code"] == "no_post_assigned"
-    assert (await client.get(LIST, headers=headers(homeless))).json() == []
+    assert response.json()["code"] == "permission_denied" and response.json()["missing"] == ["post.view"]
+    listed = await client.get(LIST, headers=headers(homeless))
+    assert listed.status_code == 403 and listed.json()["missing"] == ["observation.view"]
 
 
 @pytest.mark.asyncio

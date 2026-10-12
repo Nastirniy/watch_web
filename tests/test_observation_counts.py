@@ -7,7 +7,7 @@ import pytest
 from app.backend.config import settings
 from app.backend.enums.routes import PostRoutes, SearchRoutes
 from app.backend.api.v1 import V1
-from tests.helpers import make_post, make_user, make_dictionary, make_observation
+from tests.helpers import make_admin, make_post, make_user, make_dictionary, make_observation
 
 POSTS = V1.path(PostRoutes.ROOT)
 POST = V1.path(PostRoutes.POST_BY_ID)
@@ -63,11 +63,14 @@ async def test_all_time_and_last_24h(client, db, headers):
     searched = (await client.get(SEARCH_POSTS, headers=headers(user))).json()
     assert all("observation_counts" not in item for item in searched["items"])
 
-    # Administrators count any post, like GET /statistics; everyone else only their data scope
-    admin = await make_user(db, perms=VIEW + ["admin.true"], post_id=other.id)
+    # Counters follow observation.view at the post: an administrator holding it at the root counts any post,
+    # admin.true alone extends nothing (observation.view of its home post only); everyone else their data scope
+    admin = await make_admin(db)
     as_admin = await client.get(url, headers=headers(admin))
     assert as_admin.status_code == 200, as_admin.text
     assert as_admin.json()["all_time"]["not_archived"] == 3
+    gated = await make_user(db, perms=VIEW + ["admin.true"], post_id=other.id)
+    assert (await client.get(url, headers=headers(gated))).status_code == 403
     outsider = await make_user(db, perms=VIEW, post_id=other.id)
     assert (await client.get(url, headers=headers(outsider))).status_code == 403
     no_observations = await make_user(db, perms=["post.view"], post_id=post.id)

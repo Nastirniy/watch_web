@@ -1,9 +1,7 @@
 """Dashboard statistics.
 
-Administrators (admin.true) see figures over every post. Everyone else holding
-statistics.view sees them over their data scope (home post, user_post_access
-rows, or every post with post.access_all): posts in the scope, users whose home
-post is in the scope, observations and media of those posts.
+Figures over the posts where statistics.view is in effect (every post when it is held at the root): posts in the
+scope, users whose home post is in the scope, observations and media of those posts.
 """
 from typing import Optional
 from datetime import datetime, timedelta, timezone
@@ -60,14 +58,14 @@ async def get_statistics(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.STATISTICS_VIEW]))
 ):
-    """Application statistics: every post for administrators, the caller's post scope for everyone else"""
+    """Application statistics over the posts where statistics.view is in effect (post_ids; null: every post)"""
     now = datetime.now(timezone.utc)
     date_to = date_to or now
     date_from = date_from or date_to - timedelta(days=DEFAULT_PERIOD_DAYS)
     if date_from > date_to:
         raise ApiError(ErrorCode.PERIOD_REVERSED, fields="date_from / date_to")
 
-    scope = None if auth.is_admin else AccessControlService.post_scope(auth)
+    scope = AccessControlService.scope_for(auth, Permissions.STATISTICS_VIEW)
     post_ids = sorted(scope) if scope is not None else None
     # Scope conditions; an empty scope matches nothing
     in_posts = (Post.id.in_(post_ids),) if post_ids is not None else ()

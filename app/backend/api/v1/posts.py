@@ -13,6 +13,7 @@ from app.backend.auth.context import AuthContext
 from app.backend.api.v1.models.request.posts import PostCreate, PostUpdate
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.require import require
+from app.backend.auth.scope import Node, ROOT
 from app.backend.enums.general import Permissions, StatsGroupBy
 from app.backend.config import settings
 from app.backend.enums.routes import PostRoutes
@@ -26,7 +27,7 @@ from app.backend.services.scope_groups import get_group
 from app.backend.errors.problems import ApiError
 from app.backend.errors.coded import CodedError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
-from app.backend.errors.openapi import ADMIN, GUARDED, problems
+from app.backend.errors.openapi import GUARDED, problems
 from app.backend.utils.validators import UtcDatetime
 
 router = APIRouter(prefix=PostRoutes.BASE.value, tags=[PostRoutes.tag()])
@@ -63,14 +64,14 @@ async def list_posts(
     """List posts with filters
 
     Note:
-        - Administrators (admin.true) see every post record
-        - Everyone else sees the posts of their data scope (home post, user_post_access, or all with post.access_all);
-          an archived post leaves the home-post and access-row scope
-        - Archived posts only with include_deleted (requires post.archive)
+        - The posts where post.view is in effect (assigned at the root, at a group above the post or at the post)
+        - Archived posts only with include_deleted (requires post.archive), and only where post.archive is in effect
     """
-    AccessControlService.check_include_deleted(auth, filters, Permissions.POST_ARCHIVE)
+    archived = AccessControlService.archived_scope(auth, filters, Permissions.POST_ARCHIVE)
     query = select(Post)
-    query = PostFilterService.apply_filters(query, filters, AccessControlService.post_record_scope(auth))
+    query = PostFilterService.apply_filters(
+        query, filters, AccessControlService.scope_for(auth, Permissions.POST_VIEW), archived_post_ids=archived,
+    )
     result = await session.exec(query)
     return [post_to_response(post) for post in result.all()]
 
@@ -85,23 +86,33 @@ async def _check_group(session: AsyncSession, group_id: Optional[int]) -> None:
         raise ApiError.from_coded(exc)
 
 
+def _location(group_id: Optional[int]) -> Node:
+    """Where a post sits in the scope tree: its group, or directly under the root"""
+    return Node.group(group_id) if group_id is not None else ROOT
+
+
 @router.post(
     PostRoutes.ROOT.value, response_model=PostResponse,
-    responses=problems(ErrorCode.POST_CODE_TAKEN, ErrorCode.SCOPE_GROUP_NOT_FOUND, *ADMIN),
+    responses=problems(
+        AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, ErrorCode.POST_CODE_TAKEN, ErrorCode.SCOPE_GROUP_NOT_FOUND,
+        *GUARDED,
+    ),
 )
 async def create_post(
         request: Request,
         post_data: PostCreate,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW, Permissions.POST_CREATE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW, Permissions.POST_CREATE]))
 ):
-    """Create new post"""
+    """Create new post. post.create must be held at the target group (or above it); a post directly under the
+    root needs post.create at the root."""
     current_user = auth.user
+    AccessControlService.check_covers(auth, Permissions.POST_CREATE, _location(post_data.group_id), "create_post")
+    await _check_group(session, post_data.group_id)
     # Check if post with code exists
     result = await session.exec(_code_taken(post_data.code))
     if result.first():
         raise ApiError(ErrorCode.POST_CODE_TAKEN)
-    await _check_group(session, post_data.group_id)
 
     post = Post(**post_data.model_dump())
     session.add(post)
@@ -139,11 +150,10 @@ async def get_post(
     """Get post by ID
 
     Note:
-        - Administrators (admin.true) can view any post record
-        - Everyone else needs the post in their data scope
-        - An archived post answers 404 unless the caller holds post.archive or is an administrator
+        - post.view must be in effect at the post
+        - An archived post answers 404 unless post.archive is in effect at it too
     """
-    AccessControlService.check_post_record_view(auth, post_id)
+    AccessControlService.check_post(auth, Permissions.POST_VIEW, post_id)
 
     result = await session.exec(
         select(Post).where(Post.id == post_id)
@@ -153,9 +163,8 @@ async def get_post(
 
     if not post:
         raise ApiError(ErrorCode.POST_NOT_FOUND)
-    # The state after the scope: archived posts are for those who manage the archive (and administrators, whose
-    # post.view is the route's)
-    if post.is_deleted and not (auth.is_admin or auth.has(Permissions.POST_ARCHIVE)):
+    # The state after the scope: archived posts are for those who manage the archive at that post
+    if post.is_deleted and not auth.has_at_post(Permissions.POST_ARCHIVE, post_id):
         raise ApiError(ErrorCode.POST_NOT_FOUND)
 
     return post_to_response(post)
@@ -183,10 +192,9 @@ async def get_post_observation_stats(
     per hour or per day with every bucket included. not_archived and archived never overlap.
 
     Note:
-        - Administrators (admin.true) count any post, like GET /statistics
-        - Everyone else needs the post in their data scope
+        - observation.view must be in effect at the post (counters are observation data)
     """
-    AccessControlService.check_post_record_view(auth, post_id)
+    AccessControlService.check_post(auth, Permissions.OBSERVATION_VIEW, post_id)
     if (await session.exec(select(Post.id).where(Post.id == post_id))).first() is None:
         raise ApiError(ErrorCode.POST_NOT_FOUND)
     try:
@@ -201,21 +209,27 @@ async def get_post_observation_stats(
 @router.put(
     PostRoutes.POST_BY_ID.value,
     response_model=PostResponse,
-    responses=problems(ErrorCode.POST_CODE_TAKEN, ErrorCode.POST_NOT_FOUND, ErrorCode.SCOPE_GROUP_NOT_FOUND, *ADMIN),
+    responses=problems(
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_WRITE_DENIED,
+        AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, ErrorCode.POST_CODE_TAKEN, ErrorCode.POST_NOT_FOUND,
+        ErrorCode.SCOPE_GROUP_NOT_FOUND, *GUARDED,
+    ),
 )
 async def update_post(
         request: Request,
         post_id: int,
         post_data: PostUpdate,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW, Permissions.POST_UPDATE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW, Permissions.POST_UPDATE]))
 ):
-    """Update post by ID. Administration route: any post, only for administrators.
+    """Update post by ID. post.update must be in effect at the post; a move (group_id) also needs post.update
+    at the new group (or above it), at the root for a post directly under the root.
 
     Only the fields sent are changed; null is refused for name, code and is_active (omit them instead).
     Archived posts answer 404 until restored (POST /{post_id}/restore); is_deleted is never read from the body.
     """
     current_user = auth.user
+    AccessControlService.check_post(auth, Permissions.POST_UPDATE, post_id)
     result = await session.exec(
         select(Post).where(Post.id == post_id)
     )
@@ -224,14 +238,15 @@ async def update_post(
     if not post or post.is_deleted:
         raise ApiError(ErrorCode.POST_NOT_FOUND)
 
-    # Check code uniqueness if being updated
     update_data = post_data.model_dump(exclude_unset=True)
+    if "group_id" in update_data and update_data["group_id"] != post.group_id:
+        AccessControlService.check_covers(auth, Permissions.POST_UPDATE, _location(update_data["group_id"]), "move_post")
+        await _check_group(session, update_data["group_id"])
+    # Check code uniqueness if being updated
     if "code" in update_data:
         existing = await session.exec(_code_taken(update_data["code"], exclude_post_id=post_id))
         if existing.first():
             raise ApiError(ErrorCode.POST_CODE_TAKEN)
-    if update_data.get("group_id") is not None:
-        await _check_group(session, update_data["group_id"])
 
     # Store old values for auditing
     old_values = post.model_dump()
@@ -268,8 +283,11 @@ async def _set_post_archived(
         post_id: int,
         archived: bool,
 ) -> PostResponse:
-    """Shared body of archive / restore: state checks, flag flip, audit row (administration: any post)"""
+    """Shared body of archive / restore: post.archive at the post, state checks, flag flip, audit row. An archived
+    post is restored only through a grant inherited from a group or the root (a grant on the post itself stops
+    applying while it is archived)."""
     current_user = auth.user
+    AccessControlService.check_post(auth, Permissions.POST_ARCHIVE, post_id)
     post = (await session.exec(select(Post).where(Post.id == post_id))).first()
     if not post or (archived and post.is_deleted):
         raise ApiError(ErrorCode.POST_NOT_FOUND)
@@ -300,15 +318,17 @@ async def _set_post_archived(
 @router.post(
     PostRoutes.POST_ARCHIVE.value,
     response_model=PostResponse,
-    responses=problems(ErrorCode.POST_NOT_FOUND, *ADMIN),
+    responses=problems(
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.POST_NOT_FOUND, *GUARDED,
+    ),
 )
 async def archive_post(
         request: Request,
         post_id: int,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW, Permissions.POST_ARCHIVE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW, Permissions.POST_ARCHIVE]))
 ):
-    """Archive a post (is_deleted=true). Administration route: any post, only for administrators.
+    """Archive a post (is_deleted=true). post.archive must be in effect at the post.
 
     Nothing is removed and no user row changes. The post leaves the data scope of its home users and of its
     user_post_access rows until it is restored (they keep the rows); only post.access_all still reads its data. Its
@@ -324,14 +344,18 @@ async def archive_post(
 @router.post(
     PostRoutes.POST_RESTORE.value,
     response_model=PostResponse,
-    responses=problems(ErrorCode.POST_NOT_FOUND, ErrorCode.POST_NOT_ARCHIVED, *ADMIN),
+    responses=problems(
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.POST_NOT_FOUND,
+        ErrorCode.POST_NOT_ARCHIVED, *GUARDED,
+    ),
 )
 async def restore_post(
         request: Request,
         post_id: int,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW, Permissions.POST_ARCHIVE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW, Permissions.POST_ARCHIVE]))
 ):
     """Restore an archived post (is_deleted=false): its home users and access rows read and write its data again.
-    Unknown: 404. Not archived: 409."""
+    post.archive must be in effect at the post through a group or the root (a grant on the archived post itself
+    does not apply). Unknown: 404. Not archived: 409."""
     return await _set_post_archived(request, session, auth, post_id, archived=False)

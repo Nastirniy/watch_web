@@ -104,15 +104,16 @@ async def list_users(
     """
     List users with filters.
 
-    Administrators (admin.true) see users of every post. Everyone else is limited to their post scope
-    (home post, extra post access, or every post with post.access_all).
+    The users whose home post is where user.view is in effect, and the caller; users without a home post only
+    with user.view at the root. Archived users only with include_deleted (requires user.archive), and only where
+    user.archive is in effect.
     """
     current_user = auth.user
-    AccessControlService.check_include_deleted(auth, filters, Permissions.USER_ARCHIVE)
-    scope = AccessControlService.resolve_record_scope(auth, filters.post_id)
+    archived = AccessControlService.archived_scope(auth, filters, Permissions.USER_ARCHIVE)
+    scope = AccessControlService.resolve_scope(auth, Permissions.USER_VIEW, filters.post_id)
 
     query = select(User)
-    query = UserFilterService.apply_filters(query, filters, scope)
+    query = UserFilterService.apply_filters(query, filters, scope, archived_post_ids=archived, caller_id=current_user.id)
     result = await session.exec(query)
     users = result.all()
 
@@ -274,7 +275,8 @@ async def get_user(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW]))
 ):
-    """Get user by ID - visible to the user itself, to administrators and to callers whose post scope covers the user's post"""
+    """Get user by ID - visible to the user itself and to callers with user.view in effect at the user's home post
+    (at the root for a user without one); an archived user also needs user.archive there"""
 
     result = await session.exec(
         select(User).where(User.id == user_id)
@@ -285,10 +287,10 @@ async def get_user(
         raise ApiError(ErrorCode.USER_NOT_FOUND)
 
     # Visibility before the state: an outsider gets the same 403 for an archived and a live user
-    AccessControlService.check_user_visibility(auth, user)
+    AccessControlService.check_user_view(auth, user)
 
-    # Archived users are for those who manage the archive (and administrators, whose user.view is the route's)
-    if user.is_deleted and not (auth.is_admin or auth.has(Permissions.USER_ARCHIVE)):
+    # Archived users are for those who manage the archive where the user belongs
+    if user.is_deleted and not auth.covers_user(Permissions.USER_ARCHIVE, user):
         raise ApiError(ErrorCode.USER_NOT_FOUND)
 
     return UserResponse.model_validate(user)

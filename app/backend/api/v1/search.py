@@ -144,16 +144,18 @@ async def search_users(
     auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW])),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse[UserResponse]:
-    access_post_ids = AccessControlService.resolve_record_scope(auth, params.post_id)
-
-    AccessControlService.check_include_deleted(auth, params, Permissions.USER_ARCHIVE)
+    # Scope of GET /users: user.view at the home post, the caller always, archived users where user.archive applies
+    access_post_ids = AccessControlService.resolve_scope(auth, Permissions.USER_VIEW, params.post_id)
+    archived = AccessControlService.archived_scope(auth, params, Permissions.USER_ARCHIVE)
     query = select(User)
-    query = UserFilterService.apply_filters(query, params, access_post_ids)
+    query = UserFilterService.apply_filters(query, params, access_post_ids, archived_post_ids=archived, caller_id=auth.user.id)
     result = await session.exec(query)
     items = result.all()
 
     count_query = select(func.count()).select_from(User)
-    count_query = UserFilterService.apply_filters_for_count(count_query, params, access_post_ids)
+    count_query = UserFilterService.apply_filters_for_count(
+        count_query, params, access_post_ids, archived_post_ids=archived, caller_id=auth.user.id,
+    )
     total = (await session.exec(count_query)).one()
 
     await log_search(request, session, auth, "users", params.model_dump(exclude_none=True), len(items))
@@ -177,16 +179,17 @@ async def search_posts(
     auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW])),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse[PostResponse]:
-    AccessControlService.check_include_deleted(auth, params, Permissions.POST_ARCHIVE)
-    access_post_ids = AccessControlService.post_record_scope(auth)
+    # Scope of GET /posts: post.view, archived posts where post.archive is in effect
+    archived = AccessControlService.archived_scope(auth, params, Permissions.POST_ARCHIVE)
+    access_post_ids = AccessControlService.scope_for(auth, Permissions.POST_VIEW)
 
     query = select(Post)
-    query = PostFilterService.apply_filters(query, params, access_post_ids)
+    query = PostFilterService.apply_filters(query, params, access_post_ids, archived_post_ids=archived)
     result = await session.exec(query)
     items = result.all()
 
     count_query = select(func.count()).select_from(Post)
-    count_query = PostFilterService.apply_filters_for_count(count_query, params, access_post_ids)
+    count_query = PostFilterService.apply_filters_for_count(count_query, params, access_post_ids, archived_post_ids=archived)
     total = (await session.exec(count_query)).one()
 
     await log_search(request, session, auth, "posts", params.model_dump(exclude_none=True), len(items))

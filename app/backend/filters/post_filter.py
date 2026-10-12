@@ -4,7 +4,7 @@ PostFilterService - Filter service for Post entity
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Iterable
+from typing import FrozenSet, Optional, Iterable
 from sqlalchemy.sql.selectable import Select
 
 from app.backend.models.post import Post
@@ -52,13 +52,15 @@ class PostFilterService(SimpleFilterEngine):
         cls,
         query: Select,
         params: PostCriteria,
-        access_post_ids: Optional[Iterable[int]] = None
+        access_post_ids: Optional[Iterable[int]] = None,
+        archived_post_ids: Optional[FrozenSet[int]] = None,
     ) -> Select:
-        """Apply all filters from PostCriteria"""
+        """Apply all filters from PostCriteria. access_post_ids: the posts the caller sees (None: every post);
+        archived_post_ids: with include_deleted, the posts shown even when archived (None: every one)"""
         params = cls.criteria(params)
 
-        # Archived posts only on include_deleted
-        query = cls._apply_soft_delete(query, params)
+        # Archived posts only on include_deleted, and only where post.archive is in effect
+        query = cls._apply_soft_delete(query, params, Post.id, archived_post_ids)
 
         # Access control (user can only see their post)
         if access_post_ids is not None:
@@ -105,11 +107,12 @@ class PostFilterService(SimpleFilterEngine):
         cls,
         query: Select,
         params: PostCriteria,
-        access_post_ids: Optional[Iterable[int]] = None
+        access_post_ids: Optional[Iterable[int]] = None,
+        archived_post_ids: Optional[FrozenSet[int]] = None,
     ) -> Select:
         """Apply filters without pagination"""
         params = cls.criteria(params)
-        query = cls._apply_soft_delete(query, params)
+        query = cls._apply_soft_delete(query, params, Post.id, archived_post_ids)
         if access_post_ids is not None:
             query = query.where(Post.id.in_(list(access_post_ids)))
         query = cls._apply_exact(query, Post.id, params.id)

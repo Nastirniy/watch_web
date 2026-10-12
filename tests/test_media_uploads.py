@@ -16,7 +16,7 @@ from app.backend.models.audit import AuditLog
 from app.backend.models.media import MediaFile
 from app.backend.services.media import uploads
 from app.backend.services.media.manager import get_media_manager, reset_media_manager
-from tests.helpers import make_post, make_user, make_dictionary, make_observation
+from tests.helpers import make_admin, make_post, make_user, make_dictionary, make_observation
 
 CREATE = V1.path(MediaRoutes.UPLOADS)
 SESSION = V1.path(MediaRoutes.UPLOAD_SESSION)
@@ -312,7 +312,8 @@ async def test_claim_writer_is_exclusive(db, storage):
 
 @pytest.mark.asyncio
 async def test_session_list_scope(client, db, headers, storage):
-    """media.manage_any lists other users' sessions: every post for administrators, the data scope otherwise"""
+    """media.manage_any lists other users' sessions at the posts where it is in effect: every post when held at the
+    root, the home post of an admin.true holder too (admin.true no longer widens the list)"""
     post_a, user_a, observation_a = await _scene(db)
     post_b, user_b, observation_b = await _scene(db)
     data = make_png()
@@ -328,7 +329,8 @@ async def test_session_list_scope(client, db, headers, storage):
     administrator = await make_user(db, perms=["admin.true", "media.view", "media.create", "media.manage_any"], post_id=post_a.id)
     assert await listed(user_a) == {id_a}
     assert await listed(manager) == {id_a}
-    assert await listed(administrator) == {id_a, id_b}
+    assert await listed(administrator) == {id_a}
+    assert await listed(await make_admin(db)) == {id_a, id_b}
 
 
 @pytest.mark.asyncio

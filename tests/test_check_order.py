@@ -118,11 +118,13 @@ async def test_archived_user_is_hidden_without_user_archive(client, db, headers)
     url = V1.path(UserRoutes.USER_BY_ID, user_id=target.id)
 
     plain = await make_user(db, perms=["user.view", "post.access_all"])
-    archiver = await make_user(db, perms=["user.view", "user.archive", "post.access_all"])
+    archiver = await make_user(db, perms=["user.view", "user.archive", "admin.true"])
+    # admin.true alone no longer shows archived records; user.archive without admin.true is held nowhere
     admin = await make_user(db, perms=["user.view", "admin.true"])
-    assert (await client.get(url, headers=headers(plain))).status_code == 404
+    dead_archive = await make_user(db, perms=["user.view", "user.archive", "post.access_all"])
+    for user in (plain, admin, dead_archive):
+        assert (await client.get(url, headers=headers(user))).status_code == 404
     assert (await client.get(url, headers=headers(archiver))).status_code == 200
-    assert (await client.get(url, headers=headers(admin))).status_code == 200
 
 
 @pytest.mark.asyncio

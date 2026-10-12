@@ -160,15 +160,9 @@ async def list_upload_sessions(
 ):
     """Your upload sessions. Use it after a page reload to find what to resume.
 
-    media.manage_any lists every user's sessions: administrators (admin.true) over every post,
-    everyone else over the posts of their data scope."""
-    if auth.has(Permissions.MEDIA_MANAGE_ANY):
-        owner = None
-        post_ids = None if auth.is_admin else AccessControlService.post_scope(auth)
-    else:
-        owner = auth.user.id
-        post_ids = None
-    rows = await uploads.list_sessions(session, owner, status, observation_id, post_ids)
+    With media.manage_any, other users' sessions too, at the posts where media.manage_any is in effect."""
+    others_post_ids = AccessControlService.scope_for(auth, Permissions.MEDIA_MANAGE_ANY)
+    rows = await uploads.list_sessions(session, auth.user.id, status, observation_id, others_post_ids)
     return [_to_response(row, version) for row in rows]
 
 

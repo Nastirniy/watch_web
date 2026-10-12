@@ -736,7 +736,7 @@
           "USERS"
         ],
         "summary": "List Users",
-        "description": "List users with filters.\n\nAdministrators (admin.true) see users of every post. Everyone else is limited to their post scope\n(home post, extra post access, or every post with post.access_all).",
+        "description": "List users with filters.\n\nThe users whose home post is where user.view is in effect, and the caller; users without a home post only\nwith user.view at the root. Archived users only with include_deleted (requires user.archive), and only where\nuser.archive is in effect.",
         "operationId": "list_users",
         "security": [
           {
@@ -1391,7 +1391,7 @@
           "USERS"
         ],
         "summary": "Get User",
-        "description": "Get user by ID - visible to the user itself, to administrators and to callers whose post scope covers the user's post",
+        "description": "Get user by ID - visible to the user itself and to callers with user.view in effect at the user's home post\n(at the root for a user without one); an archived user also needs user.archive there",
         "operationId": "get_user",
         "security": [
           {
@@ -11448,7 +11448,7 @@
           "POSTS"
         ],
         "summary": "List Posts",
-        "description": "List posts with filters\n\nNote:\n    - Administrators (admin.true) see every post record\n    - Everyone else sees the posts of their data scope (home post, user_post_access, or all with post.access_all);\n      an archived post leaves the home-post and access-row scope\n    - Archived posts only with include_deleted (requires post.archive)",
+        "description": "List posts with filters\n\nNote:\n    - The posts where post.view is in effect (assigned at the root, at a group above the post or at the post)\n    - Archived posts only with include_deleted (requires post.archive), and only where post.archive is in effect",
         "operationId": "list_posts",
         "security": [
           {
@@ -11945,7 +11945,7 @@
           "POSTS"
         ],
         "summary": "Create Post",
-        "description": "Create new post",
+        "description": "Create new post. post.create must be held at the target group (or above it); a post directly under the\nroot needs post.create at the root.",
         "operationId": "create_post",
         "security": [
           {
@@ -12048,23 +12048,23 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
                     {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
                     },
                     {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                      "$ref": "#/components/schemas/PermissionRequiredForActionProblem"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "permission_required_for_action": "#/components/schemas/PermissionRequiredForActionProblem"
                     }
                   }
                 }
@@ -12090,7 +12090,7 @@
           "POSTS"
         ],
         "summary": "Get Post",
-        "description": "Get post by ID\n\nNote:\n    - Administrators (admin.true) can view any post record\n    - Everyone else needs the post in their data scope\n    - An archived post answers 404 unless the caller holds post.archive or is an administrator",
+        "description": "Get post by ID\n\nNote:\n    - post.view must be in effect at the post\n    - An archived post answers 404 unless post.archive is in effect at it too",
         "operationId": "get_post",
         "security": [
           {
@@ -12228,7 +12228,7 @@
           "POSTS"
         ],
         "summary": "Update Post",
-        "description": "Update post by ID. Administration route: any post, only for administrators.\n\nOnly the fields sent are changed; null is refused for name, code and is_active (omit them instead).\nArchived posts answer 404 until restored (POST /{post_id}/restore); is_deleted is never read from the body.",
+        "description": "Update post by ID. post.update must be in effect at the post; a move (group_id) also needs post.update\nat the new group (or above it), at the root for a post directly under the root.\n\nOnly the fields sent are changed; null is refused for name, code and is_active (omit them instead).\nArchived posts answer 404 until restored (POST /{post_id}/restore); is_deleted is never read from the body.",
         "operationId": "update_post",
         "security": [
           {
@@ -12342,23 +12342,31 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`no_post_assigned`: You are not assigned to any post. Please contact an administrator.; `permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action; `post_write_denied`: Read-only access to this post",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
                     {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
+                      "$ref": "#/components/schemas/NoPostAssignedProblem"
                     },
                     {
                       "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionRequiredForActionProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PostWriteDeniedProblem"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
+                      "no_post_assigned": "#/components/schemas/NoPostAssignedProblem",
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "permission_required_for_action": "#/components/schemas/PermissionRequiredForActionProblem",
+                      "post_write_denied": "#/components/schemas/PostWriteDeniedProblem"
                     }
                   }
                 }
@@ -12398,7 +12406,7 @@
           "POSTS"
         ],
         "summary": "Get Post Observation Stats",
-        "description": "Observation counters of a post by created_at: all time, last 24 hours, and the period\nper hour or per day with every bucket included. not_archived and archived never overlap.\n\nNote:\n    - Administrators (admin.true) count any post, like GET /statistics\n    - Everyone else needs the post in their data scope",
+        "description": "Observation counters of a post by created_at: all time, last 24 hours, and the period\nper hour or per day with every bucket included. not_archived and archived never overlap.\n\nNote:\n    - observation.view must be in effect at the post (counters are observation data)",
         "operationId": "get_post_observation_stats",
         "security": [
           {
@@ -12646,7 +12654,7 @@
           "POSTS"
         ],
         "summary": "Archive Post",
-        "description": "Archive a post (is_deleted=true). Administration route: any post, only for administrators.\n\nNothing is removed and no user row changes. The post leaves the data scope of its home users and of its\nuser_post_access rows until it is restored (they keep the rows); only post.access_all still reads its data. Its\nobservations and media become read-only history: writes answer 409 post_archived, except that callers with\nadmin.true AND post.access_all (plus observation.view, observation.archive and ownership or\nobservation.manage_any) still archive and restore its observations. It cannot\nbecome a home post or get new access rows. Hidden from lists unless include_deleted=true.\nUndo with POST /{post_id}/restore. Already archived or unknown: 404.",
+        "description": "Archive a post (is_deleted=true). post.archive must be in effect at the post.\n\nNothing is removed and no user row changes. The post leaves the data scope of its home users and of its\nuser_post_access rows until it is restored (they keep the rows); only post.access_all still reads its data. Its\nobservations and media become read-only history: writes answer 409 post_archived, except that callers with\nadmin.true AND post.access_all (plus observation.view, observation.archive and ownership or\nobservation.manage_any) still archive and restore its observations. It cannot\nbecome a home post or get new access rows. Hidden from lists unless include_deleted=true.\nUndo with POST /{post_id}/restore. Already archived or unknown: 404.",
         "operationId": "archive_post",
         "security": [
           {
@@ -12740,23 +12748,27 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`no_post_assigned`: You are not assigned to any post. Please contact an administrator.; `permission_denied`: Insufficient permissions; `post_write_denied`: Read-only access to this post",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
                     {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
+                      "$ref": "#/components/schemas/NoPostAssignedProblem"
                     },
                     {
                       "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PostWriteDeniedProblem"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
+                      "no_post_assigned": "#/components/schemas/NoPostAssignedProblem",
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "post_write_denied": "#/components/schemas/PostWriteDeniedProblem"
                     }
                   }
                 }
@@ -12782,7 +12794,7 @@
           "POSTS"
         ],
         "summary": "Restore Post",
-        "description": "Restore an archived post (is_deleted=false): its home users and access rows read and write its data again.\nUnknown: 404. Not archived: 409.",
+        "description": "Restore an archived post (is_deleted=false): its home users and access rows read and write its data again.\npost.archive must be in effect at the post through a group or the root (a grant on the archived post itself\ndoes not apply). Unknown: 404. Not archived: 409.",
         "operationId": "restore_post",
         "security": [
           {
@@ -12876,23 +12888,27 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`no_post_assigned`: You are not assigned to any post. Please contact an administrator.; `permission_denied`: Insufficient permissions; `post_write_denied`: Read-only access to this post",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
                     {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
+                      "$ref": "#/components/schemas/NoPostAssignedProblem"
                     },
                     {
                       "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PostWriteDeniedProblem"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
+                      "no_post_assigned": "#/components/schemas/NoPostAssignedProblem",
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "post_write_denied": "#/components/schemas/PostWriteDeniedProblem"
                     }
                   }
                 }
@@ -17598,7 +17614,7 @@
           "MEDIA"
         ],
         "summary": "List Upload Sessions",
-        "description": "Your upload sessions. Use it after a page reload to find what to resume.\n\nmedia.manage_any lists every user's sessions: administrators (admin.true) over every post,\neveryone else over the posts of their data scope.",
+        "description": "Your upload sessions. Use it after a page reload to find what to resume.\n\nWith media.manage_any, other users' sessions too, at the posts where media.manage_any is in effect.",
         "operationId": "list_upload_sessions",
         "security": [
           {
@@ -23724,7 +23740,7 @@
           "STATISTICS"
         ],
         "summary": "Get Statistics",
-        "description": "Application statistics: every post for administrators, the caller's post scope for everyone else",
+        "description": "Application statistics over the posts where statistics.view is in effect (post_ids; null: every post)",
         "operationId": "get_statistics",
         "security": [
           {

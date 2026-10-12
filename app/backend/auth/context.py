@@ -47,6 +47,12 @@ class AuthContext:
     session_id: Optional[str] = None    # user_sessions.id of the access token (audit, logout)
     grants: Tuple[Grant, ...] = ()      # what the user holds where (authorization v2)
     tree: ScopeTree = field(default_factory=ScopeTree.empty)
+    # every permission of the grants, computed once (require() reads it on every request)
+    _held_anywhere: FrozenSet[str] = field(init=False, repr=False, compare=False, default=frozenset())
+
+    def __post_init__(self):
+        held = frozenset().union(*(grant.permissions for grant in self.grants))
+        object.__setattr__(self, "_held_anywhere", held)
 
     @property
     def is_admin(self) -> bool:
@@ -82,7 +88,7 @@ class AuthContext:
     @property
     def held_anywhere(self) -> FrozenSet[str]:
         """Every permission held at some node: route reachability, objects without a post, the web menu"""
-        return frozenset().union(*(grant.permissions for grant in self.grants))
+        return self._held_anywhere
 
     def has_anywhere(self, permission: Union[Permissions, str]) -> bool:
         return _permission_name(permission) in self.held_anywhere

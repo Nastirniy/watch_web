@@ -8,7 +8,13 @@ Semantics:
 - all:   every listed permission is required
 - any:   at least one listed permission is required
 - admin: admin.true is required IN ADDITION to the granular permissions. admin.true
-         is a gate for the administration area only, it never substitutes a permission.
+         is a gate for the administration area only, it never substitutes a permission
+         (transitional: removed once no route sets it).
+
+A permission counts when it is held at some node of the scope tree (AuthContext.held_anywhere): the route is
+reachable, the handler then checks where it applies (AccessControlService: check_post, scope_for, ...). A legacy
+permission the grants do not carry (dead without admin.true) never counts, so removing the admin gate from a route
+never widens it.
 """
 import builtins
 from dataclasses import dataclass
@@ -55,8 +61,9 @@ class Require:
         )
 
     def evaluate(self, auth: AuthContext) -> PermissionCheckResult:
-        missing: List[str] = [p for p in self.all if p not in auth.permissions]
-        if self.any and not builtins.any(p in auth.permissions for p in self.any):
+        held = auth.held_anywhere
+        missing: List[str] = [p for p in self.all if p not in held]
+        if self.any and not builtins.any(p in held for p in self.any):
             missing.extend(p for p in self.any if p not in missing)
         admin_missing = self.admin and not auth.is_admin
         return PermissionCheckResult(

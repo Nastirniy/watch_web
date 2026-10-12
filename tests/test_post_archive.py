@@ -134,16 +134,16 @@ async def test_archive_and_restore_a_post(client, db, headers):
 
 
 @pytest.mark.asyncio
-async def test_archive_and_restore_need_post_view_post_archive_and_the_admin_gate(client, db, headers):
+async def test_archive_and_restore_need_post_view_and_post_archive(client, db, headers):
+    """No admin gate; post.archive of a role without admin.true was dead behind the gate and still counts nowhere"""
     post = await make_post(db)
     not_admin = await make_user(db, perms=[P.POST_VIEW, P.POST_ARCHIVE, P.POST_ACCESS_ALL])
     without_archive = await make_user(db, perms=[P.IS_ADMIN, P.POST_VIEW, P.POST_UPDATE])
     for path in (_archive_path(post.id), _restore_path(post.id)):
-        refused = await client.post(path, headers=headers(not_admin))
-        assert refused.status_code == 403 and refused.json()["code"] == "admin_required", refused.text
-        refused = await client.post(path, headers=headers(without_archive))
-        assert refused.status_code == 403 and refused.json()["code"] == "permission_denied", refused.text
-        assert refused.json()["missing"] == ["post.archive"]
+        for user in (not_admin, without_archive):
+            refused = await client.post(path, headers=headers(user))
+            assert refused.status_code == 403 and refused.json()["code"] == "permission_denied", refused.text
+            assert refused.json()["missing"] == ["post.archive"]
     await db.refresh(post)
     assert post.is_deleted is False
 
@@ -168,8 +168,10 @@ async def test_an_archived_post_answers_404_on_update_and_is_deleted_is_never_re
 async def test_lists_hide_archived_posts_unless_include_deleted(client, db, headers, path):
     live, gone = await make_post(db), await make_post(db)
     await _set_archived(db, gone)
-    manager = await make_user(db, perms=[P.POST_VIEW, P.POST_ARCHIVE, P.POST_ACCESS_ALL])
+    manager = await make_user(db, perms=[P.IS_ADMIN, P.POST_VIEW, P.POST_ARCHIVE])
     viewer = await make_user(db, perms=[P.POST_VIEW, P.POST_ACCESS_ALL])
+    # post.archive without admin.true is held nowhere (it was dead behind the gate)
+    dead_archive = await make_user(db, perms=[P.POST_VIEW, P.POST_ARCHIVE, P.POST_ACCESS_ALL])
 
     def ids(response) -> list:
         assert response.status_code == 200, response.text
@@ -177,19 +179,21 @@ async def test_lists_hide_archived_posts_unless_include_deleted(client, db, head
         return [item["id"] for item in (body["items"] if isinstance(body, dict) else body)]
 
     assert ids(await client.get(path, headers=headers(viewer))) == [live.id]
-    refused = await client.get(path, params={"include_deleted": "true"}, headers=headers(viewer))
-    assert refused.status_code == 403 and refused.json()["code"] == "permission_required_for_action", refused.text
+    for user in (viewer, dead_archive):
+        refused = await client.get(path, params={"include_deleted": "true"}, headers=headers(user))
+        assert refused.status_code == 403 and refused.json()["code"] == "permission_required_for_action", refused.text
     assert ids(await client.get(path, headers=headers(manager))) == [live.id]
     assert ids(await client.get(path, params={"include_deleted": "true"}, headers=headers(manager))) == [live.id, gone.id]
 
 
 @pytest.mark.asyncio
 async def test_get_an_archived_post(client, db, headers):
-    """404 unless the caller holds post.archive or is an administrator (record scope); a home user is out of scope"""
+    """404 unless post.archive is in effect at the post (an administrator without it no longer sees it); a home user
+    is out of scope (a grant on the archived post itself stops applying)"""
     post = await make_post(db)
     home = await make_user(db, perms=[P.POST_VIEW, P.POST_ARCHIVE], post_id=post.id)
     viewer = await make_user(db, perms=[P.POST_VIEW, P.POST_ACCESS_ALL])
-    manager = await make_user(db, perms=[P.POST_VIEW, P.POST_ARCHIVE, P.POST_ACCESS_ALL])
+    manager = await make_user(db, perms=[P.IS_ADMIN, P.POST_VIEW, P.POST_ARCHIVE])
     admin = await make_user(db, perms=[P.IS_ADMIN, P.POST_VIEW])
     path = V1.path(PostRoutes.POST_BY_ID, post_id=post.id)
     for user in (home, viewer, manager, admin):
@@ -197,11 +201,11 @@ async def test_get_an_archived_post(client, db, headers):
 
     await _set_archived(db, post)
     assert (await client.get(path, headers=headers(home))).status_code == 403
-    hidden = await client.get(path, headers=headers(viewer))
-    assert hidden.status_code == 404 and hidden.json()["code"] == "post_not_found", hidden.text
-    for user in (manager, admin):
-        shown = await client.get(path, headers=headers(user))
-        assert shown.status_code == 200 and shown.json()["is_deleted"] is True, shown.text
+    for user in (viewer, admin):
+        hidden = await client.get(path, headers=headers(user))
+        assert hidden.status_code == 404 and hidden.json()["code"] == "post_not_found", hidden.text
+    shown = await client.get(path, headers=headers(manager))
+    assert shown.status_code == 200 and shown.json()["is_deleted"] is True, shown.text
 
 
 # ----------------------------------------------------------------- data scope

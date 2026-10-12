@@ -4,11 +4,11 @@ Every service declares its criteria as a frozen dataclass extending ListCriteria
 """
 
 from dataclasses import dataclass
-from typing import Optional, Type, TypeVar, List, Set
+from typing import FrozenSet, Optional, Type, TypeVar, List, Set
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.sql.selectable import Select
 
-from sqlalchemy import inspect as sa_inspect
+from sqlalchemy import inspect as sa_inspect, or_
 from sqlalchemy.exc import NoInspectionAvailable
 
 from app.backend.enums.general import SortOrder
@@ -175,12 +175,25 @@ class SimpleFilterEngine:
         return query.order_by(*terms)
 
     @classmethod
-    def _apply_soft_delete(cls, query: Select, params: ListCriteria) -> Select:
-        """Apply soft delete filter if model has is_deleted"""
-        include_deleted = getattr(params, 'include_deleted', False)
-        if hasattr(cls.MODEL, 'is_deleted') and not include_deleted:
-            query = query.where(cls.MODEL.is_deleted == False)
-        return query
+    def _apply_soft_delete(
+            cls,
+            query: Select,
+            params: ListCriteria,
+            post_column=None,
+            archived_post_ids: Optional[FrozenSet[int]] = None,
+    ) -> Select:
+        """Archived rows (is_deleted) only with include_deleted. With include_deleted and a post_column, archived
+        rows are kept only where post_column is in archived_post_ids (the posts where X.archive is in effect; None:
+        everywhere, a row without a post only then); live rows are never limited here."""
+        if not hasattr(cls.MODEL, 'is_deleted'):
+            return query
+        if not getattr(params, 'include_deleted', False):
+            return query.where(cls.MODEL.is_deleted == False)
+        if post_column is None or archived_post_ids is None:
+            return query
+        if not archived_post_ids:
+            return query.where(cls.MODEL.is_deleted == False)
+        return query.where(or_(cls.MODEL.is_deleted == False, post_column.in_(sorted(archived_post_ids))))
 
     @classmethod
     def _get_last_n_days_start(cls, n_days: int) -> datetime:
