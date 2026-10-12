@@ -12228,7 +12228,7 @@
           "POSTS"
         ],
         "summary": "Update Post",
-        "description": "Update post by ID. post.update must be in effect at the post; a move (group_id) also needs post.update\nat the new group (or above it), at the root for a post directly under the root.\n\nOnly the fields sent are changed; null is refused for name, code and is_active (omit them instead).\nArchived posts answer 404 until restored (POST /{post_id}/restore); is_deleted is never read from the body.",
+        "description": "Update post by ID. post.update must be in effect at the post; a move (group_id) also needs post.update\ncovering both the old and the new location (the group or above it; the root for a post directly under it).\n\nOnly the fields sent are changed; null is refused for name, code and is_active (omit them instead).\nArchived posts answer 404 until restored (POST /{post_id}/restore); is_deleted is never read from the body.",
         "operationId": "update_post",
         "security": [
           {

@@ -53,7 +53,8 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `/restore` (403 `admin_required` is no longer declared there). Each checks its permission at the post:
   `post.update` / `post.archive` in effect at the post (403 `post_write_denied`, `no_post_assigned`); creating a post
   needs `post.create` at its group or above (at the root for a post without a group), moving one (`group_id`)
-  `post.update` at the new location: otherwise 403 `permission_required_for_action` (`action` `create_post` /
+  `post.update` covering both the old and the new location (a grant on the post itself covers neither): otherwise
+  403 `permission_required_for_action` (`action` `create_post` /
   `move_post`). Restoring an archived post needs `post.archive` inherited from a group or the root (a grant on the
   post itself stops applying while it is archived). Administrators keep all of this: `admin.true` with these
   permissions holds them at the root.

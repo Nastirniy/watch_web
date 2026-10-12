@@ -212,6 +212,30 @@ async def test_create_and_move_need_the_permission_at_the_target(client, db, hea
     assert in_east.group_id == sector.id
 
 
+async def test_a_move_needs_post_update_covering_the_old_and_the_new_location(client, db, headers, with_grants):
+    east, west = await _group(db, "East"), await _group(db, "West")
+    post = await make_post(db, group_id=east.id)
+    puller = await make_user(db, perms=[P.POST_VIEW, P.POST_UPDATE])
+    # post.update on the post itself and at West: in effect at the post, but East is not covered
+    with_grants(puller, grant(Node.post(post.id), P.POST_VIEW, P.POST_UPDATE),
+                grant(Node.group(west.id), P.POST_VIEW, P.POST_UPDATE))
+    body = _denied(await client.put(_post_url(post.id), json={"group_id": west.id}, headers=headers(puller)),
+                   "permission_required_for_action", ["post.update"])
+    assert body["permission"] == "post.update" and body["action"] == "move_post"
+    await db.refresh(post)
+    assert post.group_id == east.id
+    # other fields of the post stay editable through the grant on the post
+    assert (await client.put(_post_url(post.id), json={"name": "Renamed"}, headers=headers(puller))).status_code == 200
+
+    mover = await make_user(db, perms=[P.POST_VIEW, P.POST_UPDATE])
+    with_grants(mover, grant(Node.group(east.id), P.POST_VIEW, P.POST_UPDATE),
+                grant(Node.group(west.id), P.POST_VIEW, P.POST_UPDATE))
+    moved = await client.put(_post_url(post.id), json={"group_id": west.id}, headers=headers(mover))
+    assert moved.status_code == 200 and moved.json()["group_id"] == west.id, moved.text
+    await db.refresh(post)
+    assert post.group_id == west.id
+
+
 async def test_archive_and_restore_follow_post_archive_at_the_post(client, db, headers, with_grants):
     east = await _group(db, "East")
     in_east, outside = await make_post(db, group_id=east.id), await make_post(db)

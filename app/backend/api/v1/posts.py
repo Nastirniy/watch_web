@@ -223,7 +223,7 @@ async def update_post(
         auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW, Permissions.POST_UPDATE]))
 ):
     """Update post by ID. post.update must be in effect at the post; a move (group_id) also needs post.update
-    at the new group (or above it), at the root for a post directly under the root.
+    covering both the old and the new location (the group or above it; the root for a post directly under it).
 
     Only the fields sent are changed; null is refused for name, code and is_active (omit them instead).
     Archived posts answer 404 until restored (POST /{post_id}/restore); is_deleted is never read from the body.
@@ -240,7 +240,9 @@ async def update_post(
 
     update_data = post_data.model_dump(exclude_unset=True)
     if "group_id" in update_data and update_data["group_id"] != post.group_id:
-        AccessControlService.check_covers(auth, Permissions.POST_UPDATE, _location(update_data["group_id"]), "move_post")
+        # A move needs post.update covering the old and the new location (a grant on the post itself covers neither)
+        for location in (_location(post.group_id), _location(update_data["group_id"])):
+            AccessControlService.check_covers(auth, Permissions.POST_UPDATE, location, "move_post")
         await _check_group(session, update_data["group_id"])
     # Check code uniqueness if being updated
     if "code" in update_data:
