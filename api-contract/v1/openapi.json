@@ -4038,7 +4038,7 @@
           "ROLES"
         ],
         "summary": "Delete Role",
-        "description": "PERMANENTLY delete a role. This is the only hard delete in the API and cannot be undone.\n\nRequires role.delete (distinct from role.archive). The role row, its permission grants and its\nassignments to archived users are removed from the database. Preconditions, each answered with 409:\nthe role must be archived first (POST /{role_id}/archive), no active user may still hold it\n(the response lists them), and a built-in role can never be deleted.\nThe audit log keeps a full copy of the role, its permissions and its assignments.",
+        "description": "PERMANENTLY delete a role. This is the only hard delete in the API and cannot be undone.\n\nRequires role.delete (distinct from role.archive). The role row, its permission grants and its\nassignments to archived users are removed from the database, and so are its rows in user_roles_v1 (the legacy\nholders migration 023 keeps until a cleanup revision; a downgrade does not bring them or the role back).\nPreconditions, each answered with 409: the role must be archived first (POST /{role_id}/archive), no active user\nmay still hold it (the response lists them), and a built-in role can never be deleted.\nThe audit log keeps a full copy of the role, its permissions, its assignments and its user_roles_v1 rows.",
         "operationId": "delete_role",
         "security": [
           {

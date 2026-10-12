@@ -22,7 +22,7 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   per type (`viewer`, `operator`, `senior_operator`, `analyst`, `post_admin`, `admin`), created and restored at every
   start with exactly the base permissions of its type. A custom role already named like one of these keys (except
   `admin`) is renamed to `<key>_custom` by the migration.
-- `GET /user-types`: the catalog (`key`, `display_name`, `description`, `base_role`, `base_permissions`,
+- `GET /user-types/`: the catalog (`key`, `display_name`, `description`, `base_role`, `base_permissions`,
   `allowed_permissions` = the ceiling of the type). Nothing authorizes by type yet.
 - Permission levels: `level` (`system` or `scoped`) on `RoleResponse` (system when the role holds a system permission)
   and on `PermissionResponse`. `RoleResponse` also has `is_builtin` and `builtin_key`; the role list and
@@ -36,7 +36,7 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   both set; `scope_key` `root` / `g:<id>` / `p:<id>`, unique per user and role; `created_at`, `created_by`). They are
   the only source of access: an assignment applies to its node and everything below it, archived roles grant
   nothing. The home post (`users.post_id`) is membership only (who manages the user).
-- `users.user_type` (NOT NULL): one of the types of `GET /user-types`.
+- `users.user_type` (NOT NULL): one of the types of `GET /user-types/`.
 - Migration `023_authorization_v2` converts every user with the frozen conversion of spec section 8
   (`app/backend/migrations/support/authz_v2.py`): the inferred `user_type`, assignments at the root and at the posts
   of the home post and the access rows (derived roles `<role>_system`, `<role>_posts`, `<role>_view` where a role's
@@ -51,11 +51,15 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - Exact downgrade to 020 also after the new version has started (seeding ran). `022_builtin_roles` records in a
   table of its own, `builtin_roles_migration_log` (`kind`, `ref_id`, JSON `data`), every rename to `<key>_custom`,
   the texts of the `admin` role it marks and the display texts of every permission; its downgrade deletes the
-  built-in roles seeding created (all but `admin`, which existed before) with their grants, gives every renamed role
+  built-in roles seeding created (all but `admin`, which existed before on an upgraded database) with their grants, gives every renamed role
   its old name back, restores the texts seeding refreshed, deletes `media.monitor` with its grants and drops the
   column and the log. A built-in role a legacy `user_roles` row refers to is kept, and a role whose old name another
   role holds keeps `<key>_custom`; the output says so. `021_scope_groups`'s downgrade deletes `scope_group.*` with
   their grants. A downgrade and upgrade again no longer leave `<key>_custom` copies of the built-in roles behind.
+  Names compare without case, as `roles.name` does on MySQL and MariaDB: a legacy "Viewer" is renamed too (the log
+  keeps the stored name and the downgrade gives it back), and the suffix is chosen so that no name differs from a
+  taken one only by case (before, "operator" next to "Operator_custom" made the rename fail with a duplicate key).
+  Changes made through the API after the upgrade are not undone by a downgrade (DEPLOYMENT.md).
 - `python -m app.backend.cli.authz_report [--json] [--url URL]`: dry run of the conversion on a database at
   `022_builtin_roles` (run it on a copy of production before the upgrade; read-only): the plan of every user, as the
   migration's audit rows will record it, and the derived roles. A database at 023 or later answers
@@ -222,7 +226,11 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `cannot_remove_own_admin`.
 - `DELETE /roles/{role_id}` removes the role's assignments (the holders are read from `role_assignments`); the audit
   copy lists them under `assignments`, each with every column of the removed row (`id`, `user_id`, `role_id`,
-  `scope_group_id`, `scope_post_id`, `scope_key`, `created_at`, `created_by`).
+  `scope_group_id`, `scope_post_id`, `scope_key`, `created_at`, `created_by`). It also removes the role's rows of `user_roles_v1` (the
+  legacy holders 023 keeps, with their foreign key to `roles.id`, until a cleanup revision drops the table): on MySQL
+  the permanent delete of an archived legacy role with such rows answered 500. The audit copy lists them under
+  `user_roles_v1` with every column (empty without the table). Such a role and its legacy rows do not come back with
+  a downgrade.
 - `/auth/me` and the login response: `permissions` are the permissions held at some node (see Added for the other
   auth fields).
 - Role edits are bounded by the role's holders: permissions added by `PATCH /roles/{role_id}` (`permission_ids`) or
@@ -283,7 +291,7 @@ removed field or code. What replaces each (API.md, "Authorization: pages, button
 
 | Removed | Use instead |
 |---------|-------------|
-| `is_admin` (login, refresh, `/auth/me`) | Pages by `user_type` (the catalog: `GET /user-types`), buttons by permissions: `permissions` (held at some node) for the menu, `root_permissions` + `post_permissions` at a post. The administration pages belong to the `admin` type; no flag says "administrator". |
+| `is_admin` (login, refresh, `/auth/me`) | Pages by `user_type` (the catalog: `GET /user-types/`), buttons by permissions: `permissions` (held at some node) for the menu, `root_permissions` + `post_permissions` at a post. The administration pages belong to the `admin` type; no flag says "administrator". |
 | `accessible_post_ids` | `root_permissions` (in effect at every post) + `post_permissions` (`{"7": [...]}`): the permissions in effect at post 7 are `root_permissions` + `post_permissions["7"]`. Lists are already limited by the API; a post picker uses `GET /posts/` or `GET /scope-groups/tree`. |
 | `roles` (auth responses, schema `RoleBriefResponse`) | `assignments`: each a role (`id`, `name`, `display_name`, `is_builtin`, `is_deleted`) at a node (`scope`: `kind` root / group / post, `id`, `name`). |
 | `GET /users/{user_id}/roles` | `GET /users/{user_id}/assignments` |

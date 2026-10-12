@@ -27,7 +27,9 @@ from app.backend.api.shared.helpers.roles_helper import (
     get_role_or_404,
     permission_names_by_role,
     get_permission_or_404,
-    check_role_name_exists
+    check_role_name_exists,
+    delete_legacy_holder_rows,
+    legacy_holder_rows,
 )
 from app.backend.api.v1.models.request.roles import RoleClone, RoleCreate, RoleUpdate
 from app.backend.api.v1.models.response.roles import (
@@ -429,10 +431,11 @@ async def delete_role(
     """PERMANENTLY delete a role. This is the only hard delete in the API and cannot be undone.
 
     Requires role.delete (distinct from role.archive). The role row, its permission grants and its
-    assignments to archived users are removed from the database. Preconditions, each answered with 409:
-    the role must be archived first (POST /{role_id}/archive), no active user may still hold it
-    (the response lists them), and a built-in role can never be deleted.
-    The audit log keeps a full copy of the role, its permissions and its assignments.
+    assignments to archived users are removed from the database, and so are its rows in user_roles_v1 (the legacy
+    holders migration 023 keeps until a cleanup revision; a downgrade does not bring them or the role back).
+    Preconditions, each answered with 409: the role must be archived first (POST /{role_id}/archive), no active user
+    may still hold it (the response lists them), and a built-in role can never be deleted.
+    The audit log keeps a full copy of the role, its permissions, its assignments and its user_roles_v1 rows.
     """
     current_user = auth.user
     role = await get_role_or_404(session, role_id, include_deleted=True)
@@ -465,14 +468,16 @@ async def delete_role(
         .order_by(Permission.name)
     )
     permission_names = list(permissions.all())
+    legacy_holders = await legacy_holder_rows(session, role_id)
     old_values = {
         **role.model_dump(), "permissions": permission_names, "assigned_archived_users": archived_users,
-        "assignments": assignments,
+        "assignments": assignments, "user_roles_v1": legacy_holders,
     }
 
     # Core statements on purpose: no ORM cascade (no lazy loads in an async session), every row is removed explicitly
     await session.execute(sa_delete(RolePermission).where(RolePermission.role_id == role_id))
     await session.execute(sa_delete(RoleAssignment).where(RoleAssignment.role_id == role_id))
+    await delete_legacy_holder_rows(session, role_id)
     await session.execute(sa_delete(Role).where(Role.id == role_id))
     await create_audit_log(
         session=session,
@@ -485,7 +490,7 @@ async def delete_role(
             "message": (
                 f"User {current_user.username} permanently deleted role '{old_values['name']}' "
                 f"({len(permission_names)} permissions, {len(assignments)} assignments of {len(archived_users)} "
-                f"archived users)"
+                f"archived users, {len(legacy_holders)} legacy user_roles_v1 rows)"
             ),
             "permanent": True,
         },

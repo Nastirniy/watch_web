@@ -1,4 +1,5 @@
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
+import sqlalchemy as sa
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 
@@ -53,3 +54,29 @@ async def permission_names_by_role(session: AsyncSession, role_ids: List[int]) -
     for role_id, name in rows.all():
         names.setdefault(role_id, set()).add(name)
     return names
+
+
+# Transitional, until a cleanup revision drops the *_v1 tables: migration 023 keeps the legacy user_roles as
+# user_roles_v1 with its foreign key to roles.id (for the downgrade). A role it still names cannot be deleted on MySQL
+# while those rows exist, so the permanent delete of a role removes them too (and copies them into its audit row).
+LEGACY_ROLE_HOLDERS = "user_roles_v1"
+
+
+def _has_table(sync_session, name: str) -> bool:
+    return sa.inspect(sync_session.connection()).has_table(name)
+
+
+async def legacy_holder_rows(session: AsyncSession, role_id: int) -> List[Dict[str, Any]]:
+    """Every column of the user_roles_v1 rows of the role; none when the table does not exist (a fresh install, or
+    after the cleanup revision)"""
+    if not await session.run_sync(_has_table, LEGACY_ROLE_HOLDERS):
+        return []
+    rows = await session.execute(
+        sa.text(f"SELECT * FROM {LEGACY_ROLE_HOLDERS} WHERE role_id = :role_id ORDER BY id"), {"role_id": role_id})
+    return [dict(row._mapping) for row in rows]
+
+
+async def delete_legacy_holder_rows(session: AsyncSession, role_id: int) -> None:
+    if await session.run_sync(_has_table, LEGACY_ROLE_HOLDERS):
+        await session.execute(
+            sa.text(f"DELETE FROM {LEGACY_ROLE_HOLDERS} WHERE role_id = :role_id"), {"role_id": role_id})

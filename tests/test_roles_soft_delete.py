@@ -2,6 +2,7 @@
 from datetime import datetime
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
@@ -159,6 +160,40 @@ async def test_permanent_delete_preconditions_and_effect(client, db, headers):
     assert set(copied) == set(RoleAssignment.__table__.columns.keys())
     assert {**copied, "created_at": datetime.fromisoformat(copied["created_at"])} == expected_assignment
     assert log.details["permanent"] is True
+    assert log.old_values["user_roles_v1"] == [], "no user_roles_v1 table (a fresh install): nothing to copy"
+
+
+LEGACY_HOLDERS_DDL = (  # user_roles_v1 as 023 leaves it: the legacy user_roles, foreign key to roles.id kept
+    "CREATE TABLE user_roles_v1 (id INTEGER NOT NULL PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users (id),"
+    " role_id INTEGER NOT NULL REFERENCES roles (id), assigned_at DATETIME NOT NULL,"
+    " CONSTRAINT uq_user_roles_user_role UNIQUE (user_id, role_id))"
+)
+
+
+@pytest.mark.asyncio
+async def test_permanent_delete_removes_legacy_holder_rows(client, db, headers):
+    """A legacy role archived before the upgrade can still have rows in user_roles_v1 (023 keeps the table with its
+    foreign key; MySQL refused the delete with a 500): they go with the role, and the audit row keeps a full copy"""
+    admin = await make_admin(db)
+    holder, other = await make_user(db), await make_user(db)
+    role = await make_role(db, ["tag.view"], name="legacy_archived")
+    kept = await make_role(db, ["tag.view"], name="legacy_kept")
+    await db.execute(text(LEGACY_HOLDERS_DDL))
+    await db.execute(text("INSERT INTO user_roles_v1 (id, user_id, role_id, assigned_at) VALUES"
+                          " (5, :holder, :role, '2026-01-01 00:00:00'), (6, :other, :kept, '2026-01-02 00:00:00')"),
+                     {"holder": holder.id, "other": other.id, "role": role.id, "kept": kept.id})
+    await db.commit()
+    assert (await client.post(ARCHIVE.format(role_id=role.id), headers=headers(admin))).status_code == 200
+
+    deleted = await client.delete(ROLE.format(role_id=role.id), headers=headers(admin))
+    assert deleted.status_code == 204, deleted.text
+
+    left = (await db.execute(text("SELECT id, role_id FROM user_roles_v1 ORDER BY id"))).all()
+    assert [tuple(row) for row in left] == [(6, kept.id)]
+    log = (await db.exec(select(AuditLog).where(
+        AuditLog.resource_type == "role", AuditLog.resource_id == role.id, AuditLog.action == "delete"))).one()
+    assert log.old_values["user_roles_v1"] == [
+        {"id": 5, "user_id": holder.id, "role_id": role.id, "assigned_at": "2026-01-01 00:00:00"}]
 
 
 @pytest.mark.asyncio

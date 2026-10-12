@@ -7,16 +7,20 @@ the code at every start. Here:
 - the role named "admin" becomes the built-in admin role (builtin_key = 'admin');
 - a custom role that already uses another built-in key as its name is renamed to "<key>_custom" (a numeric suffix
   when that is taken too), so seeding can create the built-in role under the key. Nothing else about the role changes.
+  Names compare without case, as roles.name does on MySQL and MariaDB (utf8mb4_unicode_ci, the unique index too): a
+  legacy "Viewer" blocks the built-in "viewer" there and is renamed as well, and "Operator_custom" takes the suffix
+  "operator_custom". The database's own comparison counts too, whatever its collation.
 
 What the downgrade needs is recorded in builtin_roles_migration_log (kind, ref_id, data), in the transaction of the
-change: every rename (the old name), the admin role it marks (its texts and archive flag, which seeding resets) and
+change: every rename (the name as stored, its case included), the admin role it marks (its texts and archive flag, which seeding resets) and
 the display texts of every permission present now (seeding refreshes them from the code).
 
 Downgrade restores the roles and permissions exactly (spec section 8, controller ruling R31), also after the
 application started and seeded: the built-in roles seeding created (builtin_key set, not admin) are deleted with
 their grants, unless a legacy user_roles row refers to one (it is kept and a line says so); every recorded role gets
 its old name back (unless another role holds that name now: a line says so); the admin role gets its recorded texts
-back and keeps existing (it was there before, this revision only marked it); the permission texts come back;
+back and keeps existing (on an upgraded database it was there before, this revision only marked it); the
+permission texts come back;
 media.monitor, which the code of this revision introduced, is deleted with its grants (023's log replay already
 removes it when 023 inserted it). Then roles.builtin_key, its index and the log are dropped.
 
@@ -27,7 +31,7 @@ Revision ID: 022_builtin_roles
 Revises: 021_scope_groups
 Create Date: 2026-10-12
 """
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from alembic import op
 import sqlalchemy as sa
@@ -76,6 +80,14 @@ def _record(kind: str, ref_id: int, data: dict) -> None:
     op.get_bind().execute(LOG_ROWS.insert().values(kind=kind, ref_id=ref_id, data=data))
 
 
+def _name_in_use(name: str, other_than: Optional[int] = None) -> bool:
+    """A role (other than the given one) holds the name, as the database compares names (its collation)"""
+    query = sa.select(ROLES.c.id).where(ROLES.c.name == name)
+    if other_than is not None:
+        query = query.where(ROLES.c.id != other_than)
+    return op.get_bind().execute(query.limit(1)).first() is not None
+
+
 # ---------------------------------------------------------------------------------------------------- upgrade
 def upgrade() -> None:
     bind = op.get_bind()
@@ -95,19 +107,24 @@ def upgrade() -> None:
         _log(f"adding column {TABLE}.{COLUMN}")
         op.add_column(TABLE, sa.Column(COLUMN, sa.String(length=50), nullable=True))
 
-    taken = {name for (name,) in bind.execute(sa.select(ROLES.c.name))}
+    customs = bind.execute(sa.select(ROLES.c.id, ROLES.c.name).where(ROLES.c[COLUMN].is_(None))
+                           .order_by(ROLES.c.id)).all()
+    taken = {name.casefold() for (name,) in bind.execute(sa.select(ROLES.c.name))}
     for key in OTHER_KEYS:
-        rows = bind.execute(sa.select(ROLES.c.id).where(ROLES.c.name == key, ROLES.c[COLUMN].is_(None))).all()
-        for (role_id,) in rows:
+        # what the database calls equal to the key (its collation) and what equals it without case (sqlite compares
+        # with case: the same roles are renamed on every database)
+        equal = {role_id for (role_id,) in bind.execute(
+            sa.select(ROLES.c.id).where(ROLES.c.name == key, ROLES.c[COLUMN].is_(None)))}
+        for role_id, name in [(role_id, name) for role_id, name in customs if role_id in equal or name.casefold() == key]:
             new_name = f"{key}_custom"
             suffix = 2
-            while new_name in taken:
+            while new_name.casefold() in taken or _name_in_use(new_name):
                 new_name = f"{key}_custom_{suffix}"
                 suffix += 1
-            _log(f"renaming custom role {key} (id {role_id}) -> {new_name}")
+            _log(f"renaming custom role {name} (id {role_id}) -> {new_name}")
             bind.execute(sa.update(ROLES).where(ROLES.c.id == role_id).values(name=new_name))
-            _record(RENAMED_ROLE, role_id, {"name": key, "renamed_to": new_name})
-            taken.add(new_name)
+            _record(RENAMED_ROLE, role_id, {"name": name, "renamed_to": new_name})
+            taken.add(new_name.casefold())
 
     admin_rows = bind.execute(
         sa.select(ROLES.c.id, ROLES.c.name, ROLES.c.display_name, ROLES.c.description, ROLES.c.is_deleted)
@@ -185,7 +202,8 @@ def _referrers(tables: set, role_id: int) -> List[str]:
 
 
 def _delete_seeded_roles(tables: set) -> None:
-    """The built-in roles seeding created (every one but admin, which existed before): deleted with their grants"""
+    """The built-in roles seeding created (every one but admin, which existed before on an upgraded database):
+    deleted with their grants"""
     bind = op.get_bind()
     seeded = bind.execute(sa.select(ROLES.c.id, ROLES.c.name, ROLES.c[COLUMN]).where(
         ROLES.c[COLUMN].isnot(None), ROLES.c[COLUMN] != ADMIN_KEY).order_by(ROLES.c.id)).all()
@@ -212,9 +230,11 @@ def _restore_roles(entries: Dict[str, List[Tuple[int, dict]]]) -> None:
         current = bind.execute(sa.select(ROLES.c.name).where(ROLES.c.id == role_id)).first()
         if current is None:
             continue
-        holder = bind.execute(sa.select(ROLES.c.id).where(ROLES.c.name == data["name"], ROLES.c.id != role_id)).first()
-        if holder is not None:
-            _log(f"keeping the name {current[0]} of role {role_id}: role {holder[0]} is named {data['name']}")
+        folded = data["name"].casefold()
+        holder = [other_id for other_id, other in bind.execute(sa.select(ROLES.c.id, ROLES.c.name))
+                  if other_id != role_id and other.casefold() == folded]
+        if holder or _name_in_use(data["name"], other_than=role_id):
+            _log(f"keeping the name {current[0]} of role {role_id}: another role is named {data['name']}")
             continue
         _log(f"renaming role {current[0]} (id {role_id}) back to {data['name']}")
         bind.execute(sa.update(ROLES).where(ROLES.c.id == role_id).values(name=data["name"]))
