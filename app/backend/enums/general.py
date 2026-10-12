@@ -220,9 +220,11 @@ class SessionRevokeCause(str, Enum):
     """What made the server revoke a session; the account itself may stay as it is"""
     ACCOUNT_DEACTIVATED = "account_deactivated"
     ACCOUNT_ARCHIVED = "account_archived"
-    CERTIFICATE_CHANGED = "certificate_changed"  # the user got another certificate: the old one's sessions end
+    # Written before migration 024, when PATCH /users/{id} replaced the user's one certificate; nothing writes it now
+    CERTIFICATE_CHANGED = "certificate_changed"
     ENDED_BY_ADMIN = "ended_by_admin"
     USER_TYPE_CHANGED = "user_type_changed"      # the web must not keep showing the pages of the old type
+    CERTIFICATE_REVOKED = "certificate_revoked"  # the certificate of the session is no active row of the user
 
 
 class ExportJobType(Enum):
@@ -309,3 +311,19 @@ class P12Encryption(str, Enum):
     """How a .p12 package is encrypted: AES-256 (modern) or 3DES/SHA-1 (older Windows)"""
     AES256 = "aes256"
     LEGACY = "legacy"
+
+
+class CertificateSource(str, Enum):
+    """Where a row of user_certificates comes from (no DB CHECK: a new source is a new value)"""
+    ISSUED = "issued"           # signed by the signer (pki-signer) for the user
+    UPLOADED = "uploaded"       # a certificate file from an administrator (POST /users/, init_user)
+    LEGACY = "legacy"           # the hashes users held before migration 024; hashes only
+    CONFIGURED = "configured"   # the hashes of settings.admin (development seed); hashes only
+
+
+class CertificateState(str, Enum):
+    """State of a certificate, computed on read, never stored: revoked when revoked_at is set, else expired when
+    not_after is in the past, else active (a row without not_after stays active until revoked)"""
+    ACTIVE = "active"
+    EXPIRED = "expired"
+    REVOKED = "revoked"

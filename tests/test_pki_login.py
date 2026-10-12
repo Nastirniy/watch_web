@@ -15,13 +15,13 @@ from app.backend.config import settings
 from app.backend.enums.general import AppEnvironment
 from app.backend.enums.routes import AuthRoutes, UserRoutes
 from app.backend.models.user import User, UserSession
-from tests.helpers import make_admin
+from app.backend.models.user_certificate import UserCertificate
+from tests.helpers import make_admin, make_certificate_row
 
 LOGIN = V1.path(AuthRoutes.LOGIN)
 REFRESH = V1.path(AuthRoutes.REFRESH)
 ME = V1.path(AuthRoutes.ME)
 CREATE_USER = V1.path(UserRoutes.ROOT)
-USER = V1.path(UserRoutes.USER_BY_ID)
 
 
 def make_certificate(common_name: str, serial: int) -> x509.Certificate:
@@ -126,30 +126,34 @@ async def test_unverified_certificate_is_refused(client, db, headers, production
     assert response.status_code == 401 and response.json()["code"] == "certificate_verification_failed"
 
 
+async def _certificate_row(db, cert: x509.Certificate) -> UserCertificate:
+    fingerprint_hash = await hash_data(nginx_headers(cert)["X-SSL-Client-Fingerprint"])
+    return (await db.exec(select(UserCertificate).where(UserCertificate.fingerprint_hash == fingerprint_hash))).one()
+
+
 @pytest.mark.asyncio
-async def test_new_certificate_ends_the_sessions_of_the_old_one(client, db, headers, production):
+async def test_a_user_logs_in_with_each_of_its_certificates(client, db, headers, production):
+    """Several certificates per user (a renewal overlaps): each logs in as the user; revoking the old one refuses its
+    login and leaves the new one's session"""
     old = make_certificate("cn-replace", 0x2222)
     user_id = await _create_user(client, db, headers, "replaced", old)
-    old_session = await _login(client, old)
-    assert (await client.get(ME, headers=old_session)).status_code == 200
-
-    # the same certificate again changes nothing
-    admin = await make_admin(db)
-    same = await client.patch(USER.format(user_id=user_id), headers=headers(admin),
-                              files={"certificate": ("cert.pem", pem(old), "application/x-pem-file")})
-    assert same.status_code == 200, same.text
-    assert (await client.get(ME, headers=old_session)).status_code == 200
-
+    user = (await db.exec(select(User).where(User.id == user_id))).one()
     new = make_certificate("cn-replace-new", 0x3333)
-    replaced = await client.patch(USER.format(user_id=user_id), headers=headers(admin),
-                                  files={"certificate": ("cert.pem", pem(new), "application/x-pem-file")})
-    assert replaced.status_code == 200, replaced.text
-    ended = await client.get(ME, headers=old_session)
-    assert ended.status_code == 401 and ended.json()["code"] == "session_expired"
+    await make_certificate_row(db, user, cert=new)
 
+    old_session = await _login(client, old)
+    new_session = await _login(client, new)
+    for device in (old_session, new_session):
+        me = await client.get(ME, headers=device)
+        assert me.status_code == 200 and me.json()["username"] == "replaced", me.text
+
+    row = await _certificate_row(db, old)
+    row.revoked_at = datetime.now(timezone.utc)
+    db.add(row)
+    await db.commit()
     refused = await client.post(LOGIN, headers=nginx_headers(old))
-    assert refused.status_code == 401 and refused.json()["code"] == "certificate_not_recognized"
-    assert (await client.get(ME, headers=await _login(client, new))).status_code == 200
+    assert refused.status_code == 401 and refused.json()["code"] == "certificate_revoked"
+    assert (await client.get(ME, headers=new_session)).status_code == 200
 
 
 @pytest.mark.asyncio
@@ -214,21 +218,20 @@ async def test_login_with_a_cyrillic_common_name(client, db, headers, production
     assert me.status_code == 200 and me.json()["username"] == "cyrillic"
 
 
-# ------------------------------------------------------------------ a session bound to a replaced certificate
+# ------------------------------------------------------------------ a session bound to a revoked certificate
 @pytest.mark.asyncio
-async def test_a_session_of_a_replaced_certificate_ends_on_its_next_request(client, db, headers, production):
-    """A login racing a certificate change: the revocation ran before the new session was stored, so the session
-    is bound to the old certificate. Its next request or refresh ends it (revoked, certificate_changed)."""
+async def test_a_session_of_a_revoked_certificate_ends_on_its_next_request(client, db, headers, production):
+    """A login racing a revocation: the revocation ran before the new session was stored, so the session is bound
+    to a revoked certificate. Its next request or refresh ends it (revoked, certificate_revoked)."""
     old = make_certificate("cn-race", 0x7777)
     user_id = await _create_user(client, db, headers, "racer", old)
     on_request = await _tokens(client, old)
     on_refresh = await _tokens(client, old)
 
-    # the change as it lands after the logins: the user's certificate is another one, these sessions stayed live
-    new = make_certificate("cn-race-new", 0x8888)
-    user = (await db.exec(select(User).where(User.id == user_id))).one()
-    user.pki_certificate_fingerprint_hash = await hash_data(nginx_headers(new)["X-SSL-Client-Fingerprint"])
-    db.add(user)
+    # the revocation as it lands after the logins: these sessions stayed live
+    row = await _certificate_row(db, old)
+    row.revoked_at = datetime.now(timezone.utc)
+    db.add(row)
     await db.commit()
 
     me = await client.get(ME, headers={**nginx_headers(old), "Authorization": f"Bearer {on_request['access_token']}"})
@@ -239,7 +242,7 @@ async def test_a_session_of_a_replaced_certificate_ends_on_its_next_request(clie
     db.expire_all()
     rows = (await db.exec(select(UserSession).where(UserSession.user_id == user_id))).all()
     assert len(rows) == 2
-    assert all((row.end_reason, row.revoke_cause) == ("revoked", "certificate_changed") and row.ended_at for row in rows)
+    assert all((row.end_reason, row.revoke_cause) == ("revoked", "certificate_revoked") and row.ended_at for row in rows)
     again = await client.get(ME, headers={**nginx_headers(old), "Authorization": f"Bearer {on_request['access_token']}"})
     assert again.status_code == 401 and again.json()["code"] == "session_expired"
 

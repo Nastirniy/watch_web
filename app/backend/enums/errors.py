@@ -142,6 +142,8 @@ class AuthErrorCode(ProblemType):
     CERTIFICATE_VERIFICATION_FAILED = ("certificate_verification_failed", problem(401, "Certificate verification failed"))
     CERTIFICATE_DATA_MISSING = ("certificate_data_missing", problem(401, "Invalid certificate data"))
     CERTIFICATE_NOT_RECOGNIZED = ("certificate_not_recognized", problem(401, "Certificate not recognized"))
+    # The certificate is registered but revoked: the person asks for a new one (an expired one is not recognized)
+    CERTIFICATE_REVOKED = ("certificate_revoked", problem(401, "Certificate revoked"))
     SESSION_EXPIRED = ("session_expired", problem(401, "Session expired or invalidated"))
     # The session was opened with another client certificate than the one this request presents (RFC 8705)
     TOKEN_CERTIFICATE_MISMATCH = ("token_certificate_mismatch", problem(401, "Token belongs to another client certificate"))
@@ -215,7 +217,7 @@ class ErrorCode(ProblemType):
     USER_NOT_ARCHIVED = ("user_not_archived", problem(409, "User is not archived"))
     USERNAME_TAKEN = ("username_taken", problem(400, "User with this username already exists"))
     USERNAME_OR_CERTIFICATE_TAKEN = ("username_or_certificate_taken", problem(400, "User with this username or certificate already exists"))
-    CERTIFICATE_TAKEN = ("certificate_taken", problem(400, "Certificate already exists for another user"))
+    CERTIFICATE_TAKEN = ("certificate_taken", problem(400, "Certificate already registered"))
     CERTIFICATE_FILE_EMPTY = ("certificate_file_empty", problem(400, "Certificate file is empty"))
     CERTIFICATE_FILE_TOO_LARGE = ("certificate_file_too_large", problem(
         413, "Certificate file is too large", "Certificate file is too large (at most {max_bytes} bytes)", max_bytes=int))
@@ -467,6 +469,8 @@ class FieldErrorCode(FieldCode):
     CERTIFICATE_CN_INVALID = ("certificate_cn_invalid", field("Invalid certificate CN format"))
     CERTIFICATE_SERIAL_INVALID = ("certificate_serial_invalid", field("Invalid certificate serial format"))
     CERTIFICATE_FINGERPRINT_INVALID = ("certificate_fingerprint_invalid", field("Invalid certificate fingerprint format"))
+    CERTIFICATE_LABEL_INVALID = ("certificate_label_invalid", field(
+        "Certificate label must be 1 to 64 characters without control characters"))
     SEARCH_LOGIC_INVALID = ("search_logic_invalid", field("logic must be 'and' or 'or'"))
     CONTENT_TYPE_INVALID = ("content_type_invalid", field("Not a valid Content-Type (expected type/subtype, lower case)"))
     EXTENSION_INVALID = ("extension_invalid", field("Not a valid extension (expected .ext, letters and digits, up to 10 characters)"))

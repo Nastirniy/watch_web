@@ -5,30 +5,34 @@ Init User Utility - Create the first user from the server machine.
 Usage:
     python -m app.backend.cli.init_user /path/to/cert.pem
     python -m app.backend.cli.init_user /path/to/cert.pem --username admin --alias "Admin" --user-type admin
+    python -m app.backend.cli.init_user /path/to/cert.pem --username ivan --alias "Ivan" --user-type viewer --label "PC"
+    python -m app.backend.cli.init_user --username admin --alias "Admin" --user-type admin
     python -m app.backend.cli.init_user --list-types
 
 The user gets the built-in base role of the user type at the root of the scope tree (no home post); more access is
-role assignments through the API.
+role assignments through the API. With a certificate file the user gets it as an uploaded certificate (label: --label,
+default its CN); without one the user cannot log in until a certificate is issued or uploaded for them.
 """
 
 import asyncio
 import sys
 import argparse
 from pathlib import Path
+from typing import Optional
 
 from loguru import logger
 
 from app.backend.database import get_session_maker, create_database_if_not_exists
 from app.backend.auth.scope import ROOT
 from app.backend.auth.user_types import USER_TYPES
-from app.backend.enums.general import UserType
+from app.backend.enums.general import CertificateSource, UserType
+from app.backend.errors.coded import CodedError
 from app.backend.models.user import User
 from app.backend.models.role import Role
 from app.backend.models.role_assignment import RoleAssignment, scope_columns
-from app.backend.auth.certificates import (
-    CN_SCHEME_CURRENT, CertificateParser, cn_hash_matches, hash_pki_certificate_data,
-)
+from app.backend.pki.profile import LABEL_MAX_LENGTH, normalize_label
 from app.backend.services.audit import create_audit_log
+from app.backend.services.certificates import register_certificate
 
 from sqlmodel import select
 
@@ -43,11 +47,13 @@ def list_types() -> None:
 async def create_user(
     username: str,
     username_alias: str,
-    cert_path: str,
+    cert_path: Optional[str],
     user_type: UserType,
+    label: Optional[str] = None,
 ):
     """
-    Create a user with PKI certificate authentication and the base role of the type at the root.
+    Create a user with the base role of the type at the root and, with cert_path, an uploaded certificate (label:
+    its readable name, default the CN).
 
     Mirrors the logic from app/backend/api/v1/users.py create_user route (without a home post).
     """
@@ -55,34 +61,21 @@ async def create_user(
     session_maker = await get_session_maker()
 
     # Read certificate file
-    cert_file = Path(cert_path)
-    if not cert_file.exists():
-        logger.error(f"Certificate file not found: {cert_path}")
-        sys.exit(1)
-
-    cert_data = cert_file.read_bytes()
-    if len(cert_data) == 0:
-        logger.error("Certificate file is empty")
-        sys.exit(1)
-
-    # Parse certificate
-    try:
-        cert_info = CertificateParser.parse_certificate(cert_data)
-        pki_cn = cert_info["pki_certificate_cn"]
-        pki_serial = cert_info["pki_certificate_serial"]
-        pki_fingerprint = cert_info["pki_certificate_fingerprint"]
-        logger.info("Certificate parsed OK:")
-        logger.info(f"  CN:          {pki_cn}")
-        logger.info(f"  Serial:      {pki_serial}")
-        logger.info(f"  Fingerprint: {pki_fingerprint}")
-    except ValueError as e:
-        logger.error(f"Invalid certificate - {e}")
-        sys.exit(1)
-
-    # Hash PKI data
-    pki_cn_hash, pki_serial_hash, pki_fingerprint_hash = await hash_pki_certificate_data(
-        pki_cn, pki_serial, pki_fingerprint
-    )
+    cert_data = None
+    if cert_path:
+        cert_file = Path(cert_path)
+        if not cert_file.exists():
+            logger.error(f"Certificate file not found: {cert_path}")
+            sys.exit(1)
+        cert_data = cert_file.read_bytes()
+        if len(cert_data) == 0:
+            logger.error("Certificate file is empty")
+            sys.exit(1)
+    if label is not None:
+        label = normalize_label(label)
+        if label is None:
+            logger.error(f"The label must be 1 to {LABEL_MAX_LENGTH} characters without control characters")
+            sys.exit(1)
 
     async with session_maker() as session:
         # Check username uniqueness
@@ -91,18 +84,6 @@ async def create_user(
         )
         if result.first():
             logger.error(f"User with username '{username}' already exists")
-            sys.exit(1)
-
-        # Check certificate uniqueness
-        dup = await session.exec(
-            select(User).where(
-                await cn_hash_matches(pki_cn) |
-                (User.pki_certificate_serial_hash == pki_serial_hash) |
-                (User.pki_certificate_fingerprint_hash == pki_fingerprint_hash)
-            )
-        )
-        if dup.first():
-            logger.error("Certificate already registered to another user")
             sys.exit(1)
 
         # The base role of the type (seeding creates the built-in roles)
@@ -117,15 +98,26 @@ async def create_user(
         user = User(
             username=username,
             username_alias=username_alias,
-            pki_certificate_cn_hash=pki_cn_hash,
-            pki_certificate_cn_hash_scheme=CN_SCHEME_CURRENT,
-            pki_certificate_serial_hash=pki_serial_hash,
-            pki_certificate_fingerprint_hash=pki_fingerprint_hash,
             user_type=user_type.value,
         )
         session.add(user)
         await session.flush()
         session.add(RoleAssignment(user_id=user.id, role_id=role.id, **scope_columns(ROOT)))
+        certificate = None
+        if cert_data is not None:
+            try:
+                certificate = await register_certificate(
+                    session, user, cert_data, label, CertificateSource.UPLOADED, None)
+            except CodedError as exc:
+                await session.rollback()
+                logger.error(f"Certificate refused: {exc.code.title}")
+                sys.exit(1)
+            logger.info("Certificate registered:")
+            logger.info(f"  Label:   {certificate.label}")
+            logger.info(f"  CN:      {certificate.subject_cn}")
+            logger.info(f"  Serial:  {certificate.serial}")
+            logger.info(f"  Expires: {certificate.not_after}")
+        certificate_id = certificate.id if certificate is not None else None
         await session.commit()
         await session.refresh(user)
 
@@ -136,8 +128,9 @@ async def create_user(
             resource_type="user",
             resource_id=user.id,
             new_values={
-                **user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"}),
+                **user.model_dump(),
                 "assignments": [{"role_id": role.id, "scope": ROOT.key}],
+                "certificate_id": certificate_id,
             },
             details={"message": f"User {user.username} created via CLI init utility"},
             ip_address="127.0.0.1",
@@ -150,6 +143,8 @@ async def create_user(
         logger.info(f"  Name:  {user.username}")
         logger.info(f"  Alias: {user.username_alias}")
         logger.info(f"  Type:  {user.user_type} ({role.name} at {ROOT.key})")
+        if certificate_id is None:
+            logger.info("  No certificate: the user logs in once a certificate is issued or uploaded for them")
 
 
 def _prompt(label: str, default: str = "") -> str:
@@ -167,16 +162,13 @@ def _user_type(value: str) -> UserType:
         sys.exit(1)
 
 
-async def interactive_create(cert_path: str = None):
+async def interactive_create(cert_path: str = None, label: Optional[str] = None):
     """Interactive mode -- prompts for missing fields."""
     logger.info("=== Create User ===")
     list_types()
 
     if not cert_path:
-        cert_path = _prompt("Certificate file path (PEM or DER)")
-        if not cert_path:
-            logger.error("Certificate path is required")
-            sys.exit(1)
+        cert_path = _prompt("Certificate file path (PEM or DER; empty: none)") or None
 
     username = _prompt("Username (3-50 chars)")
     if not username or len(username) < 3 or len(username) > 50:
@@ -189,22 +181,26 @@ async def interactive_create(cert_path: str = None):
         sys.exit(1)
 
     user_type = _user_type(_prompt("User type", UserType.ADMIN.value))
+    if cert_path and label is None:
+        label = _prompt("Certificate label (empty: its CN)") or None
 
-    await create_user(username, username_alias, cert_path, user_type)
+    await create_user(username, username_alias, cert_path, user_type, label)
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Create initial user with PKI certificate authentication"
+        description="Create initial user, optionally with the certificate file it logs in with"
     )
     parser.add_argument("cert", nargs="?", default=None,
-                        help="Path to PKI certificate file (PEM or DER)")
+                        help="Path to a certificate file (PEM or DER); optional")
     parser.add_argument("--list-types", action="store_true",
                         help="List the user types and exit")
     parser.add_argument("--username", type=str, help="Username (3-50 chars)")
     parser.add_argument("--alias", type=str, help="Display name")
     parser.add_argument("--user-type", type=str, default=None,
                         help=f"User type: {', '.join(t.value for t in UserType)}")
+    parser.add_argument("--label", type=str, default=None,
+                        help=f"Readable name of the certificate, 1 to {LABEL_MAX_LENGTH} characters (default: its CN)")
 
     args = parser.parse_args()
 
@@ -212,19 +208,19 @@ def main():
         list_types()
         return
 
-    # If all flags provided -- run non-interactively
-    if args.cert and args.username and args.alias and args.user_type:
+    # If all flags provided -- run non-interactively (the certificate is optional)
+    if args.username and args.alias and args.user_type:
         user_type = _user_type(args.user_type)
 
         if len(args.username) < 3 or len(args.username) > 50:
             logger.error("Username must be 3-50 characters")
             sys.exit(1)
 
-        asyncio.run(create_user(args.username, args.alias, args.cert, user_type))
+        asyncio.run(create_user(args.username, args.alias, args.cert, user_type, args.label))
         return
 
     # Otherwise -- interactive, with cert pre-filled if given positionally
-    asyncio.run(interactive_create(cert_path=args.cert))
+    asyncio.run(interactive_create(cert_path=args.cert, label=args.label))
 
 
 if __name__ == "__main__":

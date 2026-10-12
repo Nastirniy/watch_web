@@ -50,7 +50,7 @@ _logger = get_auth_logger()
     responses=problems(
         ErrorCode.LOGIN_DATA_REQUIRED, AuthErrorCode.ACCOUNT_DEACTIVATED, AuthErrorCode.ACCOUNT_DELETED,
         AuthErrorCode.CERTIFICATE_DATA_MISSING, AuthErrorCode.CERTIFICATE_NOT_RECOGNIZED,
-        AuthErrorCode.CERTIFICATE_VERIFICATION_FAILED,
+        AuthErrorCode.CERTIFICATE_REVOKED, AuthErrorCode.CERTIFICATE_VERIFICATION_FAILED,
     ),
 )
 async def login(
@@ -195,8 +195,9 @@ async def refresh_token(
     if refresh_session is None:
         raise ApiError(AuthErrorCode.SESSION_EXPIRED)
 
-    # A session bound to a certificate that is no longer the user's ends here (a login that raced the change)
-    if await AuthService.end_session_of_replaced_certificate(session, refresh_session, user):
+    # A session bound to a certificate that is no active row of the user ends here (a login that raced a
+    # revocation, an expired certificate)
+    if await AuthService.end_session_of_revoked_certificate(session, refresh_session, user):
         raise ApiError(AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH)
     if not await certificate_matches(refresh_session, x_ssl_client_fingerprint):
         _logger.warning(f"Refresh token presented with another client certificate: session_id={session_id}, user_id={user_id}")

@@ -23,12 +23,11 @@ from app.backend.auth.privileges import (
 from app.backend.auth.scope import Node, ROOT
 from app.backend.bootstrap.permissions import role_level
 from app.backend.auth.service import AuthService
-from app.backend.auth.certificates import (
-    CN_SCHEME_CURRENT, CertificateParser, cn_hash_matches, hash_pki_certificate_data,
-)
 from app.backend.enums.general import (
-    PermissionLevel, Permissions, SessionEndReason, SessionRevokeCause, SessionStatus, UserType,
+    CertificateSource, PermissionLevel, Permissions, SessionEndReason, SessionRevokeCause, SessionStatus, UserType,
 )
+from app.backend.errors.coded import CodedError
+from app.backend.services.certificates import register_certificate
 from app.backend.auth import sessions as session_lifetimes
 from app.backend.api.v1.models.response.auth import SessionsEndedResponse, UserSessionResponse, build_session_response
 from app.backend.enums.routes import UserRoutes
@@ -50,7 +49,7 @@ _logger = get_api_logger()
 
 
 def taken_error_code(exc: IntegrityError) -> ErrorCode | None:
-    """The problem for a unique violation on users.username, a certificate hash column or the unique index of
+    """The problem for a unique violation on users.username, user_certificates.fingerprint_hash or the unique index of
     role_assignments (a type change met a concurrent assignment of the new base role at the same node), otherwise None.
 
     e.orig holds only the database message (sqlite: "users.username", MySQL: the key name, which contains the column);
@@ -61,7 +60,7 @@ def taken_error_code(exc: IntegrityError) -> ErrorCode | None:
     message = str(exc.orig)
     if "username" in message:
         return ErrorCode.USERNAME_TAKEN
-    if "pki_certificate" in message:
+    if "fingerprint_hash" in message:
         return ErrorCode.CERTIFICATE_TAKEN
     if "uq_role_assignments_user_role_scope" in message or "role_assignments.scope_key" in message:
         return ErrorCode.ASSIGNMENT_EXISTS
@@ -146,14 +145,12 @@ async def create_user(
         auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_CREATE]))
 ):
     """
-    Create new user with PKI certificate authentication
+    Create a new user, optionally with a certificate file the user logs in with
 
-    The certificate file will be parsed to extract:
-    - Common Name (CN)
-    - Serial Number
-    - SHA256 Fingerprint
-
-    These fields are hashed before storage for security.
+    With certificate (PEM or DER) the user gets a certificate row (source uploaded) with its plain values (CN,
+    serial, validity), the hashes the login matches and certificate_label as its readable name (default: the CN cut to
+    64 characters). The same certificate registered already, for any user, answers 400 certificate_taken; an expired
+    one is accepted. Without a certificate the user exists but cannot log in until one is issued or uploaded.
 
     The form fields are described by UserCreateForm. The user gets one assignment: the built-in base role of
     user_type at the home post (post_id), or at the root without a home post or when the base role holds system
@@ -164,7 +161,6 @@ async def create_user(
     """
     current_user = auth.user
     certificate = user_data.certificate
-    username = user_data.username
 
     # Scope before the post: an outsider gets the same 403 for an unknown, an archived and a live post outside it
     base_role, node = await _default_assignment(session, auth, user_data.user_type, user_data.post_id)
@@ -179,61 +175,38 @@ async def create_user(
     if result.first():
         raise ApiError(ErrorCode.USERNAME_TAKEN)
 
-    # Read and parse certificate
-    try:
+    # The certificate file before anything is written; it is parsed when its row is registered
+    cert_data = None
+    if certificate is not None:
         cert_data = await certificate.read()
         if len(cert_data) == 0:
             raise ApiError(ErrorCode.CERTIFICATE_FILE_EMPTY)
-
         if len(cert_data) > MAX_CERTIFICATE_BYTES:
             raise ApiError(ErrorCode.CERTIFICATE_FILE_TOO_LARGE, max_bytes=MAX_CERTIFICATE_BYTES)
 
-        # Parse certificate and extract PKI fields
-        cert_info = CertificateParser.parse_certificate(cert_data)
-        pki_cn = cert_info["pki_certificate_cn"]
-        pki_serial = cert_info["pki_certificate_serial"]
-        pki_fingerprint = cert_info["pki_certificate_fingerprint"]
-
-        _logger.info(f"Certificate parsed successfully for user {username}: CN={pki_cn}, Serial={pki_serial[:16]}...")
-
-    except ValueError as e:
-        _logger.error(f"Certificate parsing error for user {username}: {str(e)}")
-        raise ApiError(ErrorCode.CERTIFICATE_INVALID)
-
-    # Hash PKI certificate data before storing
-    pki_cn_hash, pki_serial_hash, pki_fingerprint_hash = await hash_pki_certificate_data(
-        pki_cn, pki_serial, pki_fingerprint
-    )
-
-    # Check for duplicate certificate before creating user
-    duplicate_check = await session.exec(
-        select(User).where(
-            await cn_hash_matches(pki_cn) |
-            (User.pki_certificate_serial_hash == pki_serial_hash) |
-            (User.pki_certificate_fingerprint_hash == pki_fingerprint_hash)
-        )
-    )
-    if duplicate_check.first():
-        raise ApiError(ErrorCode.CERTIFICATE_TAKEN)
-
-    # Create user with validated data and hashed PKI data
     user = User(
         username=user_data.username,
         username_alias=user_data.username_alias,
         post_id=user_data.post_id,
         user_type=user_data.user_type.value,
-        pki_certificate_cn_hash=pki_cn_hash,
-        pki_certificate_cn_hash_scheme=CN_SCHEME_CURRENT,
-        pki_certificate_serial_hash=pki_serial_hash,
-        pki_certificate_fingerprint_hash=pki_fingerprint_hash
     )
     session.add(user)
 
     try:
-        # The user and its assignment are written by one commit: a user never exists without an assignment
+        # The user, its assignment and its certificate are written by one commit: a user never exists without an
+        # assignment, a refused certificate leaves no user
         await session.flush()
         session.add(RoleAssignment(user_id=user.id, role_id=base_role.id, created_by=current_user.id,
                                    **scope_columns(node)))
+        certificate_row = None
+        if cert_data is not None:
+            try:
+                certificate_row = await register_certificate(
+                    session, user, cert_data, user_data.certificate_label, CertificateSource.UPLOADED, current_user.id)
+            except CodedError as exc:
+                await session.rollback()
+                raise ApiError.from_coded(exc)
+        certificate_id = certificate_row.id if certificate_row is not None else None
         await session.commit()
         await session.refresh(user)
 
@@ -245,8 +218,9 @@ async def create_user(
             resource_id=user.id,
             user_id=current_user.id,
             new_values={
-                **user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"}),
+                **user.model_dump(),
                 "assignments": [{"role_id": base_role.id, "scope": node.key}],
+                "certificate_id": certificate_id,
             },
             details={"message": f"User {current_user.username} created new user {user.username} "
                                 f"({user.user_type}, {base_role.name} at {node.key})"},
@@ -254,7 +228,8 @@ async def create_user(
         )
         await session.commit()
         
-        _logger.info(f"User {current_user.username} created user {user_data.username} ({user.user_type}) with PKI authentication")
+        _logger.info(f"User {current_user.username} created user {user_data.username} ({user.user_type}), "
+                     f"certificate_id={certificate_id}")
 
         return UserResponse(
             id=user.id,
@@ -312,11 +287,9 @@ async def get_user(
     UserRoutes.USER_BY_ID.value,
     response_model=UserResponse,
     responses=problems(
-        ErrorCode.CANNOT_DEACTIVATE_SELF, ErrorCode.CERTIFICATE_FILE_EMPTY, ErrorCode.CERTIFICATE_INVALID,
-        ErrorCode.CERTIFICATE_TAKEN, ErrorCode.USERNAME_TAKEN, ErrorCode.POST_NOT_FOUND, ErrorCode.POST_ARCHIVED,
-        ErrorCode.USER_NOT_FOUND, ErrorCode.CERTIFICATE_FILE_TOO_LARGE, ErrorCode.FORM_CONTENT_TYPE_REQUIRED,
-        ErrorCode.LAST_ADMIN_REQUIRED, ErrorCode.CANNOT_REMOVE_OWN_ADMIN, ErrorCode.USER_TYPE_CEILING_EXCEEDED,
-        ErrorCode.ASSIGNMENT_EXISTS,
+        ErrorCode.CANNOT_DEACTIVATE_SELF, ErrorCode.USERNAME_TAKEN, ErrorCode.POST_NOT_FOUND, ErrorCode.POST_ARCHIVED,
+        ErrorCode.USER_NOT_FOUND, ErrorCode.FORM_CONTENT_TYPE_REQUIRED, ErrorCode.LAST_ADMIN_REQUIRED,
+        ErrorCode.CANNOT_REMOVE_OWN_ADMIN, ErrorCode.USER_TYPE_CEILING_EXCEEDED, ErrorCode.ASSIGNMENT_EXISTS,
         AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION,
         AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
     ),
@@ -339,8 +312,6 @@ async def update_user(
       archived post outside the caller's scope); inside it an unknown post answers 404 post_not_found and an
       archived one 409 post_archived (sending the current home post again changes nothing and is accepted)
     - is_active: User's active status (boolean)
-    - certificate: Update PKI certificate authentication data (file upload). A different certificate ends every
-      session of the user, like deactivation: the old certificate's tokens stop working.
     - user_type: Another type (GET /user-types). Every assignment of the old type's built-in role gets the new type's
       built-in role at the same node (at the root when the new one holds system permissions, as for a new user; an
       assignment of the new role the user already has at that node is kept and the old one merged into it). The
@@ -353,6 +324,8 @@ async def update_user(
       of the old type. The same type again changes nothing.
 
     Only provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).
+    Certificates are not changed here: a new one is issued or uploaded and the old one revoked (a certificate form
+    field is ignored).
     The fields are form fields: any other body (JSON included) answers 415 instead of being ignored.
 
     Changing a user needs user.update covering them (their home post, the root for a user without one) and, for
@@ -377,9 +350,8 @@ async def update_user(
         raise ApiError(ErrorCode.USER_NOT_FOUND)
 
     # Store old values for auditing
-    old_values = user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"})
+    old_values = user.model_dump()
 
-    certificate = update_data.certificate
     if update_data.username is not None:
         existing_username = await session.exec(_username_taken(update_data.username, exclude_user_id=user_id))
         if existing_username.first():
@@ -409,56 +381,6 @@ async def update_user(
         deactivating = user.is_active and not update_data.is_active
         user.is_active = update_data.is_active
 
-    # Handle certificate update if provided
-    certificate_replaced = False
-    if certificate is not None:
-        try:
-            cert_data = await certificate.read()
-            if len(cert_data) == 0:
-                raise ApiError(ErrorCode.CERTIFICATE_FILE_EMPTY)
-
-            if len(cert_data) > MAX_CERTIFICATE_BYTES:
-                raise ApiError(ErrorCode.CERTIFICATE_FILE_TOO_LARGE, max_bytes=MAX_CERTIFICATE_BYTES)
-
-            # Parse certificate and extract PKI fields
-            cert_info = CertificateParser.parse_certificate(cert_data)
-            pki_cn = cert_info["pki_certificate_cn"]
-            pki_serial = cert_info["pki_certificate_serial"]
-            pki_fingerprint = cert_info["pki_certificate_fingerprint"]
-
-            _logger.info(f"Certificate parsed for user {user.username}: CN={pki_cn}, Serial={pki_serial[:16]}...")
-
-            # Hash PKI certificate data before storing
-            pki_cn_hash, pki_serial_hash, pki_fingerprint_hash = await hash_pki_certificate_data(
-                pki_cn, pki_serial, pki_fingerprint
-            )
-
-            # Check for duplicate certificate (excluding current user)
-            duplicate_check = await session.exec(
-                select(User).where(
-                    (
-                        await cn_hash_matches(pki_cn) |
-                        (User.pki_certificate_serial_hash == pki_serial_hash) |
-                        (User.pki_certificate_fingerprint_hash == pki_fingerprint_hash)
-                    ) &
-                    (User.id != user_id)
-                )
-            )
-            if duplicate_check.first():
-                raise ApiError(ErrorCode.CERTIFICATE_TAKEN)
-
-            certificate_replaced = user.pki_certificate_fingerprint_hash != pki_fingerprint_hash
-            user.pki_certificate_cn_hash = pki_cn_hash
-            user.pki_certificate_cn_hash_scheme = CN_SCHEME_CURRENT
-            user.pki_certificate_serial_hash = pki_serial_hash
-            user.pki_certificate_fingerprint_hash = pki_fingerprint_hash
-
-            _logger.info(f"User {current_user.username} updated certificate for user {user.username}")
-
-        except ValueError as e:
-            _logger.error(f"Certificate parsing error for user {user.username}: {str(e)}")
-            raise ApiError(ErrorCode.CERTIFICATE_INVALID)
-
     # Update timestamp
     user.updated_at = datetime.now(timezone.utc)
     session.add(user)
@@ -472,13 +394,10 @@ async def update_user(
         if update_data.user_type is not None:
             type_change = await change_user_type(session, auth, user, update_data.user_type)
 
-        # Deactivation, a new certificate and a new type end every live session in the same transaction as the
-        # change, so the user's tokens stop working the moment the update is committed (the request dependency
-        # rejects them). A certificate is replaced because the old one is lost, compromised or revoked: its sessions
-        # must not outlive it. An administrator replacing their own certificate ends their own session too. A new
-        # type changes the pages of the web client: a login of the old type must not keep showing them.
+        # Deactivation and a new type end every live session in the same transaction as the change, so the user's
+        # tokens stop working the moment the update is committed (the request dependency rejects them). A new type
+        # changes the pages of the web client: a login of the old type must not keep showing them.
         revoke_cause = (SessionRevokeCause.ACCOUNT_DEACTIVATED if deactivating
-                        else SessionRevokeCause.CERTIFICATE_CHANGED if certificate_replaced
                         else SessionRevokeCause.USER_TYPE_CHANGED if type_change is not None else None)
         if revoke_cause:
             invalidated_count = await AuthService.invalidate_all_user_sessions(
@@ -504,10 +423,7 @@ async def update_user(
             # refused above)
             await check_an_admin_remains(session)
 
-        new_values = {
-            **user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"}),
-            "certificate_replaced": certificate_replaced,
-        }
+        new_values = user.model_dump()
         message = f"User {current_user.username} updated user {user.username}"
         if type_change is not None:
             new_values["replaced_assignments"] = type_change.replaced
@@ -533,7 +449,7 @@ async def update_user(
 
     except IntegrityError as e:
         await session.rollback()
-        # A concurrent request took the username, the certificate or the new base role at the node after the checks
+        # A concurrent request took the username or the new base role at the node after the checks
         code = taken_error_code(e)
         if code is None:
             raise
@@ -571,7 +487,7 @@ async def archive_user(
     if user.is_deleted:
         raise ApiError(ErrorCode.USER_NOT_FOUND)
 
-    old_values = user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"})
+    old_values = user.model_dump()
     user.is_deleted = True
     user.is_active = False
     user.updated_at = datetime.now(timezone.utc)
@@ -626,7 +542,7 @@ async def restore_user(
     if not user.is_deleted:
         raise ApiError(ErrorCode.USER_NOT_ARCHIVED)
 
-    old_values = user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"})
+    old_values = user.model_dump()
     user.is_deleted = False
     user.is_active = True
     user.updated_at = datetime.now(timezone.utc)

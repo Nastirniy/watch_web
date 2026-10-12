@@ -28,6 +28,7 @@ from app.backend.models.audit import AuditLog
 from app.backend.models.role import Permission, Role, RolePermission
 from app.backend.models.role_assignment import RoleAssignment
 from app.backend.models.user import User, UserSession
+from app.backend.models.user_certificate import UserCertificate
 from tests.helpers import ADMIN_TRUE, assign, make_admin, make_post, make_role, make_user
 from tests.test_username_validation import make_certificate
 
@@ -304,16 +305,15 @@ async def test_archive_and_restore_of_a_role_need_every_permission_of_the_role(c
 # ----------------------------------------------------------------- users holding more than the caller
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("change", ["certificate", "is_active", "username", "username_alias", "post_id"])
+@pytest.mark.parametrize("change", ["is_active", "username", "username_alias", "post_id"])
 async def test_limited_admin_cannot_change_a_more_privileged_user(client, db, headers, change):
     post = await make_post(db)
     admin = await make_admin(db)
     admin_id = admin.id
-    stored_before = (admin.username, admin.username_alias, admin.post_id, admin.is_active, admin.pki_certificate_fingerprint_hash)
+    stored_before = (admin.username, admin.username_alias, admin.post_id, admin.is_active)
     manager = await make_user(db, perms=[ADMIN_TRUE, "user.view", "user.update"])
     assignments_before = await stored_assignments(db, admin_id)
     request = {
-        "certificate": {"files": certificate_file("cn-taken-over")},
         "is_active": {"data": {"is_active": "false"}},
         "username": {"data": {"username": "renamed_chief"}},
         "username_alias": {"data": {"username_alias": "Chief"}},
@@ -323,8 +323,8 @@ async def test_limited_admin_cannot_change_a_more_privileged_user(client, db, he
     body = problem(await client.patch(USER.format(user_id=admin_id), headers=headers(manager), **request),
                    403, "target_user_more_privileged")
     assert "audit.view" in body["missing"]
-    row = (await db.exec(select(User.username, User.username_alias, User.post_id, User.is_active,
-                                User.pki_certificate_fingerprint_hash).where(User.id == admin_id))).one()
+    row = (await db.exec(select(User.username, User.username_alias, User.post_id, User.is_active)
+                         .where(User.id == admin_id))).one()
     assert tuple(row) == stored_before
     assert await stored_assignments(db, admin_id) == assignments_before
 
@@ -623,7 +623,7 @@ async def test_create_user_makes_default_assignment(client, db, headers):
 # ----------------------------------------------------------------- audit of user changes
 
 @pytest.mark.asyncio
-async def test_user_audit_records_type_assignment_and_certificate_replacement(client, db, headers):
+async def test_user_audit_records_type_assignment_certificate_and_changes(client, db, headers):
     post = await make_post(db)
     admin = await make_admin(db)
     operator = await builtin_role(db, "operator")
@@ -642,13 +642,12 @@ async def test_user_audit_records_type_assignment_and_certificate_replacement(cl
     (create_row,) = await audit_rows("create")
     assert create_row.new_values["user_type"] == "operator"
     assert create_row.new_values["assignments"] == [{"role_id": operator.id, "scope": f"p:{post.id}"}]
+    certificate_id = (await db.exec(select(UserCertificate.id).where(UserCertificate.user_id == user_id))).one()
+    assert create_row.new_values["certificate_id"] == certificate_id
 
-    changed = await client.patch(USER.format(user_id=user_id), headers=headers(admin), files=certificate_file("cn-audited-new"))
-    assert changed.status_code == 200, changed.text
     alias = await client.patch(USER.format(user_id=user_id), headers=headers(admin), data={"username_alias": "Renamed"})
     assert alias.status_code == 200, alias.text
 
-    certificate_change, alias_change = await audit_rows("update")
-    assert certificate_change.new_values["certificate_replaced"] is True
-    assert alias_change.new_values["certificate_replaced"] is False
+    (alias_change,) = await audit_rows("update")
     assert alias_change.old_values["username_alias"] == "Audited" and alias_change.new_values["username_alias"] == "Renamed"
+    assert not any("certificate" in key for key in alias_change.new_values), "certificates are not changed here"

@@ -9,17 +9,19 @@ import secrets
 from app.backend.config import settings
 from app.backend.utils.logging_config import get_auth_logger
 from app.backend.models.user import User, UserSession
+from app.backend.models.user_certificate import UserCertificate
 from app.backend.enums.errors import AuthErrorCode
-from app.backend.enums.general import SessionEndReason, SessionRevokeCause, SessionStatus
+from app.backend.enums.general import CertificateState, SessionEndReason, SessionRevokeCause, SessionStatus
 from app.backend.auth import sessions as session_lifetimes
 from app.backend.auth.certificates import (
-    validate_pki_certificate_data,
-    hash_pki_certificate_data,
+    validate_certificate_data,
+    hash_certificate_data,
     serial_hashes,
     create_pki_auth_audit_details,
     cn_hash_matches,
 )
 from app.backend.services.audit import create_audit_log
+from app.backend.services.certificates import active_certificate, certificate_state
 from app.backend.utils.text import fit_column
 
 # Get authentication logger
@@ -191,13 +193,15 @@ class AuthService:
             ip_address: Optional[str] = None
     ) -> tuple[Optional[User], Optional[str]]:
         """
-        Authenticate user by PKI certificate with enhanced security.
+        Authenticate user by PKI certificate with enhanced security: the three hashes of the certificate match a row
+        of user_certificates (legacy rows exactly as the users columns did before 024). A revoked certificate answers
+        certificate_revoked, an expired one certificate_not_recognized, then the account is checked.
 
         Returns:
             (user, None) on success
             (None, error_code) on failure -- error_code is an AuthErrorCode value
         """
-        if not await validate_pki_certificate_data(certificate_cn, certificate_serial, certificate_fingerprint):
+        if not await validate_certificate_data(certificate_cn, certificate_serial, certificate_fingerprint):
             _logger.warning("Invalid PKI certificate data provided")
             return None, AuthErrorCode.CERTIFICATE_DATA_MISSING
 
@@ -208,7 +212,7 @@ class AuthService:
         )
 
         # Hash the certificate data for secure comparison using helper
-        _, _, fingerprint_hash = await hash_pki_certificate_data(
+        _, _, fingerprint_hash = await hash_certificate_data(
             certificate_cn, certificate_serial, certificate_fingerprint
         )
         stored_serial_forms = await serial_hashes(certificate_serial)
@@ -226,39 +230,47 @@ class AuthService:
             details=audit_details
         )
 
-        # Find user by certificate (without status filters first)
+        # Find the certificate and its user (without status filters first); the fingerprint hash is unique
         result = await session.exec(
-            select(User).where(
+            select(UserCertificate, User).join(User, User.id == UserCertificate.user_id).where(
                 and_(
                     await cn_hash_matches(certificate_cn),
-                    User.pki_certificate_serial_hash.in_(stored_serial_forms),
-                    User.pki_certificate_fingerprint_hash == fingerprint_hash,
+                    UserCertificate.serial_hash.in_(stored_serial_forms),
+                    UserCertificate.fingerprint_hash == fingerprint_hash,
                 )
             )
         )
-        user = result.first()
+        found = result.first()
 
-        if not user:
+        if not found:
             _logger.warning(f"No user found for certificate CN: {certificate_cn}")
             await session.commit()
+            return None, AuthErrorCode.CERTIFICATE_NOT_RECOGNIZED
+
+        certificate, user = found
+        audit.user_id = user.id
+        audit.details = {**audit_details, "certificate_id": certificate.id}
+        state = certificate_state(certificate)
+        if state is not CertificateState.ACTIVE:
+            _logger.warning(f"Login with a {state.value} certificate: certificate_id={certificate.id}, user_id={user.id}")
+            await session.commit()
+            if state is CertificateState.REVOKED:
+                return None, AuthErrorCode.CERTIFICATE_REVOKED
             return None, AuthErrorCode.CERTIFICATE_NOT_RECOGNIZED
 
         # Check account status separately for distinct error codes
         if user.is_deleted:
             _logger.warning(f"Deleted user attempted login: user_id={user.id}, username={user.username}")
-            audit.user_id = user.id
             await session.commit()
             return None, AuthErrorCode.ACCOUNT_DELETED
 
         if not user.is_active:
             _logger.warning(f"Deactivated user attempted login: user_id={user.id}, username={user.username}")
-            audit.user_id = user.id
             await session.commit()
             return None, AuthErrorCode.ACCOUNT_DEACTIVATED
 
         # Success
         audit.success = True
-        audit.user_id = user.id
         _logger.info(f"Successful PKI authentication for user {user.username}")
 
         await session.commit()
@@ -316,7 +328,7 @@ class AuthService:
             user_agent: Optional[str] = None,
             commit: bool = True
     ) -> int:
-        """Revoke every live session of a user (deactivation, archive, new certificate, administrator).
+        """Revoke every live session of a user (deactivation, archive, new user type, administrator).
 
         A session already past its absolute end or idle timeout is recorded with that reason, not as revoked.
         commit=False leaves the changes in the caller's transaction so that they land together with
@@ -361,18 +373,19 @@ class AuthService:
         return count
 
     @staticmethod
-    async def end_session_of_replaced_certificate(session: AsyncSession, user_session: UserSession, user: User) -> bool:
-        """End a live session bound to a certificate that is no longer the user's (revoked, certificate_changed).
+    async def end_session_of_revoked_certificate(session: AsyncSession, user_session: UserSession, user: User) -> bool:
+        """End a live session bound to a certificate that is no active row of the user (revoked, expired, or not
+        the user's): revoked, certificate_revoked.
 
-        A certificate change revokes the live sessions of the old certificate in its own transaction; a login
-        that read the user before that change and stored its session after it leaves a session bound to the old
-        certificate. Called on every request and refresh of a bound session: True when it ended it (the caller
-        answers token_certificate_mismatch). Unbound sessions (development logins) are never ended here.
+        Revoking a certificate ends its live sessions in its own transaction; a login that read the row before the
+        revocation and stored its session after it leaves a session bound to a revoked certificate. Called on every
+        request and refresh of a bound session (one indexed lookup): True when it ended it (the caller answers
+        token_certificate_mismatch). Unbound sessions (development logins) are never ended here.
         """
         bound_to = user_session.certificate_fingerprint_hash
-        if not bound_to or bound_to == user.pki_certificate_fingerprint_hash:
+        if not bound_to or await active_certificate(session, user.id, bound_to) is not None:
             return False
-        session_lifetimes.end(user_session, SessionEndReason.REVOKED, SessionRevokeCause.CERTIFICATE_CHANGED)
+        session_lifetimes.end(user_session, SessionEndReason.REVOKED, SessionRevokeCause.CERTIFICATE_REVOKED)
         session.add(user_session)
         await create_audit_log(
             session=session,
@@ -381,12 +394,12 @@ class AuthService:
             action="force_logout",
             resource_type="session",
             resource_id=user.id,
-            details={"message": f"Session of a replaced certificate ended for user_id={user.id}",
-                     "cause": SessionRevokeCause.CERTIFICATE_CHANGED.value},
+            details={"message": f"Session of a certificate that is no longer active ended for user_id={user.id}",
+                     "cause": SessionRevokeCause.CERTIFICATE_REVOKED.value},
             success=True
         )
         await session.commit()
-        _logger.warning(f"Session bound to a replaced certificate ended: user_id={user.id}")
+        _logger.warning(f"Session bound to a certificate that is no longer active ended: user_id={user.id}")
         return True
 
     @staticmethod

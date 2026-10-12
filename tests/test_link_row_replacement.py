@@ -87,10 +87,12 @@ def integrity(orig):
 def test_unique_violation_mapping():
     sqlite_error = sqlite3.IntegrityError
     assert taken_error_code(integrity(sqlite_error("UNIQUE constraint failed: users.username"))) == ErrorCode.USERNAME_TAKEN
-    for column in ("pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"):
-        assert taken_error_code(integrity(sqlite_error(f"UNIQUE constraint failed: users.{column}"))) == ErrorCode.CERTIFICATE_TAKEN
+    assert taken_error_code(integrity(sqlite_error(
+        "UNIQUE constraint failed: user_certificates.fingerprint_hash"))) == ErrorCode.CERTIFICATE_TAKEN
     assert taken_error_code(integrity(MySQLError(1062, "Duplicate entry 'a' for key 'users.ix_users_username'"))) == ErrorCode.USERNAME_TAKEN
-    assert taken_error_code(integrity(MySQLError(1062, "Duplicate entry 'a' for key 'users.pki_certificate_serial_hash'"))) == ErrorCode.CERTIFICATE_TAKEN
+    assert taken_error_code(integrity(MySQLError(
+        1062, "Duplicate entry 'a' for key 'user_certificates.uq_user_certificates_fingerprint_hash'",
+    ))) == ErrorCode.CERTIFICATE_TAKEN
     # the unique index of role_assignments: a type change met a concurrent assignment of the new base role
     assert taken_error_code(integrity(sqlite_error(
         "UNIQUE constraint failed: role_assignments.user_id, role_assignments.role_id, role_assignments.scope_key",

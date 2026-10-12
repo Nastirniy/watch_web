@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings
 import toml
 
-from app.backend.enums.general import AppEnvironment
+from app.backend.enums.general import AppEnvironment, P12Encryption
 
 
 class AppConfig(BaseModel):
@@ -311,6 +311,34 @@ class StorageConfig(BaseModel):
         return max(1, min(1024, v))
 
 
+class PkiConfig(BaseModel):
+    """The client certificate authority: MYSETTINGS_PKI__* (spec section 3,
+    docs/superpowers/specs/2026-10-12-pki-certificates-design.md).
+
+    PKI is configured when ca_cert_path, signer_socket, store_dir and crl_path are all set. Unconfigured, the API
+    issues and exports nothing; uploaded certificates are never ca_issued.
+    """
+    ca_cert_path: str = ""          # the client CA certificate (PEM), read-only
+    signer_socket: str = ""         # the Unix socket of pki-signer
+    store_dir: str = ""             # the folder holding every issued certificate (<user_id>/<certificate_id>/)
+    crl_path: str = ""              # the CRL file nginx reads (ssl_crl), written by the API
+    extra_crl_paths: list[str] = []  # CRL files appended to the published one (the existing root's)
+    validity_days: int = 365        # default validity of a new certificate
+    max_validity_days: int = 730    # upper limit a request may ask for
+    key_size: int = 2048            # RSA key size of user keys
+    p12_encryption: P12Encryption = P12Encryption.AES256  # legacy: 3DES / SHA-1 for old Windows and macOS
+    crl_days: int = 7               # how long a signed CRL stays valid (next_update)
+
+    @field_validator('extra_crl_paths', mode='before')
+    @classmethod
+    def parse_extra_crl_paths(cls, v):
+        # Environment overrides arrive as strings: MYSETTINGS_PKI__EXTRA_CRL_PATHS=["/pki/crl/legacy-root.crl"]
+        return _parse_json_sequence(v)
+
+    def is_configured(self) -> bool:
+        return all((self.ca_cert_path, self.signer_socket, self.store_dir, self.crl_path))
+
+
 class HealthConfig(BaseModel):
     """Configuration for health endpoint security"""
     allowed_hosts: list[str] = ["127.0.0.1", "localhost", "::1"]
@@ -357,6 +385,7 @@ class Settings(BaseSettings):
     timezone: TimezoneConfig = Field(default_factory=TimezoneConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     health: HealthConfig = Field(default_factory=HealthConfig)
+    pki: PkiConfig = Field(default_factory=PkiConfig)
 
     def __init__(self, **kwargs):
         # Load from TOML first

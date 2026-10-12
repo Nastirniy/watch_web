@@ -45,19 +45,7 @@ async def test_create_certificate_file_errors(client, db, headers, content, code
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("content, code", [(b"", 400), (b"x" * (MAX_CERT_SIZE + 1), 413)], ids=["empty", "too_large"])
-async def test_update_certificate_file_errors(client, db, headers, content, code):
-    admin = await make_admin(db)
-    target = await make_user(db)
-    response = await client.patch(
-        USER.format(user_id=target.id), headers=headers(admin),
-        files={"certificate": ("cert.pem", content, "application/x-pem-file")},
-    )
-    assert response.status_code == code, response.text
-
-
-@pytest.mark.asyncio
-async def test_update_with_certificate_of_another_user_answers_400(client, db, headers):
+async def test_create_with_certificate_of_another_user_answers_400(client, db, headers):
     admin = await make_admin(db)
     certificate = make_certificate("cn-shared")
     created = await client.post(
@@ -67,10 +55,10 @@ async def test_update_with_certificate_of_another_user_answers_400(client, db, h
     )
     assert created.status_code == 200, created.text
 
-    other = await make_user(db)
-    response = await client.patch(
-        USER.format(user_id=other.id), headers=headers(admin),
+    response = await client.post(
+        CREATE, headers=headers(admin),
         files={"certificate": ("cert.pem", certificate, "application/x-pem-file")},
+        data={"username": "cert_thief", "username_alias": "Alias", "user_type": "viewer"},
     )
     assert response.status_code == 400
     assert response.json()["code"] == "certificate_taken"

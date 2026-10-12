@@ -59,8 +59,9 @@ async def seed_database():
     async with session_maker() as session:
         from app.backend.auth.scope import ROOT
         from app.backend.models.user import User
+        from app.backend.models.user_certificate import UserCertificate
         from app.backend.models.role_assignment import RoleAssignment, scope_columns
-        from app.backend.enums.general import UserType
+        from app.backend.enums.general import CertificateSource, UserType
         from app.backend.utils.pki_generator import generate_admin_pki_credentials
 
         # 1. Seed roles and permissions (required in all modes)
@@ -114,10 +115,6 @@ async def seed_database():
                 admin_user = User(
                     username=settings.admin.username,
                     username_alias=settings.admin.username_alias,
-                    pki_certificate_cn_hash=await hash_cn(admin_pki["pki_certificate_cn"]),
-                    pki_certificate_cn_hash_scheme=CN_SCHEME_CURRENT,
-                    pki_certificate_serial_hash=await hash_data(admin_pki["pki_certificate_serial"]),
-                    pki_certificate_fingerprint_hash=await hash_data(admin_pki["pki_certificate_fingerprint"]),
                     user_type=UserType.ADMIN.value,
                     is_active=True
                 )
@@ -126,6 +123,23 @@ async def seed_database():
 
                 # The built-in admin role at the root
                 session.add(RoleAssignment(user_id=admin_user.id, role_id=admin_role.id, **scope_columns(ROOT)))
+
+                # Its certificate: only the hashes of the configured (or generated) values, a configured row
+                fingerprint_hash = await hash_data(admin_pki["pki_certificate_fingerprint"])
+                taken = await session.exec(
+                    select(UserCertificate.id).where(UserCertificate.fingerprint_hash == fingerprint_hash))
+                if taken.first() is None:
+                    session.add(UserCertificate(
+                        user_id=admin_user.id,
+                        source=CertificateSource.CONFIGURED.value,
+                        fingerprint_hash=fingerprint_hash,
+                        cn_hash=await hash_cn(admin_pki["pki_certificate_cn"]),
+                        cn_hash_scheme=CN_SCHEME_CURRENT,
+                        serial_hash=await hash_data(admin_pki["pki_certificate_serial"]),
+                    ))
+                else:
+                    _logger.warning("The configured admin certificate is registered for another user already: "
+                                    "the new admin user gets no certificate")
 
                 await session.commit()
                 _logger.info(f"Admin user created successfully (mode: {'generated' if use_generated else 'configured'})")

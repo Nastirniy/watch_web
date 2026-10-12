@@ -5,14 +5,18 @@ from decimal import Decimal
 from typing import Dict, Iterable, Optional
 
 import httpx
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.backend.auth.certificates import CN_SCHEME_CURRENT, certificate_values, hash_certificate_data
 from app.backend.auth.scope import Node, ROOT
-from app.backend.enums.general import Permissions, UserType
+from app.backend.enums.general import CertificateSource, Permissions, UserType
 from app.backend.errors.problems import PROBLEM_JSON
 from app.backend.migrations.support.authz_v2 import LegacyRole, LegacyUser, REMOVED, plan_conversion
 from app.backend.models.user import User
+from app.backend.models.user_certificate import UserCertificate
 from app.backend.models.role import Role, Permission, RolePermission
 from app.backend.models.role_assignment import RoleAssignment, scope_columns
 from app.backend.models.post import Post
@@ -103,9 +107,6 @@ async def assign(db: AsyncSession, user: User, role: Role, node: Node) -> RoleAs
 
 def _new_user(n: int, username: Optional[str], post_id: Optional[int], user_type: str) -> User:
     return User(
-        pki_certificate_cn_hash=f"cn-hash-{n}",
-        pki_certificate_serial_hash=f"serial-hash-{n}",
-        pki_certificate_fingerprint_hash=f"fp-hash-{n}",
         username=username or f"user_{n}",
         username_alias=f"User {n}",
         post_id=post_id,
@@ -173,6 +174,37 @@ async def make_admin(db: AsyncSession, post_id: Optional[int] = None) -> User:
     await db.commit()
     await db.refresh(user)
     return user
+
+
+async def make_certificate_row(
+        db: AsyncSession,
+        user: User,
+        source: CertificateSource = CertificateSource.UPLOADED,
+        cert: Optional[x509.Certificate] = None,
+        **values,
+) -> UserCertificate:
+    """A certificate row of the user. With cert: its hashes (scheme 2) and, for issued and uploaded rows, its plain
+    values, as register_certificate stores them (legacy and configured rows hold only the hashes); without one
+    made-up unique hashes that match no certificate. values set any column (cn_hash_scheme=1, revoked_at=...)."""
+    n = _next()
+    if cert is not None:
+        parsed = certificate_values(cert.public_bytes(serialization.Encoding.PEM))
+        cn_hash, serial_hash, fingerprint_hash = await hash_certificate_data(parsed.cn, parsed.serial, parsed.fingerprint)
+        fields = dict(label=parsed.cn[:64], subject_cn=parsed.cn, serial=parsed.serial, not_before=parsed.not_before,
+                      not_after=parsed.not_after)
+    else:
+        cn_hash, serial_hash, fingerprint_hash = f"cn-hash-{n}", f"serial-hash-{n}", f"fp-hash-{n}"
+        fields = dict(label=f"Device {n}", subject_cn=f"Device {n}", serial=f"{n:x}")
+    if source in (CertificateSource.LEGACY, CertificateSource.CONFIGURED):
+        fields = dict(label="")
+    fields.update(cn_hash=cn_hash, cn_hash_scheme=CN_SCHEME_CURRENT, serial_hash=serial_hash,
+                  fingerprint_hash=fingerprint_hash)
+    fields.update(values)
+    row = UserCertificate(user_id=user.id, source=source.value, **fields)
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return row
 
 
 async def make_dictionary(db: AsyncSession) -> Dict[str, int]:

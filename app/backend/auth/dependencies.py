@@ -74,11 +74,11 @@ async def get_current_user(
         raise ApiError(AuthErrorCode.ACCOUNT_DEACTIVATED)
 
     # The session of the token must be live (not ended, used within the idle timeout) and, when it was opened
-    # with a client certificate, bound to the user's current certificate and presented with that certificate
+    # with a client certificate, bound to an active certificate of the user and presented with that certificate
     user_session = await live_session(session, session_id, user_id)
     if user_session is None:
         raise ApiError(AuthErrorCode.SESSION_EXPIRED)
-    if await AuthService.end_session_of_replaced_certificate(session, user_session, user):
+    if await AuthService.end_session_of_revoked_certificate(session, user_session, user):
         raise ApiError(AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH)
     if not await certificate_matches(user_session, x_ssl_client_fingerprint):
         logger.warning(f"Token presented with another client certificate: session_id={session_id}, user_id={user_id}")

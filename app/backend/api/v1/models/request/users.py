@@ -2,7 +2,10 @@ from typing import Optional
 from fastapi import UploadFile
 from pydantic import ConfigDict, Field, field_validator
 
+from app.backend.enums.errors import FieldErrorCode
 from app.backend.enums.general import UserType
+from app.backend.errors.coded import invalid
+from app.backend.pki.profile import LABEL_MAX_LENGTH, normalize_label
 from app.backend.utils.validators import SecureBaseModel, SecurityValidators
 
 
@@ -57,12 +60,28 @@ class UserCreateForm(UserCreateData):
     """Form of POST /users/ (multipart/form-data). Unknown form fields are ignored, as with plain Form() params."""
     model_config = ConfigDict(extra="ignore")
 
-    certificate: UploadFile = Field(description="PKI certificate file (PEM or DER format)")
+    certificate: Optional[UploadFile] = Field(
+        default=None,
+        description="Certificate file (PEM or DER) the user logs in with, registered as an uploaded certificate; "
+                    "without one the user cannot log in until a certificate is issued or uploaded")
+    certificate_label: Optional[str] = Field(
+        default=None,
+        description=f"Readable name of the certificate, 1 to {LABEL_MAX_LENGTH} characters after trimming, no control "
+                    f"characters (default: its CN cut to {LABEL_MAX_LENGTH} characters); only used with certificate")
+
+    @field_validator('certificate_label')
+    @classmethod
+    def validate_certificate_label(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        label = normalize_label(v)
+        if label is None:
+            raise invalid(FieldErrorCode.CERTIFICATE_LABEL_INVALID)
+        return label
 
 
 class UserUpdateForm(UserUpdateData):
     """Form of PATCH /users/{user_id} (multipart/form-data or urlencoded): only the fields sent are changed.
-    Unknown form fields (is_deleted included) are ignored, as with plain Form() params."""
+    Unknown form fields (is_deleted and certificate included) are ignored, as with plain Form() params: certificates
+    are issued or uploaded for the user and revoked on their own."""
     model_config = ConfigDict(extra="ignore")
-
-    certificate: Optional[UploadFile] = Field(default=None, description="New PKI certificate file (PEM or DER format)")

@@ -1,4 +1,5 @@
 from .user import User, UserSession
+from .user_certificate import UserCertificate, CertificateAuthorityState
 from .role import Role, Permission, RolePermission
 from .role_assignment import RoleAssignment
 from .scope_group import ScopeGroup
@@ -15,7 +16,7 @@ from .upload_session import UploadSession
 from .storyboard import VideoStoryboard
 
 __all__ = [
-    'User', 'UserSession',
+    'User', 'UserSession', 'UserCertificate', 'CertificateAuthorityState',
     'Role', 'Permission', 'RolePermission', 'RoleAssignment',
     'Post', 'ScopeGroup',
     'SignalType', 'Category',

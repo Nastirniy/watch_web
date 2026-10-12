@@ -36,6 +36,8 @@ TABLES_OWNED_BY_LATER_REVISIONS = {
     "video_storyboards",  # 017_video_storyboards
     "scope_groups",  # 021_scope_groups
     "role_assignments",  # 023_authorization_v2
+    "user_certificates",  # 024_user_certificates
+    "certificate_authority_state",  # 024_user_certificates
 }
 down_revision = "001_relativize_media_paths"
 branch_labels = None

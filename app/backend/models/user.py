@@ -1,6 +1,5 @@
 from typing import Optional, List, TYPE_CHECKING
 from datetime import datetime, timezone
-from sqlalchemy import SmallInteger
 from sqlmodel import Field, SQLModel, Relationship
 
 if TYPE_CHECKING:
@@ -13,14 +12,7 @@ class User(SQLModel, table=True):
     __tablename__ = "users"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    pki_certificate_cn_hash: str = Field(unique=True, index=True, max_length=255)
-    # Rule that made pki_certificate_cn_hash: 1 = hash_data (rows from before 019), 2 = hash_cn (every new certificate)
-    # SMALLINT like the column 019 adds, so a fresh install (tables built from the models by 002) gets the same type
-    pki_certificate_cn_hash_scheme: int = Field(
-        default=1, sa_type=SmallInteger, sa_column_kwargs={"server_default": "1", "nullable": False}
-    )
-    pki_certificate_serial_hash: str = Field(unique=True, max_length=255)
-    pki_certificate_fingerprint_hash: str = Field(unique=True, max_length=255)
+    # The certificates a user logs in with are rows of user_certificates (models/user_certificate.py, migration 024)
     username: str = Field(unique=True, index=True, max_length=255)
     username_alias: str = Field(max_length=255)
     is_active: bool = Field(default=True, index=True)

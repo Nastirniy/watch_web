@@ -105,7 +105,7 @@
             }
           },
           "401": {
-            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `certificate_data_missing`: Invalid certificate data; `certificate_not_recognized`: Certificate not recognized; `certificate_verification_failed`: Certificate verification failed",
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `certificate_data_missing`: Invalid certificate data; `certificate_not_recognized`: Certificate not recognized; `certificate_revoked`: Certificate revoked; `certificate_verification_failed`: Certificate verification failed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -123,6 +123,9 @@
                       "$ref": "#/components/schemas/CertificateNotRecognizedProblem"
                     },
                     {
+                      "$ref": "#/components/schemas/CertificateRevokedProblem"
+                    },
+                    {
                       "$ref": "#/components/schemas/CertificateVerificationFailedProblem"
                     }
                   ],
@@ -133,6 +136,7 @@
                       "account_deleted": "#/components/schemas/AccountDeletedProblem",
                       "certificate_data_missing": "#/components/schemas/CertificateDataMissingProblem",
                       "certificate_not_recognized": "#/components/schemas/CertificateNotRecognizedProblem",
+                      "certificate_revoked": "#/components/schemas/CertificateRevokedProblem",
                       "certificate_verification_failed": "#/components/schemas/CertificateVerificationFailedProblem"
                     }
                   }
@@ -1182,7 +1186,7 @@
           "USERS"
         ],
         "summary": "Create User",
-        "description": "Create new user with PKI certificate authentication\n\nThe certificate file will be parsed to extract:\n- Common Name (CN)\n- Serial Number\n- SHA256 Fingerprint\n\nThese fields are hashed before storage for security.\n\nThe form fields are described by UserCreateForm. The user gets one assignment: the built-in base role of\nuser_type at the home post (post_id), or at the root without a home post or when the base role holds system\npermissions (admin). The caller needs user.create covering that node (403 permission_required_for_action) and\nevery permission of the role there (403 grant_exceeds_own_permissions). These checks answer first: a post_id\noutside the caller's scope gets the same 403 whether the post exists, is archived or not. An unknown post answers\n404 post_not_found and an archived post 409 post_archived (it cannot be the home post).",
+        "description": "Create a new user, optionally with a certificate file the user logs in with\n\nWith certificate (PEM or DER) the user gets a certificate row (source uploaded) with its plain values (CN,\nserial, validity), the hashes the login matches and certificate_label as its readable name (default: the CN cut to\n64 characters). The same certificate registered already, for any user, answers 400 certificate_taken; an expired\none is accepted. Without a certificate the user exists but cannot log in until one is issued or uploaded.\n\nThe form fields are described by UserCreateForm. The user gets one assignment: the built-in base role of\nuser_type at the home post (post_id), or at the root without a home post or when the base role holds system\npermissions (admin). The caller needs user.create covering that node (403 permission_required_for_action) and\nevery permission of the role there (403 grant_exceeds_own_permissions). These checks answer first: a post_id\noutside the caller's scope gets the same 403 whether the post exists, is archived or not. An unknown post answers\n404 post_not_found and an archived post 409 post_archived (it cannot be the home post).",
         "operationId": "create_user",
         "security": [
           {
@@ -1289,7 +1293,7 @@
             }
           },
           "400": {
-            "description": "`certificate_file_empty`: Certificate file is empty; `certificate_invalid`: Invalid certificate; `certificate_taken`: Certificate already exists for another user; `username_or_certificate_taken`: User with this username or certificate already exists; `username_taken`: User with this username already exists",
+            "description": "`certificate_file_empty`: Certificate file is empty; `certificate_invalid`: Invalid certificate; `certificate_taken`: Certificate already registered; `username_or_certificate_taken`: User with this username or certificate already exists; `username_taken`: User with this username already exists",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1526,7 +1530,7 @@
           "USERS"
         ],
         "summary": "Update User",
-        "description": "Update user fields - all fields are optional\n\nSupports updating:\n- username: Unique username (3-50 characters)\n- username_alias: User's display name (1-255 characters)\n- post_id: Home post (membership: who manages the user; it grants nothing by itself). Moving the user needs\n  user.update covering the new post too (403 permission_required_for_action, the same for an unknown or\n  archived post outside the caller's scope); inside it an unknown post answers 404 post_not_found and an\n  archived one 409 post_archived (sending the current home post again changes nothing and is accepted)\n- is_active: User's active status (boolean)\n- certificate: Update PKI certificate authentication data (file upload). A different certificate ends every\n  session of the user, like deactivation: the old certificate's tokens stop working.\n- user_type: Another type (GET /user-types). Every assignment of the old type's built-in role gets the new type's\n  built-in role at the same node (at the root when the new one holds system permissions, as for a new user; an\n  assignment of the new role the user already has at that node is kept and the old one merged into it). The\n  caller needs user.update and every permission of the new built-in role at each of these nodes and at the node\n  a new user of the type would get it (the home post; the root without one or for a system role), also when\n  nothing is replaced (403 grant_exceeds_own_permissions); every other assignment, those of archived roles\n  included, must fit the ceiling of the new type (409 user_type_ceiling_exceeded with the assignments and their\n  excess_permissions). A concurrent assignment of the new built-in role at the same node answers 409\n  assignment_exists. The user's sessions end (revoke_cause user_type_changed), so the web never shows the pages\n  of the old type. The same type again changes nothing.\n\nOnly provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).\nThe fields are form fields: any other body (JSON included) answers 415 instead of being ignored.\n\nChanging a user needs user.update covering them (their home post, the root for a user without one) and, for\nanother user, that the caller could grant every assignment they have (403 target_user_more_privileged); this\nanswers before the archived state of the user. A deactivation or a type change must leave an active holder of the\nbuilt-in admin role at the root (409 last_admin_required), and a caller cannot take it from themselves (409\ncannot_remove_own_admin).",
+        "description": "Update user fields - all fields are optional\n\nSupports updating:\n- username: Unique username (3-50 characters)\n- username_alias: User's display name (1-255 characters)\n- post_id: Home post (membership: who manages the user; it grants nothing by itself). Moving the user needs\n  user.update covering the new post too (403 permission_required_for_action, the same for an unknown or\n  archived post outside the caller's scope); inside it an unknown post answers 404 post_not_found and an\n  archived one 409 post_archived (sending the current home post again changes nothing and is accepted)\n- is_active: User's active status (boolean)\n- user_type: Another type (GET /user-types). Every assignment of the old type's built-in role gets the new type's\n  built-in role at the same node (at the root when the new one holds system permissions, as for a new user; an\n  assignment of the new role the user already has at that node is kept and the old one merged into it). The\n  caller needs user.update and every permission of the new built-in role at each of these nodes and at the node\n  a new user of the type would get it (the home post; the root without one or for a system role), also when\n  nothing is replaced (403 grant_exceeds_own_permissions); every other assignment, those of archived roles\n  included, must fit the ceiling of the new type (409 user_type_ceiling_exceeded with the assignments and their\n  excess_permissions). A concurrent assignment of the new built-in role at the same node answers 409\n  assignment_exists. The user's sessions end (revoke_cause user_type_changed), so the web never shows the pages\n  of the old type. The same type again changes nothing.\n\nOnly provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).\nCertificates are not changed here: a new one is issued or uploaded and the old one revoked (a certificate form\nfield is ignored).\nThe fields are form fields: any other body (JSON included) answers 415 instead of being ignored.\n\nChanging a user needs user.update covering them (their home post, the root for a user without one) and, for\nanother user, that the caller could grant every assignment they have (403 target_user_more_privileged); this\nanswers before the archived state of the user. A deactivation or a type change must leave an active holder of the\nbuilt-in admin role at the root (409 last_admin_required), and a caller cannot take it from themselves (409\ncannot_remove_own_admin).",
         "operationId": "update_user",
         "security": [
           {
@@ -1631,22 +1635,13 @@
             }
           },
           "400": {
-            "description": "`cannot_deactivate_self`: You cannot deactivate your own account; `certificate_file_empty`: Certificate file is empty; `certificate_invalid`: Invalid certificate; `certificate_taken`: Certificate already exists for another user; `username_taken`: User with this username already exists",
+            "description": "`cannot_deactivate_self`: You cannot deactivate your own account; `username_taken`: User with this username already exists",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
                     {
                       "$ref": "#/components/schemas/CannotDeactivateSelfProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CertificateFileEmptyProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CertificateInvalidProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CertificateTakenProblem"
                     },
                     {
                       "$ref": "#/components/schemas/UsernameTakenProblem"
@@ -1656,9 +1651,6 @@
                     "propertyName": "code",
                     "mapping": {
                       "cannot_deactivate_self": "#/components/schemas/CannotDeactivateSelfProblem",
-                      "certificate_file_empty": "#/components/schemas/CertificateFileEmptyProblem",
-                      "certificate_invalid": "#/components/schemas/CertificateInvalidProblem",
-                      "certificate_taken": "#/components/schemas/CertificateTakenProblem",
                       "username_taken": "#/components/schemas/UsernameTakenProblem"
                     }
                   }
@@ -1754,16 +1746,6 @@
                       "user_type_ceiling_exceeded": "#/components/schemas/UserTypeCeilingExceededProblem"
                     }
                   }
-                }
-              }
-            }
-          },
-          "413": {
-            "description": "`certificate_file_too_large`: Certificate file is too large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CertificateFileTooLargeProblem"
                 }
               }
             }
@@ -25067,6 +25049,69 @@
           }
         ]
       },
+      "CertificateRevokedProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Certificate revoked",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 401,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Certificate revoked"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "certificate_revoked",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "CertificateRevokedProblem",
+        "description": "Certificate revoked (HTTP 401). Problem type certificate_revoked.",
+        "examples": [
+          {
+            "code": "certificate_revoked",
+            "detail": "Certificate revoked",
+            "instance": "/api/v1/...",
+            "status": 401,
+            "title": "Certificate revoked",
+            "type": "https://example.org/problems/certificate_revoked"
+          }
+        ]
+      },
       "CertificateTakenProblem": {
         "properties": {
           "type": {
@@ -25077,7 +25122,7 @@
           },
           "title": {
             "type": "string",
-            "const": "Certificate already exists for another user",
+            "const": "Certificate already registered",
             "title": "Title",
             "description": "Summary of the problem type"
           },
@@ -25092,7 +25137,7 @@
             "title": "Detail",
             "description": "Explanation of this occurrence",
             "examples": [
-              "Certificate already exists for another user"
+              "Certificate already registered"
             ]
           },
           "instance": {
@@ -25118,14 +25163,14 @@
           "code"
         ],
         "title": "CertificateTakenProblem",
-        "description": "Certificate already exists for another user (HTTP 400). Problem type certificate_taken.",
+        "description": "Certificate already registered (HTTP 400). Problem type certificate_taken.",
         "examples": [
           {
             "code": "certificate_taken",
-            "detail": "Certificate already exists for another user",
+            "detail": "Certificate already registered",
             "instance": "/api/v1/...",
             "status": 400,
-            "title": "Certificate already exists for another user",
+            "title": "Certificate already registered",
             "type": "https://example.org/problems/certificate_taken"
           }
         ]
@@ -25603,6 +25648,7 @@
           "certificate_cn_invalid",
           "certificate_serial_invalid",
           "certificate_fingerprint_invalid",
+          "certificate_label_invalid",
           "search_logic_invalid",
           "content_type_invalid",
           "extension_invalid",
@@ -34857,7 +34903,8 @@
           "account_archived",
           "certificate_changed",
           "ended_by_admin",
-          "user_type_changed"
+          "user_type_changed",
+          "certificate_revoked"
         ],
         "title": "SessionRevokeCause",
         "description": "What made the server revoke a session; the account itself may stay as it is"
@@ -38314,18 +38361,36 @@
             "description": "The type of the user (GET /user-types): its base role is assigned at the home post, at the root without one or when the base role holds system permissions"
           },
           "certificate": {
-            "type": "string",
-            "format": "binary",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "binary"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Certificate",
-            "description": "PKI certificate file (PEM or DER format)"
+            "description": "Certificate file (PEM or DER) the user logs in with, registered as an uploaded certificate; without one the user cannot log in until a certificate is issued or uploaded"
+          },
+          "certificate_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Certificate Label",
+            "description": "Readable name of the certificate, 1 to 64 characters after trimming, no control characters (default: its CN cut to 64 characters); only used with certificate"
           }
         },
         "type": "object",
         "required": [
           "username",
           "username_alias",
-          "user_type",
-          "certificate"
+          "user_type"
         ],
         "title": "UserCreateForm",
         "description": "Form of POST /users/ (multipart/form-data). Unknown form fields are ignored, as with plain Form() params."
@@ -39198,24 +39263,11 @@
               }
             ],
             "description": "Another type (GET /user-types): every assignment of the old type's built-in role gets the new type's built-in role at the same node (at the root when it holds system permissions), every other assignment must fit the new ceiling, and the user's sessions end"
-          },
-          "certificate": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "binary"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Certificate",
-            "description": "New PKI certificate file (PEM or DER format)"
           }
         },
         "type": "object",
         "title": "UserUpdateForm",
-        "description": "Form of PATCH /users/{user_id} (multipart/form-data or urlencoded): only the fields sent are changed.\nUnknown form fields (is_deleted included) are ignored, as with plain Form() params."
+        "description": "Form of PATCH /users/{user_id} (multipart/form-data or urlencoded): only the fields sent are changed.\nUnknown form fields (is_deleted and certificate included) are ignored, as with plain Form() params: certificates\nare issued or uploaded for the user and revoked on their own."
       },
       "UsernameOrCertificateTakenProblem": {
         "properties": {

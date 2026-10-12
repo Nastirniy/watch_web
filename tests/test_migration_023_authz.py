@@ -246,9 +246,8 @@ def test_fresh_install_chain(tmp_path):
     assert any(set(c[2] for c in conn.execute(f"pragma index_info({name})")) == {"user_id", "role_id", "scope_key"}
                for name in unique)
     # the CHECK: never a group and a post at once
-    conn.execute("insert into users (id, pki_certificate_cn_hash, pki_certificate_serial_hash,"
-                 " pki_certificate_fingerprint_hash, username, username_alias, is_active, is_deleted, created_at,"
-                 " updated_at, user_type) values (1, 'c', 's', 'f', 'u', 'U', 1, 0, ?, ?, 'viewer')", (STAMP, STAMP))
+    conn.execute("insert into users (id, username, username_alias, is_active, is_deleted, created_at,"
+                 " updated_at, user_type) values (1, 'u', 'U', 1, 0, ?, ?, 'viewer')", (STAMP, STAMP))
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute("insert into role_assignments (user_id, role_id, scope_group_id, scope_post_id, scope_key,"
                      " created_at) values (1, 1, 1, 1, 'g:1', ?)", (STAMP,))

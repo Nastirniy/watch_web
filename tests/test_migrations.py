@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-HEAD = "023_authorization_v2"
+HEAD = "024_user_certificates"
 
 
 def run_migrate(db_file: Path, cwd: Path = PROJECT_ROOT) -> subprocess.CompletedProcess:
@@ -76,7 +76,7 @@ def test_migration_chain_on_empty_database(tmp_path):
 
     conn = sqlite3.connect(db_file)
     tables = {row[0] for row in conn.execute("select name from sqlite_master where type='table'")}
-    assert {"users", "roles", "permissions", "observations", "media_files", "user_post_access_v1", "worker_heartbeats", "media_formats", "upload_sessions", "observation_frequencies", "video_storyboards", "scope_groups", "role_assignments"} <= tables
+    assert {"users", "roles", "permissions", "observations", "media_files", "user_post_access_v1", "worker_heartbeats", "media_formats", "upload_sessions", "observation_frequencies", "video_storyboards", "scope_groups", "role_assignments", "user_certificates", "certificate_authority_state"} <= tables
     assert not {"user_roles", "user_post_access"} & tables, "023 keeps the legacy tables as *_v1; a fresh install never had user_roles"
     assert conn.execute("select version_num from alembic_version").fetchone()[0] == HEAD
     assert "group_id" in {row[1] for row in conn.execute("pragma table_info(posts)")}

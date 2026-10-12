@@ -9,7 +9,8 @@ already found.
 
 A session opened with a client certificate (production login through nginx) is bound to it (RFC 8705 style):
 every request must present the same certificate (certificate_matches), so a token is useless without it, and
-that certificate must still be the user's (AuthService.end_session_of_replaced_certificate).
+that certificate must still be an active certificate of the user
+(AuthService.end_session_of_revoked_certificate).
 """
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone

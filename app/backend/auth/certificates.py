@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 import hashlib
 import string
@@ -13,9 +15,30 @@ from app.backend.utils.logging_config import get_security_logger
 
 _logger = get_security_logger()
 
-# users.pki_certificate_cn_hash_scheme: the rule that made the stored name hash
+# user_certificates.cn_hash_scheme: the rule that made the stored name hash
 CN_SCHEME_LEGACY = 1  # hash_data; certificates stored before migration 019 keep it
 CN_SCHEME_CURRENT = 2  # hash_cn; every certificate stored from now on
+
+
+@dataclass(frozen=True)
+class CertificateValues:
+    """What a certificate file gives: the certificate and the plain values the login matches (hashed)"""
+    certificate: x509.Certificate
+    cn: str            # Common Name from subject (or an identifier built from the subject)
+    serial: str        # lower-case hex, without leading zeros
+    fingerprint: str   # SHA-1 of the DER, lower-case hex (nginx $ssl_client_fingerprint)
+    not_before: datetime
+    not_after: datetime
+
+
+def certificate_values(cert_data: bytes) -> CertificateValues:
+    """The values of a PEM or DER certificate file; ValueError as CertificateParser.parse_certificate"""
+    cert = CertificateParser.load_certificate(cert_data)
+    parsed = CertificateParser.describe(cert)
+    return CertificateValues(
+        certificate=cert, cn=parsed["cn"], serial=parsed["serial"], fingerprint=parsed["fingerprint"],
+        not_before=cert.not_valid_before_utc, not_after=cert.not_valid_after_utc,
+    )
 
 
 class CertificateParser:
@@ -31,14 +54,19 @@ class CertificateParser:
 
         Returns:
             Dictionary containing:
-                - pki_certificate_cn: Common Name from subject (or an identifier built from the subject)
-                - pki_certificate_serial: Serial number as hex string
-                - pki_certificate_fingerprint: SHA1 fingerprint (matches nginx $ssl_client_fingerprint)
+                - cn: Common Name from subject (or an identifier built from the subject)
+                - serial: Serial number as hex string
+                - fingerprint: SHA1 fingerprint (matches nginx $ssl_client_fingerprint)
 
         Raises:
             ValueError: cert_data is not a PEM or DER X.509 certificate (cryptography's own error). Any other
             exception is a bug and is not disguised as an invalid certificate.
         """
+        return CertificateParser.describe(CertificateParser.load_certificate(cert_data))
+
+    @staticmethod
+    def load_certificate(cert_data: bytes) -> x509.Certificate:
+        """PEM, else DER; ValueError when cert_data is neither"""
         try:
             cert = x509.load_pem_x509_certificate(cert_data, default_backend())
             _logger.debug("Certificate loaded as PEM format")
@@ -46,7 +74,11 @@ class CertificateParser:
             # Not PEM: DER, or cryptography's ValueError when it is no certificate at all
             cert = x509.load_der_x509_certificate(cert_data, default_backend())
             _logger.debug("Certificate loaded as DER format")
+        return cert
 
+    @staticmethod
+    def describe(cert: x509.Certificate) -> Dict[str, str]:
+        """cn, serial and fingerprint of a loaded certificate (see parse_certificate)"""
         # Common Name; without one, an identifier from other subject fields, else the full subject DN
         cn_attributes = cert.subject.get_attributes_for_oid(x509.oid.NameOID.COMMON_NAME)
         cn = cn_attributes[0].value if cn_attributes else None
@@ -64,9 +96,9 @@ class CertificateParser:
         _logger.debug(f"Certificate CN={cn}, serial={serial_number}, fingerprint={fingerprint[:16]}...")
 
         return {
-            "pki_certificate_cn": str(cn),
-            "pki_certificate_serial": str(serial_number),
-            "pki_certificate_fingerprint": str(fingerprint)
+            "cn": str(cn),
+            "serial": str(serial_number),
+            "fingerprint": str(fingerprint)
         }
 
 
@@ -170,7 +202,7 @@ async def serial_hashes(certificate_serial: str) -> set[str]:
     return {await hash_data(normalized), await hash_data(normalized.lstrip("0") or "0")}
 
 
-async def validate_pki_certificate_data(
+async def validate_certificate_data(
     certificate_cn: str,
     certificate_serial: str,
     certificate_fingerprint: str
@@ -189,7 +221,7 @@ async def validate_pki_certificate_data(
     return all([certificate_cn, certificate_serial, certificate_fingerprint])
 
 
-async def hash_pki_certificate_data(
+async def hash_certificate_data(
     certificate_cn: str,
     certificate_serial: str,
     certificate_fingerprint: str
@@ -214,14 +246,15 @@ async def hash_pki_certificate_data(
 
 
 async def cn_hash_matches(certificate_cn: str):
-    """SQL condition: the user row holds this name under the rule of its own scheme (scheme 1 rows were hashed
-    with hash_data, scheme 2 rows with hash_cn)."""
-    from app.backend.models.user import User  # models load auth.sessions, which imports this module
+    """SQL condition: the certificate row holds this name under the rule of its own scheme (scheme 1 rows were
+    hashed with hash_data, scheme 2 rows with hash_cn)."""
+    # models load auth.sessions, which imports this module
+    from app.backend.models.user_certificate import UserCertificate
     return or_(
-        and_(User.pki_certificate_cn_hash_scheme == CN_SCHEME_LEGACY,
-             User.pki_certificate_cn_hash == await hash_data(certificate_cn)),
-        and_(User.pki_certificate_cn_hash_scheme == CN_SCHEME_CURRENT,
-             User.pki_certificate_cn_hash == await hash_cn(certificate_cn)),
+        and_(UserCertificate.cn_hash_scheme == CN_SCHEME_LEGACY,
+             UserCertificate.cn_hash == await hash_data(certificate_cn)),
+        and_(UserCertificate.cn_hash_scheme == CN_SCHEME_CURRENT,
+             UserCertificate.cn_hash == await hash_cn(certificate_cn)),
     )
 
 

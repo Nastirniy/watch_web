@@ -5,6 +5,67 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## PKI client certificates
+
+### Added
+
+- Table `user_certificates` (migration `024_user_certificates`, model `UserCertificate`): one row per client
+  certificate a user logs in with, several per user (a renewal may overlap). `source` (`issued`, `uploaded`,
+  `legacy`, `configured`), `label` (the readable name), the plain values `subject_cn`, `serial` (lower-case hex),
+  `not_before`, `not_after` (empty for `legacy` and `configured`, which have only hashes), the hashes the login
+  matches (`fingerprint_hash`, unique; `cn_hash`, `cn_hash_scheme`, `serial_hash`), `ca_issued`, `revoked_at`,
+  `revoked_by`, `revocation_reason`, `files_dir`, `export_count`, `last_exported_at`, `created_at`, `created_by`.
+  The state (`active`, `expired`, `revoked`) is computed when a row is read, never stored. Table
+  `certificate_authority_state` (one row, id 1: the number and dates of the last published CRL).
+- Migration `024_user_certificates` turns the certificate of every user into a `legacy` row with the user's exact
+  hashes and name hash scheme (`created_at` = the user's): every certificate from before the upgrade keeps logging
+  in. Its downgrade gives `users` the columns back: the values of the user's `legacy` row exactly, otherwise the
+  hashes of the newest active row; a user with none, or whose CN or serial hash another restored user holds (the
+  columns are unique), gets the placeholder `unassigned:<user_id>`, which matches no certificate. The downgrade
+  output names every such user and counts the certificates, revocations and exports it drops.
+- `POST /users/`: optional `certificate_label`, the readable name of the certificate (1 to 64 characters after
+  trimming, no control characters; field code `certificate_label_invalid`; default the CN cut to 64 characters).
+- 401 `certificate_revoked` on `POST /auth/login`: the certificate is registered but revoked (the person asks for a
+  new one).
+- Session revoke cause `certificate_revoked`: a session bound to a certificate that is no longer an active row of
+  its user (revoked or expired) ends on its next request or refresh, which answers 401 `token_certificate_mismatch`
+  as before; the sessions of the user's other certificates stay.
+- Settings `settings.pki` (`MYSETTINGS_PKI__*`): `ca_cert_path`, `signer_socket`, `store_dir`, `crl_path`,
+  `extra_crl_paths`, `validity_days` (365), `max_validity_days` (730), `key_size` (2048), `p12_encryption`
+  (`aes256` or `legacy`), `crl_days` (7). An uploaded certificate signed by the client CA of `ca_cert_path` is
+  `ca_issued` (it goes on the CRL when revoked).
+- `python -m app.backend.cli.init_user`: the certificate path is optional; `--label` names the certificate (default
+  its CN).
+
+### Changed
+
+- The login matches the three hashes against `user_certificates` (`legacy` rows exactly as the `users` columns
+  did). A revoked certificate answers `certificate_revoked`, an expired one `certificate_not_recognized`, then the
+  account checks follow as before.
+- `POST /users/`: `certificate` is optional (the form stays multipart); without one the user exists but cannot log
+  in until a certificate is issued or uploaded. The file becomes an `uploaded` row; an expired file is accepted. Only
+  the certificate itself (its fingerprint) is unique: the same certificate registered for any user answers 400
+  `certificate_taken`, whose title is now "Certificate already registered"; two certificates may carry the same name
+  or serial. The audit row `create` of a user has `certificate_id`.
+- The development seed writes the admin's configured (or generated) certificate hashes as a `configured` row.
+
+### Removed
+
+- Columns `users.pki_certificate_cn_hash`, `pki_certificate_cn_hash_scheme`, `pki_certificate_serial_hash`,
+  `pki_certificate_fingerprint_hash` and their unique indexes (the hashes live in `user_certificates`).
+- `PATCH /users/{user_id}`: the `certificate` form field (now ignored like any unknown field) and the problems
+  `certificate_file_empty`, `certificate_invalid`, `certificate_taken` and `certificate_file_too_large` of that
+  operation. Replacing a certificate is issuing or uploading a new one and revoking the old one. The session revoke
+  cause `certificate_changed` is no longer written (it stays in the enum for existing rows), and the audit rows
+  `update` of a user no longer have `certificate_replaced`.
+
+### Migration guide for the web client
+
+Regenerate the types from `api-contract/v1/openapi.json`. The user edit form loses its certificate field; the
+create form keeps it, optional, next to `certificate_label`. New translations: `certificate_revoked`,
+`certificate_label_invalid` and the revoke cause `certificate_revoked`; the text of `certificate_taken` reads
+"Certificate already registered".
+
 ## Authorization v2
 
 ### Added
