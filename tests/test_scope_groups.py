@@ -252,6 +252,24 @@ async def test_group_writes_need_scope_group_view_at_the_group(client, db, heade
     assert renamed.status_code == 200, renamed.text
 
 
+@pytest.mark.parametrize("group_id", [0, -1])
+async def test_group_ids_below_one_are_validation_errors(client, db, headers, group_id):
+    """A group id below one is no node of the tree: 422 on every route that takes one (was 500)"""
+    h = headers(await make_admin(db))
+    for method, route, body in (
+            ("GET", ScopeGroupRoutes.GROUP_BY_ID, None),
+            ("PATCH", ScopeGroupRoutes.GROUP_BY_ID, {"name": "x"}),
+            ("POST", ScopeGroupRoutes.GROUP_ARCHIVE, None),
+            ("POST", ScopeGroupRoutes.GROUP_RESTORE, None),
+    ):
+        r = await client.request(method, V1.path(route, group_id=group_id), json=body, headers=h)
+        assert r.status_code == 422, (method, route, r.text)
+        problem = r.json()
+        assert problem["code"] == "validation_error", problem
+        assert [(e["code"], e["parameter"], e["location"]) for e in problem["errors"]] == [
+            ("greater_than_equal", "group_id", "path")], problem
+
+
 async def test_a_group_move_needs_post_update_at_the_old_and_the_new_parent(client, db, headers):
     """R37: a move takes every post below the group along, so it needs post.update covering the old and the new parent
     location, like a post move; checked before the tree rules, nothing moves on a refusal"""

@@ -267,6 +267,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   in `posts`, the posts directly under the root (with `scope_group.view` at the root) and the posts where it is held
   on the post itself. A post or group below an archived group is left out (a post restored while its group is
   archived was shown as a post of the root).
+- `group_id` in the path of `GET` / `PATCH /scope-groups/{group_id}`, `/archive` and `/restore` is a positive
+  integer (`minimum` 1 in the schema): 0 or a negative id answers 422 `validation_error` (`greater_than_equal`,
+  `parameter` `group_id`) instead of 500 `internal_error`.
 - Moving a scope group (`PATCH /scope-groups/{group_id}` with a `parent_id` other than the current one) takes every
   post below it along, so it also needs `post.update` covering the old and the new parent location (the group or
   above it, the root for a group directly under it), like a post move: otherwise 403

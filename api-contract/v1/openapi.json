@@ -13093,6 +13093,7 @@
             "required": true,
             "schema": {
               "type": "integer",
+              "minimum": 1,
               "title": "Group Id"
             }
           }
@@ -13213,6 +13214,7 @@
             "required": true,
             "schema": {
               "type": "integer",
+              "minimum": 1,
               "title": "Group Id"
             }
           }
@@ -13387,6 +13389,7 @@
             "required": true,
             "schema": {
               "type": "integer",
+              "minimum": 1,
               "title": "Group Id"
             }
           }
@@ -13519,6 +13522,7 @@
             "required": true,
             "schema": {
               "type": "integer",
+              "minimum": 1,
               "title": "Group Id"
             }
           }

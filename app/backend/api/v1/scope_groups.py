@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Annotated, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Path, Query, Request
 from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -204,7 +204,7 @@ async def get_scope_tree(
     responses=problems(ErrorCode.SCOPE_GROUP_NOT_FOUND, *GUARDED),
 )
 async def get_scope_group(
-        group_id: int,
+        group_id: Annotated[int, Path(ge=1)],
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW]))
 ):
@@ -220,7 +220,7 @@ async def get_scope_group(
 )
 async def update_scope_group(
         request: Request,
-        group_id: int,
+        group_id: Annotated[int, Path(ge=1)],
         data: ScopeGroupUpdate,
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(
@@ -265,7 +265,7 @@ async def update_scope_group(
 )
 async def archive_scope_group(
         request: Request,
-        group_id: int,
+        group_id: Annotated[int, Path(ge=1)],
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(
             all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_ARCHIVE]))
@@ -296,7 +296,7 @@ async def archive_scope_group(
 )
 async def restore_scope_group(
         request: Request,
-        group_id: int,
+        group_id: Annotated[int, Path(ge=1)],
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(
             all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_ARCHIVE]))
