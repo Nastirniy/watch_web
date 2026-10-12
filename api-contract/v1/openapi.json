@@ -2701,7 +2701,7 @@
           "USERS"
         ],
         "summary": "List User Sessions",
-        "description": "Login sessions of a user, newest first. status is computed when read: online (a request within\nsecurity.online_threshold_seconds), idle (live, client quiet) or ended; a session past its absolute end or\nidle timeout is ended even if nothing has recorded it yet. Archived users are listed too. user.view must cover\nthe user (403 user_self_only otherwise).",
+        "description": "Login sessions of a user, newest first. status is computed when read: online (a request within\nsecurity.online_threshold_seconds), idle (live, client quiet) or ended; a session past its absolute end or\nidle timeout is ended even if nothing has recorded it yet. user.view must cover the user (403 user_self_only\notherwise); an archived user, like GET /{user_id}, only for callers with user.archive covering them (404\notherwise).",
         "operationId": "list_user_sessions",
         "security": [
           {

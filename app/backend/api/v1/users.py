@@ -849,12 +849,16 @@ async def list_user_sessions(
 ):
     """Login sessions of a user, newest first. status is computed when read: online (a request within
     security.online_threshold_seconds), idle (live, client quiet) or ended; a session past its absolute end or
-    idle timeout is ended even if nothing has recorded it yet. Archived users are listed too. user.view must cover
-    the user (403 user_self_only otherwise)."""
+    idle timeout is ended even if nothing has recorded it yet. user.view must cover the user (403 user_self_only
+    otherwise); an archived user, like GET /{user_id}, only for callers with user.archive covering them (404
+    otherwise)."""
     target = (await session.exec(select(User).where(User.id == user_id))).first()
     if not target:
         raise ApiError(ErrorCode.USER_NOT_FOUND)
+    # Visibility before the state: an outsider gets the same 403 for an archived and a live user
     AccessControlService.check_user_view(auth, target)
+    if target.is_deleted and not auth.covers_user(Permissions.USER_ARCHIVE, target):
+        raise ApiError(ErrorCode.USER_NOT_FOUND)
     query = select(UserSession).where(UserSession.user_id == user_id)
     if not include_ended:
         query = query.where(session_lifetimes.live_clause())

@@ -689,6 +689,22 @@ async def test_user_sessions_need_user_view_covering_the_user(client, db, header
     assert (await client.get(sessions, headers=headers(await make_admin(db)))).status_code == 200
 
 
+async def test_sessions_of_an_archived_user_need_user_archive_covering_them(client, db, headers, with_grants):
+    """Like GET /users/{user_id}: an archived user is shown only where user.archive covers them"""
+    a = await make_post(db)
+    gone = await make_user(db, post_id=a.id)
+    await _archive(db, gone)
+    sessions = V1.path(UserRoutes.USER_SESSIONS, user_id=gone.id)
+    viewer = await make_user(db, perms=[P.USER_VIEW], post_id=a.id)
+    hidden = await client.get(sessions, headers=headers(viewer))
+    assert hidden.status_code == 404 and hidden.json()["code"] == "user_not_found", hidden.text
+
+    archiver = await make_user(db, perms=[P.USER_VIEW, P.USER_ARCHIVE], post_id=a.id)
+    with_grants(archiver, grant(Node.post(a.id), P.USER_VIEW, P.USER_ARCHIVE))
+    shown = await client.get(sessions, headers=headers(archiver))
+    assert shown.status_code == 200, shown.text
+
+
 async def test_administration_routes_need_only_their_permissions(client, db, headers, with_grants):
     """Dictionaries, formats, roles and groups: the permissions of the route at some node, no admin.true"""
     editor = await make_user(db, perms=[P.TAG_VIEW, P.TAG_CREATE, P.SCOPE_GROUP_VIEW, P.ROLE_VIEW])

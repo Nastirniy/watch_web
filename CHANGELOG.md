@@ -105,6 +105,8 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `admin.true` with `post.access_all`); everyone else gets 409 `post_archived`.
 - `GET /users/{user_id}/sessions`, `/roles` and `/post-access` need `user.view` covering the user (the caller, or
   `user.view` in effect at the user's home post, at the root for a user without one), otherwise 403 `user_self_only`.
+  The sessions of an archived user, like `GET /users/{user_id}`, only with `user.archive` covering them (404
+  `user_not_found` otherwise).
 - Regenerating the thumbnail of a media file without an observation needs `media.update` at the root (403
   `permission_required_for_action`).
 
