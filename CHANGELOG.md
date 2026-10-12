@@ -156,7 +156,11 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   restore, ending sessions), `GET /users/{user_id}/roles`, `/post-access` and `/sessions`, `POST /observations/report`,
   `GET /media/statistics`, `GET /media/posters/status`, `POST /media/posters/reconcile` and
   `POST /media/{media_id}/thumbnail/regenerate`. A permission that did nothing without `admin.true` is held nowhere,
-  so no route opens to a user who could not call it before; `admin.true` alone passes no route.
+  and `admin.true` alone passes no route. One route opens to users who could not call it before:
+  `GET /users/{user_id}/sessions` needs `user.view` covering the user (before: administrators only, behind the gate),
+  and `user.view` was live without `admin.true`, so a holder of `user.view` at a post now sees the sessions of that
+  post's users. The new `GET /users/{user_id}/assignments` follows the same rule (the routes it replaces,
+  `/users/{user_id}/roles` and `/post-access`, were administrators only).
 - `POST /observations/report` needs `observation.view` + `export.create` and covers the posts where both are in effect
   (before: every readable post, behind the admin gate). A `post_ids` entry outside them answers 403
   (`post_access_denied`, or `post_write_denied` with `missing` `["export.create"]`). With `include_deleted`, archived
@@ -243,6 +247,11 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   group. The post scope (403) and the post state (404, 409) answer first.
 - `PATCH /users/{user_id}`: a deactivation answers only `last_admin_required` (deactivating oneself is refused with
   `cannot_deactivate_self` before); `cannot_remove_own_admin` is declared for the type change.
+- Texts of the OpenAPI document that still described the admin gate: `include_deleted` of the post, user,
+  observation and media lists (and the description of `GET /search/posts`) states the rule (`X.archive` held
+  anywhere; archived rows only where it is in effect); `GET /roles/list-all-permissions` and `GET /roles/{role_id}`
+  no longer say "admin only" / "administration area"; the title of `poster_failed` reads "Poster extraction failed;
+  a holder of media.update can regenerate it" (the code and params are unchanged).
 
 ### Removed
 
@@ -258,6 +267,36 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - `role_ids` of the user forms (`UserCreateForm`, `UserUpdateForm`) and its field code `role_ids_duplicate`.
 - Problem types `post_access_home_post`, `post_access_not_found` and `role_archived_not_assignable`.
 - Tables `user_roles` and `user_post_access` (kept as `*_v1` by migration 023 until a later cleanup revision).
+
+### Migration guide for the web client
+
+Regenerate the types from `api-contract/v1/openapi.json` (`WEB_TOOLING.md`); `tsc` then points at every use of a
+removed field or code. What replaces each (API.md, "Authorization: pages, buttons, scope", has the details):
+
+| Removed | Use instead |
+|---------|-------------|
+| `is_admin` (login, refresh, `/auth/me`) | Pages by `user_type` (the catalog: `GET /user-types`), buttons by permissions: `permissions` (held at some node) for the menu, `root_permissions` + `post_permissions` at a post. The administration pages belong to the `admin` type; no flag says "administrator". |
+| `accessible_post_ids` | `root_permissions` (in effect at every post) + `post_permissions` (`{"7": [...]}`): the permissions in effect at post 7 are `root_permissions` + `post_permissions["7"]`. Lists are already limited by the API; a post picker uses `GET /posts/` or `GET /scope-groups/tree`. |
+| `roles` (auth responses, schema `RoleBriefResponse`) | `assignments`: each a role (`id`, `name`, `display_name`, `is_builtin`, `is_deleted`) at a node (`scope`: `kind` root / group / post, `id`, `name`). |
+| `GET /users/{user_id}/roles` | `GET /users/{user_id}/assignments` |
+| `GET /users/{user_id}/post-access`, `PUT` / `DELETE /users/{user_id}/post-access/{post_id}` | `GET` / `POST /users/{user_id}/assignments`, `DELETE /users/{user_id}/assignments/{assignment_id}`: a role at a post (or a group, or the root). A read-only access row is an assignment of a role holding only `*.view` permissions; the home post (`post_id`) grants nothing by itself. |
+| `role_ids` in the user forms (`POST /users/`, `PATCH /users/{user_id}`) | `user_type` (required on create: the type's built-in role is assigned at the home post, at the root without one or for `admin`; on `PATCH` it changes the type), then the assignment routes for any other role. |
+| `admin` in `POST /auth/check-permission`, the admin flag of `required` (403 bodies, `GET /auth/route-access`) | `post_id` in `check-permission` (in effect at that post); `required` is `{all, any}`. |
+| 403 `admin_required` | 403 `permission_denied` (with `required` and `missing`). |
+| `admin_role_not_renamable`, `admin_role_permissions_fixed`, `admin_role_not_archivable`, `admin_role_not_deletable` | `builtin_role_not_renamable`, `builtin_role_permissions_fixed`, `builtin_role_not_archivable`, `builtin_role_not_deletable` (every built-in role; clone one to edit it). |
+| `post_access_home_post`, `post_access_not_found` | The assignment codes: `assignment_not_found`, `assignment_exists`, `last_assignment_required`, `role_requires_root_scope`, `role_exceeds_user_type`. |
+| `role_archived_not_assignable` | Assigning an archived role answers 404 `role_not_found`. |
+| Field code `role_ids_duplicate` | Gone with `role_ids`; the assignment body has `scope_id_required` and `scope_id_not_allowed`. |
+| Permissions `admin.true`, `post.access_all` | Administration is the granular permissions held at the root (the built-in `admin` role at `/`); access to every post is an assignment at the root. `check-permission` with them answers 422. |
+
+New translations: every code of API.md, "Problem codes of authorization and scope" (`assignment_*`,
+`last_assignment_required`, `role_requires_root_scope`, `role_exceeds_user_type`, `user_type_ceiling_exceeded`,
+`role_holders_exceed_user_type`, `builtin_role_*`, `scope_group_*`) and the field codes `scope_id_required`,
+`scope_id_not_allowed`. Drop the removed ones above.
+
+New in the forms: `user_type` on user create and edit, `group_id` on post create and edit, the scope groups pages
+(`/scope-groups`), the assignments of a user, `POST /roles/{role_id}/clone`. A type change ends the user's sessions
+(`revoke_cause` `user_type_changed`).
 
 ## Post archiving and certificate name hash
 

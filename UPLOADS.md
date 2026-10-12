@@ -91,7 +91,7 @@ POST /api/v1/media/uploads/{id}/complete
 | Status | Meaning | What the client does |
 |--------|---------|----------------------|
 | 200 | File stored. Same body as the other uploads plus `upload_id`. A video starts with `thumbnail_status: pending` and gets its poster from the worker shortly. | Done. |
-| 409 | `upload_incomplete`: bytes still missing (`missing_bytes`, `offset`, `expected_size`). `upload_session_completing`: another `complete` is storing the file right now (status `completing`). `upload_writer_busy`: a chunk request still holds the session. `post_archived` (`post_id`): the post was archived after the session opened (only for a `post.access_all` uploader, see "Archived post" below); the session stays `open`. | Incomplete: send the rest, then complete again. Completing: ask `GET` until the status is `completed` (or `open` again after a server-side failure), or call `complete` again later. Busy: complete again after a second. Archived post: tell the user; complete again once the post is restored, or abort. |
+| 409 | `upload_incomplete`: bytes still missing (`missing_bytes`, `offset`, `expected_size`). `upload_session_completing`: another `complete` is storing the file right now (status `completing`). `upload_writer_busy`: a chunk request still holds the session. `post_archived` (`post_id`): the post was archived after the session opened (only for an uploader whose `media.create` comes from a group or the root, see "Archived post" below); the session stays `open`. | Incomplete: send the rest, then complete again. Completing: ask `GET` until the status is `completed` (or `open` again after a server-side failure), or call `complete` again later. Busy: complete again after a second. Archived post: tell the user; complete again once the post is restored, or abort. |
 | 422 | `upload_checksum_mismatch` (`expected_sha256`, `actual_sha256`). The session is aborted and the bytes deleted. | Open a new session and send again. |
 | 415 / 413 | The content did not match the declared format (same 415 codes as on open, plus `media_extension_dangerous`) or `media_file_too_large`. Session aborted. | Tell the user. |
 | 400 | `media_file_empty` or `media_content_invalid` (the file header does not match its type). Session aborted. | Tell the user. |
@@ -105,10 +105,11 @@ When a refused file or lost bytes abort the session, `error` of the session (`GE
 
 ### Archived post
 
-While the post of a session is archived, an uploader whose access is the home post or a `user_post_access` row gets
-403 on every session route (create, chunk, status, complete, abort): the post left their data scope. The session then
-expires on its own. Only a `post.access_all` uploader gets 409 `post_archived` on create and `complete`; that session
-stays `open` and completes after a restore. A session that is already aborted or expired answers 410
+While the post of a session is archived, an uploader whose `media.view` / `media.create` come from an assignment on
+the post itself gets 403 on every session route (create, chunk, status, complete, abort): an assignment on an archived
+post stops applying. The session then expires on its own. An uploader who holds them through a scope group or the
+root (they keep applying to an archived post) gets 409 `post_archived` on create and `complete`; that session stays
+`open` and completes after a restore. A session that is already aborted or expired answers 410
 `upload_session_closed` on `complete` whatever the state of the post.
 
 ### 4. Give up

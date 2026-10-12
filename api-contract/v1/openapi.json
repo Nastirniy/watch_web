@@ -1057,11 +1057,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
-              "description": "Include archived records (requires user.archive)",
+              "description": "Include archived users (requires user.archive held anywhere; archived users only where user.archive covers them)",
               "default": false,
               "title": "Include Deleted"
             },
-            "description": "Include archived records (requires user.archive)"
+            "description": "Include archived users (requires user.archive held anywhere; archived users only where user.archive covers them)"
           }
         ],
         "responses": {
@@ -3607,7 +3607,7 @@
           "ROLES"
         ],
         "summary": "List All Permissions",
-        "description": "List all available permissions in the system - admin only",
+        "description": "List every permission of the catalog with its level (system: assignable only at the root)",
         "operationId": "list_all_permissions",
         "responses": {
           "200": {
@@ -3712,7 +3712,7 @@
           "ROLES"
         ],
         "summary": "Get Role",
-        "description": "Get role by ID (administration area)",
+        "description": "Get a role by id, archived roles included",
         "operationId": "get_role",
         "security": [
           {
@@ -8872,11 +8872,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
-              "description": "Include archived records (requires observation.archive)",
+              "description": "Include archived records (requires observation.archive held anywhere; archived rows only at the posts where it is in effect)",
               "default": false,
               "title": "Include Deleted"
             },
-            "description": "Include archived records (requires observation.archive)"
+            "description": "Include archived records (requires observation.archive held anywhere; archived rows only at the posts where it is in effect)"
           }
         ],
         "responses": {
@@ -11436,11 +11436,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
-              "description": "Include archived posts (requires post.archive)",
+              "description": "Include archived posts (requires post.archive held anywhere; archived posts only where post.archive is in effect)",
               "default": false,
               "title": "Include Deleted"
             },
-            "description": "Include archived posts (requires post.archive)"
+            "description": "Include archived posts (requires post.archive held anywhere; archived posts only where post.archive is in effect)"
           }
         ],
         "responses": {
@@ -14104,11 +14104,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
-              "description": "Include archived media (requires media.archive); media of archived observations are never listed",
+              "description": "Include archived media (requires media.archive held anywhere; archived media only at the posts where it is in effect); media of archived observations are never listed",
               "default": false,
               "title": "Include Deleted"
             },
-            "description": "Include archived media (requires media.archive); media of archived observations are never listed"
+            "description": "Include archived media (requires media.archive held anywhere; archived media only at the posts where it is in effect); media of archived observations are never listed"
           }
         ],
         "responses": {
@@ -16459,7 +16459,7 @@
             }
           },
           "409": {
-            "description": "`poster_failed`: Poster extraction failed; an administrator can regenerate it",
+            "description": "`poster_failed`: Poster extraction failed; a holder of media.update can regenerate it",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -16912,7 +16912,7 @@
             }
           },
           "409": {
-            "description": "`poster_failed`: Poster extraction failed; an administrator can regenerate it",
+            "description": "`poster_failed`: Poster extraction failed; a holder of media.update can regenerate it",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -20016,11 +20016,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
-              "description": "Include archived records (requires observation.archive)",
+              "description": "Include archived records (requires observation.archive held anywhere; archived rows only at the posts where it is in effect)",
               "default": false,
               "title": "Include Deleted"
             },
-            "description": "Include archived records (requires observation.archive)"
+            "description": "Include archived records (requires observation.archive held anywhere; archived rows only at the posts where it is in effect)"
           }
         ],
         "responses": {
@@ -20460,11 +20460,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
-              "description": "Include archived records (requires user.archive)",
+              "description": "Include archived users (requires user.archive held anywhere; archived users only where user.archive covers them)",
               "default": false,
               "title": "Include Deleted"
             },
-            "description": "Include archived records (requires user.archive)"
+            "description": "Include archived users (requires user.archive held anywhere; archived users only where user.archive covers them)"
           }
         ],
         "responses": {
@@ -20583,7 +20583,7 @@
           "SEARCH"
         ],
         "summary": "Search posts",
-        "description": "Search posts with typed filters. Archived posts only with include_deleted (requires post.archive).",
+        "description": "Search posts with typed filters. include_deleted needs post.archive held anywhere and shows archived posts only where post.archive is in effect.",
         "operationId": "search_posts",
         "security": [
           {
@@ -20963,11 +20963,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
-              "description": "Include archived posts (requires post.archive)",
+              "description": "Include archived posts (requires post.archive held anywhere; archived posts only where post.archive is in effect)",
               "default": false,
               "title": "Include Deleted"
             },
-            "description": "Include archived posts (requires post.archive)"
+            "description": "Include archived posts (requires post.archive held anywhere; archived posts only where post.archive is in effect)"
           }
         ],
         "responses": {
@@ -22780,11 +22780,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
-              "description": "Include archived media (requires media.archive); media of archived observations are never listed",
+              "description": "Include archived media (requires media.archive held anywhere; archived media only at the posts where it is in effect); media of archived observations are never listed",
               "default": false,
               "title": "Include Deleted"
             },
-            "description": "Include archived media (requires media.archive); media of archived observations are never listed"
+            "description": "Include archived media (requires media.archive held anywhere; archived media only at the posts where it is in effect); media of archived observations are never listed"
           }
         ],
         "responses": {
@@ -32143,7 +32143,7 @@
           },
           "title": {
             "type": "string",
-            "const": "Poster extraction failed; an administrator can regenerate it",
+            "const": "Poster extraction failed; a holder of media.update can regenerate it",
             "title": "Title",
             "description": "Summary of the problem type"
           },
@@ -32158,7 +32158,7 @@
             "title": "Detail",
             "description": "Explanation of this occurrence",
             "examples": [
-              "Poster extraction failed; an administrator can regenerate it"
+              "Poster extraction failed; a holder of media.update can regenerate it"
             ]
           },
           "instance": {
@@ -32194,16 +32194,16 @@
           "attempts"
         ],
         "title": "PosterFailedProblem",
-        "description": "Poster extraction failed; an administrator can regenerate it (HTTP 409). Problem type poster_failed.",
+        "description": "Poster extraction failed; a holder of media.update can regenerate it (HTTP 409). Problem type poster_failed.",
         "examples": [
           {
             "attempts": 1024,
             "code": "poster_failed",
-            "detail": "Poster extraction failed; an administrator can regenerate it",
+            "detail": "Poster extraction failed; a holder of media.update can regenerate it",
             "instance": "/api/v1/...",
             "status": 409,
             "thumbnail_status": "<thumbnail_status>",
-            "title": "Poster extraction failed; an administrator can regenerate it",
+            "title": "Poster extraction failed; a holder of media.update can regenerate it",
             "type": "https://example.org/problems/poster_failed"
           }
         ]

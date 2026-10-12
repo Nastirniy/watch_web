@@ -170,7 +170,8 @@ async def search_users(
     SearchRoutes.POSTS.value,
     response_model=SearchResponse[PostResponse],
     summary="Search posts",
-    description="Search posts with typed filters. Archived posts only with include_deleted (requires post.archive).",
+    description="Search posts with typed filters. include_deleted needs post.archive held anywhere and shows archived "
+                "posts only where post.archive is in effect.",
     responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
 )
 async def search_posts(

@@ -32,4 +32,4 @@ class MediaFilterParams(BaseFilterParams):
     has_thumbnail: Optional[bool] = Field(default=None, description="Has a thumbnail available (images always, videos once the poster is ready)")
     uploaded_at_from: Optional[UtcDatetime] = Field(default=None, description="Uploaded after")
     uploaded_at_to: Optional[UtcDatetime] = Field(default=None, description="Uploaded before")
-    include_deleted: bool = Field(default=False, description="Include archived media (requires media.archive); media of archived observations are never listed")
+    include_deleted: bool = Field(default=False, description="Include archived media (requires media.archive held anywhere; archived media only at the posts where it is in effect); media of archived observations are never listed")

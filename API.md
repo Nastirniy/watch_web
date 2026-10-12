@@ -129,9 +129,91 @@ A session opened through nginx with a client certificate is bound to it: every r
 
 The body adds `required` (`{all, any}`) and `missing` (permissions the user lacks). `GET /api/v1/auth/route-access` tells in advance which routes the user may call.
 
+| Code | When |
+|------|------|
+| `permission_denied` | The route's permissions are held nowhere (no assignment gives them) |
+| `post_access_denied` / `post_write_denied` | The permission is held, but not in effect at this post (`post_id`; `*.view` / any other permission) |
+| `no_post_assigned` | The permission is in effect at no post at all (for example its only post is archived) |
+| `permission_required_for_action` | A permission a part or a target of the request needs (`permission`, `action`): `include_deleted`, the group a post is created in or moved to, the home post of a new or moved user, a media file without an observation (`media.update` at the root) |
+| `user_self_only` | A user record outside the caller's `user.view` |
+| `target_user_more_privileged` | A change to a user the caller's `user.*` does not cover, or who holds an assignment the caller could not grant |
+| `grant_exceeds_own_permissions` | Granting or revoking permissions the caller does not hold (at the node, for an assignment) |
+
 ### Server errors (500 `internal_error`)
 
 The body carries `error_id`, the request id of the response (`X-Request-ID`); the server log has it once, with the details. Show it to the user so a report can be matched.
+
+## Authorization: pages, buttons, scope
+
+Access is role assignments: a user holds a role at one node of the scope tree, the root (`/`, the whole system), a
+scope group (a group of posts, groups nest) or a post, and it applies to that node and everything below it.
+Assignments add up. Every route checks its own permissions where it acts; there is no administrator flag.
+
+The login, the refresh and `GET /api/v1/auth/me` carry what the interface is built from:
+
+| Field | Use it for |
+|-------|------------|
+| `user_type` | Which pages the web shows. The catalog is `GET /api/v1/user-types` (`key`, `display_name`, `description`, `base_role`, `base_permissions`, `allowed_permissions` = the ceiling of the type). The API never authorizes by type: a page still checks its buttons. |
+| `permissions` | Permissions held at some node: the menu (an entry whose route the user can call somewhere). |
+| `root_permissions` | Permissions held at the root: in effect at every post. |
+| `post_permissions` | `{"7": ["observation.create", ...]}`: per post (key: the post id as a string), the permissions that assignments at groups and at the post put in effect there, for every post they reach. |
+| `assignments` | The user's assignments, as `GET /users/{user_id}/assignments` lists them. |
+| `post_id` | Home post: membership (who manages the user); it grants nothing by itself. |
+
+Buttons: the permissions in effect at post 7 are `root_permissions` plus `post_permissions["7"]` (a post missing from
+`post_permissions` has `root_permissions` only). Show an action on the data of a post (create an observation, upload,
+archive) when its permission is in effect there. Lists need no filtering in the client: the API answers only the
+posts and rows where the permission is in effect. `POST /api/v1/auth/check-permission` with `{all, any, post_id}`
+answers the same question on the server (`allowed` when in effect at that post; without `post_id`: held at some node).
+
+An assignment change applies to the user's next request; the fields above are as fresh as the last login, refresh or
+`/auth/me`, so read `/auth/me` again after changing the current user's access. A type change ends every session of
+the user (`session_expired`, `revoke_cause` `user_type_changed`): the new pages come with the next login.
+
+### Scope picker and assignments
+
+- `GET /api/v1/scope-groups/tree` (`scope_group.view`): the part of the tree the caller sees, for choosing a node:
+  `{groups: [{id, name, description, groups: [...], posts: [{id, name, code}]}], posts: [...]}`; posts only where
+  `post.view` is in effect; archived groups and posts, and everything below an archived group, are left out. The
+  root itself is not in the tree: offer it when the caller holds the permissions at the root (`root_permissions`).
+- `GET /api/v1/users/{user_id}/assignments`: `[{id, role: {id, name, display_name, is_builtin, is_deleted}, scope:
+  {kind: "root" | "group" | "post", id, name}, created_at}]` (`id` is null at the root; an assignment of an archived
+  role, `role.is_deleted`, grants nothing).
+- `POST /api/v1/users/{user_id}/assignments` (201): `{"role_id": 5, "scope": {"kind": "post", "id": 7}}`; `id` is
+  left out for `{"kind": "root"}`. `DELETE /api/v1/users/{user_id}/assignments/{assignment_id}` (204).
+- The caller may assign only a role whose permissions they hold at that node (and `user.update` there). A role with a
+  `system` permission (`RoleResponse.level` `system`) is assignable only at the root; a role must fit the ceiling of
+  the user's type (`allowed_permissions`). Offer only roles that pass these checks.
+- A new user (`POST /api/v1/users/`, form fields `user_type` and an optional `post_id`) gets the built-in role of the
+  type at the home post (at the root without one, or for the `admin` type); add more with the assignment routes.
+  `PATCH /api/v1/users/{user_id}` with `user_type` changes the type and replaces the old built-in role with the new
+  one at the same nodes.
+- Built-in roles (`is_builtin`, `builtin_key`: one per type) are read-only; `POST /api/v1/roles/{role_id}/clone`
+  makes an editable copy.
+
+### Problem codes of authorization and scope
+
+| Code | Status | When |
+|------|--------|------|
+| `assignment_not_found` | 404 | The assignment is not one of this user's |
+| `assignment_exists` | 409 | The user already holds this role at this node |
+| `last_assignment_required` | 409 | The user's last assignment (of a live role) cannot be removed |
+| `role_requires_root_scope` | 409 | A role with system permissions below the root (`system_permissions`) |
+| `role_exceeds_user_type` | 409 | The role holds permissions the user's type does not allow (`user_type`, `excess_permissions`) |
+| `user_type_ceiling_exceeded` | 409 | A type change while other assignments exceed the new type (`user_type`, `assignments` with their `excess_permissions`) |
+| `role_holders_exceed_user_type` | 409 | Permissions added to a role that the type of a holder does not allow (`users`) |
+| `builtin_role_not_renamable`, `builtin_role_permissions_fixed`, `builtin_role_not_archivable`, `builtin_role_not_deletable` | 409 | Built-in roles cannot change (clone one) |
+| `scope_group_not_found` | 404 | Unknown, archived or outside the caller's `scope_group.view` |
+| `scope_group_not_archived` | 409 | Restore of a group that is not archived |
+| `scope_group_not_empty` | 409 | Archive of a group that still has live groups or posts |
+| `scope_group_cycle` | 409 | A group moved into its own subtree |
+| `scope_group_depth_exceeded` | 409 | Groups nested deeper than `max_depth` (6) |
+| `scope_group_name_taken` | 409 | The name is used under the same parent |
+| `last_admin_required`, `cannot_remove_own_admin` | 409 | The built-in `admin` role at the root must stay with an active user and cannot be taken from oneself |
+
+Field codes inside `validation_error`: `scope_id_required` (a group or post scope without `id`),
+`scope_id_not_allowed` (the root with an `id`).
+
 ## Responses that are not JSON
 
 | Operation | Response |
@@ -172,6 +254,6 @@ track when it is `ready`; the route answers the same states:
 | failed | `409` problem `storyboard_failed` (param `attempts`) |
 | unsupported | `422` problem `storyboard_unsupported` (param `min_duration_seconds`), or `no_video_stream` for a video file with only audio |
 
-The permission is `media.view` plus the post scope. The sheet URLs need no token (like thumbnails) and expire:
+The permission is `media.view` in effect at the post of the media. The sheet URLs need no token (like thumbnails) and expire:
 `Cache-Control: private, max-age` of the track is no longer than their lifetime, so fetch the track again after
 it. Every problem code here needs a text in the web translations.

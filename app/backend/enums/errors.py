@@ -374,7 +374,7 @@ class ErrorCode(ProblemType):
         megapixels=float, max_megapixels=float))
     NO_VIDEO_STREAM = ("no_video_stream", problem(422, "The file has no video stream"))
     POSTER_FAILED = ("poster_failed", problem(
-        409, "Poster extraction failed; an administrator can regenerate it", thumbnail_status=str, attempts=int))
+        409, "Poster extraction failed; a holder of media.update can regenerate it", thumbnail_status=str, attempts=int))
     STORYBOARD_FAILED = ("storyboard_failed", problem(409, "Storyboard generation failed", attempts=int))
     STORYBOARD_UNSUPPORTED = ("storyboard_unsupported", problem(
         422, "No storyboard for this media",

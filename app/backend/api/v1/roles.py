@@ -135,14 +135,14 @@ async def list_all_permissions(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW]))
 ):
-    """List all available permissions in the system - admin only"""
+    """List every permission of the catalog with its level (system: assignable only at the root)"""
     current_user = auth.user
     result = await session.exec(
         select(Permission).order_by(Permission.name)
     )
 
     permissions = result.all()
-    _logger.info(f"Admin {current_user.username} listed all {len(permissions)} permissions")
+    _logger.info(f"User {current_user.username} listed all {len(permissions)} permissions")
 
     return [permission_to_response(perm) for perm in permissions]
 
@@ -157,7 +157,7 @@ async def get_role(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW]))
 ):
-    """Get role by ID (administration area)"""
+    """Get a role by id, archived roles included"""
     role = await get_role_or_404(session, role_id, include_deleted=True)
 
     return await _role_response(session, role)

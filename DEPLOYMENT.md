@@ -122,11 +122,78 @@ Key and salt: `python3 -c "import secrets; print(secrets.token_hex(32))"` twice.
 
 Air-gapped hosts: build on a connected machine, `docker save watch-web ghcr.io/imgproxy/imgproxy:v3 | gzip > images.tgz`, copy, `docker load`. Nothing is downloaded at runtime.
 
-Upgrades: `docker compose build api && docker compose up -d api media-worker`. The API runs migrations on start; start the worker after the API has finished the first start. Upgrading to storyboards with `MYSETTINGS_STORAGE__POSTER__CONCURRENCY=1`: see the upgrade note under "Storyboards" (the worker refuses to start until the concurrency is 2 or storyboards are off).
+Upgrades: `docker compose build api && docker compose up -d api media-worker`. The API runs migrations on start; start the worker after the API has finished the first start. Upgrading to authorization v2: run the report on a copy first (see "Upgrading to authorization v2" below). Upgrading to storyboards with `MYSETTINGS_STORAGE__POSTER__CONCURRENCY=1`: see the upgrade note under "Storyboards" (the worker refuses to start until the concurrency is 2 or storyboards are off).
 
 Upgrading to sizes as displayed (vertical phone videos, EXIF-rotated photos): rows stored before keep the stored frame size until probed again. `docker compose exec media-worker python -m app.backend.cli.media_tools probe-missing --all` probes every video and audio file again and re-reads every image size (headers only; `--limit N` per run, default 1000). Video uploads that failed only because they have no video stream become `unsupported` after `media_tools reconcile-posters --retry-failed`: the worker sees the probed metadata and stops trying.
 
 Offloaded uploads (`/api/v1/media/nginx-upload`): nginx keeps the request body in `NGINX_UPLOAD_TEMP` (`client_body_in_file_only` never deletes it). The API accepts `X-File-Name` only for a regular file inside that directory (`storage.nginx_upload_temp_path`, same path as `client_body_temp_path`), moves it on success and deletes it on every other outcome once the path is checked. A request refused before the handler runs (an expired token, 401) leaves its file, so sweep the directory from cron (see "Scheduled cleanup" below): `docker compose exec api python -m app.backend.cli.media_tools sweep-nginx-temp` deletes files older than `storage.nginx_upload_temp_max_age_hours` (24 by default; `--max-age-hours N` overrides it). Keep the age above the longest upload, nginx may still be writing a younger file. A file the command cannot read or delete (permissions) is logged, left in place and counted (`skipped N file(s)` in its output); the sweep goes on with the others.
+
+### Upgrading to authorization v2 (user types, scope groups, role assignments)
+
+Migrations `021_scope_groups` (scope groups, `posts.group_id`), `022_builtin_roles` (`roles.builtin_key`; a custom
+role named like a built-in key other than `admin` becomes `<key>_custom`) and `023_authorization_v2` convert every
+user: roles, home post and access rows become role assignments (a role at the root or at a post) and a user type;
+`admin.true` and `post.access_all` leave the catalog. Look at what the conversion will do on a copy first:
+
+1. Copy the production database, for example:
+
+   ```bash
+   mysql -e "CREATE DATABASE radio_monitoring_copy CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+   mysqldump --single-transaction --routines --triggers radio_monitoring | mysql radio_monitoring_copy
+   ```
+
+2. Upgrade the copy to `022_builtin_roles` with the new code (the report reads a database at 022 only: it refuses an
+   earlier revision with exit code 2 and answers `already converted` at 023 or later). From the project root of the
+   new version, or in the new image:
+
+   ```bash
+   WATCH_WEB_ALEMBIC_URL=mysql+aiomysql://user:password@127.0.0.1:3306/radio_monitoring_copy \
+     venv/bin/python -m alembic upgrade 022_builtin_roles
+   docker compose run --rm --no-deps -e WATCH_WEB_ALEMBIC_URL=mysql+aiomysql://user:password@127.0.0.1:3306/radio_monitoring_copy \
+     api python -m alembic upgrade 022_builtin_roles
+   ```
+
+3. Run the report on the copy (read-only: the session refuses writes; `--json` for a file to keep):
+
+   ```bash
+   python -m app.backend.cli.authz_report --url mysql+aiomysql://user:password@127.0.0.1:3306/radio_monitoring_copy
+   python -m app.backend.cli.authz_report --json --url mysql+aiomysql://user:password@127.0.0.1:3306/radio_monitoring_copy > authz_report.json
+   ```
+
+4. Review it. Per user: the inferred `type`, the roles, home post and access rows before, the assignments after
+   (`role @ root` or `role @ p:<post id>`), `dropped` (permissions that did nothing: the administration permissions of
+   a role without `admin.true`, or scoped permissions of a user without any post) and `differences`, what the new
+   model cannot express 1:1:
+   - `upload_list_follows_manage_any`: the upload list of other users now follows `media.manage_any` at each post;
+   - `observation_counters_follow_view`: post counters now need `observation.view` at the post (before `admin.true`
+     counted every post);
+   - `archived_records_need_archive`: archived posts and users, and archived rows of read-only posts, now need
+     `X.archive` where they are;
+   - `archived_post_observations_need_post_archive`: archiving observations of an archived post needs `post.archive`
+     at the post;
+   - `no_permissions`: the user gets no assignment (give them one after the upgrade).
+
+   Then the derived roles: where a role's permissions land on different nodes, the conversion creates
+   `<role>_system` (the part at the root), `<role>_posts` (home post and write rows) or `<role>_view` (the `*.view`
+   part, for read-only rows), with the part (system, posts, view; in Ukrainian) added to the display name.
+5. Deploy as usual (`docker compose build api && docker compose up -d api media-worker`): the start applies 021 -
+   023 and seeding creates the built-in role of every type. Every converted user gets an audit row (`action`
+   `migrate`, `resource_type` `user`) with the record the report showed; the upgrade of a database that is converted
+   already prints `already converted` and changes nothing.
+6. Fix the reported differences through the API: the type of a user (`PATCH /users/{user_id}`, `user_type`), the
+   assignments (`/users/{user_id}/assignments`), scope groups for the posts (`/scope-groups`, `group_id` of a post).
+7. The web client moves to the new auth fields at the same deploy: `is_admin`, `accessible_post_ids`, `roles` and the
+   post-access routes are gone (CHANGELOG.md, "Migration guide for the web client").
+
+Downgrade (with the new code, before the old one starts): `python -m alembic downgrade 020_post_archive`. 023 restores
+exactly what it converted, from the kept tables and its log: `user_roles` and `user_post_access` come back from
+`user_roles_v1` / `user_post_access_v1`, `admin.true`, `post.access_all` and their grants are inserted again with
+their ids, the derived roles, `role_assignments`, `users.user_type` and `authz_v2_migration_log` are dropped. 022
+drops `roles.builtin_key` only: a role it renamed keeps the name `<key>_custom`, and the built-in roles seeding
+created stay as ordinary roles without users (an upgrade after that renames them `<key>_custom` too). 021 drops
+`posts.group_id` and `scope_groups`: the groups are lost. Everything done through the new API since the upgrade is
+lost with the assignments: users created after the upgrade have no legacy roles and lose access on a downgrade, type
+changes and new assignments are gone.
 
 ### Scheduled cleanup (cron)
 

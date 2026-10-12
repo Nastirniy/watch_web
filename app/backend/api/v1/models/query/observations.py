@@ -65,7 +65,7 @@ class ObservationFilterParams(BaseFilterParams):
     tag_match: TagMatch = Field(default=TagMatch.ANY, description="any: observations with at least one of tag_ids; all: with every one of them")
 
     # --- Soft Delete ---
-    include_deleted: bool = Field(default=False, description="Include archived records (requires observation.archive)")
+    include_deleted: bool = Field(default=False, description="Include archived records (requires observation.archive held anywhere; archived rows only at the posts where it is in effect)")
 
 
 class ObservationFrequencyListParams(BaseModel):
