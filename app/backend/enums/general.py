@@ -294,3 +294,18 @@ class TagMatch(str, Enum):
     """How a list of tags filters observations: at least one of the tags (any) or every one of them (all)"""
     ANY = "any"
     ALL = "all"
+
+
+class RevocationReason(str, Enum):
+    """Why a client certificate was revoked (the RFC 5280 reason written to the CRL)"""
+    UNSPECIFIED = "unspecified"
+    KEY_COMPROMISE = "key_compromise"
+    AFFILIATION_CHANGED = "affiliation_changed"
+    SUPERSEDED = "superseded"
+    CESSATION_OF_OPERATION = "cessation_of_operation"
+
+
+class P12Encryption(str, Enum):
+    """How a .p12 package is encrypted: AES-256 (modern) or 3DES/SHA-1 (older Windows)"""
+    AES256 = "aes256"
+    LEGACY = "legacy"

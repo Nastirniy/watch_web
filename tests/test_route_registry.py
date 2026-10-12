@@ -102,7 +102,7 @@ def test_nothing_outside_api_imports_api():
 
 
 # Code that runs without a request; HTTP lives in api/, auth/ (require, dependencies, ...) and errors/ (but coded.py)
-FRAMEWORK_FREE = ("services", "filters", "models", "workers", "enums", "bootstrap", "utils")
+FRAMEWORK_FREE = ("services", "filters", "models", "workers", "enums", "bootstrap", "utils", "pki")
 FRAMEWORK = re.compile(r"(fastapi|starlette)(\.|$)")
 
 
