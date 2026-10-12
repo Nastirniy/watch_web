@@ -21,8 +21,8 @@ from app.backend.enums.general import Permissions as P
 from app.backend.errors.problems import ApiError
 from app.backend.config import settings
 from app.backend.enums.routes import (
-    MediaRoutes, ObservationRoutes, PostRoutes, RoleRoutes, ScopeGroupRoutes, SearchRoutes, StatisticsRoutes, TagRoutes,
-    UserRoutes,
+    AuthRoutes, MediaRoutes, ObservationRoutes, PostRoutes, RoleRoutes, ScopeGroupRoutes, SearchRoutes, StatisticsRoutes,
+    TagRoutes, UserRoutes,
 )
 from app.backend.filters.post_filter import PostCriteria, PostFilterService
 from app.backend.filters.user_filter import UserCriteria, UserFilterService
@@ -143,8 +143,8 @@ async def test_archived_post_needs_post_archive_at_post(client, db, headers):
     admin = await make_admin(db)
     await _archive(db, post)
 
-    # a direct grant on an archived post stops applying: post.view is in effect at no post at all
-    _denied(await client.get(_post_url(post.id), headers=headers(home)), "no_post_assigned", ["post.view"])
+    # a direct grant on an archived post stops applying: post.view is held nowhere (R39; before: no_post_assigned)
+    _denied(await client.get(_post_url(post.id), headers=headers(home)), "permission_denied", ["post.view"])
     # admin.true no longer shows archived records by itself: post.archive must be in effect at the post
     hidden = await client.get(_post_url(post.id), headers=headers(viewer))
     assert hidden.status_code == 404 and hidden.json()["code"] == "post_not_found", hidden.text
@@ -152,6 +152,26 @@ async def test_archived_post_needs_post_archive_at_post(client, db, headers):
         shown = await client.get(_post_url(post.id), headers=headers(user))
         assert shown.status_code == 200 and shown.json()["is_deleted"] is True, shown.text
         assert post.id in _ids(await client.get(POSTS, params={"include_deleted": "true"}, headers=headers(user)))
+
+
+async def test_a_grant_only_at_an_archived_node_is_held_nowhere(client, db, headers, with_grants):
+    """R39: a permission whose only grant is on an archived post (or at an archived group) applies nowhere: it is not
+    in /auth/me permissions and a route requiring it answers 403 permission_denied (before: no_post_assigned, or the
+    route ran with an empty scope)"""
+    post, other = await make_post(db), await make_post(db)
+    gone = await _group(db, "Gone")
+    user = await make_user(db, perms=[P.POST_VIEW], post_id=post.id)
+    await with_grants(user, grant(Node.post(post.id), P.POST_VIEW), grant(Node.group(gone.id), P.OBSERVATION_VIEW),
+                      grant(Node.post(other.id), P.TAG_VIEW))
+    await _archive(db, post)
+    await _archive(db, gone)
+
+    me = (await client.get(V1.path(AuthRoutes.ME), headers=headers(user))).json()
+    assert me["permissions"] == ["tag.view"] and me["post_permissions"] == {str(other.id): ["tag.view"]}
+    body = _denied(await client.get(_post_url(other.id), headers=headers(user)), "permission_denied", ["post.view"])
+    assert body["required"] == {"all": ["post.view"], "any": []}
+    _denied(await client.get(V1.path(ObservationRoutes.LIST_ALL), headers=headers(user)), "permission_denied",
+            ["observation.view"])
 
 
 async def test_archived_posts_are_listed_only_where_post_archive_is_held(client, db, headers, with_grants):

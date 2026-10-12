@@ -194,7 +194,7 @@ async def update_role(
     changed on any refusal.
     """
     current_user = auth.user
-    role = await get_role_or_404(session, role_id)
+    role = await get_role_or_404(session, role_id, lock=role_update.permission_ids is not None)
     if role.builtin_key is not None and role_update.name is not None and role_update.name != role.name:
         raise ApiError(ErrorCode.BUILTIN_ROLE_NOT_RENAMABLE)
 
@@ -337,7 +337,7 @@ async def restore_role(
     caller must hold every permission of the role at each of these nodes (at some node for a role assigned nowhere):
     otherwise 403 grant_exceeds_own_permissions with the permissions missing."""
     current_user = auth.user
-    role = await get_role_or_404(session, role_id, include_deleted=True)
+    role = await get_role_or_404(session, role_id, include_deleted=True, lock=True)
     if not role.is_deleted:
         raise ApiError(ErrorCode.ROLE_NOT_ARCHIVED)
     check_role_grant(auth, await role_nodes(session, role_id), added=await role_permission_names(session, [role_id]))
@@ -445,7 +445,7 @@ async def delete_role(
     The audit log keeps a full copy of the role, its permissions, its assignments and its user_roles_v1 rows.
     """
     current_user = auth.user
-    role = await get_role_or_404(session, role_id, include_deleted=True)
+    role = await get_role_or_404(session, role_id, include_deleted=True, lock=True)
     if role.builtin_key is not None:
         raise ApiError(ErrorCode.BUILTIN_ROLE_NOT_DELETABLE)
     if not role.is_deleted:
@@ -576,7 +576,7 @@ async def add_role_permission(
     root (409 role_requires_root_scope), and the type of every holder, archived ones included, must allow it (409
     role_holders_exceed_user_type)."""
     current_user = auth.user
-    role = await get_role_or_404(session, role_id)
+    role = await get_role_or_404(session, role_id, lock=True)
     permission = await get_permission_or_404(session, permission_id)
 
     existing = await session.exec(

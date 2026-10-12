@@ -131,13 +131,13 @@ The body adds `required` (`{all, any}`) and `missing` (permissions the user lack
 
 | Code | When |
 |------|------|
-| `permission_denied` | The route's permissions are held nowhere (no assignment gives them) |
+| `permission_denied` | The route's permissions are held nowhere (no assignment gives them; an assignment on an archived post or at an archived group gives nothing) |
 | `post_access_denied` / `post_write_denied` | The permission is held, but not in effect at this post (`post_id`; `*.view` / any other permission) |
-| `no_post_assigned` | The permission is in effect at no post at all (for example its only post is archived) |
-| `permission_required_for_action` | A permission a part or a target of the request needs (`permission`, `action`): `include_deleted`, the group a post is created in or moved to, the home post of a new or moved user, a media file without an observation (`media.update` at the root) |
+| `no_post_assigned` | The permission is held, but in effect at no post at all (for example only at a scope group without posts) |
+| `permission_required_for_action` | A permission a part or a target of the request needs (`permission`, `action`): `include_deleted`, the group a post is created in or moved to, the old and the new parent of a moved scope group (`post.update`), the home post of a new or moved user, a media file without an observation (`media.update` at the root) |
 | `user_self_only` | A user record outside the caller's `user.view` |
 | `target_user_more_privileged` | A change to a user the caller's `user.*` does not cover, or who holds an assignment the caller could not grant |
-| `grant_exceeds_own_permissions` | Granting or revoking permissions the caller does not hold (at the node, for an assignment) |
+| `grant_exceeds_own_permissions` | Granting or revoking permissions the caller does not hold (at the node, for an assignment; at every node the role is assigned at, for permissions added to a role and the restore of a role) |
 
 ### Server errors (500 `internal_error`)
 
@@ -154,7 +154,7 @@ The login, the refresh and `GET /api/v1/auth/me` carry what the interface is bui
 | Field | Use it for |
 |-------|------------|
 | `user_type` | Which pages the web shows. The catalog is `GET /api/v1/user-types/` (`key`, `display_name`, `description`, `base_role`, `base_permissions`, `allowed_permissions` = the ceiling of the type). The API never authorizes by type: a page still checks its buttons. |
-| `permissions` | Permissions held at some node: the menu (an entry whose route the user can call somewhere). |
+| `permissions` | Permissions held at some node (an assignment on an archived post or at an archived group counts nowhere): the menu (an entry whose route the user can call somewhere). |
 | `root_permissions` | Permissions held at the root: in effect at every post. |
 | `post_permissions` | `{"7": ["observation.create", ...]}`: per post (key: the post id as a string), the permissions that assignments at groups and at the post put in effect there, for every post they reach. |
 | `assignments` | The user's assignments, as `GET /users/{user_id}/assignments` lists them. |
@@ -197,7 +197,7 @@ the user (`session_expired`, `revoke_cause` `user_type_changed`): the new pages 
 |------|--------|------|
 | `assignment_not_found` | 404 | The assignment is not one of this user's |
 | `assignment_exists` | 409 | The user already holds this role at this node |
-| `last_assignment_required` | 409 | The user's last assignment (of a live role) cannot be removed |
+| `last_assignment_required` | 409 | The user's last assignment (of a live role) cannot be removed; also the permanent delete of a role that is the only assignment of an archived holder |
 | `role_requires_root_scope` | 409 | A role with system permissions below the root (`system_permissions`) |
 | `role_exceeds_user_type` | 409 | The role holds permissions the user's type does not allow (`user_type`, `excess_permissions`) |
 | `user_type_ceiling_exceeded` | 409 | A type change while other assignments exceed the new type (`user_type`, `assignments` with their `excess_permissions`) |

@@ -8,9 +8,16 @@ from app.backend.errors.problems import ApiError
 from app.backend.enums.errors import ErrorCode
 
 
-async def get_role_or_404(session: AsyncSession, role_id: int, include_deleted: bool = False) -> Role:
-    """Get role by ID or raise 404. Soft-deleted roles are 404 unless include_deleted is set."""
-    result = await session.exec(select(Role).where(Role.id == role_id))
+async def get_role_or_404(session: AsyncSession, role_id: int, include_deleted: bool = False,
+                          lock: bool = False) -> Role:
+    """Get role by ID or raise 404. Soft-deleted roles are 404 unless include_deleted is set.
+    lock=True: SELECT ... FOR UPDATE (nothing on sqlite), the row read again, before the checks of a change that gives
+    the role's permissions to its holders (permissions added, restore) or removes it (delete): such changes of one
+    role run one after another."""
+    query = select(Role).where(Role.id == role_id)
+    if lock:
+        query = query.with_for_update().execution_options(populate_existing=True)
+    result = await session.exec(query)
     role = result.first()
     if role and role.is_deleted and not include_deleted:
         role = None

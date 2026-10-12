@@ -10,6 +10,13 @@ every user: the inferred user type, the roles, home post and access rows before,
 any post) and the differences the new model cannot express; then the derived roles. Migration 023 writes the same
 per-user record into its audit rows (action migrate, resource_type user): this is what it will do.
 
+The first lines name the administrators after the conversion: the users who will hold the built-in admin role at the
+root and are active and not archived (root_admins in --json), the users the last-administrator rule counts. With none
+(the legacy administrator role was not the admin role, for example) a WARNING line says so: after the upgrade, archive
+and deactivation answer last_admin_required and nobody can assign the admin role; create an administrator on the
+server with python -m app.backend.cli.init_user <certificate.pem> --username <name> --alias <display name>
+--user-type admin.
+
 A database at 023 or later is converted already: the command says so and exits 0. Exit code 2: the database is not
 at 022 (or is not an alembic database, or the sqlite file does not exist).
 
@@ -21,12 +28,14 @@ import contextlib
 import json
 import sys
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import FrozenSet, List, Optional, Tuple
 
 import sqlalchemy as sa
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from app.backend.auth.scope import ROOT
+from app.backend.migrations.support.authz_v2 import ConversionPlan
 from app.backend.migrations.support.authz_v2_data import LegacyData, describe_plan, load_legacy
 
 REVISION = "022_builtin_roles"
@@ -43,17 +52,27 @@ def converted_revisions() -> set:
     return {revision.revision for revision in script.walk_revisions(base=CONVERTED, head="heads")} | {CONVERTED}
 
 
-def _read(conn) -> Tuple[Optional[str], Optional[LegacyData]]:
-    """The revision of the database and, at 022, its legacy data. Read-only: the session refuses writes and the
-    transaction is never committed."""
+USERS = sa.table("users", sa.column("id", sa.Integer), sa.column("is_active", sa.Boolean),
+                 sa.column("is_deleted", sa.Boolean))
+
+Database = Tuple[Optional[str], Optional[LegacyData], FrozenSet[int]]
+
+
+def _read(conn) -> Database:
+    """The revision of the database and, at 022, its legacy data and the users who cannot act (deactivated or
+    archived). Read-only: the session refuses writes and the transaction is never committed."""
     if conn.dialect.name == "sqlite":
         conn.exec_driver_sql("PRAGMA query_only = ON")
     elif conn.dialect.name in ("mysql", "mariadb"):
         conn.exec_driver_sql("SET SESSION TRANSACTION READ ONLY")
     if "alembic_version" not in sa.inspect(conn).get_table_names():
-        return None, None
+        return None, None, frozenset()
     version = conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar()
-    return version, load_legacy(conn) if version == REVISION else None
+    if version != REVISION:
+        return version, None, frozenset()
+    inactive = frozenset(user_id for user_id, is_active, is_deleted in conn.execute(
+        sa.select(USERS.c.id, USERS.c.is_active, USERS.c.is_deleted)) if not is_active or is_deleted)
+    return version, load_legacy(conn), inactive
 
 
 async def _read_async(url: str):
@@ -65,7 +84,7 @@ async def _read_async(url: str):
         await engine.dispose()
 
 
-def read_database(url: str) -> Tuple[Optional[str], Optional[LegacyData]]:
+def read_database(url: str) -> Database:
     if make_url(url).get_dialect().is_async:
         return asyncio.run(_read_async(url))
     engine = sa.create_engine(url)
@@ -86,9 +105,34 @@ def _list(values) -> str:
     return ", ".join(values) if values else "-"
 
 
+def root_admins(data: LegacyData, plan: ConversionPlan, inactive: FrozenSet[int]) -> List[dict]:
+    """The users who will hold the built-in admin role at the root and are active and not archived (the users
+    privileges.check_an_admin_remains counts), by id"""
+    names = {user.id: user.username for user in data.users}
+    if data.admin_role_id is None:
+        return []
+    return [{"user_id": user_plan.user_id, "user": names[user_plan.user_id]} for user_plan in plan.users
+            if user_plan.user_id not in inactive
+            and any(a.role == data.admin_role_id and a.node == ROOT.key for a in user_plan.assignments)]
+
+
+NO_ROOT_ADMIN = (
+    "WARNING: nobody active will hold the built-in admin role at the root after the conversion: archiving or "
+    "deactivating a user will answer last_admin_required and nobody can assign the admin role. After the upgrade, "
+    "create an administrator on the server: python -m app.backend.cli.init_user <certificate.pem> --username <name> "
+    "--alias <display name> --user-type admin (DEPLOYMENT.md)"
+)
+
+
 def text_report(revision: str, report: dict) -> str:
+    admins = report["root_admins"]
     lines = [f"authz_report: database at {revision}, {len(report['users'])} user(s), "
-             f"{len(report['derived_roles'])} derived role(s)", ""]
+             f"{len(report['derived_roles'])} derived role(s)",
+             f"administrators after the conversion (the built-in admin role at the root, active, not archived): "
+             f"{len(admins)}" + (f" ({', '.join(admin['user'] for admin in admins)})" if admins else "")]
+    if not admins:
+        lines.append(NO_ROOT_ADMIN)
+    lines.append("")
     for user in report["users"]:
         before = user["before"]
         roles = [f"{role['name']} ({role['id']}{', archived' if role['archived'] else ''})" for role in before["roles"]]
@@ -130,7 +174,7 @@ def main(argv=None) -> int:
         print(f"authz_report: no database file at {make_url(url).database}", file=sys.stderr)
         return 2
 
-    revision, data = read_database(url)
+    revision, data, inactive = read_database(url)
     if revision in converted_revisions():
         message = f"already converted: the database is at {revision}"
         print(json.dumps({"revision": revision, "status": message}) if args.json else message)
@@ -140,7 +184,8 @@ def main(argv=None) -> int:
               f"{REVISION} (upgrade a copy to {REVISION} first)", file=sys.stderr)
         return 2
 
-    report = describe_plan(data, data.plan())
+    plan = data.plan()
+    report = {**describe_plan(data, plan), "root_admins": root_admins(data, plan, inactive)}
     if args.json:
         print(json.dumps({"revision": revision, **report}, ensure_ascii=False, indent=2))
     else:

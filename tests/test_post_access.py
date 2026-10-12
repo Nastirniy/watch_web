@@ -5,8 +5,10 @@ import pytest
 
 from app.backend.enums.routes import AuthRoutes, ObservationRoutes, PostRoutes, SearchRoutes, UserRoutes
 from app.backend.api.v1 import V1
+from app.backend.auth.scope import Node
 from tests.helpers import (
-    ACCESS_ALL, ADMIN_TRUE, make_post, make_user, make_admin, make_dictionary, make_observation, observation_payload,
+    ACCESS_ALL, ADMIN_TRUE, assign, make_group, make_post, make_role, make_user, make_admin, make_dictionary,
+    make_observation, observation_payload,
 )
 
 LIST = V1.path(ObservationRoutes.LIST_ALL)
@@ -51,9 +53,18 @@ async def test_home_post_scope(client, db, headers):
 
 @pytest.mark.asyncio
 async def test_no_post_assigned(client, db, headers):
-    """no_post_assigned: the permission is in effect at no post (its only post is archived). A user with no post at
-    all holds scoped permissions nowhere: the routes refuse them (permission_denied)"""
+    """no_post_assigned: the permission is held, at a node that reaches no post (a group without posts). A grant only
+    on an archived post applies nowhere (R39), and a user with no post at all holds scoped permissions nowhere: the
+    routes refuse both (permission_denied)"""
     post_a, post_b, ids, admin, user, obs_a, obs_b = await world(db)
+    empty = await make_group(db)
+    grouped = await make_user(db)
+    await assign(db, grouped, await make_role(db, OPERATOR), Node.group(empty.id))
+    response = await client.get(V1.path(PostRoutes.POST_BY_ID, post_id=post_a.id), headers=headers(grouped))
+    assert response.status_code == 403
+    assert response.json()["code"] == "no_post_assigned"
+    assert (await client.get(LIST, headers=headers(grouped))).json() == []
+
     gone = await make_post(db)
     unassigned = await make_user(db, perms=OPERATOR, post_id=gone.id)
     gone.is_deleted = True
@@ -61,8 +72,9 @@ async def test_no_post_assigned(client, db, headers):
     await db.commit()
     response = await client.get(V1.path(PostRoutes.POST_BY_ID, post_id=post_a.id), headers=headers(unassigned))
     assert response.status_code == 403
-    assert response.json()["code"] == "no_post_assigned"
-    assert (await client.get(LIST, headers=headers(unassigned))).json() == []
+    assert response.json()["code"] == "permission_denied" and response.json()["missing"] == ["post.view"]
+    listed = await client.get(LIST, headers=headers(unassigned))
+    assert listed.status_code == 403 and listed.json()["missing"] == ["observation.view"]
 
     homeless = await make_user(db, perms=OPERATOR)
     response = await client.get(V1.path(PostRoutes.POST_BY_ID, post_id=post_a.id), headers=headers(homeless))

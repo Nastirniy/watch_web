@@ -183,3 +183,25 @@ async def test_grants_come_from_role_assignments(db):
     assert auth.posts_with(P.OBSERVATION_VIEW) == {a.id, b.id, outside.id}
     assert auth.covers(P.OBSERVATION_VIEW, Node.post(a.id)) and not auth.covers(P.OBSERVATION_VIEW, ROOT)
     assert (await db.exec(select(RoleAssignment.scope_key).where(RoleAssignment.id == at_group.id))).one() == f"g:{east.id}"
+
+
+async def test_grants_at_archived_nodes_are_held_nowhere(db):
+    """R39 (spec section 5): a grant on an archived post or at an archived group applies nowhere, so it does not count
+    as held anywhere either (require(), /auth/me permissions, role edits); a live group without posts still does"""
+    gone_post, live = await make_post(db), await make_post(db)
+    gone_group, empty_group = await _group(db, "Gone"), await _group(db, "Empty")
+    user = await make_user(db)
+    await assign(db, user, await make_role(db, [P.POST_VIEW]), Node.post(gone_post.id))
+    await assign(db, user, await make_role(db, [P.TAG_VIEW]), Node.group(gone_group.id))
+    await assign(db, user, await make_role(db, [P.MEDIA_VIEW]), Node.group(empty_group.id))
+    await assign(db, user, await make_role(db, [P.OBSERVATION_VIEW]), Node.post(live.id))
+    await _archive_post(db, gone_post)
+    gone_group.is_deleted = True
+    db.add(gone_group)
+    await db.commit()
+
+    auth = await load_auth_context(db, user)
+    assert len(auth.grants) == 4   # the grants stay: they apply again after a restore
+    assert auth.held_anywhere == auth.permissions == {"media.view", "observation.view"}
+    assert not auth.has_anywhere(P.POST_VIEW) and not auth.has_anywhere(P.TAG_VIEW)
+    assert auth.posts_with(P.MEDIA_VIEW) == frozenset()   # held, at no post: check_post answers no_post_assigned

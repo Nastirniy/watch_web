@@ -206,3 +206,39 @@ async def test_user_update_outsider_gets_the_same_403_for_an_archived_and_a_live
     hidden = await client.patch(V1.path(UserRoutes.USER_BY_ID, user_id=archived.id), data={"username_alias": "X"},
                                 headers=headers(admin))
     assert hidden.status_code == 404 and hidden.json()["code"] == "user_not_found"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route, permission", [
+    (UserRoutes.USER_ARCHIVE, "user.archive"),
+    (UserRoutes.USER_RESTORE, "user.archive"),
+    (UserRoutes.USER_SESSIONS_END, "user.update"),
+    (UserRoutes.USER_SESSION_END, "user.update"),
+])
+async def test_user_state_routes_answer_the_outsider_alike(client, db, headers, route, permission):
+    """R39: archive, restore and ending sessions check the caller's reach before the archived state of the user (404
+    user_not_found, 409 user_not_archived only inside it), so an outsider gets the same 403 for an archived and a live
+    user"""
+    home, other = await make_post(db), await make_post(db)
+    live = await make_user(db, perms=["observation.view"], post_id=home.id)
+    archived = await make_user(db, perms=["observation.view"], post_id=home.id)
+    archived.is_deleted = True
+    db.add(archived)
+    await db.commit()
+    outsider = await make_user(db, post_id=other.id)
+    await assign(db, outsider, await make_role(db, ["user.view", permission]), Node.post(other.id))
+
+    def url(target) -> str:
+        params = {"session_id": "no-such-session"} if route is UserRoutes.USER_SESSION_END else {}
+        return V1.path(route, user_id=target.id, **params)
+
+    for target in (live, archived):
+        response = await client.post(url(target), headers=headers(outsider))
+        assert response.status_code == 403, (target.is_deleted, response.text)
+        assert response.json()["code"] == "target_user_more_privileged", response.text
+
+    # Inside the caller's reach the state answers
+    admin = await make_admin(db)
+    state = {UserRoutes.USER_RESTORE: (live, 409, "user_not_archived")}.get(route, (archived, 404, "user_not_found"))
+    response = await client.post(url(state[0]), headers=headers(admin))
+    assert (response.status_code, response.json()["code"]) == state[1:], response.text

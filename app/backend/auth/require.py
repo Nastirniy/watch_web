@@ -8,9 +8,9 @@ Semantics:
 - all:   every listed permission is required
 - any:   at least one listed permission is required
 
-A permission counts when it is held at some node of the scope tree (AuthContext.held_anywhere): the route is
-reachable, the handler then checks where it applies (AccessControlService: check_post, scope_for, ...). There is no
-administrator gate: an administration route requires its own permissions, like any other route.
+A permission counts when it is held at some node of the scope tree that is not archived (AuthContext.held_anywhere):
+the route is reachable, the handler then checks where it applies (AccessControlService: check_post, scope_for, ...).
+There is no administrator gate: an administration route requires its own permissions, like any other route.
 """
 import builtins
 from dataclasses import dataclass

@@ -5,7 +5,9 @@ and permissions, every group, every post). Every permission and scope check read
 the database again during the request.
 
 Access is the user's role assignments (role_assignments: role + node of the scope tree), each a Grant: its
-permissions apply to the node and everything below it (auth/scope.py). Archived roles grant nothing.
+permissions apply to the node and everything below it (auth/scope.py). Archived roles grant nothing, and a grant on an
+archived post or at an archived group applies nowhere (it is kept: it applies again after a restore), so it does not
+count as held anywhere either.
 """
 from dataclasses import dataclass, field
 from typing import Dict, FrozenSet, Iterable, Optional, Set, Tuple, Union
@@ -33,11 +35,11 @@ class AuthContext:
     grants: Tuple[Grant, ...] = ()      # what the user holds where: one per role assignment of a role not archived
     tree: ScopeTree = field(default_factory=ScopeTree.empty)
     session_id: Optional[str] = None    # user_sessions.id of the access token (audit, logout)
-    # every permission of the grants, computed once (require() reads it on every request)
+    # every permission of the grants in effect, computed once (require() reads it on every request)
     _held_anywhere: FrozenSet[str] = field(init=False, repr=False, compare=False, default=frozenset())
 
     def __post_init__(self):
-        held = frozenset().union(*(grant.permissions for grant in self.grants))
+        held = frozenset().union(*(grant.permissions for grant in self.grants if not self.tree.is_archived(grant.node)))
         object.__setattr__(self, "_held_anywhere", held)
 
     @property
@@ -48,7 +50,9 @@ class AuthContext:
     # ------------------------------------------------------------------ grants on the scope tree
     @property
     def held_anywhere(self) -> FrozenSet[str]:
-        """Every permission held at some node: route reachability, objects without a post, the web menu"""
+        """Every permission held at some node in effect (the root, a group or a post that is not archived): route
+        reachability, objects without a post, the web menu. A grant on an archived post or at an archived group
+        applies nowhere and is left out."""
         return self._held_anywhere
 
     def has_anywhere(self, permission: Union[Permissions, str]) -> bool:

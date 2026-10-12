@@ -540,14 +540,6 @@ async def update_user(
         raise ApiError(code)
 
 
-async def _get_active_user_or_404(session: AsyncSession, user_id: int) -> User:
-    result = await session.exec(select(User).where(User.id == user_id, User.is_deleted == False))
-    user = result.first()
-    if not user:
-        raise ApiError(ErrorCode.USER_NOT_FOUND)
-    return user
-
-
 @router.post(
     UserRoutes.USER_ARCHIVE.value,
     response_model=UserResponse,
@@ -567,13 +559,17 @@ async def archive_user(
     Nothing is removed: observations, media and role assignments of the user stay. The user is hidden from
     lists unless include_deleted=true. Undo with POST /{user_id}/restore. Already archived or unknown: 404.
     Needs user.archive covering the user and every assignment of the user grantable by the caller (403
-    target_user_more_privileged); the last administrator: 409.
+    target_user_more_privileged), answered before the archived state of the user, so an outsider gets the same 403
+    for an archived and a live user; the last administrator: 409.
     """
     current_user = auth.user
-    user = await _get_active_user_or_404(session, user_id)
+    user = await _get_user_or_404(session, user_id)
     if user.id == current_user.id:
         raise ApiError(ErrorCode.CANNOT_ARCHIVE_SELF)
+    # Scope before the state: an outsider gets the same 403 for an archived and a live user
     await check_target_user(session, auth, user, Permissions.USER_ARCHIVE)
+    if user.is_deleted:
+        raise ApiError(ErrorCode.USER_NOT_FOUND)
 
     old_values = user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"})
     user.is_deleted = True
@@ -622,12 +618,13 @@ async def restore_user(
 ):
     """Restore an archived user (is_deleted=false, is_active=true): the account can log in again. Not archived: 409.
     Needs user.archive covering the user and every assignment of the user grantable by the caller (403
-    target_user_more_privileged)."""
+    target_user_more_privileged), answered before the archived state of the user."""
     current_user = auth.user
     user = await _get_user_or_404(session, user_id)
+    # Scope before the state: an outsider gets the same 403 for an archived and a live user
+    await check_target_user(session, auth, user, Permissions.USER_ARCHIVE)
     if not user.is_deleted:
         raise ApiError(ErrorCode.USER_NOT_ARCHIVED)
-    await check_target_user(session, auth, user, Permissions.USER_ARCHIVE)
 
     old_values = user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"})
     user.is_deleted = False
@@ -694,8 +691,12 @@ async def end_user_sessions(
     """Revoke every live session of a user (revoke_cause ended_by_admin); the account stays as it is and can log
     in again. The caller's own session ends too when user_id is the caller. Archived users: 404.
     Needs user.update covering the user and every assignment of the user grantable by the caller (403
-    target_user_more_privileged)."""
-    await check_target_user(session, auth, await _get_active_user_or_404(session, user_id), Permissions.USER_UPDATE)
+    target_user_more_privileged), answered before the archived state of the user."""
+    target = await _get_user_or_404(session, user_id)
+    # Scope before the state: an outsider gets the same 403 for an archived and a live user
+    await check_target_user(session, auth, target, Permissions.USER_UPDATE)
+    if target.is_deleted:
+        raise ApiError(ErrorCode.USER_NOT_FOUND)
     ended = await AuthService.invalidate_all_user_sessions(
         session=session,
         user_id=user_id,
@@ -724,9 +725,13 @@ async def end_user_session(
         auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE]))
 ):
     """Revoke one live session of a user (revoke_cause ended_by_admin). Ended already: 409 with its end_reason.
-    Needs user.update covering the user and every assignment of the user grantable by the caller (403
-    target_user_more_privileged)."""
-    await check_target_user(session, auth, await _get_active_user_or_404(session, user_id), Permissions.USER_UPDATE)
+    Archived users: 404. Needs user.update covering the user and every assignment of the user grantable by the
+    caller (403 target_user_more_privileged), answered before the archived state of the user and the session."""
+    target = await _get_user_or_404(session, user_id)
+    # Scope before the state: an outsider gets the same 403 for an archived and a live user
+    await check_target_user(session, auth, target, Permissions.USER_UPDATE)
+    if target.is_deleted:
+        raise ApiError(ErrorCode.USER_NOT_FOUND)
     row = (await session.exec(
         select(UserSession).where(UserSession.id == session_id, UserSession.user_id == user_id)
     )).first()

@@ -1787,7 +1787,7 @@
           "USERS"
         ],
         "summary": "Archive User",
-        "description": "Archive a user (is_deleted=true): deactivates the account and invalidates its sessions.\n\nNothing is removed: observations, media and role assignments of the user stay. The user is hidden from\nlists unless include_deleted=true. Undo with POST /{user_id}/restore. Already archived or unknown: 404.\nNeeds user.archive covering the user and every assignment of the user grantable by the caller (403\ntarget_user_more_privileged); the last administrator: 409.",
+        "description": "Archive a user (is_deleted=true): deactivates the account and invalidates its sessions.\n\nNothing is removed: observations, media and role assignments of the user stay. The user is hidden from\nlists unless include_deleted=true. Undo with POST /{user_id}/restore. Already archived or unknown: 404.\nNeeds user.archive covering the user and every assignment of the user grantable by the caller (403\ntarget_user_more_privileged), answered before the archived state of the user, so an outsider gets the same 403\nfor an archived and a live user; the last administrator: 409.",
         "operationId": "archive_user",
         "security": [
           {
@@ -1943,7 +1943,7 @@
           "USERS"
         ],
         "summary": "Restore User",
-        "description": "Restore an archived user (is_deleted=false, is_active=true): the account can log in again. Not archived: 409.\nNeeds user.archive covering the user and every assignment of the user grantable by the caller (403\ntarget_user_more_privileged).",
+        "description": "Restore an archived user (is_deleted=false, is_active=true): the account can log in again. Not archived: 409.\nNeeds user.archive covering the user and every assignment of the user grantable by the caller (403\ntarget_user_more_privileged), answered before the archived state of the user.",
         "operationId": "restore_user",
         "security": [
           {
@@ -2256,7 +2256,7 @@
           "USERS"
         ],
         "summary": "End User Sessions",
-        "description": "Revoke every live session of a user (revoke_cause ended_by_admin); the account stays as it is and can log\nin again. The caller's own session ends too when user_id is the caller. Archived users: 404.\nNeeds user.update covering the user and every assignment of the user grantable by the caller (403\ntarget_user_more_privileged).",
+        "description": "Revoke every live session of a user (revoke_cause ended_by_admin); the account stays as it is and can log\nin again. The caller's own session ends too when user_id is the caller. Archived users: 404.\nNeeds user.update covering the user and every assignment of the user grantable by the caller (403\ntarget_user_more_privileged), answered before the archived state of the user.",
         "operationId": "end_user_sessions",
         "security": [
           {
@@ -2393,7 +2393,7 @@
           "USERS"
         ],
         "summary": "End User Session",
-        "description": "Revoke one live session of a user (revoke_cause ended_by_admin). Ended already: 409 with its end_reason.\nNeeds user.update covering the user and every assignment of the user grantable by the caller (403\ntarget_user_more_privileged).",
+        "description": "Revoke one live session of a user (revoke_cause ended_by_admin). Ended already: 409 with its end_reason.\nArchived users: 404. Needs user.update covering the user and every assignment of the user grantable by the\ncaller (403 target_user_more_privileged), answered before the archived state of the user and the session.",
         "operationId": "end_user_session",
         "security": [
           {

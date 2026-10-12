@@ -160,7 +160,19 @@ user: roles, home post and access rows become role assignments (a role at the ro
    python -m app.backend.cli.authz_report --json --url mysql+aiomysql://user:password@127.0.0.1:3306/radio_monitoring_copy > authz_report.json
    ```
 
-4. Review it. Per user: the inferred `type`, the roles, home post and access rows before, the assignments after
+4. Review it. The second line names the administrators after the conversion: the users who will hold the built-in
+   `admin` role at the root and are active and not archived (`root_admins` in `--json`), the users the
+   last-administrator rule counts. When there are none (for example the legacy administrator role was not the `admin`
+   role), a `WARNING` line follows: after the upgrade, archiving or deactivating a user answers 409
+   `last_admin_required` and nobody can assign the `admin` role. Recovery after the upgrade: create an administrator
+   on the server (a user of type `admin` holding the `admin` role at the root), with the new version (in the image:
+   `docker compose run --rm --no-deps api python -m ...`, the certificate in a directory mounted into the container):
+
+   ```bash
+   python -m app.backend.cli.init_user /path/to/cert.pem --username <name> --alias "<display name>" --user-type admin
+   ```
+
+   Per user: the inferred `type`, the roles, home post and access rows before, the assignments after
    (`role @ root` or `role @ p:<post id>`), `dropped` (permissions that did nothing: the administration permissions of
    a role without `admin.true`, or scoped permissions of a user without any post) and `differences`, what the new
    model cannot express 1:1:

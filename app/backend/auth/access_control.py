@@ -63,8 +63,8 @@ class AccessControlService:
             auth: AuthContext, permission: Union[Permissions, str], post_id: int, resource_type: str = "post",
     ) -> None:
         """The permission is in effect at the post, otherwise 403: no_post_assigned when it is in effect at no post
-        at all (never held, or held only on archived posts), post_access_denied for a *.view permission,
-        post_write_denied for any other"""
+        at all (never held, or held only at groups without posts; a grant only on archived nodes is held nowhere and
+        require() answers first), post_access_denied for a *.view permission, post_write_denied for any other"""
         if auth.has_at_post(permission, post_id):
             return
         name = permission_name(permission)

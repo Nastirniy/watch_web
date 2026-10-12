@@ -7,7 +7,8 @@ from app.backend.api.v1 import V1
 from app.backend.config import settings
 from app.backend.enums.routes import MediaRoutes, SearchRoutes
 from app.backend.filters.media_filter import MediaFilterService, MediaCriteria
-from tests.helpers import make_post, make_user, make_dictionary, make_observation, make_media
+from app.backend.auth.scope import Node
+from tests.helpers import assign, make_group, make_post, make_role, make_user, make_dictionary, make_observation, make_media
 
 LIST = ["media.view"]
 
@@ -150,15 +151,13 @@ async def test_regenerate_needs_access_to_the_post_of_the_media(client, db, head
 
 @pytest.mark.asyncio
 async def test_regenerate_by_an_administrator_without_a_post_is_no_post_assigned(client, db, headers, tmp_path, monkeypatch):
-    """check_post answers no_post_assigned to a caller whose media permissions apply at no post (their only
-    post is archived; without any post they would hold them nowhere and the route refuse them); the route declares it"""
+    """check_post answers no_post_assigned to a caller whose media permissions apply at no post (held at a group
+    without posts; a grant only on an archived post, or no grant, holds them nowhere and the route refuses the caller
+    with permission_denied); the route declares it"""
     monkeypatch.setattr(settings.storage, "upload_path", str(tmp_path))
     _, _, owner, observation = await _scene(db)
-    gone = await make_post(db)
-    homeless_admin = await make_user(db, perms=["media.view", "media.update", "admin.true"], post_id=gone.id)
-    gone.is_deleted = True
-    db.add(gone)
-    await db.commit()
+    homeless_admin = await make_user(db)
+    await assign(db, homeless_admin, await make_role(db, ["media.view", "media.update"]), Node.group((await make_group(db)).id))
     video = await make_media(db, observation, owner, media_type="video", poster_status="ready")
 
     response = await client.post(V1.path(MediaRoutes.MEDIA_THUMBNAIL_REGENERATE, media_id=video.id),

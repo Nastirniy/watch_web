@@ -32,6 +32,10 @@ new type:
                user_type_ceiling_exceeded
             (the route then ends the user's sessions, runs check_admin_kept and writes the audit row, one transaction)
 
+create_assignment and change_user_type lock the target's users row first (SELECT ... FOR UPDATE, _lock_user), the
+role edits the roles row (get_role_or_404(lock=True)): concurrent changes of one user, or of one role, run one after
+another.
+
 check_role_permissions_added (PATCH /roles/{role_id}, PUT /roles/{role_id}/permissions/{permission_id}): permissions
 added to a role reach every holder at once, so a system permission needs every assignment of the role at the root
 (409 role_requires_root_scope) and every holder's type must allow the added permissions (409
@@ -162,9 +166,19 @@ def _check_ceiling(target: User, permissions: Iterable[str]) -> None:
 
 
 # ------------------------------------------------------------------ changes
+async def _lock_user(session: AsyncSession, target: User) -> None:
+    """SELECT ... FOR UPDATE on the target's row (nothing on sqlite), the row read again (pending changes of the
+    request are flushed first): a concurrent assignment or type change of the same user waits for this transaction,
+    and the checks read the user's type as committed"""
+    (await session.exec(
+        select(User).where(User.id == target.id).with_for_update().execution_options(populate_existing=True)
+    )).one()
+
+
 async def create_assignment(session: AsyncSession, auth: AuthContext, target: User, role_id: int,
                             node: Node) -> RoleAssignment:
     """The assignment of the role to the target at the node, checked and added to the session (not flushed)"""
+    await _lock_user(session, target)
     await check_target_user(session, auth, target, Permissions.USER_UPDATE)
     _refuse_archived(target)
     role = await _live_role(session, role_id)
@@ -274,6 +288,7 @@ async def change_user_type(session: AsyncSession, auth: AuthContext, target: Use
     """Give the target another type (written to the session and flushed, not committed). The route has run rule 2
     (check_target_user with user.update) and, after this, ends the user's sessions and runs check_admin_kept. None
     when the type stays the same: nothing changes."""
+    await _lock_user(session, target)
     old_type = UserType(target.user_type)
     if new_type is old_type:
         return None

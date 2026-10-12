@@ -63,7 +63,10 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - `python -m app.backend.cli.authz_report [--json] [--url URL]`: dry run of the conversion on a database at
   `022_builtin_roles` (run it on a copy of production before the upgrade; read-only): the plan of every user, as the
   migration's audit rows will record it, and the derived roles. A database at 023 or later answers
-  `already converted`; one before 022 is refused (exit code 2).
+  `already converted`; one before 022 is refused (exit code 2). Its second line names the administrators after the
+  conversion, the active, non-archived users who will hold the built-in `admin` role at the root (`root_admins` in
+  `--json`), and a `WARNING` line follows when there are none (recovery: `cli/init_user` with `--user-type admin`,
+  DEPLOYMENT.md).
 - Role assignments API. `GET /users/{user_id}/assignments` (`user.view` covering the user, 403 `user_self_only`;
   an archived user only with `user.archive` covering them, 404 `user_not_found` otherwise): every assignment of the
   user by id, assignments of archived roles included, as `AssignmentResponse` (`id`, `role` {`id`, `name`,
@@ -137,7 +140,12 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   such an `X.archive` answers 403 `permission_required_for_action`. A user with no home post and no access rows holds
   no post-scoped permission (`post.view`, `observation.*`, `media.*`, `user.view`, ...): routes needing one answer
   403 `permission_denied` instead of `no_post_assigned` or an empty list. `no_post_assigned` now means: the
-  permission applies at no post (for example the only post is archived).
+  permission is held, but applies at no post (for example it is held only at a scope group without posts).
+- A permission whose only grants are on archived posts or at archived scope groups is held nowhere (spec section 5:
+  such assignments do not apply): it is left out of `permissions` (`/auth/me`, the login and the refresh response),
+  does not pass a route requirement (403 `permission_denied` with `missing`; before: `no_post_assigned`, or a list
+  answered empty), `POST /auth/check-permission` and `GET /auth/route-access`, and does not count for role edits.
+  The assignments are kept and apply again when the post or the group is restored.
 - The admin gate is removed from `POST /posts/`, `PUT /posts/{post_id}`, `POST /posts/{post_id}/archive` and
   `/restore` (403 `admin_required` is no longer declared there). Each checks its permission at the post:
   `post.update` / `post.archive` in effect at the post (403 `post_write_denied`, `no_post_assigned`); creating a post
@@ -254,6 +262,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   count).
 - `PATCH /users/{user_id}`: the check of the caller's reach (403 `target_user_more_privileged`) answers before the
   archived state of the user (404 `user_not_found`), so an outsider gets the same 403 for an archived and a live user.
+  The same order now holds for `POST /users/{user_id}/archive`, `/sessions/end` and `/sessions/{session_id}/end`
+  (404 `user_not_found` for an archived user only inside the caller's reach) and `POST /users/{user_id}/restore` (409
+  `user_not_archived` only inside it); before, they answered the state first.
 - `RoleResponse.builtin_key`, `is_builtin`, `level` and `PermissionResponse.level` are required in the schema (they
   were always present; openapi-typescript typed them as optional).
 - The permission catalog no longer has `admin.true` and `post.access_all` (migration 023 removes the rows and their
