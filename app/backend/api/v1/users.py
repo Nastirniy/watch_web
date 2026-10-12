@@ -272,6 +272,14 @@ async def create_user(
         raise
 
 
+async def _get_user_or_404(session: AsyncSession, user_id: int) -> User:
+    """The user, archived or not (each route decides what an archived user means after its scope check)"""
+    user = (await session.exec(select(User).where(User.id == user_id))).first()
+    if not user:
+        raise ApiError(ErrorCode.USER_NOT_FOUND)
+    return user
+
+
 @router.get(
     UserRoutes.USER_BY_ID.value,
     response_model=UserResponse,
@@ -284,11 +292,7 @@ async def get_user(
 ):
     """Get user by ID - visible to the user itself and to callers with user.view in effect at the user's home post
     (at the root for a user without one); an archived user also needs user.archive there"""
-
-    result = await session.exec(select(User).where(User.id == user_id))
-    user = result.first()
-    if not user:
-        raise ApiError(ErrorCode.USER_NOT_FOUND)
+    user = await _get_user_or_404(session, user_id)
 
     # Visibility before the state: an outsider gets the same 403 for an archived and a live user
     AccessControlService.check_user_view(auth, user)
@@ -349,14 +353,7 @@ async def update_user(
             content_type=content_type,
         )
 
-    # Find user
-    result = await session.exec(
-        select(User).where(User.id == user_id)
-    )
-    user = result.first()
-
-    if not user:
-        raise ApiError(ErrorCode.USER_NOT_FOUND)
+    user = await _get_user_or_404(session, user_id)
     if user.is_deleted:
         raise ApiError(ErrorCode.USER_NOT_FOUND)
     await check_target_user(session, auth, user, Permissions.USER_UPDATE)
@@ -593,10 +590,7 @@ async def restore_user(
     Needs user.archive covering the user and every assignment of the user grantable by the caller (403
     target_user_more_privileged)."""
     current_user = auth.user
-    result = await session.exec(select(User).where(User.id == user_id))
-    user = result.first()
-    if not user:
-        raise ApiError(ErrorCode.USER_NOT_FOUND)
+    user = await _get_user_or_404(session, user_id)
     if not user.is_deleted:
         raise ApiError(ErrorCode.USER_NOT_ARCHIVED)
     await check_target_user(session, auth, user, Permissions.USER_ARCHIVE)
@@ -639,9 +633,7 @@ async def list_user_sessions(
     idle timeout is ended even if nothing has recorded it yet. user.view must cover the user (403 user_self_only
     otherwise); an archived user, like GET /{user_id}, only for callers with user.archive covering them (404
     otherwise)."""
-    target = (await session.exec(select(User).where(User.id == user_id))).first()
-    if not target:
-        raise ApiError(ErrorCode.USER_NOT_FOUND)
+    target = await _get_user_or_404(session, user_id)
     # Visibility before the state: an outsider gets the same 403 for an archived and a live user
     AccessControlService.check_user_view(auth, target)
     if target.is_deleted and not auth.covers_user(Permissions.USER_ARCHIVE, target):
@@ -732,14 +724,6 @@ async def end_user_session(
 
 # Role assignments: a role held at one node of the scope tree (auth/assignments.py has the rules and their order)
 
-async def _get_user_or_404(session: AsyncSession, user_id: int) -> User:
-    """The user, archived or not (each route decides what an archived user means after its scope check)"""
-    user = (await session.exec(select(User).where(User.id == user_id))).first()
-    if not user:
-        raise ApiError(ErrorCode.USER_NOT_FOUND)
-    return user
-
-
 @router.get(
     UserRoutes.USER_ASSIGNMENTS.value,
     response_model=List[AssignmentResponse],
@@ -751,8 +735,8 @@ async def list_user_assignments(
         auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW]))
 ):
     """The role assignments of a user, by id: the role and the node it applies to (root, group or post, with its
-    name; the application name at the root), assignments of archived roles included (they grant nothing until the
-    role is restored). user.view must cover the user (403 user_self_only otherwise); an archived user, like
+    name; the application name at the root), assignments of archived roles included (role.is_deleted: they grant
+    nothing until the role is restored). user.view must cover the user (403 user_self_only otherwise); an archived user, like
     GET /{user_id}, only for callers with user.archive covering them (404 otherwise)."""
     target = await _get_user_or_404(session, user_id)
     # Visibility before the state: an outsider gets the same 403 for an archived and a live user
@@ -786,7 +770,8 @@ async def create_user_assignment(
     Checked in this order, so that a node outside the caller's scope answers the same 403 whether it exists, is
     archived or not: user.update covering the user and every assignment of the user grantable by the caller (403
     target_user_more_privileged); an archived user 404 user_not_found; an unknown or archived role 404
-    role_not_found; every permission of the role held by the caller at the node (403 grant_exceeds_own_permissions);
+    role_not_found; user.update and every permission of the role held by the caller at the node (403
+    grant_exceeds_own_permissions, missing lists both; a role without permissions still needs user.update there);
     an unknown or archived group or post 404 scope_group_not_found / post_not_found; a role with a system permission
     below the root 409 role_requires_root_scope; a role above the ceiling of the user's type 409
     role_exceeds_user_type; the same role at the same node 409 assignment_exists.
@@ -832,8 +817,10 @@ async def delete_user_assignment(
 
     Checked in this order: user.update covering the user and every assignment of the user grantable by the caller
     (403 target_user_more_privileged); an archived user 404 user_not_found; an assignment that is not this user's
-    404 assignment_not_found; every permission of its role held by the caller at its node (403
-    grant_exceeds_own_permissions); the user's last assignment 409 last_assignment_required; the built-in admin role
+    404 assignment_not_found; user.update and every permission of its role held by the caller at its node (403
+    grant_exceeds_own_permissions); the user's last assignment 409 last_assignment_required (an assignment of a live
+    role needs another one of a live role to remain: an assignment of an archived role grants nothing; one of an
+    archived role needs any other assignment to remain); the built-in admin role
     at the root must stay with an active user (409 last_admin_required) and cannot be taken from oneself (409
     cannot_remove_own_admin).
     """

@@ -295,6 +295,9 @@ async def _set_post_archived(
         raise ApiError(ErrorCode.POST_NOT_FOUND)
     if not archived and not post.is_deleted:
         raise ApiError(ErrorCode.POST_NOT_ARCHIVED)
+    if not archived:
+        # Like a group restored under an archived parent: restore the group first
+        await _check_group(session, post.group_id)
 
     action = "archive" if archived else "restore"
     old_values = post.model_dump()
@@ -347,7 +350,7 @@ async def archive_post(
     response_model=PostResponse,
     responses=problems(
         AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.POST_NOT_FOUND,
-        ErrorCode.POST_NOT_ARCHIVED, *GUARDED,
+        ErrorCode.POST_NOT_ARCHIVED, ErrorCode.SCOPE_GROUP_NOT_FOUND, *GUARDED,
     ),
 )
 async def restore_post(
@@ -358,5 +361,6 @@ async def restore_post(
 ):
     """Restore an archived post (is_deleted=false): role assignments made on it apply again.
     post.archive must be in effect at the post through a group or the root (a grant on the archived post itself
-    does not apply). Unknown: 404. Not archived: 409."""
+    does not apply). Unknown: 404. Not archived: 409. Its group archived: 404 scope_group_not_found (restore the
+    group first, as for a group under an archived parent)."""
     return await _set_post_archived(request, session, auth, post_id, archived=False)

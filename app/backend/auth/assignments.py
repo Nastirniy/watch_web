@@ -6,13 +6,16 @@ two requests pass the duplicate check together) and writes the audit row. The or
 ids: the target user and the caller's scope answer before the existence or the state of a role, a group or a post.
 
     create: check_target_user(user.update) 403 -> archived user 404 -> role unknown or archived 404
-            -> check_grant_at(the role's permissions, the node) 403 (an unknown or archived node outside the caller's
-               scope is not covered: the same 403 as a live one) -> the node exists and is live 404
+            -> check_assign_at(user.update and the role's permissions, the node) 403 (an unknown or archived node
+               outside the caller's scope is not covered: the same 403 as a live one, a role without permissions
+               included) -> the node exists and is live 404
             -> a role with a system permission only at the root 409 -> the ceiling of the user's type 409
             -> the same role at the same node 409
     delete: check_target_user(user.update) 403 -> archived user 404 -> the assignment of that user 404
-            -> check_grant_at(its role's permissions, its node) 403 -> the user's last assignment 409
-            -> the built-in admin role at the root: someone keeps it, and not taken from oneself 409
+            -> check_assign_at(user.update and its role's permissions, its node) 403
+            -> the user's last assignment 409 (of a live role: another one of a live role remains; an assignment of
+               an archived role grants nothing)
+            -> the built-in admin role at the root: not taken from oneself, and someone keeps it 409
 
 assignment_views reads the assignments of a user with the role and the scope named, as dataclasses (the route
 converts them into its response model).
@@ -27,7 +30,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.auth.context import AuthContext
-from app.backend.auth.privileges import check_admin_kept, check_grant_at, check_target_user, role_permission_names
+from app.backend.auth.privileges import check_admin_kept, check_assign_at, check_target_user, role_permission_names
 from app.backend.auth.scope import Node, NodeKind, ROOT
 from app.backend.auth.user_types import excess_permissions
 from app.backend.bootstrap.permissions import permission_level
@@ -48,6 +51,7 @@ class AssignmentRoleView:
     name: str
     display_name: str
     is_builtin: bool
+    is_deleted: bool    # an archived role grants nothing until it is restored
 
 
 @dataclass(frozen=True)
@@ -102,6 +106,31 @@ def _check_level(permissions: Iterable[str], node: Node) -> None:
         raise ApiError(ErrorCode.ROLE_REQUIRES_ROOT_SCOPE, system_permissions=system)
 
 
+async def _assignment_exists(session: AsyncSession, user_id: int, role_id: int, node: Node) -> bool:
+    """The user already holds the role at the node (two requests may both see False: the unique index answers then)"""
+    found = (await session.exec(
+        select(RoleAssignment.id).where(
+            RoleAssignment.user_id == user_id, RoleAssignment.role_id == role_id, RoleAssignment.scope_key == node.key,
+        )
+    )).first()
+    return found is not None
+
+
+async def _check_not_last(session: AsyncSession, target: User, assignment: RoleAssignment, role: Role) -> None:
+    """Spec section 6 rule 6: a user keeps at least one assignment. An assignment of an archived role grants nothing,
+    so the last assignment of a live role stays while only such assignments would remain; an assignment of an
+    archived role goes while any other assignment remains"""
+    others = (
+        select(func.count()).select_from(RoleAssignment)
+        .join(Role, Role.id == RoleAssignment.role_id)
+        .where(RoleAssignment.user_id == target.id, RoleAssignment.id != assignment.id)
+    )
+    if not role.is_deleted:
+        others = others.where(Role.is_deleted == False)  # noqa: E712
+    if (await session.exec(others)).one() == 0:
+        raise ApiError(ErrorCode.LAST_ASSIGNMENT_REQUIRED)
+
+
 def _check_ceiling(target: User, permissions: Iterable[str]) -> None:
     """Every role of a user fits the ceiling of the user's type"""
     user_type = UserType(target.user_type)
@@ -118,16 +147,11 @@ async def create_assignment(session: AsyncSession, auth: AuthContext, target: Us
     _refuse_archived(target)
     role = await _live_role(session, role_id)
     permissions = await role_permission_names(session, [role.id])
-    check_grant_at(auth, permissions, node)
+    check_assign_at(auth, permissions, node)
     await _check_node_live(session, node)
     _check_level(permissions, node)
     _check_ceiling(target, permissions)
-    duplicate = (await session.exec(
-        select(RoleAssignment.id).where(
-            RoleAssignment.user_id == target.id, RoleAssignment.role_id == role.id, RoleAssignment.scope_key == node.key,
-        )
-    )).first()
-    if duplicate is not None:
+    if await _assignment_exists(session, target.id, role.id, node):
         raise ApiError(ErrorCode.ASSIGNMENT_EXISTS)
 
     assignment = RoleAssignment(user_id=target.id, role_id=role.id, created_by=auth.user.id, **scope_columns(node))
@@ -146,20 +170,15 @@ async def delete_assignment(session: AsyncSession, auth: AuthContext, target: Us
     )).first()
     if assignment is None:
         raise ApiError(ErrorCode.ASSIGNMENT_NOT_FOUND)
-    check_grant_at(auth, await role_permission_names(session, [assignment.role_id]), assignment.node)
+    check_assign_at(auth, await role_permission_names(session, [assignment.role_id]), assignment.node)
+    role = (await session.exec(select(Role).where(Role.id == assignment.role_id))).one()
+    await _check_not_last(session, target, assignment, role)
 
-    count = (await session.exec(
-        select(func.count()).select_from(RoleAssignment).where(RoleAssignment.user_id == target.id)
-    )).one()
-    if count <= 1:
-        raise ApiError(ErrorCode.LAST_ASSIGNMENT_REQUIRED)
-
-    builtin_key = (await session.exec(select(Role.builtin_key).where(Role.id == assignment.role_id))).one()
     removed = assignment.model_dump()
     session.expunge(assignment)
     # A core statement: no ORM cascade or relationship bookkeeping in the async session
     await session.execute(sa_delete(RoleAssignment).where(RoleAssignment.id == assignment_id))
-    if builtin_key == UserType.ADMIN.value and removed["scope_key"] == ROOT.key:
+    if role.builtin_key == UserType.ADMIN.value and removed["scope_key"] == ROOT.key:
         await check_admin_kept(session, auth)
     logger.info(f"User {auth.user.username} removes assignment {assignment_id} ({removed['scope_key']}) of user {target.id}")
     return removed
@@ -196,7 +215,7 @@ async def assignment_views(session: AsyncSession, user_id: int,
         views.append(AssignmentView(
             id=assignment.id,
             role=AssignmentRoleView(id=role.id, name=role.name, display_name=role.display_name,
-                                    is_builtin=role.builtin_key is not None),
+                                    is_builtin=role.builtin_key is not None, is_deleted=role.is_deleted),
             scope=AssignmentScopeView(kind=node.kind, id=node.id, name=name),
             created_at=assignment.created_at,
         ))

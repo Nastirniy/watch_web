@@ -15,6 +15,7 @@ import pytest
 from sqlmodel import select
 
 from app.backend.api.v1 import V1
+from app.backend.auth import assignments as assignment_rules
 from app.backend.auth.scope import Node, ROOT
 from app.backend.auth.user_types import USER_TYPES
 from app.backend.config import settings
@@ -114,7 +115,7 @@ async def test_group_admin_assigns_inside_own_subtree(client, db, headers, tree)
     assert created.status_code == 201, created.text
     body = created.json()
     assert body["role"] == {"id": operator.id, "name": operator.name, "display_name": operator.display_name,
-                            "is_builtin": True}
+                            "is_builtin": True, "is_deleted": False}
     assert body["scope"] == {"kind": "group", "id": tree.kharkiv.id, "name": "Kharkiv"}
     assert body["created_at"]
 
@@ -146,7 +147,7 @@ async def test_group_admin_cannot_assign_outside_own_subtree(client, db, headers
         refused = await client.post(assignments_url(target.id), json=body_of(operator, kind, node_id),
                                     headers=headers(group_admin))
         body = problem(refused, 403, "grant_exceeds_own_permissions")
-        assert body["missing"] == sorted(USER_TYPES[UserType.OPERATOR].base_permissions), kind
+        assert body["missing"] == sorted(USER_TYPES[UserType.OPERATOR].base_permissions | {"user.update"}), kind
 
     refused = await client.post(assignments_url(outsider.id), json=body_of(operator, "group", tree.kharkiv.id),
                                 headers=headers(group_admin))
@@ -228,6 +229,35 @@ async def test_scoped_caller_gets_the_same_403_for_unknown_archived_and_foreign_
     body = problem(await client.post(assignments_url(target.id), json=body_of(operator, "post", gone_a.id),
                                      headers=headers(group_admin)), 404, "post_not_found")
     assert body["post_id"] == gone_a.id
+
+
+async def test_a_role_without_permissions_needs_user_update_at_the_node(client, db, headers, tree):
+    """R22: an assignment is made or removed only at a node inside the caller's user.update; a role without
+    permissions is no free pass (an unknown, a foreign and the root node answer the same 403, nothing written)"""
+    group_admin = await group_admin_of(db, tree.east)
+    target = await typed_user(db, UserType.OPERATOR, post_id=tree.a.id)
+    empty = await make_role(db, [])
+    before = await assignment_ids(db, target)
+
+    answers = []
+    for kind, node_id in (("group", 999999), ("post", 999999), ("group", tree.west.id), ("post", tree.b.id), ("root", None)):
+        refused = await client.post(assignments_url(target.id), json=body_of(empty, kind, node_id),
+                                    headers=headers(group_admin))
+        answers.append(problem(refused, 403, "grant_exceeds_own_permissions"))
+    assert all(answer == answers[0] for answer in answers), answers
+    assert answers[0]["missing"] == ["user.update"]
+    assert await assignment_ids(db, target) == before
+    assert not (await db.exec(select(AuditLog).where(AuditLog.resource_type == "role_assignment"))).all()
+
+    created = await client.post(assignments_url(target.id), json=body_of(empty, "group", tree.kharkiv.id),
+                                headers=headers(group_admin))
+    assert created.status_code == 201, created.text
+
+    # One placed at West by someone else: the group admin cannot remove it either
+    planted = await assign(db, target, empty, Node.group(tree.west.id))
+    refused = await client.delete(assignment_url(target.id, planted.id), headers=headers(group_admin))
+    assert problem(refused, 403, "grant_exceeds_own_permissions")["missing"] == ["user.update"]
+    assert planted.id in await assignment_ids(db, target)
 
 
 # ----------------------------------------------------------------- level, ceiling, nodes
@@ -338,6 +368,52 @@ async def test_duplicate_and_last_assignment(client, db, headers, tree):
     assert await assignment_ids(db, other) == [foreign]
 
 
+async def test_the_last_assignment_counts_live_roles(client, db, headers, tree):
+    """An assignment of an archived role grants nothing: the last assignment of a live role stays while only such
+    assignments would remain; an assignment of an archived role goes while any other assignment remains"""
+    admin = await make_admin(db)
+    target = await typed_user(db, UserType.VIEWER, post_id=tree.a.id)
+    (live,) = await assignment_ids(db, target)
+    old_role = await make_role(db, [Permissions.POST_VIEW])
+    old_at_a = await assign(db, target, old_role, Node.post(tree.a.id))
+    old_at_kharkiv = await assign(db, target, old_role, Node.group(tree.kharkiv.id))
+    await _archive(db, old_role)
+
+    listed = await client.get(assignments_url(target.id), headers=headers(admin))
+    assert {item["id"]: item["role"]["is_deleted"] for item in listed.json()} == {
+        live: False, old_at_a.id: True, old_at_kharkiv.id: True}
+
+    problem(await client.delete(assignment_url(target.id, live), headers=headers(admin)), 409, "last_assignment_required")
+    for removed in (old_at_a.id, old_at_kharkiv.id):
+        response = await client.delete(assignment_url(target.id, removed), headers=headers(admin))
+        assert response.status_code == 204, response.text
+    assert await assignment_ids(db, target) == [live]
+
+    # Left with assignments of archived roles only: any other one lets one go, the last one stays
+    other = await make_user(db, post_id=tree.a.id, user_type=UserType.VIEWER)
+    first = await assign(db, other, old_role, Node.post(tree.a.id))
+    second = await assign(db, other, old_role, Node.group(tree.kharkiv.id))
+    response = await client.delete(assignment_url(other.id, first.id), headers=headers(admin))
+    assert response.status_code == 204, response.text
+    problem(await client.delete(assignment_url(other.id, second.id), headers=headers(admin)), 409, "last_assignment_required")
+
+
+async def test_a_concurrent_duplicate_is_refused_by_the_unique_index(client, db, headers, tree, monkeypatch):
+    """Two requests pass the duplicate check together: the unique index answers assignment_exists, nothing written"""
+    admin = await make_admin(db)
+    target = await typed_user(db, UserType.VIEWER, post_id=tree.a.id)
+    before = await assignment_ids(db, target)
+
+    async def missed(*args, **kwargs) -> bool:
+        return False
+    monkeypatch.setattr(assignment_rules, "_assignment_exists", missed)
+    refused = await client.post(assignments_url(target.id), json=body_of(await builtin(db, UserType.VIEWER), "post", tree.a.id),
+                                headers=headers(admin))
+    problem(refused, 409, "assignment_exists")
+    assert await assignment_ids(db, target) == before
+    assert not (await db.exec(select(AuditLog).where(AuditLog.resource_type == "role_assignment"))).all()
+
+
 async def test_last_admin_cannot_drop_own_root_admin(client, db, headers, tree):
     """Review Focus 5: the last administrator deleting their own admin @ root: 409, nothing changed"""
     admin = await make_admin(db)
@@ -397,6 +473,20 @@ async def test_own_assignments_are_visible_without_user_view_elsewhere(client, d
     assert shown.status_code == 200 and len(shown.json()) == 1, shown.text
     own = await client.get(assignments_url(reader.id), headers=headers(reader))
     assert own.status_code == 200 and own.json()[0]["scope"] == {"kind": "post", "id": tree.a.id, "name": "A"}
+
+
+async def test_an_outsider_gets_the_same_403_for_an_archived_and_a_live_user(client, db, headers, tree):
+    """Visibility before the state: the archive flag of a user outside the caller's user.view is not told"""
+    live = await typed_user(db, UserType.VIEWER, post_id=tree.a.id)
+    gone = await typed_user(db, UserType.VIEWER, post_id=tree.a.id)
+    await _archive(db, gone)
+    outsider = await group_admin_of(db, tree.west)
+
+    answers = []
+    for user in (live, gone):
+        body = problem(await client.get(assignments_url(user.id), headers=headers(outsider)), 403, "user_self_only")
+        answers.append({key: value for key, value in body.items() if key != "instance"})
+    assert answers[0] == answers[1]
 
 
 # ----------------------------------------------------------------- effect of a group assignment

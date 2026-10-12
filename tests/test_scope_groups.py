@@ -275,21 +275,45 @@ async def test_tree_posts_follow_post_view(client, db, headers):
 
 
 async def test_tree_leaves_out_a_live_post_of_an_archived_group(client, db, headers):
-    """A post restored while its group is archived keeps its group_id: it is not shown as a post of the root"""
+    """A live post in an archived group (data from before the restore check, test below) keeps its group_id: it is
+    not shown as a post of the root"""
+    admin = await make_admin(db)
+    old = await make_group(db, "Old")
+    post = await make_post(db, "Orphan", group_id=old.id)
+    old.is_deleted = True
+    db.add(old)
+    await db.commit()
+
+    tree = (await client.get(V1.path(ScopeGroupRoutes.TREE), headers=headers(admin))).json()
+    assert "Old" not in _names(tree["groups"])
+    assert post.id not in _every_post_id(tree)
+
+
+async def test_a_post_is_not_restored_into_an_archived_group(client, db, headers):
+    """R23: like a group restore under an archived parent, 404 scope_group_not_found; the scope answers first"""
     admin = await make_admin(db)
     h = headers(admin)
     old = await make_group(db, "Old")
     post = await make_post(db, "Orphan", group_id=old.id)
-    for url in (V1.path(PostRoutes.POST_ARCHIVE, post_id=post.id), V1.path(ScopeGroupRoutes.GROUP_ARCHIVE, group_id=old.id),
-                V1.path(PostRoutes.POST_RESTORE, post_id=post.id)):
+    restore = V1.path(PostRoutes.POST_RESTORE, post_id=post.id)
+    for url in (V1.path(PostRoutes.POST_ARCHIVE, post_id=post.id), V1.path(ScopeGroupRoutes.GROUP_ARCHIVE, group_id=old.id)):
         r = await client.post(url, headers=h)
         assert r.status_code == 200, r.text
-    await db.refresh(post)
-    assert post.is_deleted is False and post.group_id == old.id
 
-    tree = (await client.get(V1.path(ScopeGroupRoutes.TREE), headers=h)).json()
-    assert "Old" not in _names(tree["groups"])
-    assert post.id not in _every_post_id(tree)
+    r = await client.post(restore, headers=h)
+    assert r.status_code == 404 and r.json()["code"] == "scope_group_not_found", r.text
+    await db.refresh(post)
+    assert post.is_deleted is True
+
+    other = await make_post(db, "Elsewhere")
+    outsider = await _caller(db, Node.post(other.id), Permissions.POST_VIEW, Permissions.POST_ARCHIVE)
+    r = await client.post(restore, headers=headers(outsider))
+    assert r.status_code == 403 and r.json()["code"] == "post_write_denied", r.text
+
+    r = await client.post(V1.path(ScopeGroupRoutes.GROUP_RESTORE, group_id=old.id), headers=h)
+    assert r.status_code == 200, r.text
+    r = await client.post(restore, headers=h)
+    assert r.status_code == 200 and r.json()["is_deleted"] is False, r.text
 
 
 @pytest.mark.slow

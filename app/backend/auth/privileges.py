@@ -6,7 +6,9 @@ Nobody becomes able to do more than they could by changing access:
   every permission the change grants or revokes, held anywhere (role.* are system permissions: only holders at the
   root edit roles). 403 grant_exceeds_own_permissions with the permissions the caller lacks.
 - check_grant_at: an assignment at a node (a new user's default assignment, the assignment API) needs every permission
-  of the role covered at that node (AuthContext.covers). 403 grant_exceeds_own_permissions.
+  of the role covered at that node (AuthContext.covers). 403 grant_exceeds_own_permissions. check_assign_at (the
+  assignment API, create and delete) also needs user.update covered at the node, so a role without permissions
+  cannot be placed or removed outside the caller's reach.
 - check_target_user: a change to another user (fields, home post, sessions, archive state) needs the route's user.*
   permission covering the user (their home post, the root for a user without one) and that the caller could grant
   every assignment the user has (each role's permissions covered at its node), assignments of archived roles
@@ -68,6 +70,13 @@ def check_grant_at(auth: AuthContext, permissions: Iterable[str], node: Node) ->
     if missing:
         logger.warning(f"User {auth.user.username} tried to grant at {node.key} permissions they lack there: {missing}")
         raise access_denied(AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, missing=missing)
+
+
+def check_assign_at(auth: AuthContext, permissions: Iterable[str], node: Node) -> None:
+    """An assignment made or removed at the node through the assignment API: user.update covered at the node itself
+    and every permission of the role there, in one 403 grant_exceeds_own_permissions whose missing lists both. A role
+    without permissions is no free pass: the node must lie inside the caller's user.update."""
+    check_grant_at(auth, {*permissions, Permissions.USER_UPDATE.value}, node)
 
 
 async def _every_assignment(session: AsyncSession, user_id: int) -> Tuple[Grant, ...]:
