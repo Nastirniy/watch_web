@@ -289,12 +289,13 @@ the user forms, `is_admin` and `accessible_post_ids` in auth responses, `admin_r
 
 ## 8. Migration and conversion
 
-Two revisions:
+Three revisions (the plan split the built-in role column into its own revision):
 
 - `021_scope_groups` (additive): `scope_groups`, `posts.group_id`. Ships with task 1 on its own.
-- `022_authorization_v2`: `role_assignments`, `roles.builtin_key`, `users.user_type` (nullable during the
-  conversion, then NOT NULL), renames custom roles whose name is a built-in key to `<name>_custom`, converts every
-  user, removes the `admin.true` and `post.access_all` rows from `permissions` and `role_permissions`, renames
+- `022_builtin_roles` (additive): `roles.builtin_key`, renames custom roles whose name is a built-in key to
+  `<name>_custom`, marks the `admin` role.
+- `023_authorization_v2`: `role_assignments`, `users.user_type` (nullable during the conversion, then NOT NULL),
+  converts every user, removes the `admin.true` and `post.access_all` rows from `permissions` and `role_permissions`, renames
   `user_roles` and `user_post_access` to `*_v1`, and records what it did in `authz_v2_migration_log` (`kind`,
   `ref_id`, JSON `data`) for the downgrade.
 
@@ -311,7 +312,8 @@ the same way; derived roles of an archived role are archived too):
    gated-only permissions are dead today and are left out (reported): `user.create/update/archive`,
    `post.create/update/archive`, `role.*`, `category/signal_type/tag.create/update/archive`, `media.update`,
    `media_format.create/update/archive`, `export.create`.
-3. U holds `post.access_all`: every R becomes `P(R) @ /`.
+3. U holds `post.access_all`: every R becomes `P(R) @ /`, plus `media.monitor` when U also holds `admin.true` and
+   `P(R)` holds `media.view` (as in rule 4: storage monitoring ignored the data scope).
 4. Otherwise, for each R:
    - root part = `system` permissions of `P(R)`, plus, when U holds `admin.true`, the record administration and
      global aggregates of `P(R)`: `post.view/create/update/archive`, `user.view/create/update/archive`,
@@ -341,7 +343,7 @@ Differences the new model cannot express 1:1 are reported, never hidden:
 ### Report
 
 - Before the upgrade: `python -m app.backend.cli.authz_report [--json]` loads the conversion function from the 022
-  file and runs it read-only on the current (020 / 021) database: every user, inferred type, assignments before and
+  file and runs it read-only on the current (022) database: every user, inferred type, assignments before and
   after, derived roles, removed dead permissions, every difference. Run it on a copy of the production database.
 - During the migration: one audit row per converted user (`action=migrate`, `resource_type=user`) with the same
   details, written with core inserts.
@@ -354,7 +356,7 @@ rename built-in-name collisions back, drop derived roles, `role_assignments`, `u
 
 ### Verification
 
-Tests on sqlite (fresh install; upgrade from 020 with fixture data covering every rule; downgrade), then a run on
+Tests on sqlite (fresh install; upgrade from 022 with fixture data covering every rule; downgrade), then a run on
 throwaway MySQL 8 and MariaDB containers as for 018 - 020.
 
 Rollout: `authz_report` on a database copy, review, deploy (start applies the migrations), the administrator fixes
@@ -393,13 +395,13 @@ the reported differences through the API, the web moves to the new auth fields.
   `test_user_types` (catalog, ceiling, type change, downgrade 409, sessions ended), `test_assignments` (delegation
   at scope, `system` only at `/`, duplicates, last assignment, last admin), `test_scope_groups` (API, name per
   parent, archive only when empty), `test_builtin_roles` (sync at start, 409 on changes, clone),
-  `test_migration_022_authz` (every conversion rule on fixture data from 020, report equals audit rows, downgrade
+  `test_migration_023_authz` (every conversion rule on fixture data from 022, report equals audit rows, downgrade
   restores exactly);
 - rewritten: `test_access_matrix`, `test_admin_privileges`, `test_post_access`, `test_route_access`,
   `test_require`, `test_seed`, `test_scope3`, `test_post_archive`;
 - contract: `test_openapi`, `test_error_contract`, `test_route_registry`, `test_filter_criteria`; `test_api_contract`
   after the deliberate regeneration;
-- live: 021 and 022 on throwaway MySQL 8 and MariaDB.
+- live: 021, 022 and 023 on throwaway MySQL 8 and MariaDB.
 
 ## 11. Delivery
 
