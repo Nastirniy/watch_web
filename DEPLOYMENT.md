@@ -189,11 +189,17 @@ Downgrade (with the new code, before the old one starts): `python -m alembic dow
 exactly what it converted, from the kept tables and its log: `user_roles` and `user_post_access` come back from
 `user_roles_v1` / `user_post_access_v1`, `admin.true`, `post.access_all` and their grants are inserted again with
 their ids, the derived roles, `role_assignments`, `users.user_type` and `authz_v2_migration_log` are dropped. 022
-drops `roles.builtin_key` only: a role it renamed keeps the name `<key>_custom`, and the built-in roles seeding
-created stay as ordinary roles without users (an upgrade after that renames them `<key>_custom` too). 021 drops
-`posts.group_id` and `scope_groups`: the groups are lost. Everything done through the new API since the upgrade is
-lost with the assignments: users created after the upgrade have no legacy roles and lose access on a downgrade, type
-changes and new assignments are gone.
+restores from its own log (`builtin_roles_migration_log`): the built-in roles seeding created are deleted with their
+grants (the `admin` role stays: it existed before and gets its texts back), every role it renamed to `<key>_custom`
+gets its old name back, the permission texts seeding refreshed come back, `media.monitor` is deleted with its grants,
+then `roles.builtin_key` and the log are dropped. 021 deletes `scope_group.*` with their grants and drops
+`posts.group_id` and `scope_groups`: the groups are lost. So a downgrade after the new version has started restores
+`permissions`, `roles`, `role_permissions`, `users`, `user_roles` and `user_post_access` exactly (same rows, ids and
+names; checked live on MySQL 8 and MariaDB 11), and a later upgrade adds no stray roles. A line in the output names a
+built-in role kept because a `user_roles` row refers to it, or a role that keeps `<key>_custom` because another role
+took the old name. Everything done through the new API since the upgrade is lost with the assignments: users created
+after the upgrade have no legacy roles and lose access on a downgrade, type changes and new assignments are gone, and
+roles created through the API stay as roles without holders.
 
 ### Scheduled cleanup (cron)
 
