@@ -4038,7 +4038,7 @@
           "ROLES"
         ],
         "summary": "Delete Role",
-        "description": "PERMANENTLY delete a role. This is the only hard delete in the API and cannot be undone.\n\nRequires role.delete (distinct from role.archive). The role row, its permission grants and its\nassignments to archived users are removed from the database, and so are its rows in user_roles_v1 (the legacy\nholders migration 023 keeps until a cleanup revision; a downgrade does not bring them or the role back).\nPreconditions, each answered with 409: the role must be archived first (POST /{role_id}/archive), no active user\nmay still hold it (the response lists them), and a built-in role can never be deleted.\nThe audit log keeps a full copy of the role, its permissions, its assignments and its user_roles_v1 rows.",
+        "description": "PERMANENTLY delete a role. This is the only hard delete in the API and cannot be undone.\n\nRequires role.delete (distinct from role.archive). The role row, its permission grants and its\nassignments to archived users are removed from the database, and so are its rows in user_roles_v1 (the legacy\nholders migration 023 keeps until a cleanup revision; a downgrade does not bring them or the role back).\nPreconditions, each answered with 409: the role must be archived first (POST /{role_id}/archive), no active user\nmay still hold it (the response lists them), no archived holder may be left without an assignment (a restore\nwould bring the user back without any: last_assignment_required; give them another one first), and a built-in\nrole can never be deleted.\nThe audit log keeps a full copy of the role, its permissions, its assignments and its user_roles_v1 rows.",
         "operationId": "delete_role",
         "security": [
           {
@@ -4146,13 +4146,16 @@
             }
           },
           "409": {
-            "description": "`builtin_role_not_deletable`: Built-in roles cannot be deleted; `role_delete_requires_archive`: Role must be archived before it can be deleted permanently; `role_has_active_users`: Role is still assigned to active users; unassign it before deleting permanently",
+            "description": "`builtin_role_not_deletable`: Built-in roles cannot be deleted; `last_assignment_required`: The last role assignment of a user cannot be removed; `role_delete_requires_archive`: Role must be archived before it can be deleted permanently; `role_has_active_users`: Role is still assigned to active users; unassign it before deleting permanently",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
                     {
                       "$ref": "#/components/schemas/BuiltinRoleNotDeletableProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LastAssignmentRequiredProblem"
                     },
                     {
                       "$ref": "#/components/schemas/RoleDeleteRequiresArchiveProblem"
@@ -4165,6 +4168,7 @@
                     "propertyName": "code",
                     "mapping": {
                       "builtin_role_not_deletable": "#/components/schemas/BuiltinRoleNotDeletableProblem",
+                      "last_assignment_required": "#/components/schemas/LastAssignmentRequiredProblem",
                       "role_delete_requires_archive": "#/components/schemas/RoleDeleteRequiresArchiveProblem",
                       "role_has_active_users": "#/components/schemas/RoleHasActiveUsersProblem"
                     }

@@ -424,7 +424,7 @@ async def clone_role(
     status_code=status.HTTP_204_NO_CONTENT,
     responses=problems(
         ErrorCode.ROLE_NOT_FOUND, ErrorCode.BUILTIN_ROLE_NOT_DELETABLE, ErrorCode.ROLE_DELETE_REQUIRES_ARCHIVE,
-        ErrorCode.ROLE_HAS_ACTIVE_USERS, *GUARDED,
+        ErrorCode.ROLE_HAS_ACTIVE_USERS, ErrorCode.LAST_ASSIGNMENT_REQUIRED, *GUARDED,
     ),
 )
 async def delete_role(
@@ -439,7 +439,9 @@ async def delete_role(
     assignments to archived users are removed from the database, and so are its rows in user_roles_v1 (the legacy
     holders migration 023 keeps until a cleanup revision; a downgrade does not bring them or the role back).
     Preconditions, each answered with 409: the role must be archived first (POST /{role_id}/archive), no active user
-    may still hold it (the response lists them), and a built-in role can never be deleted.
+    may still hold it (the response lists them), no archived holder may be left without an assignment (a restore
+    would bring the user back without any: last_assignment_required; give them another one first), and a built-in
+    role can never be deleted.
     The audit log keeps a full copy of the role, its permissions, its assignments and its user_roles_v1 rows.
     """
     current_user = auth.user
@@ -461,6 +463,16 @@ async def delete_role(
     if active_users:
         raise ApiError(ErrorCode.ROLE_HAS_ACTIVE_USERS, assigned_users=active_users)
     archived_users = [{"id": uid, "username": name} for uid, name, deleted in assigned_rows if deleted]
+    # Spec section 6 rule 6: every archived holder keeps another assignment (of any role: a restore gives it back)
+    holder_ids = [user["id"] for user in archived_users]
+    kept = set((await session.exec(
+        select(RoleAssignment.user_id).where(RoleAssignment.user_id.in_(holder_ids), RoleAssignment.role_id != role_id)
+    )).all()) if holder_ids else set()
+    stranded = [user for user in archived_users if user["id"] not in kept]
+    if stranded:
+        _logger.warning(f"User {current_user.username} tried to delete role {role_id}, the only assignment of archived "
+                        f"users {[user['id'] for user in stranded]}")
+        raise ApiError(ErrorCode.LAST_ASSIGNMENT_REQUIRED)
     # A full copy of every role_assignments row the delete removes: every column
     assignments = [assignment.model_dump() for assignment in (await session.exec(
         select(RoleAssignment).where(RoleAssignment.role_id == role_id).order_by(RoleAssignment.id)

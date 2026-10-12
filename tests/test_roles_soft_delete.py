@@ -8,7 +8,7 @@ from sqlmodel import select
 
 from app.backend.bootstrap.permissions import seed_roles_and_permissions
 from app.backend.enums.general import Permissions
-from app.backend.enums.routes import RoleRoutes, TagRoutes, AuthRoutes
+from app.backend.enums.routes import RoleRoutes, TagRoutes, AuthRoutes, UserRoutes
 from app.backend.api.v1 import V1
 from app.backend.models.audit import AuditLog
 from app.backend.auth.scope import Node, ROOT
@@ -119,12 +119,14 @@ async def test_permanent_delete_preconditions_and_effect(client, db, headers):
         {"id": archived_holder.id, "username": archived_holder.username},
     ]
 
-    # unassign the active holder, archive the other one: its assignment row will be removed by the delete
+    # unassign the active holder, archive the other one: its assignment row will be removed by the delete (it keeps
+    # another assignment, R38)
     await db.execute(RoleAssignment.__table__.delete().where(
         RoleAssignment.user_id == holder.id, RoleAssignment.role_id == role.id))
     archived_holder.is_deleted = True
     db.add(archived_holder)
     await db.commit()
+    await assign(db, archived_holder, await make_role(db, ["tag.view"]), Node.post(post.id))
     (removed_row,) = (await db.exec(select(RoleAssignment).where(RoleAssignment.role_id == role.id))).all()
     removed_row.created_by = admin.id
     db.add(removed_row)
@@ -161,6 +163,36 @@ async def test_permanent_delete_preconditions_and_effect(client, db, headers):
     assert {**copied, "created_at": datetime.fromisoformat(copied["created_at"])} == expected_assignment
     assert log.details["permanent"] is True
     assert log.old_values["user_roles_v1"] == [], "no user_roles_v1 table (a fresh install): nothing to copy"
+
+
+@pytest.mark.asyncio
+async def test_permanent_delete_never_leaves_a_holder_without_an_assignment(client, db, headers):
+    """R38: the delete removes the assignments of archived holders; one whose only assignment is of the role would
+    come back from a restore without any (rule 6): 409 last_assignment_required, nothing removed. With another
+    assignment of the holder the delete goes through."""
+    post = await make_post(db)
+    admin = await make_admin(db)
+    role = await make_role(db, ["tag.view"])
+    holder = await make_user(db, post_id=post.id)
+    only = await assign(db, holder, role, Node.post(post.id))
+    login = headers(admin)
+    archived = await client.post(V1.path(UserRoutes.USER_ARCHIVE, user_id=holder.id), headers=login)
+    assert archived.status_code == 200, archived.text
+    assert (await client.post(ARCHIVE.format(role_id=role.id), headers=login)).status_code == 200
+
+    refused = await client.delete(ROLE.format(role_id=role.id), headers=login)
+    assert refused.status_code == 409 and refused.json()["code"] == "last_assignment_required", refused.text
+    assert (await db.exec(select(Role.id).where(Role.id == role.id))).first() == role.id
+    assert (await db.exec(select(RoleAssignment.id).where(RoleAssignment.role_id == role.id))).all() == [only.id]
+    assert (await db.exec(select(RolePermission).where(RolePermission.role_id == role.id))).first() is not None
+    assert not (await db.exec(select(AuditLog).where(AuditLog.resource_type == "role",
+                                                     AuditLog.action == "delete"))).all()
+
+    other = await assign(db, holder, await make_role(db, ["tag.view"]), Node.post(post.id))
+    deleted = await client.delete(ROLE.format(role_id=role.id), headers=login)
+    assert deleted.status_code == 204, deleted.text
+    left = (await db.exec(select(RoleAssignment.id).where(RoleAssignment.user_id == holder.id))).all()
+    assert left == [other.id]
 
 
 LEGACY_HOLDERS_DDL = (  # user_roles_v1 as 023 leaves it: the legacy user_roles, foreign key to roles.id kept

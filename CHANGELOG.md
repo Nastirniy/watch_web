@@ -231,6 +231,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   the permanent delete of an archived legacy role with such rows answered 500. The audit copy lists them under
   `user_roles_v1` with every column (empty without the table). Such a role and its legacy rows do not come back with
   a downgrade.
+- `DELETE /roles/{role_id}` answers 409 `last_assignment_required` when an archived holder's only assignment is of
+  the role (a restore would bring the user back without any assignment); nothing is removed. Give the user another
+  assignment first. Answered after `role_has_active_users`.
 - `/auth/me` and the login response: `permissions` are the permissions held at some node (see Added for the other
   auth fields).
 - Role edits are bounded by the role's holders: permissions added by `PATCH /roles/{role_id}` (`permission_ids`) or
