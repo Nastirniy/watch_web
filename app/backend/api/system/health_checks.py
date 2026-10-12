@@ -12,6 +12,9 @@ from app.backend.models.post import Post
 from app.backend.models.observation import Observation
 from app.backend.config import settings
 from app.backend.utils.logging_config import get_api_logger
+from app.backend.pki.authority import CaCheckError, load_ca_certificate
+from app.backend.services.crl_publisher import crl_status
+from app.backend.services.signer_client import SignerRefused, SignerUnavailable, signer_client
 from app.backend.utils.validators import ResponseDatetime
 
 _logger = get_api_logger()
@@ -46,6 +49,18 @@ class ServicesHealthModel(BaseModel):
     system: ServiceStatusModel = Field(..., description="System service status")
 
 
+class PkiHealthModel(BaseModel):
+    """Client certificate authority health (only when settings.pki is configured)"""
+    status: str = Field(..., description="healthy, or degraded: less than 2 days left on the CA or a CRL, a CRL "
+                                         "never published, a stale CRL or no signer")
+    ca_expires_in_days: int = Field(..., description="Whole days until the client CA certificate expires")
+    crl_next_update_in_days: Optional[int] = Field(
+        None, description="Whole days until the earliest next_update of every CRL in the published file; null when "
+                          "the file is missing")
+    crl_stale: bool = Field(..., description="A revocation newer than the published CRL")
+    signer_available: bool = Field(..., description="The signing service answers")
+
+
 class HealthResponse(BaseModel):
     """Main health check response model"""
     status: str = Field(..., description="Overall system status")
@@ -55,6 +70,7 @@ class HealthResponse(BaseModel):
     timezone: str = Field(..., description="Server timezone")
     database: DatabaseHealthModel = Field(..., description="Database health information")
     services: ServicesHealthModel = Field(..., description="Services health information")
+    pki: Optional[PkiHealthModel] = Field(None, description="Client certificate authority; only when configured")
 
 
 # Rate limiting for health endpoint
@@ -209,3 +225,32 @@ async def check_services_health() -> ServicesHealthModel:
         )
     )
 
+
+
+PKI_MIN_DAYS = 2
+
+
+async def check_pki_health(session: AsyncSession) -> Optional[PkiHealthModel]:
+    """The PKI part of /health, None when settings.pki is not configured"""
+    if not settings.pki.is_configured():
+        return None
+    now = datetime.now(timezone.utc)
+    try:
+        ca_expires_in_days = (load_ca_certificate(settings.pki.ca_cert_path).not_valid_after_utc - now).days
+    except CaCheckError as e:
+        _logger.error(f"Health check: the client CA certificate is not usable: {e.reason}")
+        ca_expires_in_days = 0
+    status = await crl_status(session)
+    next_update_in_days = None if status.earliest_next_update is None else (status.earliest_next_update - now).days
+    try:
+        await signer_client().health()
+        signer_available = True
+    except (SignerUnavailable, SignerRefused) as e:
+        _logger.warning(f"Health check: the signer is not available: {type(e).__name__}")
+        signer_available = False
+    healthy = (ca_expires_in_days >= PKI_MIN_DAYS and next_update_in_days is not None
+               and next_update_in_days >= PKI_MIN_DAYS and not status.stale and signer_available)
+    return PkiHealthModel(
+        status=(ServiceHealthStatus.HEALTHY if healthy else ServiceHealthStatus.DEGRADED).value,
+        ca_expires_in_days=ca_expires_in_days, crl_next_update_in_days=next_update_in_days,
+        crl_stale=status.stale, signer_available=signer_available)

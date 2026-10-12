@@ -7,13 +7,13 @@ the version is only this list. A module of this folder never imports another ver
 from app.backend.api.versioning import PublishedVersion
 from app.backend.enums.routes import APIVersionRoutes
 from app.backend.api.v1 import (
-    auth, users, roles, categories, signal_types, tags, observations, posts, scope_groups, media, media_uploads, media_formats,
+    auth, users, certificates, roles, categories, signal_types, tags, observations, posts, scope_groups, media, media_uploads, media_formats,
     search, statistics, user_types,
 )
 
 # Order matters only inside one prefix: media before media_uploads, as both live under /media
 V1 = PublishedVersion(
     APIVersionRoutes.V1,
-    auth, users, roles, categories, signal_types, tags, observations, posts, scope_groups, media, media_uploads, media_formats,
+    auth, users, certificates, roles, categories, signal_types, tags, observations, posts, scope_groups, media, media_uploads, media_formats,
     search, statistics, user_types,
 )

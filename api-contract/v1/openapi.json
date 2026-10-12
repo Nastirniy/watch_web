@@ -3066,6 +3066,107 @@
         }
       }
     },
+    "/api/v1/certificates/authority": {
+      "get": {
+        "tags": [
+          "CERTIFICATES"
+        ],
+        "summary": "Get Certificate Authority",
+        "description": "The client certificate authority: its certificate and the state of the published CRL. 503 when the server\nhas no PKI configured.",
+        "operationId": "get_certificate_authority",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateAuthorityResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`certificate_authority_not_configured`: Certificate authority not configured",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateAuthorityNotConfiguredProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/roles/": {
       "get": {
         "tags": [
@@ -24728,6 +24829,106 @@
         "type": "object",
         "title": "CategoryUpdate"
       },
+      "CertificateAuthorityNotConfiguredProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Certificate authority not configured",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 503,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Certificate authority not configured"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "certificate_authority_not_configured",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "CertificateAuthorityNotConfiguredProblem",
+        "description": "Certificate authority not configured (HTTP 503). Problem type certificate_authority_not_configured.",
+        "examples": [
+          {
+            "code": "certificate_authority_not_configured",
+            "detail": "Certificate authority not configured",
+            "instance": "/api/v1/...",
+            "status": 503,
+            "title": "Certificate authority not configured",
+            "type": "https://example.org/problems/certificate_authority_not_configured"
+          }
+        ]
+      },
+      "CertificateAuthorityResponse": {
+        "properties": {
+          "subject": {
+            "type": "string",
+            "title": "Subject",
+            "description": "Subject of the client CA, RFC 4514"
+          },
+          "not_after": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Not After",
+            "description": "When the client CA certificate expires"
+          },
+          "fingerprint_sha256": {
+            "type": "string",
+            "title": "Fingerprint Sha256",
+            "description": "SHA-256 of the client CA certificate, hex pairs joined by ':'"
+          },
+          "certificate_pem": {
+            "type": "string",
+            "title": "Certificate Pem",
+            "description": "The client CA certificate (PEM): what a browser or a phone installs to trust it"
+          },
+          "crl": {
+            "$ref": "#/components/schemas/CrlInfo"
+          }
+        },
+        "type": "object",
+        "required": [
+          "subject",
+          "not_after",
+          "fingerprint_sha256",
+          "certificate_pem",
+          "crl"
+        ],
+        "title": "CertificateAuthorityResponse"
+      },
       "CertificateDataMissingProblem": {
         "properties": {
           "type": {
@@ -25300,6 +25501,48 @@
             "type": "https://example.org/problems/credentials_required"
           }
         ]
+      },
+      "CrlInfo": {
+        "properties": {
+          "this_update": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "This Update",
+            "description": "When the published CRL was made; null before the first"
+          },
+          "next_update": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Update",
+            "description": "When the published CRL expires; null before the first"
+          },
+          "revoked_count": {
+            "type": "integer",
+            "title": "Revoked Count",
+            "description": "Certificates on the published CRL"
+          }
+        },
+        "type": "object",
+        "required": [
+          "this_update",
+          "next_update",
+          "revoked_count"
+        ],
+        "title": "CrlInfo"
       },
       "DataTooLongProblem": {
         "properties": {
@@ -26128,6 +26371,17 @@
           "services": {
             "$ref": "#/components/schemas/ServicesHealthModel",
             "description": "Services health information"
+          },
+          "pki": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PkiHealthModel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Client certificate authority; only when configured"
           }
         },
         "type": "object",
@@ -31395,6 +31649,51 @@
           "level"
         ],
         "title": "PermissionResponse"
+      },
+      "PkiHealthModel": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "healthy, or degraded: less than 2 days left on the CA or a CRL, a CRL never published, a stale CRL or no signer"
+          },
+          "ca_expires_in_days": {
+            "type": "integer",
+            "title": "Ca Expires In Days",
+            "description": "Whole days until the client CA certificate expires"
+          },
+          "crl_next_update_in_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Crl Next Update In Days",
+            "description": "Whole days until the earliest next_update of every CRL in the published file; null when the file is missing"
+          },
+          "crl_stale": {
+            "type": "boolean",
+            "title": "Crl Stale",
+            "description": "A revocation newer than the published CRL"
+          },
+          "signer_available": {
+            "type": "boolean",
+            "title": "Signer Available",
+            "description": "The signing service answers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "ca_expires_in_days",
+          "crl_stale",
+          "signer_available"
+        ],
+        "title": "PkiHealthModel",
+        "description": "Client certificate authority health (only when settings.pki is configured)"
       },
       "PostAccessDeniedProblem": {
         "properties": {

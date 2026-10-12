@@ -5,10 +5,13 @@ httpx ASGITransport, so tests need no external database.
 """
 import os
 import secrets
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 
 os.environ.setdefault("MYSETTINGS_APP__ENVIRONMENT", "development")
 
+import httpx
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
@@ -26,7 +29,12 @@ from app.backend.services.media.formats import seed_media_formats, invalidate_re
 from app.backend.auth import sessions as session_lifetimes
 from app.backend.auth.service import AuthService
 from app.backend.models.user import UserSession
+from app.backend.config import settings
+from app.backend.services.signer_client import use_signer_transport
+from app.backend.signer.app import create_app as create_signer_app
+from app.backend.signer.settings import SignerSettings
 from tests.helpers import errors_are_problems
+from tests.pki_helpers import DownTransport, client_ca, write_ca_files
 
 
 @pytest_asyncio.fixture
@@ -138,3 +146,44 @@ def headers(issued_sessions):
         issued_sessions.append(row)
         return {"Authorization": f"Bearer {AuthService.create_access_token(user.id, session_id=row.id)}"}
     return auth_headers
+
+
+@dataclass
+class PkiEnv:
+    """A configured PKI: a throwaway client CA, an in-process signer, folders under tmp_path"""
+    ca: tuple
+    ca_cert_path: Path
+    store_dir: Path
+    crl_path: Path
+    signer_settings: SignerSettings
+    up_transport: httpx.AsyncBaseTransport
+
+    def signer_down(self) -> None:
+        use_signer_transport(DownTransport())
+
+    def signer_up(self) -> None:
+        use_signer_transport(self.up_transport)
+
+
+@pytest.fixture
+def pki(tmp_path, monkeypatch) -> PkiEnv:
+    """settings.pki points at tmp_path; the signer client talks to an in-process signer (httpx.ASGITransport)"""
+    ca = client_ca()
+    ca_dir = tmp_path / "ca"
+    ca_dir.mkdir()
+    cert_path, key_path = write_ca_files(ca_dir, ca)
+    store_dir, crl_dir = tmp_path / "issued", tmp_path / "crl"
+    store_dir.mkdir()
+    crl_dir.mkdir()
+    signer_settings = SignerSettings(ca_cert_path=str(cert_path), ca_key_path=str(key_path))
+    monkeypatch.setattr(settings.pki, "ca_cert_path", str(cert_path))
+    monkeypatch.setattr(settings.pki, "signer_socket", str(tmp_path / "signer.sock"))
+    monkeypatch.setattr(settings.pki, "store_dir", str(store_dir))
+    monkeypatch.setattr(settings.pki, "crl_path", str(crl_dir / "nginx.crl"))
+    monkeypatch.setattr(settings.pki, "extra_crl_paths", [])
+    up = httpx.ASGITransport(app=create_signer_app(signer_settings))
+    env = PkiEnv(ca=ca, ca_cert_path=cert_path, store_dir=store_dir, crl_path=crl_dir / "nginx.crl",
+                 signer_settings=signer_settings, up_transport=up)
+    env.signer_up()
+    yield env
+    use_signer_transport(None)

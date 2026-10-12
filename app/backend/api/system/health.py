@@ -11,6 +11,7 @@ from app.backend.utils.datetime_utils import get_current_time_in_timezone
 from app.backend.api.system.health_checks import (
     HealthResponse,
     check_database_health,
+    check_pki_health,
     check_services_health,
     health_rate_limiter,
     is_host_allowed,
@@ -66,9 +67,13 @@ async def health_check(
             check_services_health()
         )
 
+        # After the gather: the two checks above share the session, this one uses it alone
+        pki_health = await check_pki_health(session)
+
         # Determine overall status
         overall_status = ServiceHealthStatus.HEALTHY.value
-        if db_health.status != ServiceHealthStatus.HEALTHY.value:
+        if db_health.status != ServiceHealthStatus.HEALTHY.value or (
+                pki_health is not None and pki_health.status != ServiceHealthStatus.HEALTHY.value):
             overall_status = ServiceHealthStatus.DEGRADED.value
 
         return HealthResponse(
@@ -78,7 +83,8 @@ async def health_check(
             environment=settings.app.environment,
             timezone=settings.timezone.timezone,
             database=db_health,
-            services=services_health
+            services=services_health,
+            pki=pki_health,
         )
 
     except Exception as e:

@@ -269,6 +269,16 @@ class StatisticsRoutes(str, Enum):
         return "STATISTICS"
 
 
+class CertificateRoutes(str, Enum):
+    """Client certificates and the authority that signs them"""
+    BASE = "/certificates"
+    AUTHORITY = "/authority"
+
+    @staticmethod
+    def tag() -> str:
+        return "CERTIFICATES"
+
+
 class SignerRoutes(str, Enum):
     """Paths of the signing service (a separate app on a Unix socket, not part of the main app)"""
     SIGN_CLIENT = "/sign/client"
@@ -290,6 +300,7 @@ class Routes:
     MEDIA = MediaRoutes
     MEDIA_FORMATS = MediaFormatRoutes
     USERS = UserRoutes
+    CERTIFICATES = CertificateRoutes
     ROLES = RoleRoutes
     CATEGORIES = CategoryRoutes
     SIGNAL_TYPES = SignalTypeRoutes

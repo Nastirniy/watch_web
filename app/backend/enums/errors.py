@@ -222,6 +222,8 @@ class ErrorCode(ProblemType):
     CERTIFICATE_FILE_TOO_LARGE = ("certificate_file_too_large", problem(
         413, "Certificate file is too large", "Certificate file is too large (at most {max_bytes} bytes)", max_bytes=int))
     CERTIFICATE_INVALID = ("certificate_invalid", problem(400, "Invalid certificate"))
+    CERTIFICATE_AUTHORITY_NOT_CONFIGURED = ("certificate_authority_not_configured", problem(
+        503, "Certificate authority not configured"))
     CANNOT_DEACTIVATE_SELF = ("cannot_deactivate_self", problem(400, "You cannot deactivate your own account"))
     CANNOT_ARCHIVE_SELF = ("cannot_archive_self", problem(400, "You cannot archive your own account"))
 

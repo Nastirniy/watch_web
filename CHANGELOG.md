@@ -36,6 +36,17 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `ca_issued` (it goes on the CRL when revoked).
 - `python -m app.backend.cli.init_user`: the certificate path is optional; `--label` names the certificate (default
   its CN).
+- `GET /certificates/authority` (any authenticated user): the client CA (`subject`, `not_after`, `fingerprint_sha256`,
+  `certificate_pem`) and the published CRL (`crl.this_update`, `crl.next_update`, `crl.revoked_count`); 503
+  `certificate_authority_not_configured` without PKI settings.
+- `/health` has a `pki` part when `settings.pki` is configured (`status`, `ca_expires_in_days`,
+  `crl_next_update_in_days` (the earliest of every CRL in the published file), `crl_stale`, `signer_available`);
+  the overall status is `degraded` when it is (less than 2 days left, a CRL never published or stale, no signer).
+- CRL publishing (`services/crl_publisher.py`): the API sends the revoked serials to the signer over its Unix
+  socket and writes `crl_path` (the signed CRL, then the `extra_crl_paths` files) atomically; at API start when the
+  file is missing or past half of its validity, and with `python -m app.backend.cli.pki crl`. The API refuses to
+  start with a partial `settings.pki`, an unusable CA certificate, a folder it cannot write or an unparsable extra
+  CRL. `python -m app.backend.cli.pki status` prints the CA, the CRL, the signer and the certificate counts.
 
 ### Changed
 

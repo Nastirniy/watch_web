@@ -4,6 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
+import httpx
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -53,3 +54,10 @@ def write_ca_files(directory: Path, ca: tuple, password: str = "") -> tuple[Path
     key_path.write_bytes(ca[1].private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, encryption))
     return cert_path, key_path
+
+
+class DownTransport(httpx.AsyncBaseTransport):
+    """A signer that does not answer (socket gone, service stopped)"""
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("signer is down", request=request)
