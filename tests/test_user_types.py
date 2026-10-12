@@ -7,6 +7,8 @@ import pytest
 from sqlmodel import select
 
 from app.backend.api.v1 import V1
+from app.backend.api.v1 import users as users_routes
+from app.backend.auth import assignments as assignment_rules
 from app.backend.auth.scope import Node, ROOT
 from app.backend.auth.user_types import USER_TYPES, excess_permissions
 from app.backend.bootstrap.permissions import PERMISSION_LEVELS, PERMISSION_META, permission_level, role_level
@@ -345,6 +347,100 @@ async def test_type_change_needs_the_new_base_role_at_the_node(client, db, heade
     assert await assignment_rows(db, operator) == [(before[0][0], senior_role.id, f"p:{tree.a.id}")]
 
 
+async def test_type_change_needs_the_new_base_role_where_a_new_user_would_get_it(client, db, headers, tree):
+    """R29: with nothing to replace, the caller still needs the new base role at the node of the default assignment
+    (the home post; the root without one or for a system role), the bar of POST /users/"""
+    await make_admin(db)
+    east_admin = await typed_user(db, UserType.POST_ADMIN, node=Node.group(tree.east.id))
+    user = await make_user(db, post_id=tree.a.id, user_type=UserType.OPERATOR)
+    await assign(db, user, await make_role(db, ["observation.view"]), Node.post(tree.a.id))
+    before = await assignment_rows(db, user)
+    login = headers(user)
+
+    body = problem(await change_type(client, headers(east_admin), user, "admin"), 403, "grant_exceeds_own_permissions")
+    assert "role.create" in body["missing"]
+    assert await stored_type(db, user) == "operator" and await assignment_rows(db, user) == before
+    assert (await client.get(ME, headers=login)).status_code == 200
+
+    # Themselves: a delegated administrator holding a custom copy of the post_admin role cannot become an admin
+    copy = await make_role(db, USER_TYPES[UserType.POST_ADMIN].base_permissions)
+    delegate = await make_user(db, post_id=tree.a.id, user_type=UserType.POST_ADMIN)
+    await assign(db, delegate, copy, Node.group(tree.east.id))
+    problem(await change_type(client, headers(delegate), delegate, "admin"), 403, "grant_exceeds_own_permissions")
+    assert await stored_type(db, delegate) == "post_admin"
+
+    # Inside the caller's reach: allowed, the assignments stay
+    changed = await change_type(client, headers(east_admin), user, "senior_operator")
+    assert changed.status_code == 200, changed.text
+    assert await assignment_rows(db, user) == before and await stored_type(db, user) == "senior_operator"
+
+
+async def test_type_change_and_deactivation_in_one_request(client, db, headers, tree):
+    admin = await make_admin(db)
+    operator = await typed_user(db, UserType.OPERATOR, post_id=tree.a.id)
+    (before,) = await assignment_rows(db, operator)
+    login = headers(operator)
+
+    changed = await client.patch(V1.path(UserRoutes.USER_BY_ID, user_id=operator.id), headers=headers(admin),
+                                 data={"user_type": "senior_operator", "is_active": "false"})
+    assert changed.status_code == 200, changed.text
+    assert (changed.json()["user_type"], changed.json()["is_active"]) == ("senior_operator", False)
+    senior = await builtin(db, UserType.SENIOR_OPERATOR)
+    assert await assignment_rows(db, operator) == [(before[0], senior.id, f"p:{tree.a.id}")]
+    ended = (await db.exec(select(UserSession.end_reason, UserSession.revoke_cause)
+                           .where(UserSession.user_id == operator.id))).all()
+    assert [tuple(row) for row in ended] == [("revoked", "account_deactivated")]   # the deactivation names the cause
+    assert len((await update_audit(db, operator)).new_values["replaced_assignments"]) == 1
+    assert (await client.get(ME, headers=login)).status_code == 401
+
+
+async def test_a_concurrent_base_role_assignment_is_refused_by_the_unique_index(client, db, headers, tree,
+                                                                                monkeypatch):
+    """R30: another request assigns the new base role at the same node after the type change read the user's
+    assignments: the unique index answers assignment_exists, nothing written"""
+    admin = await make_admin(db)
+    operator = await typed_user(db, UserType.OPERATOR, post_id=tree.a.id)
+    await assign(db, operator, await builtin(db, UserType.SENIOR_OPERATOR), Node.post(tree.a.id))
+    before = await assignment_rows(db, operator)
+    login = headers(operator)
+
+    async def not_yet_committed(*args, **kwargs) -> dict:
+        return {}
+    monkeypatch.setattr(assignment_rules, "_held_nodes", not_yet_committed, raising=False)
+    problem(await change_type(client, headers(admin), operator, "senior_operator"), 409, "assignment_exists")
+    assert await assignment_rows(db, operator) == before and await stored_type(db, operator) == "operator"
+    assert (await client.get(ME, headers=login)).status_code == 200
+    assert not (await db.exec(select(AuditLog).where(AuditLog.resource_type == "user"))).all()
+
+
+async def test_a_username_race_with_a_type_change_answers_username_taken(client, db, headers, tree, monkeypatch):
+    """R30: the type change flushes the pending username: the unique index answers username_taken, not a 500"""
+    admin = await make_admin(db)
+    operator = await typed_user(db, UserType.OPERATOR, post_id=tree.a.id)
+    other = await make_user(db, post_id=tree.a.id)
+    monkeypatch.setattr(users_routes, "_username_taken", lambda username, exclude_user_id=None: select(User).where(User.id == -1))
+
+    refused = await client.patch(V1.path(UserRoutes.USER_BY_ID, user_id=operator.id), headers=headers(admin),
+                                 data={"username": other.username, "user_type": "senior_operator"})
+    problem(refused, 400, "username_taken")
+    assert await stored_type(db, operator) == "operator"
+
+
+async def test_the_audit_row_is_written_with_the_change(client, db, headers, tree, monkeypatch):
+    """R30: the type change and its audit row are one transaction: when the audit row cannot be written, the
+    assignments and the type stay as they were"""
+    admin = await make_admin(db)
+    operator = await typed_user(db, UserType.OPERATOR, post_id=tree.a.id)
+    before = await assignment_rows(db, operator)
+
+    async def broken(*args, **kwargs):
+        raise RuntimeError("audit storage unavailable")
+    monkeypatch.setattr(users_routes, "create_audit_log", broken)
+    failed = await change_type(client, headers(admin), operator, "admin")
+    assert failed.status_code == 500 and failed.json()["code"] == "internal_error"
+    assert await assignment_rows(db, operator) == before and await stored_type(db, operator) == "operator"
+
+
 # ----------------------------------------------------------------- the last administrator (rule 5)
 async def test_last_admin_cannot_downgrade_self(client, db, headers):
     admin = await make_admin(db)
@@ -408,18 +504,52 @@ async def test_role_update_refused_above_holder_ceiling(client, db, headers, tre
     assert await role_permissions(db, reader) == {"observation.view", "statistics.view"}
 
 
-async def test_archived_holders_do_not_bound_role_edits(client, db, headers, tree):
+async def test_archived_holders_bound_role_edits(client, db, headers, tree):
+    """R28: an archived user gets the role back with the restore (POST /users/{user_id}/restore re-checks nothing), so
+    they count as a holder for the ceiling and for the root level, and are listed"""
     admin = await make_admin(db)
     viewer = await typed_user(db, UserType.VIEWER, post_id=tree.a.id)
-    reader = await make_role(db, ["observation.view"])
-    await assign(db, viewer, reader, ROOT)
-    viewer.is_deleted = True
+    tagger = await make_role(db, ["tag.view"])
+    await assign(db, viewer, tagger, Node.group(tree.east.id))
+    viewer.is_deleted, viewer.is_active = True, False
     db.add(viewer)
     await db.commit()
+    tag_view, update_id = await permission_id(db, "tag.view"), await permission_id(db, "observation.update")
+    tag_create = await permission_id(db, "tag.create")
+    expected = [{"id": viewer.id, "username": viewer.username, "user_type": "viewer",
+                 "excess_permissions": ["observation.update"]}]
 
-    update_id = await permission_id(db, "observation.update")
-    allowed = await client.put(ROLE_PERMISSION.format(role_id=reader.id, permission_id=update_id), headers=headers(admin))
-    assert allowed.status_code == 200, allowed.text
+    patched = await client.patch(ROLE.format(role_id=tagger.id), headers=headers(admin),
+                                 json={"permission_ids": [tag_view, update_id]})
+    assert problem(patched, 409, "role_holders_exceed_user_type")["users"] == expected
+    put = await client.put(ROLE_PERMISSION.format(role_id=tagger.id, permission_id=update_id), headers=headers(admin))
+    assert problem(put, 409, "role_holders_exceed_user_type")["users"] == expected
+
+    # A system permission while the archived holder's assignment is below the root
+    patched = await client.patch(ROLE.format(role_id=tagger.id), headers=headers(admin),
+                                 json={"permission_ids": [tag_view, tag_create]})
+    assert problem(patched, 409, "role_requires_root_scope")["system_permissions"] == ["tag.create"]
+    put = await client.put(ROLE_PERMISSION.format(role_id=tagger.id, permission_id=tag_create), headers=headers(admin))
+    assert problem(put, 409, "role_requires_root_scope")["system_permissions"] == ["tag.create"]
+    assert await role_permissions(db, tagger) == {"tag.view"}
+
+
+async def test_a_holder_with_several_assignments_is_listed_once(client, db, headers, tree):
+    """Only the permissions a holder's type does not allow are listed, once per holder whatever their assignments"""
+    admin = await make_admin(db)
+    viewer = await typed_user(db, UserType.VIEWER, post_id=tree.a.id)
+    operator = await typed_user(db, UserType.OPERATOR, post_id=tree.a.id)
+    reader = await make_role(db, ["observation.view"])
+    for node in (Node.post(tree.a.id), Node.post(tree.b.id), Node.group(tree.east.id)):
+        await assign(db, viewer, reader, node)
+    await assign(db, operator, reader, Node.post(tree.a.id))
+    ids = [await permission_id(db, name) for name in ("observation.view", "observation.update", "statistics.view")]
+
+    patched = await client.patch(ROLE.format(role_id=reader.id), headers=headers(admin), json={"permission_ids": ids})
+    assert problem(patched, 409, "role_holders_exceed_user_type")["users"] == [
+        {"id": viewer.id, "username": viewer.username, "user_type": "viewer",
+         "excess_permissions": ["observation.update"]}]
+    assert await role_permissions(db, reader) == {"observation.view"}
 
 
 async def test_role_edit_refused_with_system_permission_below_root(client, db, headers, tree):
@@ -470,3 +600,11 @@ def test_user_type_is_required_in_the_user_schema():
     from app.main import fastapi_app
     schemas = V1.openapi(fastapi_app)["components"]["schemas"]
     assert "user_type" in schemas["UserResponse"]["required"]
+
+
+def test_user_type_params_of_problems_are_the_enum():
+    """openapi-typescript narrows them to the type keys"""
+    from app.main import fastapi_app
+    schemas = V1.openapi(fastapi_app)["components"]["schemas"]
+    for name in ("RoleExceedsUserTypeProblem", "UserTypeCeilingExceededProblem", "ExcessHolder"):
+        assert schemas[name]["properties"]["user_type"]["$ref"].endswith("/UserType"), name

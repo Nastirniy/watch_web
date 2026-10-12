@@ -1526,7 +1526,7 @@
           "USERS"
         ],
         "summary": "Update User",
-        "description": "Update user fields - all fields are optional\n\nSupports updating:\n- username: Unique username (3-50 characters)\n- username_alias: User's display name (1-255 characters)\n- post_id: Home post (membership: who manages the user; it grants nothing by itself). Moving the user needs\n  user.update covering the new post too (403 permission_required_for_action, the same for an unknown or\n  archived post outside the caller's scope); inside it an unknown post answers 404 post_not_found and an\n  archived one 409 post_archived (sending the current home post again changes nothing and is accepted)\n- is_active: User's active status (boolean)\n- certificate: Update PKI certificate authentication data (file upload). A different certificate ends every\n  session of the user, like deactivation: the old certificate's tokens stop working.\n- user_type: Another type (GET /user-types). Every assignment of the old type's built-in role gets the new type's\n  built-in role at the same node (at the root when the new one holds system permissions, as for a new user; an\n  assignment of the new role the user already has at that node is kept and the old one merged into it). The\n  caller needs user.update and every permission of the new built-in role at each of these nodes (403\n  grant_exceeds_own_permissions); every other assignment, those of archived roles included, must fit the ceiling\n  of the new type (409 user_type_ceiling_exceeded with the assignments and their excess_permissions). The user's\n  sessions end (revoke_cause user_type_changed), so the web never shows the pages of the old type. The same type\n  again changes nothing.\n\nOnly provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).\nThe fields are form fields: any other body (JSON included) answers 415 instead of being ignored.\n\nChanging a user needs user.update covering them (their home post, the root for a user without one) and, for\nanother user, that the caller could grant every assignment they have (403 target_user_more_privileged); this\nanswers before the archived state of the user. A deactivation or a type change must leave an active holder of the\nbuilt-in admin role at the root (409 last_admin_required), and a caller cannot take it from themselves (409\ncannot_remove_own_admin).",
+        "description": "Update user fields - all fields are optional\n\nSupports updating:\n- username: Unique username (3-50 characters)\n- username_alias: User's display name (1-255 characters)\n- post_id: Home post (membership: who manages the user; it grants nothing by itself). Moving the user needs\n  user.update covering the new post too (403 permission_required_for_action, the same for an unknown or\n  archived post outside the caller's scope); inside it an unknown post answers 404 post_not_found and an\n  archived one 409 post_archived (sending the current home post again changes nothing and is accepted)\n- is_active: User's active status (boolean)\n- certificate: Update PKI certificate authentication data (file upload). A different certificate ends every\n  session of the user, like deactivation: the old certificate's tokens stop working.\n- user_type: Another type (GET /user-types). Every assignment of the old type's built-in role gets the new type's\n  built-in role at the same node (at the root when the new one holds system permissions, as for a new user; an\n  assignment of the new role the user already has at that node is kept and the old one merged into it). The\n  caller needs user.update and every permission of the new built-in role at each of these nodes and at the node\n  a new user of the type would get it (the home post; the root without one or for a system role), also when\n  nothing is replaced (403 grant_exceeds_own_permissions); every other assignment, those of archived roles\n  included, must fit the ceiling of the new type (409 user_type_ceiling_exceeded with the assignments and their\n  excess_permissions). A concurrent assignment of the new built-in role at the same node answers 409\n  assignment_exists. The user's sessions end (revoke_cause user_type_changed), so the web never shows the pages\n  of the old type. The same type again changes nothing.\n\nOnly provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).\nThe fields are form fields: any other body (JSON included) answers 415 instead of being ignored.\n\nChanging a user needs user.update covering them (their home post, the root for a user without one) and, for\nanother user, that the caller could grant every assignment they have (403 target_user_more_privileged); this\nanswers before the archived state of the user. A deactivation or a type change must leave an active holder of the\nbuilt-in admin role at the root (409 last_admin_required), and a caller cannot take it from themselves (409\ncannot_remove_own_admin).",
         "operationId": "update_user",
         "security": [
           {
@@ -1723,11 +1723,14 @@
             }
           },
           "409": {
-            "description": "`cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no active administrator; `post_archived`: Post is archived; `user_type_ceiling_exceeded`: Assignments of the user exceed the ceiling of the new type",
+            "description": "`assignment_exists`: The user already holds this role at this scope; `cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no active administrator; `post_archived`: Post is archived; `user_type_ceiling_exceeded`: Assignments of the user exceed the ceiling of the new type",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AssignmentExistsProblem"
+                    },
                     {
                       "$ref": "#/components/schemas/CannotRemoveOwnAdminProblem"
                     },
@@ -1744,6 +1747,7 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
+                      "assignment_exists": "#/components/schemas/AssignmentExistsProblem",
                       "cannot_remove_own_admin": "#/components/schemas/CannotRemoveOwnAdminProblem",
                       "last_admin_required": "#/components/schemas/LastAdminRequiredProblem",
                       "post_archived": "#/components/schemas/PostArchivedProblem",
@@ -25417,8 +25421,7 @@
             "title": "Username"
           },
           "user_type": {
-            "type": "string",
-            "title": "User Type"
+            "$ref": "#/components/schemas/UserType"
           },
           "excess_permissions": {
             "items": {
@@ -32597,8 +32600,7 @@
             "description": "Key of exactly this problem in the localization package"
           },
           "user_type": {
-            "type": "string",
-            "title": "User Type"
+            "$ref": "#/components/schemas/UserType"
           },
           "excess_permissions": {
             "items": {
@@ -32625,13 +32627,13 @@
         "examples": [
           {
             "code": "role_exceeds_user_type",
-            "detail": "A user of type <user_type> cannot hold: <excess_permissions>",
+            "detail": "A user of type operator cannot hold: <excess_permissions>",
             "excess_permissions": "<excess_permissions>",
             "instance": "/api/v1/...",
             "status": 409,
             "title": "The role holds permissions the user's type does not allow",
             "type": "https://example.org/problems/role_exceeds_user_type",
-            "user_type": "<user_type>"
+            "user_type": "operator"
           }
         ]
       },
@@ -38989,8 +38991,7 @@
             "description": "Key of exactly this problem in the localization package"
           },
           "user_type": {
-            "type": "string",
-            "title": "User Type"
+            "$ref": "#/components/schemas/UserType"
           },
           "assignments": {
             "items": {
@@ -39035,12 +39036,12 @@
               }
             ],
             "code": "user_type_ceiling_exceeded",
-            "detail": "A user of type <user_type> cannot hold the roles of the listed assignments: remove them first",
+            "detail": "A user of type operator cannot hold the roles of the listed assignments: remove them first",
             "instance": "/api/v1/...",
             "status": 409,
             "title": "Assignments of the user exceed the ceiling of the new type",
             "type": "https://example.org/problems/user_type_ceiling_exceeded",
-            "user_type": "<user_type>"
+            "user_type": "operator"
           }
         ]
       },

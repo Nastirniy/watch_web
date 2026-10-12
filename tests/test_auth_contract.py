@@ -110,6 +110,23 @@ async def test_post_permissions_follow_the_evaluator(client, db, headers, tree):
 
 
 @pytest.mark.asyncio
+async def test_a_grant_at_an_archived_group_puts_nothing_in_effect(client, db, headers, tree):
+    """An assignment at an archived group applies nowhere (its posts keep what the live groups above them grant)"""
+    user = await make_user(db, post_id=tree.a.id, user_type=UserType.OPERATOR)
+    await assign(db, user, await builtin(db, UserType.OPERATOR), Node.group(tree.kharkiv.id))
+    await assign(db, user, await builtin(db, UserType.VIEWER), Node.group(tree.east.id))
+    await assign(db, user, await builtin(db, UserType.VIEWER), Node.group(tree.west.id))
+    await _archive(db, tree.kharkiv)
+    await _archive(db, tree.west)
+
+    login = headers(user)
+    body = (await client.get(ME, headers=login)).json()
+    assert body["post_permissions"] == {str(tree.a.id): VIEW, str(tree.a2.id): VIEW}
+    check =await client.post(CHECK, json={"all": ["observation.update"], "post_id": tree.a.id}, headers=login)
+    assert check.json() == {"allowed": False, "missing": ["observation.update"]}
+
+
+@pytest.mark.asyncio
 async def test_me_for_the_admin_at_the_root(client, db, headers):
     admin = await make_admin(db)
     body = (await client.get(ME, headers=headers(admin))).json()

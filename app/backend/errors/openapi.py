@@ -87,6 +87,7 @@ _EXAMPLE_VALUES: Dict[str, Any] = {
     "assignments": [{"id": 12, "role": {"id": 9, "name": "media_editors", "display_name": "Media editors"},
                      "scope": {"kind": "post", "id": 7, "name": "Post 7"}, "excess_permissions": ["media.update"]}],
     "users": [{"id": 3, "username": "viewer1", "user_type": "viewer", "excess_permissions": ["observation.update"]}],
+    "user_type": "operator",
 }
 for _name in ("post_id", "role_id", "format_id", "offset", "sent_offset", "expected_size", "missing_bytes",
               "max_chunk_bytes", "max_bytes", "max_file_size_bytes", "ceiling_bytes", "max_requests",

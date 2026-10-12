@@ -23,15 +23,19 @@ user.update, first) replaces every assignment of the old type's built-in role wi
 user already has is kept and the replaced row merged into it), then checks every assignment against the ceiling of the
 new type:
 
-            check_assign_at(user.update and the new base role's permissions, each target node) 403
-            -> the replacements written -> every assignment, those of archived roles included, within the new
-               ceiling 409 user_type_ceiling_exceeded
-            (the route then ends the user's sessions and runs check_admin_kept)
+            check_assign_at(user.update and the new base role's permissions, at the node of the default assignment
+               of a new user (the home post; the root without one or for a system role), also when nothing is
+               replaced, and at each target node) 403
+            -> the replacements written (the unique index answers a concurrent assignment of the new base role at
+               the same node: the route maps it to 409 assignment_exists)
+            -> every assignment, those of archived roles included, within the new ceiling 409
+               user_type_ceiling_exceeded
+            (the route then ends the user's sessions, runs check_admin_kept and writes the audit row, one transaction)
 
 check_role_permissions_added (PATCH /roles/{role_id}, PUT /roles/{role_id}/permissions/{permission_id}): permissions
 added to a role reach every holder at once, so a system permission needs every assignment of the role at the root
 (409 role_requires_root_scope) and every holder's type must allow the added permissions (409
-role_holders_exceed_user_type). Holders are the users who are not archived.
+role_holders_exceed_user_type). Archived users are holders too: a restore gives them the role back as it is.
 
 assignment_views reads the assignments of a user with the role and the scope named, as dataclasses (the route
 converts them into its response model).
@@ -256,6 +260,15 @@ async def _check_type_ceiling(session: AsyncSession, target: User, user_type: Us
         raise ApiError(ErrorCode.USER_TYPE_CEILING_EXCEEDED, user_type=user_type.value, assignments=exceeding)
 
 
+async def _held_nodes(session: AsyncSession, user_id: int, role_id: int) -> Dict[str, int]:
+    """scope key -> id of the user's assignments of the role (a concurrent request may add one after this read: the
+    unique index answers then)"""
+    return dict((await session.exec(
+        select(RoleAssignment.scope_key, RoleAssignment.id)
+        .where(RoleAssignment.user_id == user_id, RoleAssignment.role_id == role_id)
+    )).all())
+
+
 async def change_user_type(session: AsyncSession, auth: AuthContext, target: User,
                            new_type: UserType) -> Optional[TypeChange]:
     """Give the target another type (written to the session and flushed, not committed). The route has run rule 2
@@ -274,14 +287,13 @@ async def change_user_type(session: AsyncSession, auth: AuthContext, target: Use
         .order_by(RoleAssignment.id)
     )).all()
     plan = [(row, ROOT if to_root else row.node) for row in rows]
-    for _, node in plan:
+    # The bar of a new user's default assignment, whether or not anything is replaced (R29)
+    default_node = ROOT if target.post_id is None or to_root else Node.post(target.post_id)
+    for node in (default_node, *(node for _, node in plan)):
         check_assign_at(auth, new_permissions, node)
     admin_held_before = await holds_admin_at_root(session, auth.user.id)
 
-    held = dict((await session.exec(
-        select(RoleAssignment.scope_key, RoleAssignment.id)
-        .where(RoleAssignment.user_id == target.id, RoleAssignment.role_id == new_base.id)
-    )).all())
+    held = await _held_nodes(session, target.id, new_base.id)
     replaced: List[dict] = []
     for row, node in plan:
         before = row.model_dump()
@@ -309,16 +321,17 @@ async def change_user_type(session: AsyncSession, auth: AuthContext, target: Use
 
 # ------------------------------------------------------------------ role edits (holders of the role)
 async def check_role_permissions_added(session: AsyncSession, role_id: int, added: Iterable[str]) -> None:
-    """Permissions added to a role apply at once at every assignment of it. Only the assignments of users who are not
-    archived count: a system permission needs every such assignment at the root (409 role_requires_root_scope), and
-    the type of every such holder must allow the added permissions (409 role_holders_exceed_user_type)."""
+    """Permissions added to a role apply at once at every assignment of it, those of archived users included (the
+    restore of a user gives the role back as it is): a system permission needs every assignment at the root (409
+    role_requires_root_scope), and the type of every holder must allow the added permissions (409
+    role_holders_exceed_user_type, every such holder listed once)."""
     added = sorted(set(added))
     if not added:
         return
     rows = (await session.exec(
         select(User.id, User.username, User.user_type, RoleAssignment.scope_key)
         .join(RoleAssignment, RoleAssignment.user_id == User.id)
-        .where(RoleAssignment.role_id == role_id, User.is_deleted == False)  # noqa: E712
+        .where(RoleAssignment.role_id == role_id)
         .order_by(User.id, RoleAssignment.id)
     )).all()
     below_root = next((Node.parse(scope_key) for *_, scope_key in rows if scope_key != ROOT.key), None)

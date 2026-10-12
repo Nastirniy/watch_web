@@ -194,7 +194,8 @@ async def test_user_update_outsider_gets_the_same_403_for_an_archived_and_a_live
     archived.is_deleted = True
     db.add(archived)
     await db.commit()
-    outsider = await make_user(db, perms=["user.view", "user.update", ADMIN_TRUE], post_id=other.id)
+    outsider = await make_user(db, post_id=other.id)
+    await assign(db, outsider, await make_role(db, ["user.view", "user.update"]), Node.post(other.id))
 
     for target in (live, archived):
         response = await client.patch(V1.path(UserRoutes.USER_BY_ID, user_id=target.id),

@@ -83,14 +83,18 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   that node the old row is removed (merged). A user without an assignment of the old built-in role keeps their
   assignments. Checked in this order, nothing changes on a refusal: `user.update` covering the user and every
   assignment of the user grantable by the caller (403 `target_user_more_privileged`); `user.update` and every
-  permission of the new built-in role held by the caller at each node it lands on (403
-  `grant_exceeds_own_permissions`); every assignment of the user, those of archived roles included, within the
-  ceiling of the new type (409 `user_type_ceiling_exceeded` with `user_type` and `assignments`: [{`id`, `role`
-  {`id`, `name`, `display_name`}, `scope` {`kind`, `id`, `name`}, `excess_permissions`}]); then the built-in `admin`
-  role at the root stays with an active user and is not taken from oneself (409 `last_admin_required` /
-  `cannot_remove_own_admin`). Every session of the user ends (new `SessionRevokeCause` `user_type_changed`), so the
-  web client never shows the pages of the old type. The same type again changes nothing. The audit row (`update`,
-  `user`) carries `replaced_assignments`: per replaced assignment `before` (every column) and `after` (every column)
+  permission of the new built-in role held by the caller at each node it lands on and at the node a new user of the
+  type would get it (the home post; the root without one or for a system role), also when nothing is replaced: the bar
+  of `POST /users/` (403 `grant_exceeds_own_permissions`); every assignment of the user, those of archived roles
+  included, within the ceiling of the new type (409 `user_type_ceiling_exceeded` with `user_type` and `assignments`:
+  [{`id`, `role` {`id`, `name`, `display_name`}, `scope` {`kind`, `id`, `name`}, `excess_permissions`}]); then the
+  built-in `admin` role at the root stays with an active user and is not taken from oneself (409 `last_admin_required`
+  / `cannot_remove_own_admin`). Every session of the user ends (new `SessionRevokeCause` `user_type_changed`), so the
+  web client never shows the pages of the old type. The same type again changes nothing. A concurrent assignment of
+  the new built-in role at the same node answers 409 `assignment_exists` (the unique index; before it answered 500),
+  and a username or certificate taken concurrently answers `username_taken` / `certificate_taken` also with a type
+  change in the request (before: 500). The audit row (`update`, `user`), written in the same transaction as the
+  change, carries `replaced_assignments`: per replaced assignment `before` (every column) and `after` (every column)
   or `merged_into` (the id of the assignment it was merged into).
 - `UserResponse.user_type`; `GET /users/` and `GET /search/users` filter by `user_type` (422 for an unknown type).
 - Auth fields for pages and buttons: `/auth/me`, the login and the refresh response carry `user_type` (pages),
@@ -102,7 +106,8 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `post_id` and these fields are always present (required in the schema).
 - `POST /auth/check-permission` takes an optional `post_id` (positive integer): `allowed` when the permissions are in
   effect at that post (without it: held at some node, as before).
-- Problem types `user_type_ceiling_exceeded` and `role_holders_exceed_user_type`.
+- Problem types `user_type_ceiling_exceeded` and `role_holders_exceed_user_type`. The `user_type` param of these
+  and of `role_exceeds_user_type` (and of each entry of `users`) is typed as the `UserType` enum in the schemas.
 
 ### Changed
 
@@ -209,11 +214,12 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - `/auth/me` and the login response: `permissions` are the permissions held at some node (see Added for the other
   auth fields).
 - Role edits are bounded by the role's holders: permissions added by `PATCH /roles/{role_id}` (`permission_ids`) or
-  `PUT /roles/{role_id}/permissions/{permission_id}` apply at once to every assignment of the role held by a user who
-  is not archived. A system permission needs every such assignment at the root (409 `role_requires_root_scope`,
-  `system_permissions`), and the type of every such holder must allow the added permissions (409
-  `role_holders_exceed_user_type`, `users`: [{`id`, `username`, `user_type`, `excess_permissions`}]); answered after
-  the 403 `grant_exceeds_own_permissions`, the role stays unchanged.
+  `PUT /roles/{role_id}/permissions/{permission_id}` apply at once to every assignment of the role, those of archived
+  users included (restoring a user gives the role back as it is). A system permission needs every assignment at the
+  root (409 `role_requires_root_scope`, `system_permissions`), and the type of every holder must allow the added
+  permissions (409 `role_holders_exceed_user_type`, `users`: [{`id`, `username`, `user_type`,
+  `excess_permissions`}], each holder once, archived holders listed too); answered after the 403
+  `grant_exceeds_own_permissions`, the role stays unchanged.
 - `PATCH /users/{user_id}`: the check of the caller's reach (403 `target_user_more_privileged`) answers before the
   archived state of the user (404 `user_not_found`), so an outsider gets the same 403 for an archived and a live user.
 - `RoleResponse.builtin_key`, `is_builtin`, `level` and `PermissionResponse.level` are required in the schema (they

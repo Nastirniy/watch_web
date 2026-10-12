@@ -23,6 +23,8 @@ from typing import Any, Dict, List, Literal, NamedTuple, Optional
 
 from pydantic import BaseModel, Field
 
+from app.backend.enums.general import UserType
+
 
 class RequiredPermissions(BaseModel):
     """Permission requirement of a route, mirrors auth.require.Require"""
@@ -60,7 +62,7 @@ class ExcessHolder(BaseModel):
     """A user holding a role whose added permissions the ceiling of the user's type does not allow"""
     id: int
     username: str
-    user_type: str
+    user_type: UserType
     excess_permissions: List[str]
 
 
@@ -257,12 +259,12 @@ class ErrorCode(ProblemType):
     ROLE_EXCEEDS_USER_TYPE = ("role_exceeds_user_type", problem(
         409, "The role holds permissions the user's type does not allow",
         "A user of type {user_type} cannot hold: {excess_permissions}",
-        user_type=str, excess_permissions=List[str]))
+        user_type=UserType, excess_permissions=List[str]))
     # A type change keeps every other assignment: each must fit the ceiling of the new type (spec section 4)
     USER_TYPE_CEILING_EXCEEDED = ("user_type_ceiling_exceeded", problem(
         409, "Assignments of the user exceed the ceiling of the new type",
         "A user of type {user_type} cannot hold the roles of the listed assignments: remove them first",
-        user_type=str, assignments=List[ExcessAssignment]))
+        user_type=UserType, assignments=List[ExcessAssignment]))
     # Permissions added to a role reach every holder of the role: each holder's type must allow them
     ROLE_HOLDERS_EXCEED_USER_TYPE = ("role_holders_exceed_user_type", problem(
         409, "The type of a user holding this role does not allow the added permissions",

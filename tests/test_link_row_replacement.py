@@ -91,8 +91,14 @@ def test_unique_violation_mapping():
         assert taken_error_code(integrity(sqlite_error(f"UNIQUE constraint failed: users.{column}"))) == ErrorCode.CERTIFICATE_TAKEN
     assert taken_error_code(integrity(MySQLError(1062, "Duplicate entry 'a' for key 'users.ix_users_username'"))) == ErrorCode.USERNAME_TAKEN
     assert taken_error_code(integrity(MySQLError(1062, "Duplicate entry 'a' for key 'users.pki_certificate_serial_hash'"))) == ErrorCode.CERTIFICATE_TAKEN
-    # a violation of another table's unique constraint is not a taken username or certificate
+    # the unique index of role_assignments: a type change met a concurrent assignment of the new base role
     assert taken_error_code(integrity(sqlite_error(
-        "UNIQUE constraint failed: role_assignments.user_id, role_assignments.role_id, role_assignments.scope_key"))) is None
+        "UNIQUE constraint failed: role_assignments.user_id, role_assignments.role_id, role_assignments.scope_key",
+    ))) == ErrorCode.ASSIGNMENT_EXISTS
     assert taken_error_code(integrity(MySQLError(
-        1062, "Duplicate entry '1-2-root' for key 'role_assignments.uq_role_assignments_user_role_scope'"))) is None
+        1062, "Duplicate entry '1-2-root' for key 'role_assignments.uq_role_assignments_user_role_scope'",
+    ))) == ErrorCode.ASSIGNMENT_EXISTS
+    assert taken_error_code(integrity(MySQLError(
+        1062, "Duplicate entry '1-2-root' for key 'uq_role_assignments_user_role_scope'"))) == ErrorCode.ASSIGNMENT_EXISTS
+    # a violation of another unique constraint is none of these
+    assert taken_error_code(integrity(sqlite_error("UNIQUE constraint failed: scope_groups.parent_key, scope_groups.name"))) is None

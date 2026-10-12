@@ -50,7 +50,8 @@ _logger = get_api_logger()
 
 
 def taken_error_code(exc: IntegrityError) -> ErrorCode | None:
-    """The problem for a unique violation on users.username or a certificate hash column, otherwise None.
+    """The problem for a unique violation on users.username, a certificate hash column or the unique index of
+    role_assignments (a type change met a concurrent assignment of the new base role at the same node), otherwise None.
 
     e.orig holds only the database message (sqlite: "users.username", MySQL: the key name, which contains the column);
     str(exc) also carries the SQL, which names every column, so it is never searched.
@@ -62,6 +63,8 @@ def taken_error_code(exc: IntegrityError) -> ErrorCode | None:
         return ErrorCode.USERNAME_TAKEN
     if "pki_certificate" in message:
         return ErrorCode.CERTIFICATE_TAKEN
+    if "uq_role_assignments_user_role_scope" in message or "role_assignments.scope_key" in message:
+        return ErrorCode.ASSIGNMENT_EXISTS
     return None
 
 # PATCH /users/{id} reads form fields only; a JSON body would reach the route with every field unset
@@ -313,6 +316,7 @@ async def get_user(
         ErrorCode.CERTIFICATE_TAKEN, ErrorCode.USERNAME_TAKEN, ErrorCode.POST_NOT_FOUND, ErrorCode.POST_ARCHIVED,
         ErrorCode.USER_NOT_FOUND, ErrorCode.CERTIFICATE_FILE_TOO_LARGE, ErrorCode.FORM_CONTENT_TYPE_REQUIRED,
         ErrorCode.LAST_ADMIN_REQUIRED, ErrorCode.CANNOT_REMOVE_OWN_ADMIN, ErrorCode.USER_TYPE_CEILING_EXCEEDED,
+        ErrorCode.ASSIGNMENT_EXISTS,
         AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION,
         AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
     ),
@@ -340,11 +344,13 @@ async def update_user(
     - user_type: Another type (GET /user-types). Every assignment of the old type's built-in role gets the new type's
       built-in role at the same node (at the root when the new one holds system permissions, as for a new user; an
       assignment of the new role the user already has at that node is kept and the old one merged into it). The
-      caller needs user.update and every permission of the new built-in role at each of these nodes (403
-      grant_exceeds_own_permissions); every other assignment, those of archived roles included, must fit the ceiling
-      of the new type (409 user_type_ceiling_exceeded with the assignments and their excess_permissions). The user's
-      sessions end (revoke_cause user_type_changed), so the web never shows the pages of the old type. The same type
-      again changes nothing.
+      caller needs user.update and every permission of the new built-in role at each of these nodes and at the node
+      a new user of the type would get it (the home post; the root without one or for a system role), also when
+      nothing is replaced (403 grant_exceeds_own_permissions); every other assignment, those of archived roles
+      included, must fit the ceiling of the new type (409 user_type_ceiling_exceeded with the assignments and their
+      excess_permissions). A concurrent assignment of the new built-in role at the same node answers 409
+      assignment_exists. The user's sessions end (revoke_cause user_type_changed), so the web never shows the pages
+      of the old type. The same type again changes nothing.
 
     Only provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).
     The fields are form fields: any other body (JSON included) answers 415 instead of being ignored.
@@ -457,35 +463,38 @@ async def update_user(
     user.updated_at = datetime.now(timezone.utc)
     session.add(user)
 
-    # Spec section 6 rule 4 (auth/assignments.py): None when the type stays the same
-    type_change = None
-    if update_data.user_type is not None:
-        type_change = await change_user_type(session, auth, user, update_data.user_type)
-
-    # Deactivation, a new certificate and a new type end every live session in the same transaction as the change,
-    # so the user's tokens stop working the moment the update is committed (the request dependency rejects them).
-    # A certificate is replaced because the old one is lost, compromised or revoked: its sessions must not
-    # outlive it. An administrator replacing their own certificate ends their own session too. A new type changes
-    # the pages of the web client: a login of the old type must not keep showing them.
-    revoke_cause = (SessionRevokeCause.ACCOUNT_DEACTIVATED if deactivating
-                    else SessionRevokeCause.CERTIFICATE_CHANGED if certificate_replaced
-                    else SessionRevokeCause.USER_TYPE_CHANGED if type_change is not None else None)
-    if revoke_cause:
-        invalidated_count = await AuthService.invalidate_all_user_sessions(
-            session=session,
-            user_id=user_id,
-            cause=revoke_cause,
-            actor_user_id=current_user.id,
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
-            commit=False
-        )
-        _logger.info(
-            f"User {current_user.username} updated user {user.username} ({revoke_cause.value}), "
-            f"invalidated {invalidated_count} active sessions"
-        )
-
+    # Everything below writes (the type change's reads flush the fields changed above): a unique index that refuses
+    # a row a concurrent request took after the checks above answers its 409 / 400 instead of a 500, and the audit
+    # row is written in the same transaction as the change
     try:
+        # Spec section 6 rule 4 (auth/assignments.py): None when the type stays the same
+        type_change = None
+        if update_data.user_type is not None:
+            type_change = await change_user_type(session, auth, user, update_data.user_type)
+
+        # Deactivation, a new certificate and a new type end every live session in the same transaction as the
+        # change, so the user's tokens stop working the moment the update is committed (the request dependency
+        # rejects them). A certificate is replaced because the old one is lost, compromised or revoked: its sessions
+        # must not outlive it. An administrator replacing their own certificate ends their own session too. A new
+        # type changes the pages of the web client: a login of the old type must not keep showing them.
+        revoke_cause = (SessionRevokeCause.ACCOUNT_DEACTIVATED if deactivating
+                        else SessionRevokeCause.CERTIFICATE_CHANGED if certificate_replaced
+                        else SessionRevokeCause.USER_TYPE_CHANGED if type_change is not None else None)
+        if revoke_cause:
+            invalidated_count = await AuthService.invalidate_all_user_sessions(
+                session=session,
+                user_id=user_id,
+                cause=revoke_cause,
+                actor_user_id=current_user.id,
+                ip_address=request.client.host if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+                commit=False
+            )
+            _logger.info(
+                f"User {current_user.username} updated user {user.username} ({revoke_cause.value}), "
+                f"invalidated {invalidated_count} active sessions"
+            )
+
         if type_change is not None:
             # The old type's built-in role may have been the admin role at the root: the caller keeps theirs, and
             # someone keeps it (a deactivation too)
@@ -494,10 +503,6 @@ async def update_user(
             # A change that may take the admin role at the root from its last holder (deactivating oneself is
             # refused above)
             await check_an_admin_remains(session)
-
-        await session.commit()
-
-        await session.refresh(user)
 
         new_values = {
             **user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"}),
@@ -508,7 +513,6 @@ async def update_user(
             new_values["replaced_assignments"] = type_change.replaced
             message += (f" (type {type_change.old_type.value} -> {type_change.new_type.value}, "
                         f"{len(type_change.replaced)} assignments replaced)")
-        # Create audit log
         await create_audit_log(
             session=session,
             action="update",
@@ -521,14 +525,15 @@ async def update_user(
             **client_info(request, auth)
         )
         await session.commit()
-        
+        await session.refresh(user)
+
         _logger.info(f"User {current_user.username} updated user {user.username}")
 
         return UserResponse.model_validate(user)
 
     except IntegrityError as e:
         await session.rollback()
-        # A concurrent request took the username or the certificate after the checks above
+        # A concurrent request took the username, the certificate or the new base role at the node after the checks
         code = taken_error_code(e)
         if code is None:
             raise
