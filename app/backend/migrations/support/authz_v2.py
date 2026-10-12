@@ -8,7 +8,8 @@ the copies; a different conversion is a new module.
 
 Old model: user_roles (archived roles give nothing), users.post_id (home post, read and write), user_post_access
 (post_id, can_write: read, or read and write), admin.true (the gate of the administration routes, and the record
-exception: every post and user record, global statistics) and post.access_all (every post, read and write).
+exception: every post and user record, their administration, the group list, global statistics, storage
+monitoring) and post.access_all (every post, read and write).
 New model: role assignments, user + role + node ("root" or "p:<post id>"; the conversion never uses groups).
 
 Rules (docs/superpowers/specs/2026-10-11-authorization-v2-design.md, section 8), for user U with roles R:
@@ -16,12 +17,15 @@ Rules (docs/superpowers/specs/2026-10-11-authorization-v2-design.md, section 8),
 1. U holds the built-in admin role (admin_role_id, not archived): type admin, one assignment admin @ root. Done.
 2. P(R) = permissions of R without REMOVED. When U does not hold admin.true, DEAD_WITHOUT_ADMIN are dead today
    and are left out.
-3. U holds post.access_all: every P(R) at the root.
-4. Otherwise, per R: root part = the system permissions of P(R), plus ADMIN_RECORD of P(R) when U holds
-   admin.true, plus GLOBAL_VIEW of P(R) when U has neither a home post nor access rows (objects without a post
-   are held anywhere: a dictionary reader without a post keeps the dictionaries); post part = the rest, at the
-   home post and at every access row with can_write; view part = the *.view permissions of the post part, at
-   every access row without can_write. A permission of the root part is never repeated in the other parts.
+3. U holds post.access_all: every P(R) at the root (plus media.monitor, see 4).
+4. Otherwise, per R: root part = the system permissions of P(R), plus ADMIN_RECORD and ADMIN_ADMINISTRATION of
+   P(R) when U holds admin.true, plus GLOBAL_VIEW of P(R) when U has neither a home post nor access rows (objects
+   without a post are held anywhere: a dictionary reader without a post keeps the dictionaries), plus
+   media.monitor when U holds admin.true and P(R) holds media.view (storage statistics and poster status were
+   media.view behind the gate; R itself does not hold it, so the root part goes to a derived role); post part =
+   the rest, at the home post and at every access row with can_write; view part = the *.view permissions of the
+   post part plus READ_ROW_EXTRA (export.create: an export reads the data of read-only rows today), at every
+   access row without can_write. A permission of the root part is never repeated in the other parts.
 5. Each non-empty (set, node) goes to R itself when the set is R's stored set (permissions - REMOVED), otherwise
    to a derived role: one per distinct (set, archived flag) in the whole plan, named after the first source role
    <name>_system / _posts / _view (root / post / view part) with display name "<display name> (система)" /
@@ -38,6 +42,8 @@ Open points decided here:
 - dropped = every permission of U's roles (REMOVED aside) that no planned assignment carries: dead without
   admin.true, or scoped permissions of a user without any post.
 - Permissions this module does not know (rows left in the database) stay in the roles but never decide the type.
+- media.monitor is added with post.access_all too (the storage routes were the gate, whatever the data scope).
+  Only the admin ceiling holds it, so an admin.true user with media.view gets the type admin.
 - differences: what the new model does differently for U, see _differences.
 """
 from dataclasses import dataclass
@@ -66,6 +72,18 @@ GLOBAL_VIEW: FrozenSet[str] = frozenset({
 
 # The record exception of admin.true (every post and user record) and its global statistics
 ADMIN_RECORD: FrozenSet[str] = frozenset({"post.view", "user.view", "statistics.view"})
+
+# The administration of those records, behind the admin gate: it acted on every post, user and group
+ADMIN_ADMINISTRATION: FrozenSet[str] = frozenset({
+    "post.create", "post.update", "post.archive", "user.create", "user.update", "user.archive", "scope_group.view",
+})
+
+# Storage statistics and poster status: media.view behind the admin gate, media.monitor (system) in the new model
+MEDIA_VIEW = "media.view"
+MEDIA_MONITOR = "media.monitor"
+
+# Not a view permission, but read-side: the export covers the read-only rows today
+READ_ROW_EXTRA: FrozenSet[str] = frozenset({"export.create"})
 
 # Every permission whose state-changing routes carry the admin gate today: without admin.true it does nothing
 # (read-side uses such as include_deleted are lost with it, the safe direction)
@@ -125,21 +143,13 @@ TYPE_CEILINGS: Mapping[str, FrozenSet[str]] = MappingProxyType({
     "admin": _EVERY_PERMISSION,
 })
 
-# What the new model does differently, reported per user (spec section 8 "Differences", plus the ones found
-# while writing this module: administration, export, storage monitoring)
+# What the new model does differently, reported per user (spec section 8 "Differences")
 DIFF_UPLOAD_LIST = "upload_list_follows_manage_any"
 DIFF_COUNTERS = "observation_counters_follow_view"
 DIFF_ARCHIVED_RECORDS = "archived_records_need_archive"
 DIFF_ARCHIVED_POST_DATA = "archived_post_observations_need_post_archive"
 DIFF_NO_PERMISSIONS = "no_permissions"
-DIFF_ADMINISTRATION = "administration_follows_scope"
-DIFF_EXPORT_READ_ROWS = "export_needs_export_create_at_post"
-DIFF_MONITOR = "storage_monitoring_needs_media_monitor"
 
-# Gated routes that act on any post or user today, whatever the data scope
-_ADMINISTRATION: FrozenSet[str] = frozenset({
-    "post.create", "post.update", "post.archive", "user.create", "user.update", "user.archive", "scope_group.view",
-})
 # include_deleted shows archived rows of every post of the data scope today
 _ARCHIVE_DATA: FrozenSet[str] = frozenset({"observation.archive", "media.archive", "post.archive", "user.archive"})
 
@@ -344,16 +354,17 @@ def _alive(role: LegacyRole, flags: _Flags) -> FrozenSet[str]:
 
 def _split(alive: FrozenSet[str], flags: _Flags, places: _Places) -> Dict[str, FrozenSet[str]]:
     """The root, post and view parts of one role (rules 3 and 4)"""
+    monitor = frozenset({MEDIA_MONITOR}) if flags.admin and MEDIA_VIEW in alive else frozenset()
     if flags.access_all:
-        return {_ROOT_PART: alive, _POST_PART: frozenset(), _VIEW_PART: frozenset()}
+        return {_ROOT_PART: alive | monitor, _POST_PART: frozenset(), _VIEW_PART: frozenset()}
     root = alive & SYSTEM
     if flags.admin:
-        root |= alive & ADMIN_RECORD
+        root |= alive & (ADMIN_RECORD | ADMIN_ADMINISTRATION)
     if not places.has_posts:
         root |= alive & GLOBAL_VIEW
     post = alive - root
-    view = frozenset(name for name in post if name.endswith(".view"))
-    return {_ROOT_PART: root, _POST_PART: post, _VIEW_PART: view}
+    view = frozenset(name for name in post if name.endswith(".view") or name in READ_ROW_EXTRA)
+    return {_ROOT_PART: root | monitor, _POST_PART: post, _VIEW_PART: view}
 
 
 def _nodes(part: str, places: _Places) -> Tuple[str, ...]:
@@ -378,30 +389,23 @@ def _user_type(permissions: FrozenSet[str], access_all: bool) -> str:
 def _differences(flags: _Flags, places: _Places, alive: FrozenSet[str], root: FrozenSet[str],
                  has_assignments: bool) -> Tuple[str, ...]:
     """What U could do today that the plan does not reproduce (alive: what applied today; root: what the plan puts
-    at the root). Today an administrator (admin.true) acts on every post and user record and the read-only access
-    rows count in every list; after the conversion everything follows the node where the permission is held."""
+    at the root). Today an administrator (admin.true) sees every post and user record and the read-only access rows
+    count in every list; after the conversion data permissions follow the node where they are held."""
     scoped = not flags.access_all
-    admin_scoped = flags.admin and scoped
     read_rows = bool(places.read)
     checks = (
         # GET /media/uploads with media.manage_any: every post for admin.true, the read-only rows too for everyone
         (DIFF_UPLOAD_LIST, scoped and "media.manage_any" in alive and (flags.admin or read_rows)),
         # GET /posts/{id}/observation-stats: any post for admin.true
-        (DIFF_COUNTERS, admin_scoped and {"post.view", "observation.view"} <= alive),
+        (DIFF_COUNTERS, flags.admin and scoped and {"post.view", "observation.view"} <= alive),
         # archived post and user records: visible to admin.true without X.archive; include_deleted: archived rows of
-        # the read-only rows too
+        # the read-only rows too (X.archive not held at the root)
         (DIFF_ARCHIVED_RECORDS, (flags.admin and (("post.view" in alive and "post.archive" not in root)
                                                   or ("user.view" in alive and "user.archive" not in root)))
-         or (scoped and read_rows and bool(alive & _ARCHIVE_DATA))),
+         or (scoped and read_rows and bool((alive - root) & _ARCHIVE_DATA))),
         # observation archive / restore in archived posts: admin.true + post.access_all, now post.archive at the post
         (DIFF_ARCHIVED_POST_DATA, flags.admin and flags.access_all
          and {"observation.view", "observation.archive"} <= alive and "post.archive" not in alive),
-        # post and user administration acted on any post or user, the group list showed every group
-        (DIFF_ADMINISTRATION, admin_scoped and bool(alive & _ADMINISTRATION)),
-        # the export covered the read-only rows; export.create is not a view permission, it stays in the post part
-        (DIFF_EXPORT_READ_ROWS, admin_scoped and read_rows and {"observation.view", "export.create"} <= alive),
-        # storage statistics and poster status needed media.view behind the admin gate, now media.monitor
-        (DIFF_MONITOR, flags.admin and "media.view" in alive and "media.monitor" not in alive),
         (DIFF_NO_PERMISSIONS, not has_assignments),
     )
     return tuple(sorted(tag for tag, differs in checks if differs))

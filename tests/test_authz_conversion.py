@@ -164,7 +164,71 @@ def test_admin_true_from_another_role_counts():
     r = role(2, {"user.update", "observation.view"}, name="r")
     plan, up = one(user(roles=(1, 2), post_id=7), [flag, r])
     assert up.dropped == frozenset()
-    assert set(up.assignments) == {PlannedAssignment(2, "p:7")}   # user.update is scoped: post part, as itself
+    assert set(up.assignments) == {PlannedAssignment("r_system", "root"), PlannedAssignment("r_posts", "p:7")}
+    assert by_name(plan)["r_system"].permissions == {"user.update"}
+
+
+def test_admin_true_keeps_record_administration_at_root():
+    # R8: the record exception covered the administration of posts, users and the group list
+    admin_perms = {"post.view", "post.create", "post.update", "post.archive", "user.view", "user.create",
+                   "user.update", "user.archive", "scope_group.view", "statistics.view"}
+    r = role(1, admin_perms | {"admin.true", "observation.view", "observation.create"}, name="r")
+    plan, up = one(user(roles=(1,), post_id=7, access=((8, True), (9, False))), [r])
+    derived = by_name(plan)
+    assert derived["r_system"].permissions == admin_perms
+    assert derived["r_posts"].permissions == {"observation.view", "observation.create"}
+    assert derived["r_view"].permissions == {"observation.view"}
+    assert set(up.assignments) == {
+        PlannedAssignment("r_system", "root"), PlannedAssignment("r_posts", "p:7"),
+        PlannedAssignment("r_posts", "p:8"), PlannedAssignment("r_view", "p:9"),
+    }
+    assert up.user_type == "post_admin"
+    # archive held at the root: archived post and user records stay visible, nothing to report for them
+    assert conv.DIFF_ARCHIVED_RECORDS not in up.differences
+
+
+def test_record_administration_stays_dead_without_admin_true():
+    r = role(1, {"post.view", "post.update", "user.view", "user.update", "observation.view"}, name="r")
+    plan, up = one(user(roles=(1,), post_id=7), [r])
+    assert up.assignments == (PlannedAssignment("r_posts", "p:7"),)
+    assert by_name(plan)["r_posts"].permissions == {"post.view", "user.view", "observation.view"}
+    assert up.dropped == {"post.update", "user.update"}
+
+
+def test_view_part_carries_export_create():
+    # R9: an export reads the data of read-only rows
+    r = role(1, {"admin.true", "observation.view", "observation.create", "export.create"}, name="r")
+    plan, up = one(user(roles=(1,), post_id=7, access=((9, False),)), [r])
+    assert by_name(plan)["r_view"].permissions == {"observation.view", "export.create"}
+    assert set(up.assignments) == {PlannedAssignment(1, "p:7"), PlannedAssignment("r_view", "p:9")}
+
+
+def test_export_create_of_a_view_role_assigns_the_role_itself_at_read_rows():
+    r = role(1, {"admin.true", "observation.view", "export.create"}, name="r")
+    plan, up = one(user(roles=(1,), post_id=7, access=((9, False),)), [r])
+    assert set(up.assignments) == {PlannedAssignment(1, "p:7"), PlannedAssignment(1, "p:9")}
+    assert plan.derived_roles == ()
+
+
+def test_admin_media_view_gets_media_monitor_at_root():
+    # R10: storage statistics and poster status were media.view behind the admin gate
+    r = role(1, {"admin.true", "media.view", "observation.view"}, name="r")
+    plan, up = one(user(roles=(1,), post_id=7), [r])
+    derived = by_name(plan)
+    assert derived["r_system"].permissions == {"media.monitor"}   # R itself does not hold it: a derived role
+    assert set(up.assignments) == {PlannedAssignment("r_system", "root"), PlannedAssignment(1, "p:7")}
+    assert up.user_type == "admin"   # only the admin ceiling holds media.monitor
+    # with post.access_all too
+    plan, up = one(user(roles=(1,), post_id=7), [role(1, {"admin.true", "post.access_all", "media.view"}, "r")])
+    assert by_name(plan)["r_system"].permissions == {"media.view", "media.monitor"}
+    assert up.assignments == (PlannedAssignment("r_system", "root"),)
+    # not without admin.true, and not for a role without media.view
+    _, up = one(user(roles=(1,), post_id=7), [role(1, {"media.view"})])
+    assert up.assignments == (PlannedAssignment(1, "p:7"),)
+    flag, other = role(1, {"admin.true", "media.view"}, "flag"), role(2, {"observation.view"}, "other")
+    plan, up = one(user(roles=(1, 2), post_id=7), [flag, other])
+    assert PlannedAssignment(2, "p:7") in up.assignments
+    assert by_name(plan)["flag_system"].permissions == {"media.monitor"}
 
 
 def test_admin_true_of_an_archived_role_does_not_count():
@@ -205,9 +269,11 @@ def test_type_inference_order_and_analyst_preference():
     assert type_of(OPERATOR) == "operator"
     assert type_of(OPERATOR, access_all=True) == "operator"
     assert type_of(VIEW | {"user.view"}) == "senior_operator"   # first in order whose ceiling covers
-    assert type_of(VIEW | {"admin.true", "scope_group.view"}) == "analyst"
-    assert type_of(VIEW | {"admin.true", "post.update"}) == "post_admin"
-    assert type_of(VIEW | {"admin.true", "audit.view"}) == "admin"
+    no_media = VIEW - {"media.view"}   # admin.true + media.view adds media.monitor: type admin
+    assert type_of(no_media | {"admin.true", "scope_group.view"}) == "analyst"
+    assert type_of(no_media | {"admin.true", "post.update"}) == "post_admin"
+    assert type_of(no_media | {"admin.true", "audit.view"}) == "admin"
+    assert type_of(VIEW | {"admin.true"}) == "admin"
     assert type_of(set()) == "viewer"
     assert type_of(set(), access_all=True) == "analyst"
 
@@ -305,6 +371,9 @@ def test_differences_are_reported():
     assert conv.DIFF_ARCHIVED_RECORDS in diffs({"admin.true", "post.view"})
     assert conv.DIFF_ARCHIVED_RECORDS in diffs({"admin.true", "post.access_all", "user.view"})
     assert conv.DIFF_ARCHIVED_RECORDS not in diffs({"admin.true", "post.access_all", "post.view", "post.archive"})
+    # R8: post.archive / user.archive of admin.true are at the root, archived records stay visible everywhere
+    assert conv.DIFF_ARCHIVED_RECORDS not in diffs({"admin.true", "post.view", "post.archive", "user.view",
+                                                    "user.archive"}, access=((9, False),))
     assert conv.DIFF_ARCHIVED_RECORDS not in diffs({"post.view", "observation.view", "observation.archive"})
     # include_deleted showed archived rows of read-only rows too
     assert conv.DIFF_ARCHIVED_RECORDS in diffs({"observation.view", "observation.archive"}, access=((9, False),))
@@ -314,24 +383,22 @@ def test_differences_are_reported():
     assert conv.DIFF_ARCHIVED_POST_DATA not in diffs(data | {"post.archive"})
     assert conv.DIFF_ARCHIVED_POST_DATA not in diffs(data - {"admin.true"})
 
-    assert conv.DIFF_ADMINISTRATION in diffs({"admin.true", "user.view", "user.update"})
-    assert conv.DIFF_ADMINISTRATION in diffs({"admin.true", "post.view", "post.create"})
-    assert conv.DIFF_ADMINISTRATION not in diffs({"admin.true", "post.access_all", "post.view", "post.update"})
-    assert conv.DIFF_ADMINISTRATION not in diffs({"user.view", "user.update"})   # dead, dropped
+    # R8, R9, R10: administration, exports of read-only rows and storage monitoring are kept, nothing to report
+    kept = {"admin.true", "post.update", "user.update", "scope_group.view", "observation.view", "export.create",
+            "media.view"}
+    assert diffs(kept, access=((9, False),)) == ()
 
-    export = {"admin.true", "observation.view", "export.create"}
-    assert conv.DIFF_EXPORT_READ_ROWS in diffs(export, access=((9, False),))
-    assert conv.DIFF_EXPORT_READ_ROWS not in diffs(export, access=((9, True),))
 
-    assert conv.DIFF_MONITOR in diffs({"admin.true", "media.view"})
-    assert conv.DIFF_MONITOR not in diffs({"admin.true", "media.view", "media.monitor"})
-    assert conv.DIFF_MONITOR not in diffs({"media.view"})
+def test_dropped_differences_are_gone():
+    for name in ("DIFF_ADMINISTRATION", "DIFF_EXPORT_READ_ROWS", "DIFF_MONITOR"):
+        assert not hasattr(conv, name)
 
 
 def test_differences_are_sorted_and_unique():
     perms = {"admin.true", "post.view", "observation.view", "media.view", "media.manage_any", "user.update"}
     _, up = one(user(roles=(1,), post_id=7), [role(1, perms)])
-    assert list(up.differences) == sorted(set(up.differences)) and len(up.differences) >= 4
+    assert up.differences == (conv.DIFF_ARCHIVED_RECORDS, conv.DIFF_COUNTERS, conv.DIFF_UPLOAD_LIST)
+    assert list(up.differences) == sorted(set(up.differences))
 
 
 # ----------------------------------------------------------------------- frozen copies
