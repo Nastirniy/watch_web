@@ -56,7 +56,7 @@ def test_normalize_label():
     assert normalize_label("  Laptop ") == "Laptop" and normalize_label("a" * 64) == "a" * 64
     assert normalize_label("") is None and normalize_label("a" * 65) is None
     assert normalize_label("   ") is None
-    assert normalize_label("a\tb") is None and normalize_label("a‎b") is None
+    assert normalize_label("a\tb") is None and normalize_label("a\u200eb") is None
     assert normalize_label(CYRILLIC_CN) == CYRILLIC_CN
 
 
