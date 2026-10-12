@@ -191,10 +191,11 @@ empty, so this only matters after a restore).
 - `require(all=[...], any=[...])` checks "held anywhere"; the `admin=` parameter is removed. 403
   `permission_denied` as today; `admin_required` is removed.
 - The precise check happens in the handler through `AccessControlService`, which now takes the permission:
-  - `post_scope(auth, p)` and `resolve_post_scope(auth, p, requested_post_id)` for lists;
+  - `scope_for(auth, p)` and `resolve_scope(auth, p, requested_post_id)` for lists;
   - `check_post(auth, p, post_id, resource_type)` for single resources: 403 `post_access_denied` for `*.view`
     permissions, `post_write_denied` for the others, with `required`;
-  - `check_user(auth, p, target)`: `covers_user`, or the target is the caller for `user.view`.
+  - `check_user_view(auth, target)` (reads: `covers_user`, or the target is the caller) and
+    `check_target_user(session, auth, target, p)` in `auth/privileges.py` (changes, rule 2 of section 6).
 - The old readable / writable split (`can_write`) becomes per permission: `observation.update` may be in effect at
   post 7 while only `observation.view` is at post 9.
 - `post_record_scope`, `resolve_record_scope` and `check_post_record_view` are removed: post records follow
@@ -373,8 +374,8 @@ the reported differences through the API, the web moves to the new auth fields.
   - "Access is role assignments (user + role + scope node: `/`, a scope group, a post), inherited down the tree,
     additive. Every route requires only its own permissions: `Depends(require(all=[Permissions.X_VIEW,
     Permissions.X_UPDATE]))`; there is no admin gate. The precise check is in the handler through
-    `AccessControlService` with the permission (`check_post(auth, p, post_id, ...)`, `post_scope(auth, p)`,
-    `check_user(auth, p, user)`)."
+    `AccessControlService` with the permission (`check_post(auth, p, post_id, ...)`, `scope_for(auth, p)`,
+    `check_user_view(auth, user)`; changes to users through `check_target_user`)."
   - "Every user has one `user_type` (`auth/user_types.py`): base role (built-in, synced by seeding, read-only in the
     API) and ceiling. Pages in the web follow the type; the API never authorizes by type."
   - "Permission levels: `system` (assignable only at `/`) and `scoped`; a new permission declares its level next to
