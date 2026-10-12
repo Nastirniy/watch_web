@@ -343,11 +343,12 @@ def test_frozen_sets_equal_the_live_definitions():
     from app.backend.bootstrap.permissions import PERMISSION_LEVELS
     from app.backend.enums.general import PermissionLevel, UserType
 
+    # admin.true and post.access_all leave the live code with migration 023: compare without them
     live_system = {name for name, level in PERMISSION_LEVELS.items() if level is PermissionLevel.SYSTEM}
-    assert conv.SYSTEM == live_system
+    assert conv.SYSTEM - conv.REMOVED == live_system - conv.REMOVED and conv.ADMIN_TRUE in conv.SYSTEM
     assert conv.TYPE_ORDER == tuple(t.value for t in UserType)
-    assert {key: set(ceiling) for key, ceiling in conv.TYPE_CEILINGS.items()} == {
-        t.value: set(spec.allowed_permissions) for t, spec in USER_TYPES.items()
+    assert {key: ceiling - conv.REMOVED for key, ceiling in conv.TYPE_CEILINGS.items()} == {
+        t.value: spec.allowed_permissions - conv.REMOVED for t, spec in USER_TYPES.items()
     }
     assert conv.REMOVED == {"admin.true", "post.access_all"}
     assert conv.DEAD_WITHOUT_ADMIN <= set(PERMISSION_LEVELS) and conv.GLOBAL_VIEW <= set(PERMISSION_LEVELS)

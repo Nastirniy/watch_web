@@ -68,6 +68,16 @@ async def test_access_all_is_every_post(db):
     assert auth.post_scope() is None
     assert auth.posts_with(P.OBSERVATION_VIEW) is None and auth.posts_with(P.OBSERVATION_CREATE) is None
     assert auth.has_at_post(P.OBSERVATION_CREATE, a.id)
+    # like can_view_post: every id, even one no post has (the route answers 404 after the scope check)
+    assert auth.has_at_post(P.OBSERVATION_VIEW, 0) == auth.can_view_post(0) is True
+
+
+async def test_unknown_post_ids_never_fail(db):
+    a = await make_post(db)
+    user = await make_user(db, perms=[P.OBSERVATION_VIEW], post_id=a.id)
+    auth = await load_auth_context(db, user)
+    for post_id in (0, -1, a.id + 1000):
+        assert auth.has_at_post(P.OBSERVATION_VIEW, post_id) == auth.can_view_post(post_id) is False
 
 
 async def test_dead_permissions_are_held_only_in_the_legacy_set(db):

@@ -67,7 +67,10 @@ class Node:
         prefix, separator, digits = key.partition(":")
         if not separator or prefix not in _KINDS or not digits.isascii() or not digits.isdigit():
             raise ValueError(f"not a scope key: {key!r}")
-        return cls(_KINDS[prefix], int(digits))
+        node = cls(_KINDS[prefix], int(digits))
+        if node.key != key:   # one key per node: no leading zeros
+            raise ValueError(f"not a canonical scope key: {key!r}")
+        return node
 
 
 ROOT = Node.root()
@@ -148,13 +151,13 @@ class ScopeTree:
 
     def nodes_in_effect_at_post(self, post_id: int) -> Tuple[Node, ...]:
         """Where a grant applies to the post: ROOT, every non-archived group above it (top down), the post itself
-        when it is not archived"""
-        post = Node.post(post_id)
+        when it is not archived. An id no post can have (0, negative) gets ROOT only."""
         groups = tuple(
             Node.group(group_id) for group_id in reversed(self._post_chains.get(post_id, ()))
             if group_id not in self.archived_groups
         )
-        own = () if post_id in self.archived_posts else (post,)
+        valid = isinstance(post_id, int) and not isinstance(post_id, bool) and post_id >= 1
+        own = (Node.post(post_id),) if valid and post_id not in self.archived_posts else ()
         return (ROOT, *groups, *own)
 
     def posts_in_effect(self, node: Node) -> Optional[FrozenSet[int]]:

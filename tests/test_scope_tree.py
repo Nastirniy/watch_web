@@ -67,6 +67,8 @@ def test_post_in_archived_or_unknown_group():
     assert 30 in stray.posts_under(ROOT) and stray.posts_under(Node.group(99)) == {30}
     # a post missing from the map: a live post directly under the root
     assert TREE.nodes_in_effect_at_post(404) == (ROOT, Node.post(404))
+    # an id no post can have (a query parameter nobody validated): the root only, never an error
+    assert TREE.nodes_in_effect_at_post(0) == (ROOT,) and TREE.nodes_in_effect_at_post(-3) == (ROOT,)
 
 
 def test_cyclic_parents_do_not_loop():
@@ -95,7 +97,7 @@ def test_node_key_roundtrip():
         assert Node.parse(node.key) == node
 
 
-@pytest.mark.parametrize("key", ["", "x:1", "g:", "p:abc", "root:1", "g:0", "p:-1", "G:3", " p:7"])
+@pytest.mark.parametrize("key", ["", "x:1", "g:", "p:abc", "root:1", "g:0", "p:-1", "G:3", " p:7", "p:007", "Root"])
 def test_node_parse_refuses_malformed_keys(key):
     with pytest.raises(ValueError):
         Node.parse(key)
