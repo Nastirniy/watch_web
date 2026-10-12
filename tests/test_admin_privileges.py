@@ -445,6 +445,31 @@ async def test_a_target_with_an_assignment_beyond_the_caller(db):
     assert caught.value.params["missing"] == ["observation.view"]
 
 
+@pytest.mark.asyncio
+async def test_an_archived_role_of_the_target_still_counts(client, db, headers):
+    """Spec section 6 rule 2: the caller could grant every existing assignment of the target. An assignment of an
+    archived role grants nothing today but comes back with the role's restore, so it counts too"""
+    a = await make_post(db)
+    caller = await make_user(db)
+    await assign(db, caller, await make_role(db, ["user.view", "user.update", "observation.view"]), Node.post(a.id))
+    target = await make_user(db, post_id=a.id)
+    beyond = await make_role(db, ["observation.view", "observation.create"])
+    await assign(db, target, beyond, Node.post(a.id))
+    beyond.is_deleted = True
+    db.add(beyond)
+    await db.commit()
+    assert (await load_auth_context(db, target)).grants == (), "the archived role grants nothing to the target"
+
+    auth = await load_auth_context(db, caller)
+    with pytest.raises(ApiError) as caught:
+        await check_target_user(db, auth, target)
+    assert caught.value.code is AccessErrorCode.TARGET_USER_MORE_PRIVILEGED
+    assert caught.value.params["missing"] == ["observation.create"]
+    body = problem(await client.patch(USER.format(user_id=target.id), headers=headers(caller), data={"username_alias": "X"}),
+                   403, "target_user_more_privileged")
+    assert body["missing"] == ["observation.create"]
+
+
 # ----------------------------------------------------------------- the last administrator
 
 @pytest.mark.asyncio

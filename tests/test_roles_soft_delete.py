@@ -1,4 +1,6 @@
 """Roles: archive (hidden, not assignable, permissions stop applying, restorable) and the permanent delete."""
+from datetime import datetime
+
 import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
@@ -121,6 +123,15 @@ async def test_permanent_delete_preconditions_and_effect(client, db, headers):
     archived_holder.is_deleted = True
     db.add(archived_holder)
     await db.commit()
+    (removed_row,) = (await db.exec(select(RoleAssignment).where(RoleAssignment.role_id == role.id))).all()
+    removed_row.created_by = admin.id
+    db.add(removed_row)
+    await db.commit()
+    expected_assignment = {
+        "id": removed_row.id, "user_id": archived_holder.id, "role_id": role.id, "scope_group_id": None,
+        "scope_post_id": post.id, "scope_key": f"p:{post.id}", "created_at": removed_row.created_at,
+        "created_by": admin.id,
+    }
 
     deleted = await client.delete(url, headers=headers(admin))
     assert deleted.status_code == 204, deleted.text
@@ -142,7 +153,10 @@ async def test_permanent_delete_preconditions_and_effect(client, db, headers):
     assert log.old_values["name"] == "temporary"
     assert log.old_values["permissions"] == ["tag.create", "tag.view"]
     assert log.old_values["assigned_archived_users"] == [{"id": archived_holder.id, "username": archived_holder.username}]
-    assert [(a["user_id"], a["scope"]) for a in log.old_values["assignments"]] == [(archived_holder.id, f"p:{post.id}")]
+    # every column of each removed role_assignments row
+    (copied,) = log.old_values["assignments"]
+    assert set(copied) == set(RoleAssignment.__table__.columns.keys())
+    assert {**copied, "created_at": datetime.fromisoformat(copied["created_at"])} == expected_assignment
     assert log.details["permanent"] is True
 
 

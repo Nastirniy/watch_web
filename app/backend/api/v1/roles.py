@@ -447,10 +447,10 @@ async def delete_role(
     if active_users:
         raise ApiError(ErrorCode.ROLE_HAS_ACTIVE_USERS, assigned_users=active_users)
     archived_users = [{"id": uid, "username": name} for uid, name, deleted in assigned_rows if deleted]
-    assignments = (await session.exec(
-        select(RoleAssignment.id, RoleAssignment.user_id, RoleAssignment.scope_key)
-        .where(RoleAssignment.role_id == role_id).order_by(RoleAssignment.id)
-    )).all()
+    # A full copy of every role_assignments row the delete removes: every column
+    assignments = [assignment.model_dump() for assignment in (await session.exec(
+        select(RoleAssignment).where(RoleAssignment.role_id == role_id).order_by(RoleAssignment.id)
+    )).all()]
 
     permissions = await session.exec(
         select(Permission.name)
@@ -461,7 +461,7 @@ async def delete_role(
     permission_names = list(permissions.all())
     old_values = {
         **role.model_dump(), "permissions": permission_names, "assigned_archived_users": archived_users,
-        "assignments": [{"id": aid, "user_id": uid, "scope": key} for aid, uid, key in assignments],
+        "assignments": assignments,
     }
 
     # Core statements on purpose: no ORM cascade (no lazy loads in an async session), every row is removed explicitly

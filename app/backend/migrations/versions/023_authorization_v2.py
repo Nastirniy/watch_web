@@ -5,27 +5,32 @@ Upgrade (spec section 8):
    at once), users.user_type (nullable during the conversion) and authz_v2_migration_log (kind, ref_id, data: what
    the downgrade needs), each guarded with an inspector check: a fresh install built by 002_sync_schema already has
    users.user_type.
-2. Unless the database is converted already (user_roles_v1 or user_post_access_v1 exists): the frozen conversion
-   (migrations/support/authz_v2.py) plans every user from user_roles, users.post_id and user_post_access
-   (support/authz_v2_data.py reads them; a missing table counts as empty: a fresh install has no user_roles). The
-   derived roles are inserted with their permissions (a permission the plan needs and the table lacks, media.monitor
-   before seeding added it, is inserted too and logged), then the assignments, users.user_type and one audit row per
-   user (action migrate, resource_type user, details = the user's plan, what authz_report prints). The admin.true and
-   post.access_all rows leave permissions and role_permissions (logged with every column); user_roles and
-   user_post_access are renamed to *_v1 and kept for the downgrade (a later cleanup revision drops them).
+2. Unless the database is converted already (the "converted" row in the log, or user_roles_v1 / user_post_access_v1
+   from a conversion before that row existed): the frozen conversion (migrations/support/authz_v2.py) plans every
+   user from user_roles, users.post_id and user_post_access (support/authz_v2_data.py reads them; a missing table
+   counts as empty: a fresh install has no user_roles). The derived roles are inserted with their permissions (a
+   permission the plan needs and the table lacks, media.monitor before seeding added it, is inserted too and logged),
+   then the assignments (only "root" and "p:<id>" nodes; anything else stops the migration), users.user_type and one
+   audit row per user (action migrate, resource_type user, details = the user's plan, what authz_report prints). The
+   admin.true and post.access_all rows leave permissions and role_permissions (logged with every column); the
+   "converted" row is written last, in the same transaction.
+   Then, converted now or before, each of user_roles and user_post_access still under its legacy name (and without
+   its *_v1) is renamed to *_v1 and kept for the downgrade (a later cleanup revision drops them). MySQL commits the
+   conversion with the first RENAME: a rename that failed, or a crash between the two, is finished by a rerun.
 3. users.user_type becomes NOT NULL.
 
 Downgrade restores exactly: the legacy tables come back from *_v1 (a fresh install has no user_roles_v1: user_roles
 is created empty with its original schema), the removed permission rows and grants come back with their ids from the
 log, the derived roles and the permissions the upgrade inserted are deleted, role_assignments, users.user_type and the
-log are dropped. Audit rows stay (history); assignments made after the upgrade are lost with role_assignments.
+log (the "converted" row with it) are dropped. Audit rows stay (history); assignments made after the upgrade are lost
+with role_assignments.
 
 Revision ID: 023_authorization_v2
 Revises: 022_builtin_roles
 Create Date: 2026-10-12
 """
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from alembic import op
 import sqlalchemy as sa
@@ -47,12 +52,14 @@ POST_ACCESS, POST_ACCESS_V1 = "user_post_access", "user_post_access_v1"
 UNIQUE = "uq_role_assignments_user_role_scope"
 CHECK = "ck_role_assignments_one_scope"
 INDEXED = ("user_id", "role_id", "scope_group_id", "scope_post_id")
+ROOT_NODE = "root"                               # the scope_key of the root; a post is "p:<id>"
 
 # What the log records (kind: ref_id, data)
 REMOVED_PERMISSION = "removed_permission"        # permissions.id: the row
 REMOVED_GRANT = "removed_role_permission"        # role_permissions.id: the row
 DERIVED_ROLE = "derived_role"                    # roles.id: name, source role
 ADDED_PERMISSION = "added_permission"            # permissions.id: name
+CONVERTED = "converted"                          # no ref_id: users and derived roles converted (the last row written)
 
 # Tables the conversion inserts into and needs the new id of: a primary key column (inserted_primary_key)
 _META = sa.MetaData()
@@ -92,7 +99,7 @@ def _tables() -> set:
     return set(sa.inspect(op.get_bind()).get_table_names())
 
 
-def _record(kind: str, ref_id: int, data: dict) -> None:
+def _record(kind: str, ref_id: Optional[int], data: dict) -> None:
     op.get_bind().execute(LOG_ROWS.insert().values(kind=kind, ref_id=ref_id, data=data))
 
 
@@ -114,14 +121,16 @@ def upgrade() -> None:
         )
 
     tables = _tables()
-    if USER_ROLES_V1 in tables or POST_ACCESS_V1 in tables:
-        _log("already converted: the legacy tables are kept as *_v1")
+    if _converted(tables):
+        _log("already converted: the converted marker or a *_v1 table is present")
     else:
         _convert()
-        for legacy, kept in ((USER_ROLES, USER_ROLES_V1), (POST_ACCESS, POST_ACCESS_V1)):
-            if legacy in tables:
-                _log(f"renaming {legacy} -> {kept}")
-                op.rename_table(legacy, kept)
+    # Independently of the branch above: MySQL commits the conversion with the first RENAME, so a rename that failed
+    # or a crash between the two leaves converted data under a legacy name; a rerun finishes the renames
+    for legacy, kept in ((USER_ROLES, USER_ROLES_V1), (POST_ACCESS, POST_ACCESS_V1)):
+        if legacy in tables and kept not in tables:
+            _log(f"renaming {legacy} -> {kept}")
+            op.rename_table(legacy, kept)
 
     column = next(c for c in sa.inspect(op.get_bind()).get_columns(USERS) if c["name"] == USER_TYPE)
     if column["nullable"]:
@@ -151,6 +160,26 @@ def _create_assignments(tables: set) -> None:
         name = f"ix_{ASSIGNMENTS}_{column}"
         if name not in present:
             op.create_index(name, ASSIGNMENTS, [column])
+
+
+def _converted(tables: set) -> bool:
+    """The data is converted already: the marker _convert writes in the transaction of its rows, or a *_v1 table (a
+    database converted before the marker existed)"""
+    if USER_ROLES_V1 in tables or POST_ACCESS_V1 in tables:
+        return True
+    marker = sa.select(LOG_ROWS.c.id).where(LOG_ROWS.c.kind == CONVERTED).limit(1)
+    return op.get_bind().execute(marker).first() is not None
+
+
+def scope_post_id(node: str) -> Optional[int]:
+    """The post id of a plan node: None for "root", the id for "p:<id>". The frozen plan emits nothing else (no
+    groups); any other node stops the migration rather than becoming an assignment with both scope ids NULL"""
+    if node == ROOT_NODE:
+        return None
+    kind, _, ident = node.partition(":")
+    if kind == "p" and ident.isdigit() and ident == str(int(ident)) and int(ident) > 0:
+        return int(ident)
+    raise ValueError(f"unexpected scope node in the conversion plan: {node!r}")
 
 
 def _add_user_type() -> None:
@@ -190,7 +219,7 @@ def _convert() -> None:
     users = {user.id: user for user in data.users}
     for user_plan in plan.users:
         for assignment in user_plan.assignments:
-            post_id = int(assignment.node[2:]) if assignment.node.startswith("p:") else None
+            post_id = scope_post_id(assignment.node)
             bind.execute(ASSIGNMENT_ROWS.insert().values(
                 user_id=user_plan.user_id,
                 role_id=assignment.role if isinstance(assignment.role, int) else derived_ids[assignment.role],
@@ -207,20 +236,23 @@ def _convert() -> None:
         .where(PERMISSIONS.c.name.in_(sorted(REMOVED))).order_by(PERMISSIONS.c.id)
     ).all()
     removed_ids = [row.id for row in removed]
-    if not removed_ids:
-        return
-    grants = bind.execute(
-        sa.select(ROLE_PERMISSIONS.c.id, ROLE_PERMISSIONS.c.role_id, ROLE_PERMISSIONS.c.permission_id)
-        .where(ROLE_PERMISSIONS.c.permission_id.in_(removed_ids)).order_by(ROLE_PERMISSIONS.c.id)
-    ).all()
-    for grant in grants:
-        _record(REMOVED_GRANT, grant.id, {"id": grant.id, "role_id": grant.role_id, "permission_id": grant.permission_id})
-    for row in removed:
-        _record(REMOVED_PERMISSION, row.id, {"id": row.id, "name": row.name, "display_name": row.display_name,
-                                             "description": row.description})
-    bind.execute(sa.delete(ROLE_PERMISSIONS).where(ROLE_PERMISSIONS.c.permission_id.in_(removed_ids)))
-    bind.execute(sa.delete(PERMISSIONS).where(PERMISSIONS.c.id.in_(removed_ids)))
-    _log(f"removed {', '.join(row.name for row in removed)} and {len(grants)} grant(s) of them")
+    if removed_ids:
+        grants = bind.execute(
+            sa.select(ROLE_PERMISSIONS.c.id, ROLE_PERMISSIONS.c.role_id, ROLE_PERMISSIONS.c.permission_id)
+            .where(ROLE_PERMISSIONS.c.permission_id.in_(removed_ids)).order_by(ROLE_PERMISSIONS.c.id)
+        ).all()
+        for grant in grants:
+            _record(REMOVED_GRANT, grant.id, {"id": grant.id, "role_id": grant.role_id, "permission_id": grant.permission_id})
+        for row in removed:
+            _record(REMOVED_PERMISSION, row.id, {"id": row.id, "name": row.name, "display_name": row.display_name,
+                                                 "description": row.description})
+        bind.execute(sa.delete(ROLE_PERMISSIONS).where(ROLE_PERMISSIONS.c.permission_id.in_(removed_ids)))
+        bind.execute(sa.delete(PERMISSIONS).where(PERMISSIONS.c.id.in_(removed_ids)))
+        _log(f"removed {', '.join(row.name for row in removed)} and {len(grants)} grant(s) of them")
+
+    # In the transaction of the rows above: committed with them (on MySQL by the first RENAME at the latest), so a
+    # rerun after a failed or interrupted rename never plans again from the converted data
+    _record(CONVERTED, None, {"users": len(plan.users), "derived_roles": len(plan.derived_roles)})
 
 
 # ---------------------------------------------------------------------------------------------------- downgrade

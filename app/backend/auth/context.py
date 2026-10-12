@@ -116,19 +116,21 @@ class AuthContext:
         return self.has_at_post(permission, user.post_id)
 
 
-def grant_rows(user_id: int):
+def grant_rows(user_id: int, include_archived_roles: bool = False):
     """The one definition of what a user holds: every role assignment of a role that is not archived, one row per
     permission of the role (permission None for a role without any): (assignment id, group id, post id, role id,
-    name, display name, builtin_key, permission name)"""
-    return (
+    name, display name, builtin_key, permission name). include_archived_roles reads every existing assignment
+    (privileges.check_target_user: what the user would hold again after a role's restore); never for an AuthContext"""
+    query = (
         select(RoleAssignment.id, RoleAssignment.scope_group_id, RoleAssignment.scope_post_id,
                Role.id, Role.name, Role.display_name, Role.builtin_key, Permission.name)
         .select_from(RoleAssignment)
         .join(Role, Role.id == RoleAssignment.role_id)
         .outerjoin(RolePermission, RolePermission.role_id == Role.id)
         .outerjoin(Permission, Permission.id == RolePermission.permission_id)
-        .where(RoleAssignment.user_id == user_id, Role.is_deleted == False)
+        .where(RoleAssignment.user_id == user_id)
     )
+    return query if include_archived_roles else query.where(Role.is_deleted == False)
 
 
 def grants_of(rows: Iterable) -> Tuple[Grant, ...]:

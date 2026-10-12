@@ -152,20 +152,21 @@ async def create_user(
     The form fields are described by UserCreateForm. The user gets one assignment: the built-in base role of
     user_type at the home post (post_id), or at the root without a home post or when the base role holds system
     permissions (admin). The caller needs user.create covering that node (403 permission_required_for_action) and
-    every permission of the role there (403 grant_exceeds_own_permissions). An archived post cannot be the home post
-    (409 post_archived).
+    every permission of the role there (403 grant_exceeds_own_permissions). These checks answer first: a post_id
+    outside the caller's scope gets the same 403 whether the post exists, is archived or not. An unknown post answers
+    404 post_not_found and an archived post 409 post_archived (it cannot be the home post).
     """
     current_user = auth.user
     certificate = user_data.certificate
     username = user_data.username
 
-    # Validate post_id exists if provided
+    # Scope before the post: an outsider gets the same 403 for an unknown, an archived and a live post outside it
+    base_role, node = await _default_assignment(session, auth, user_data.user_type, user_data.post_id)
     if user_data.post_id is not None:
         post = (await session.exec(select(Post).where(Post.id == user_data.post_id))).first()
         if not post:
             raise ApiError(ErrorCode.POST_NOT_FOUND, post_id=user_data.post_id)
         refuse_archived_post(post)
-    base_role, node = await _default_assignment(session, auth, user_data.user_type, user_data.post_id)
 
     # Check if user already exists
     result = await session.exec(_username_taken(user_data.username))
@@ -322,8 +323,9 @@ async def update_user(
     - username: Unique username (3-50 characters)
     - username_alias: User's display name (1-255 characters)
     - post_id: Home post (membership: who manages the user; it grants nothing by itself). Moving the user needs
-      user.update covering the new post too (403 permission_required_for_action) and answers 409 post_archived
-      for an archived post (sending the current home post again changes nothing and is accepted)
+      user.update covering the new post too (403 permission_required_for_action, the same for an unknown or
+      archived post outside the caller's scope); inside it an unknown post answers 404 post_not_found and an
+      archived one 409 post_archived (sending the current home post again changes nothing and is accepted)
     - is_active: User's active status (boolean)
     - certificate: Update PKI certificate authentication data (file upload). A different certificate ends every
       session of the user, like deactivation: the old certificate's tokens stop working.
@@ -368,13 +370,16 @@ async def update_user(
         user.username = update_data.username
 
     if update_data.post_id is not None:
+        moving = update_data.post_id != user.post_id
+        if moving:
+            # A move: user.update must cover the new home post as well as the old one (check_target_user). Scope
+            # before the post: an outsider gets the same 403 for an unknown, an archived and a live post outside it
+            AccessControlService.check_covers(auth, Permissions.USER_UPDATE, Node.post(update_data.post_id), "move_user")
         post = (await session.exec(select(Post).where(Post.id == update_data.post_id))).first()
         if not post:
             raise ApiError(ErrorCode.POST_NOT_FOUND, post_id=update_data.post_id)
-        if post.id != user.post_id:
+        if moving:
             refuse_archived_post(post)
-            # A move: user.update must cover the new home post as well as the old one (check_target_user)
-            AccessControlService.check_covers(auth, Permissions.USER_UPDATE, Node.post(post.id), "move_user")
         user.post_id = update_data.post_id
 
     if update_data.username_alias is not None:

@@ -45,7 +45,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   differences). `user_roles` and `user_post_access` are kept as `user_roles_v1` and `user_post_access_v1`; what the
   conversion removed and created is recorded in `authz_v2_migration_log`, so the downgrade restores the legacy rows,
   the removed permissions and their grants exactly and removes the derived roles. A permission the conversion needs
-  and the database lacks (`media.monitor` before the first start of this version) is inserted by it.
+  and the database lacks (`media.monitor` before the first start of this version) is inserted by it. The log's
+  `converted` row, written with the converted rows, marks the data as converted: a rerun after an interrupted upgrade
+  (MySQL commits the conversion with the first table rename) never converts again and finishes the renames.
 - `python -m app.backend.cli.authz_report [--json] [--url URL]`: dry run of the conversion on a database at
   `022_builtin_roles` (run it on a copy of production before the upgrade; read-only): the plan of every user, as the
   migration's audit rows will record it, and the derived roles. A database at 023 or later answers
@@ -136,16 +138,23 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - Changing a user (`PATCH /users/{user_id}`, `POST /users/{user_id}/sessions/end` and
   `/sessions/{session_id}/end` with `user.update`; `POST /users/{user_id}/archive` and `/restore` with
   `user.archive`) needs that permission covering the user (their home post, the root for a user without one) and,
-  for another user, every assignment of the user grantable by the caller at its node; otherwise 403
-  `target_user_more_privileged` with `missing`. Moving the home post (`post_id`) needs `user.update` covering the new
-  post too (403 `permission_required_for_action`, `action` `move_user`); a move no longer touches access rows.
+  for another user, every assignment of the user grantable by the caller at its node, assignments of archived roles
+  included (they apply again when the role is restored); otherwise 403 `target_user_more_privileged` with `missing`.
+  Moving the home post (`post_id`) needs `user.update` covering the new post too (403
+  `permission_required_for_action`, `action` `move_user`); a move no longer touches access rows.
+- Check order of `POST /users/` and of a move in `PATCH /users/{user_id}`: the scope checks answer before the post is
+  looked up, so a `post_id` outside the caller's scope answers the same 403 `permission_required_for_action`
+  whether the post is unknown, archived or live (before: 404 `post_not_found` / 409 `post_archived`, which told an
+  outsider whether an id exists and whether it is archived). 404 and 409 now answer only for a post inside the
+  caller's scope.
 - The last administrator is an active, non-archived user holding the built-in `admin` role at the root:
   deactivating or archiving them answers 409 `last_admin_required`. Role edits can no longer take it away (the
   built-in role is immutable), so `PATCH /roles/{role_id}`, `POST /roles/{role_id}/archive` and
   `DELETE /roles/{role_id}/permissions/{permission_id}` no longer declare `last_admin_required` /
   `cannot_remove_own_admin`.
 - `DELETE /roles/{role_id}` removes the role's assignments (the holders are read from `role_assignments`); the audit
-  copy lists them under `assignments`.
+  copy lists them under `assignments`, each with every column of the removed row (`id`, `user_id`, `role_id`,
+  `scope_group_id`, `scope_post_id`, `scope_key`, `created_at`, `created_by`).
 - `/auth/me` and the login response (until the auth fields of the next step): `permissions` are the permissions held
   at some node, `roles` the roles of the user's assignments, `is_admin` means the built-in `admin` role at the root,
   `accessible_post_ids` the posts where `observation.view` is in effect (null: held at the root).

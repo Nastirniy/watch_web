@@ -9,22 +9,24 @@ Nobody becomes able to do more than they could by changing access:
   of the role covered at that node (AuthContext.covers). 403 grant_exceeds_own_permissions.
 - check_target_user: a change to another user (fields, home post, sessions, archive state) needs the route's user.*
   permission covering the user (their home post, the root for a user without one) and that the caller could grant
-  every assignment the user has (each role's permissions covered at its node). 403 target_user_more_privileged.
+  every assignment the user has (each role's permissions covered at its node), assignments of archived roles
+  included (they come back with the role's restore). 403 target_user_more_privileged.
 - check_an_admin_remains / check_admin_kept: run after the change is written to the session (flushed here, committed
   by the route): an active, non-archived user still holds the built-in admin role at the root (409
   last_admin_required), and the caller has not taken it from themselves (409 cannot_remove_own_admin).
 
-What a user holds is context.grant_rows, the same definition as their AuthContext.
+What a user holds is context.grant_rows, the same definition as their AuthContext (check_target_user reads it with
+the archived roles too).
 """
-from typing import FrozenSet, Iterable, List, Set, Union
+from typing import FrozenSet, Iterable, List, Set, Tuple, Union
 
 from loguru import logger
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.auth.access_errors import access_denied
-from app.backend.auth.context import AuthContext, load_grants, permission_name
-from app.backend.auth.scope import Node, ROOT
+from app.backend.auth.context import AuthContext, grant_rows, grants_of, permission_name
+from app.backend.auth.scope import Grant, Node, ROOT
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.enums.general import Permissions, UserType
 from app.backend.errors.problems import ApiError
@@ -67,17 +69,23 @@ def check_grant_at(auth: AuthContext, permissions: Iterable[str], node: Node) ->
         raise access_denied(AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, missing=missing)
 
 
+async def _every_assignment(session: AsyncSession, user_id: int) -> Tuple[Grant, ...]:
+    """Every assignment of the user as a grant, those of archived roles included: an archived role grants nothing
+    now (grant_rows, AuthContext) but its assignments come back with the role's restore"""
+    return grants_of((await session.exec(grant_rows(user_id, include_archived_roles=True))).all())
+
+
 async def check_target_user(session: AsyncSession, auth: AuthContext, target: User,
                             permission: Union[Permissions, str] = Permissions.USER_UPDATE) -> None:
-    """The caller's permission covers the target user, and the caller could grant every assignment of the target
-    (the caller themselves always could)"""
+    """The caller's permission covers the target user, and the caller could grant every existing assignment of the
+    target, archived roles included (the caller themselves always could)"""
     name = permission_name(permission)
     missing: List[str] = []
     if not auth.covers_user(name, target):
         missing = [name]
     elif target.id != auth.user.id:
         lacking: Set[str] = set()
-        for grant in await load_grants(session, target.id):
+        for grant in await _every_assignment(session, target.id):
             lacking |= _not_covered(auth, grant.permissions, grant.node)
         missing = sorted(lacking)
     if missing:

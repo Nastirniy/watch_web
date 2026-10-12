@@ -3,6 +3,7 @@ and the *_v1 tables give an exact downgrade; a fresh install never has user_role
 
 The legacy data is written into a database downgraded to 022_builtin_roles, the shape production has before the
 upgrade (downgrading a fresh install recreates user_roles, controller ruling R5)."""
+import importlib.util
 import json
 import sqlite3
 from pathlib import Path
@@ -10,8 +11,9 @@ from typing import Dict, List
 
 import pytest
 
+from app.backend.migrations.support.authz_v2 import _DISPLAY_SUFFIX, _VIEW_PART
 from tests.test_column_bounds import _run_downgrade
-from tests.test_migrations import HEAD, run_migrate
+from tests.test_migrations import HEAD, PROJECT_ROOT, run_migrate
 
 PREVIOUS = "022_builtin_roles"
 STAMP = "2026-01-01 00:00:00"
@@ -116,7 +118,8 @@ def test_conversion_writes_assignments_types_and_log(tmp_path):
     assert held("mgr_system") == {"user.view", "media.monitor"}   # admin.true + media.view: storage monitoring
     assert held("mgr_posts") == {"observation.view", "media.view"}
     assert held("mgr") == {"user.view", "observation.view", "media.view"}   # admin.true left the custom role
-    assert conn.execute("select display_name from roles where name = 'ops_view'").fetchone()[0] == "Ops (перегляд)"
+    assert conn.execute("select display_name from roles where name = 'ops_view'").fetchone()[0] == \
+        "Ops" + _DISPLAY_SUFFIX[_VIEW_PART]
 
     names = {name for (name,) in conn.execute("select name from permissions")}
     assert not names & {"admin.true", "post.access_all"} and "media.monitor" in names
@@ -138,14 +141,73 @@ def test_conversion_writes_assignments_types_and_log(tmp_path):
     assert audit[3]["differences"] == ["archived_records_need_archive"]
     assert audit[5]["after"] == [] and audit[5]["differences"] == ["no_permissions"]
     kinds = {kind for (kind,) in conn.execute("select kind from authz_v2_migration_log")}
-    assert {"removed_permission", "removed_role_permission", "derived_role", "added_permission"} <= kinds
+    assert {"removed_permission", "removed_role_permission", "derived_role", "added_permission", "converted"} <= kinds
+    assert conn.execute("select count(*) from authz_v2_migration_log where kind = 'converted'").fetchone()[0] == 1
     conn.close()
 
-    again = run_migrate(db_file)
-    assert again.returncode == 0, again.stdout + again.stderr
-    assert "converting" not in again.stdout + again.stderr
+    # 023 really runs again (stamped back to 022): the converted database is recognised and left as it is
+    rerun = rerun_023(db_file)
+    assert "already converted" in rerun and "converting" not in rerun, rerun
     conn = sqlite3.connect(db_file)
     assert len(assignments(conn)) == 7
+    assert migrate_audit_rows(conn) == len(USERS)
+    conn.close()
+
+
+def rerun_023(db_file: Path) -> str:
+    """Stamps the database back to 022 and migrates to head again: 023 runs once more; its output"""
+    conn = sqlite3.connect(db_file)
+    conn.execute("update alembic_version set version_num = ?", (PREVIOUS,))
+    conn.commit()
+    conn.close()
+    result = run_migrate(db_file)
+    assert result.returncode == 0, result.stdout + result.stderr
+    conn = sqlite3.connect(db_file)
+    assert conn.execute("select version_num from alembic_version").fetchone()[0] == HEAD
+    conn.close()
+    return result.stdout + result.stderr
+
+
+def migrate_audit_rows(conn) -> int:
+    return conn.execute("select count(*) from audit_logs where action = 'migrate'").fetchone()[0]
+
+
+@pytest.mark.slow
+def test_a_rerun_finishes_the_renames_without_converting_again(tmp_path):
+    """MySQL commits the conversion with the first RENAME. A rename that failed (no *_v1 at all) or a crash between
+    the two renames leaves converted data under legacy table names: the converted marker in the log, not the *_v1
+    tables, tells a rerun that the data is converted, and each legacy table still under its old name is renamed"""
+    db_file = legacy_database(tmp_path)
+    assert run_migrate(db_file).returncode == 0
+    conn = sqlite3.connect(db_file)
+    converted = assignments(conn)
+    assert len(converted) == 7 and migrate_audit_rows(conn) == len(USERS)
+    conn.close()
+
+    for unrenamed in (("user_roles", "user_post_access"), ("user_post_access",)):
+        conn = sqlite3.connect(db_file)
+        for legacy in unrenamed:
+            conn.execute(f"alter table {legacy}_v1 rename to {legacy}")
+        conn.commit()
+        conn.close()
+
+        rerun = rerun_023(db_file)
+        assert "already converted" in rerun and "converting" not in rerun, rerun
+        conn = sqlite3.connect(db_file)
+        present = tables(conn)
+        assert {"user_roles_v1", "user_post_access_v1"} <= present, (unrenamed, present)
+        assert not {"user_roles", "user_post_access"} & present, (unrenamed, present)
+        assert conn.execute("select count(*) from user_roles_v1").fetchone()[0] == 4
+        assert conn.execute("select count(*) from user_post_access_v1").fetchone()[0] == 2
+        assert assignments(conn) == converted and migrate_audit_rows(conn) == len(USERS)
+        conn.close()
+
+    # and the downgrade still restores from the *_v1 tables and the log (the marker goes with the log)
+    down = _run_downgrade(db_file, PREVIOUS)
+    assert down.returncode == 0, down.stdout + down.stderr
+    conn = sqlite3.connect(db_file)
+    assert {"user_roles", "user_post_access"} <= tables(conn)
+    assert not {"authz_v2_migration_log", "user_roles_v1", "user_post_access_v1"} & tables(conn)
     conn.close()
 
 
@@ -202,3 +264,22 @@ def test_fresh_install_chain(tmp_path):
     conn = sqlite3.connect(db_file)
     assert conn.execute("select version_num from alembic_version").fetchone()[0] == HEAD
     conn.close()
+
+
+def _load_023():
+    path = PROJECT_ROOT / "app" / "backend" / "migrations" / "versions" / "023_authorization_v2.py"
+    spec = importlib.util.spec_from_file_location("migration_023", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_conversion_writes_only_root_and_post_nodes():
+    """The frozen plan emits "root" and "p:<id>" only; anything else stops the migration instead of becoming an
+    assignment with both scope ids NULL and a scope_key that is not the root"""
+    scope_post_id = _load_023().scope_post_id
+    assert scope_post_id("root") is None
+    assert scope_post_id("p:7") == 7
+    for node in ("g:3", "p:", "p:x", "p:-1", "post:7", "", "Root"):
+        with pytest.raises(ValueError):
+            scope_post_id(node)

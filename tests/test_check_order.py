@@ -3,10 +3,13 @@ learns nothing about ids. User visibility follows the list, archived users stay 
 import pytest
 
 from app.backend.api.v1 import V1
+from app.backend.auth.scope import Node
 from app.backend.enums.routes import MediaRoutes, ObservationRoutes, UserRoutes
 from tests.helpers import (
-    ACCESS_ALL, ADMIN_TRUE, make_post, make_user, make_dictionary, make_observation, make_media, observation_payload,
+    ACCESS_ALL, ADMIN_TRUE, assign, make_admin, make_post, make_role, make_user, make_dictionary, make_observation,
+    make_media, observation_payload,
 )
+from tests.test_username_validation import make_certificate
 
 MEDIA_PERMS = ["media.view", "media.archive"]
 OBS_PERMS = ["observation.view", "observation.archive"]
@@ -92,6 +95,47 @@ async def test_create_observation_unknown_post_is_404_for_access_all(client, db,
     response = await client.post(V1.path(ObservationRoutes.CREATE), json=observation_payload(999999, ids["signal_type_id"]), headers=headers(user))
     assert response.status_code == 404
     assert response.json()["code"] == "post_not_found"
+
+
+@pytest.mark.asyncio
+async def test_user_create_and_move_answer_alike_for_unknown_archived_and_foreign_posts(client, db, headers):
+    """A caller holding user.create and user.update at one post learns nothing about other post ids: an unknown id,
+    an archived post and a live post outside the scope get the same 403 on POST /users/ and on a move; 404 and
+    409 answer only inside the scope"""
+    home, archived, foreign = await make_post(db), await make_post(db), await make_post(db)
+    archived.is_deleted = True
+    db.add(archived)
+    await db.commit()
+    caller = await make_user(db)
+    await assign(db, caller, await make_role(db, ["user.view", "user.create", "user.update"]), Node.post(home.id))
+    target = await make_user(db, post_id=home.id)
+    admin = await make_admin(db)
+    outside = (999999, archived.id, foreign.id)
+
+    async def create(who, post_id: int):
+        name = f"new_{who.id}_{post_id}"
+        return await client.post(
+            V1.path(UserRoutes.ROOT), headers=headers(who),
+            files={"certificate": ("cert.pem", make_certificate(f"cn-{name}"), "application/x-pem-file")},
+            data={"username": name, "username_alias": "New", "user_type": "viewer", "post_id": str(post_id)},
+        )
+
+    async def move(who, post_id: int):
+        return await client.patch(V1.path(UserRoutes.USER_BY_ID, user_id=target.id), headers=headers(who),
+                                  data={"post_id": str(post_id)})
+
+    for call, action, permission in ((create, "create_user", "user.create"), (move, "move_user", "user.update")):
+        answers = [await call(caller, post_id) for post_id in outside]
+        for post_id, response in zip(outside, answers):
+            assert response.status_code == 403, (action, post_id, response.text)
+        bodies = [{key: response.json()[key] for key in ("code", "permission", "action", "missing")} for response in answers]
+        assert bodies == [{"code": "permission_required_for_action", "permission": permission, "action": action,
+                           "missing": [permission]}] * len(outside), bodies
+
+        # the state of a post answers only where the caller's scope reaches it (the root here)
+        unknown, gone = await call(admin, 999999), await call(admin, archived.id)
+        assert (unknown.status_code, unknown.json()["code"]) == (404, "post_not_found"), unknown.text
+        assert (gone.status_code, gone.json()["code"]) == (409, "post_archived"), gone.text
 
 
 @pytest.mark.asyncio
