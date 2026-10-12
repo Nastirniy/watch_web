@@ -32,6 +32,11 @@ class UserUpdateData(SecureBaseModel):
     username_alias: Optional[str] = Field(default=None, min_length=1, max_length=255)
     post_id: Optional[int] = Field(default=None, gt=0)
     is_active: Optional[bool] = Field(default=None)
+    user_type: Optional[UserType] = Field(
+        default=None,
+        description="Another type (GET /user-types): every assignment of the old type's built-in role gets the new "
+                    "type's built-in role at the same node (at the root when it holds system permissions), every other "
+                    "assignment must fit the new ceiling, and the user's sessions end")
 
     @field_validator('username')
     @classmethod

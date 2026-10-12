@@ -1,4 +1,4 @@
-"""Role assignments through the API (spec section 6: rules 1, 2, 5, 6 and 7).
+"""Role assignments through the API (spec section 6: rules 1, 2, 4, 5, 6 and 7).
 
 create_assignment and delete_assignment check who may add or remove an assignment and change the row in the session;
 the route flushes and commits (the unique index uq_role_assignments_user_role_scope answers assignment_exists when
@@ -17,12 +17,28 @@ ids: the target user and the caller's scope answer before the existence or the s
                an archived role grants nothing)
             -> the built-in admin role at the root: not taken from oneself, and someone keeps it 409
 
+change_user_type (PATCH /users/{user_id} with user_type, rule 4; the route ran rule 2, check_target_user with
+user.update, first) replaces every assignment of the old type's built-in role with the new type's at the same node
+(at the root when the new one holds system permissions, as the default assignment of a new user; an assignment the
+user already has is kept and the replaced row merged into it), then checks every assignment against the ceiling of the
+new type:
+
+            check_assign_at(user.update and the new base role's permissions, each target node) 403
+            -> the replacements written -> every assignment, those of archived roles included, within the new
+               ceiling 409 user_type_ceiling_exceeded
+            (the route then ends the user's sessions and runs check_admin_kept)
+
+check_role_permissions_added (PATCH /roles/{role_id}, PUT /roles/{role_id}/permissions/{permission_id}): permissions
+added to a role reach every holder at once, so a system permission needs every assignment of the role at the root
+(409 role_requires_root_scope) and every holder's type must allow the added permissions (409
+role_holders_exceed_user_type). Holders are the users who are not archived.
+
 assignment_views reads the assignments of a user with the role and the scope named, as dataclasses (the route
 converts them into its response model).
 """
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Set
 
 from loguru import logger
 from sqlalchemy import delete as sa_delete, func
@@ -30,16 +46,18 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.auth.context import AuthContext
-from app.backend.auth.privileges import check_admin_kept, check_assign_at, check_target_user, role_permission_names
+from app.backend.auth.privileges import (
+    check_admin_kept, check_assign_at, check_target_user, holds_admin_at_root, role_permission_names,
+)
 from app.backend.auth.scope import Node, NodeKind, ROOT
 from app.backend.auth.user_types import excess_permissions
-from app.backend.bootstrap.permissions import permission_level
+from app.backend.bootstrap.permissions import permission_level, role_level
 from app.backend.config import settings
 from app.backend.enums.errors import ErrorCode
 from app.backend.enums.general import PermissionLevel, Permissions, UserType
 from app.backend.errors.problems import ApiError
 from app.backend.models.post import Post
-from app.backend.models.role import Role
+from app.backend.models.role import Permission, Role, RolePermission
 from app.backend.models.role_assignment import RoleAssignment, scope_columns
 from app.backend.models.scope_group import ScopeGroup
 from app.backend.models.user import User
@@ -175,13 +193,146 @@ async def delete_assignment(session: AsyncSession, auth: AuthContext, target: Us
     await _check_not_last(session, target, assignment, role)
 
     removed = assignment.model_dump()
+    admin_at_root = role.builtin_key == UserType.ADMIN.value and removed["scope_key"] == ROOT.key
+    held_before = admin_at_root and await holds_admin_at_root(session, auth.user.id)
     session.expunge(assignment)
     # A core statement: no ORM cascade or relationship bookkeeping in the async session
     await session.execute(sa_delete(RoleAssignment).where(RoleAssignment.id == assignment_id))
-    if role.builtin_key == UserType.ADMIN.value and removed["scope_key"] == ROOT.key:
-        await check_admin_kept(session, auth)
+    if admin_at_root:
+        await check_admin_kept(session, auth, held_before)
     logger.info(f"User {auth.user.username} removes assignment {assignment_id} ({removed['scope_key']}) of user {target.id}")
     return removed
+
+
+# ------------------------------------------------------------------ the type of a user (rule 4)
+@dataclass(frozen=True)
+class TypeChange:
+    """What change_user_type did: the audit row and the route read it"""
+    old_type: UserType
+    new_type: UserType
+    # One entry per assignment of the old base role, by id: "before" (every column) and either "after" (every column:
+    # the same row with the new role, at the root for a system role) or "merged_into" (the row was removed, the user
+    # already held the new base role at that node: the id of that assignment)
+    replaced: List[dict]
+    # The caller held the built-in admin role at the root before the change (check_admin_kept)
+    admin_held_before: bool
+
+
+async def _builtin_role(session: AsyncSession, user_type: UserType) -> Role:
+    return (await session.exec(select(Role).where(Role.builtin_key == user_type.value))).one()
+
+
+async def _permissions_by_role(session: AsyncSession, role_ids: Iterable[int]) -> Dict[int, Set[str]]:
+    ids = sorted(set(role_ids))
+    by_role: Dict[int, Set[str]] = {role_id: set() for role_id in ids}
+    if ids:
+        rows = await session.exec(
+            select(RolePermission.role_id, Permission.name)
+            .join(Permission, Permission.id == RolePermission.permission_id)
+            .where(RolePermission.role_id.in_(ids))
+        )
+        for role_id, name in rows.all():
+            by_role[role_id].add(name)
+    return by_role
+
+
+async def _check_type_ceiling(session: AsyncSession, target: User, user_type: UserType) -> None:
+    """Every assignment of the user fits the ceiling of the type, those of archived roles included (they apply again
+    when the role is restored)"""
+    views = await assignment_views(session, target.id)
+    by_role = await _permissions_by_role(session, (view.role.id for view in views))
+    exceeding = []
+    for view in views:
+        excess = sorted(excess_permissions(user_type, by_role[view.role.id]))
+        if excess:
+            exceeding.append({
+                "id": view.id,
+                "role": {"id": view.role.id, "name": view.role.name, "display_name": view.role.display_name},
+                "scope": {"kind": view.scope.kind, "id": view.scope.id, "name": view.scope.name},
+                "excess_permissions": excess,
+            })
+    if exceeding:
+        logger.warning(f"Refused type {user_type.value} for user {target.id}: {len(exceeding)} assignments exceed it")
+        raise ApiError(ErrorCode.USER_TYPE_CEILING_EXCEEDED, user_type=user_type.value, assignments=exceeding)
+
+
+async def change_user_type(session: AsyncSession, auth: AuthContext, target: User,
+                           new_type: UserType) -> Optional[TypeChange]:
+    """Give the target another type (written to the session and flushed, not committed). The route has run rule 2
+    (check_target_user with user.update) and, after this, ends the user's sessions and runs check_admin_kept. None
+    when the type stays the same: nothing changes."""
+    old_type = UserType(target.user_type)
+    if new_type is old_type:
+        return None
+    old_base, new_base = await _builtin_role(session, old_type), await _builtin_role(session, new_type)
+    new_permissions = await role_permission_names(session, [new_base.id])
+    to_root = role_level(new_permissions) is PermissionLevel.SYSTEM
+
+    rows = (await session.exec(
+        select(RoleAssignment)
+        .where(RoleAssignment.user_id == target.id, RoleAssignment.role_id == old_base.id)
+        .order_by(RoleAssignment.id)
+    )).all()
+    plan = [(row, ROOT if to_root else row.node) for row in rows]
+    for _, node in plan:
+        check_assign_at(auth, new_permissions, node)
+    admin_held_before = await holds_admin_at_root(session, auth.user.id)
+
+    held = dict((await session.exec(
+        select(RoleAssignment.scope_key, RoleAssignment.id)
+        .where(RoleAssignment.user_id == target.id, RoleAssignment.role_id == new_base.id)
+    )).all())
+    replaced: List[dict] = []
+    for row, node in plan:
+        before = row.model_dump()
+        if node.key in held:
+            session.expunge(row)
+            # A core statement, like the assignment API: no ORM cascade in the async session
+            await session.execute(sa_delete(RoleAssignment).where(RoleAssignment.id == row.id))
+            replaced.append({"before": before, "merged_into": held[node.key]})
+            continue
+        row.role_id = new_base.id
+        for column, value in scope_columns(node).items():
+            setattr(row, column, value)
+        session.add(row)
+        held[node.key] = row.id
+        replaced.append({"before": before, "after": row.model_dump()})
+
+    target.user_type = new_type.value
+    session.add(target)
+    await session.flush()
+    await _check_type_ceiling(session, target, new_type)
+    logger.info(f"User {auth.user.username} changes the type of user {target.id} from {old_type.value} to "
+                f"{new_type.value} ({len(replaced)} assignments of {old_base.name} replaced)")
+    return TypeChange(old_type, new_type, replaced, admin_held_before)
+
+
+# ------------------------------------------------------------------ role edits (holders of the role)
+async def check_role_permissions_added(session: AsyncSession, role_id: int, added: Iterable[str]) -> None:
+    """Permissions added to a role apply at once at every assignment of it. Only the assignments of users who are not
+    archived count: a system permission needs every such assignment at the root (409 role_requires_root_scope), and
+    the type of every such holder must allow the added permissions (409 role_holders_exceed_user_type)."""
+    added = sorted(set(added))
+    if not added:
+        return
+    rows = (await session.exec(
+        select(User.id, User.username, User.user_type, RoleAssignment.scope_key)
+        .join(RoleAssignment, RoleAssignment.user_id == User.id)
+        .where(RoleAssignment.role_id == role_id, User.is_deleted == False)  # noqa: E712
+        .order_by(User.id, RoleAssignment.id)
+    )).all()
+    below_root = next((Node.parse(scope_key) for *_, scope_key in rows if scope_key != ROOT.key), None)
+    if below_root is not None:
+        _check_level(added, below_root)
+
+    holders: Dict[int, dict] = {}
+    for user_id, username, user_type, _ in rows:
+        excess = sorted(excess_permissions(UserType(user_type), added))
+        if excess and user_id not in holders:
+            holders[user_id] = {"id": user_id, "username": username, "user_type": user_type, "excess_permissions": excess}
+    if holders:
+        logger.warning(f"Refused permissions {added} for role {role_id}: holders {sorted(holders)} cannot hold them")
+        raise ApiError(ErrorCode.ROLE_HOLDERS_EXCEED_USER_TYPE, users=list(holders.values()))
 
 
 # ------------------------------------------------------------------ reads

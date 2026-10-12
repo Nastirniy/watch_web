@@ -183,3 +183,25 @@ async def test_user_outsider_gets_the_same_403_for_an_archived_and_a_live_user(c
         response = await client.get(V1.path(UserRoutes.USER_BY_ID, user_id=target.id), headers=headers(outsider))
         assert response.status_code == 403, (target.is_deleted, response.text)
         assert response.json()["code"] == "user_self_only"
+
+
+@pytest.mark.asyncio
+async def test_user_update_outsider_gets_the_same_403_for_an_archived_and_a_live_user(client, db, headers):
+    """PATCH /users/{user_id}: the caller's reach answers before the archived state (404 only inside it)"""
+    home, other = await make_post(db), await make_post(db)
+    live = await make_user(db, perms=["observation.view"], post_id=home.id)
+    archived = await make_user(db, perms=["observation.view"], post_id=home.id)
+    archived.is_deleted = True
+    db.add(archived)
+    await db.commit()
+    outsider = await make_user(db, perms=["user.view", "user.update", ADMIN_TRUE], post_id=other.id)
+
+    for target in (live, archived):
+        response = await client.patch(V1.path(UserRoutes.USER_BY_ID, user_id=target.id),
+                                      data={"username_alias": "X"}, headers=headers(outsider))
+        assert response.status_code == 403, (target.is_deleted, response.text)
+        assert response.json()["code"] == "target_user_more_privileged"
+    admin = await make_admin(db)
+    hidden = await client.patch(V1.path(UserRoutes.USER_BY_ID, user_id=archived.id), data={"username_alias": "X"},
+                                headers=headers(admin))
+    assert hidden.status_code == 404 and hidden.json()["code"] == "user_not_found"

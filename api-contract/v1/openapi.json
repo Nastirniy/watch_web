@@ -362,7 +362,7 @@
           "AUTHENTICATION"
         ],
         "summary": "Get Current User Info",
-        "description": "Get current user information",
+        "description": "The current user and what the web client builds its interface from: user_type (pages), permissions (menu),\nassignments, root_permissions and post_permissions (buttons at a post: root_permissions plus its entry)",
         "operationId": "get_current_user_info",
         "responses": {
           "200": {
@@ -544,7 +544,7 @@
           "AUTHENTICATION"
         ],
         "summary": "Check Permission",
-        "description": "Evaluate a permission requirement for the current user without calling the guarded route",
+        "description": "Evaluate a permission requirement for the current user without calling the guarded route: held anywhere (what\nroute reachability checks), or with post_id in effect at that post (an unknown post id: only the root counts)",
         "operationId": "check_permission",
         "requestBody": {
           "content": {
@@ -920,6 +920,24 @@
               "title": "Post Id"
             },
             "description": "Filter by post ID"
+          },
+          {
+            "name": "user_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/UserType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Users of this type (GET /user-types)",
+              "title": "User Type"
+            },
+            "description": "Users of this type (GET /user-types)"
           },
           {
             "name": "is_active",
@@ -1508,7 +1526,7 @@
           "USERS"
         ],
         "summary": "Update User",
-        "description": "Update user fields - all fields are optional\n\nSupports updating:\n- username: Unique username (3-50 characters)\n- username_alias: User's display name (1-255 characters)\n- post_id: Home post (membership: who manages the user; it grants nothing by itself). Moving the user needs\n  user.update covering the new post too (403 permission_required_for_action, the same for an unknown or\n  archived post outside the caller's scope); inside it an unknown post answers 404 post_not_found and an\n  archived one 409 post_archived (sending the current home post again changes nothing and is accepted)\n- is_active: User's active status (boolean)\n- certificate: Update PKI certificate authentication data (file upload). A different certificate ends every\n  session of the user, like deactivation: the old certificate's tokens stop working.\n\nOnly provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).\nThe fields are form fields: any other body (JSON included) answers 415 instead of being ignored.\n\nChanging a user needs user.update covering them (their home post, the root for a user without one) and, for\nanother user, that the caller could grant every assignment they have (403 target_user_more_privileged). A\ndeactivation must leave an active holder of the built-in admin role at the root (409 last_admin_required).",
+        "description": "Update user fields - all fields are optional\n\nSupports updating:\n- username: Unique username (3-50 characters)\n- username_alias: User's display name (1-255 characters)\n- post_id: Home post (membership: who manages the user; it grants nothing by itself). Moving the user needs\n  user.update covering the new post too (403 permission_required_for_action, the same for an unknown or\n  archived post outside the caller's scope); inside it an unknown post answers 404 post_not_found and an\n  archived one 409 post_archived (sending the current home post again changes nothing and is accepted)\n- is_active: User's active status (boolean)\n- certificate: Update PKI certificate authentication data (file upload). A different certificate ends every\n  session of the user, like deactivation: the old certificate's tokens stop working.\n- user_type: Another type (GET /user-types). Every assignment of the old type's built-in role gets the new type's\n  built-in role at the same node (at the root when the new one holds system permissions, as for a new user; an\n  assignment of the new role the user already has at that node is kept and the old one merged into it). The\n  caller needs user.update and every permission of the new built-in role at each of these nodes (403\n  grant_exceeds_own_permissions); every other assignment, those of archived roles included, must fit the ceiling\n  of the new type (409 user_type_ceiling_exceeded with the assignments and their excess_permissions). The user's\n  sessions end (revoke_cause user_type_changed), so the web never shows the pages of the old type. The same type\n  again changes nothing.\n\nOnly provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).\nThe fields are form fields: any other body (JSON included) answers 415 instead of being ignored.\n\nChanging a user needs user.update covering them (their home post, the root for a user without one) and, for\nanother user, that the caller could grant every assignment they have (403 target_user_more_privileged); this\nanswers before the archived state of the user. A deactivation or a type change must leave an active holder of the\nbuilt-in admin role at the root (409 last_admin_required), and a caller cannot take it from themselves (409\ncannot_remove_own_admin).",
         "operationId": "update_user",
         "security": [
           {
@@ -1649,11 +1667,14 @@
             }
           },
           "403": {
-            "description": "`permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action; `target_user_more_privileged`: This user holds permissions you do not hold",
+            "description": "`grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action; `target_user_more_privileged`: This user holds permissions you do not hold",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/GrantExceedsOwnPermissionsProblem"
+                    },
                     {
                       "$ref": "#/components/schemas/PermissionDeniedProblem"
                     },
@@ -1667,6 +1688,7 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
+                      "grant_exceeds_own_permissions": "#/components/schemas/GrantExceedsOwnPermissionsProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem",
                       "permission_required_for_action": "#/components/schemas/PermissionRequiredForActionProblem",
                       "target_user_more_privileged": "#/components/schemas/TargetUserMorePrivilegedProblem"
@@ -1701,23 +1723,31 @@
             }
           },
           "409": {
-            "description": "`last_admin_required`: This change would leave no active administrator; `post_archived`: Post is archived",
+            "description": "`cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no active administrator; `post_archived`: Post is archived; `user_type_ceiling_exceeded`: Assignments of the user exceed the ceiling of the new type",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
                     {
+                      "$ref": "#/components/schemas/CannotRemoveOwnAdminProblem"
+                    },
+                    {
                       "$ref": "#/components/schemas/LastAdminRequiredProblem"
                     },
                     {
                       "$ref": "#/components/schemas/PostArchivedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UserTypeCeilingExceededProblem"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
+                      "cannot_remove_own_admin": "#/components/schemas/CannotRemoveOwnAdminProblem",
                       "last_admin_required": "#/components/schemas/LastAdminRequiredProblem",
-                      "post_archived": "#/components/schemas/PostArchivedProblem"
+                      "post_archived": "#/components/schemas/PostArchivedProblem",
+                      "user_type_ceiling_exceeded": "#/components/schemas/UserTypeCeilingExceededProblem"
                     }
                   }
                 }
@@ -3799,7 +3829,7 @@
           "ROLES"
         ],
         "summary": "Update Role",
-        "description": "Update role and optionally replace all permissions. Archived roles answer 404 until restored (POST /{role_id}/restore).\n\nA built-in role keeps its name and its permissions (409); clone it to change them. The caller must hold every permission\npermission_ids adds or removes (403 grant_exceeds_own_permissions).",
+        "description": "Update role and optionally replace all permissions. Archived roles answer 404 until restored (POST /{role_id}/restore).\n\nA built-in role keeps its name and its permissions (409); clone it to change them. The caller must hold every permission\npermission_ids adds or removes (403 grant_exceeds_own_permissions). Added permissions apply at once to every\nholder who is not archived: a system permission needs every such assignment of the role at the root (409\nrole_requires_root_scope), and the type of every such holder must allow them (409 role_holders_exceed_user_type,\nwith the users and their excess_permissions). Nothing is changed on any refusal.",
         "operationId": "update_role",
         "security": [
           {
@@ -3962,7 +3992,7 @@
             }
           },
           "409": {
-            "description": "`builtin_role_not_renamable`: Built-in roles cannot be renamed; `builtin_role_permissions_fixed`: The permissions of built-in roles cannot be changed; `role_name_archived`: Role name belongs to an archived role",
+            "description": "`builtin_role_not_renamable`: Built-in roles cannot be renamed; `builtin_role_permissions_fixed`: The permissions of built-in roles cannot be changed; `role_holders_exceed_user_type`: The type of a user holding this role does not allow the added permissions; `role_name_archived`: Role name belongs to an archived role; `role_requires_root_scope`: This role can be assigned only at the root",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3974,7 +4004,13 @@
                       "$ref": "#/components/schemas/BuiltinRolePermissionsFixedProblem"
                     },
                     {
+                      "$ref": "#/components/schemas/RoleHoldersExceedUserTypeProblem"
+                    },
+                    {
                       "$ref": "#/components/schemas/RoleNameArchivedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RoleRequiresRootScopeProblem"
                     }
                   ],
                   "discriminator": {
@@ -3982,7 +4018,9 @@
                     "mapping": {
                       "builtin_role_not_renamable": "#/components/schemas/BuiltinRoleNotRenamableProblem",
                       "builtin_role_permissions_fixed": "#/components/schemas/BuiltinRolePermissionsFixedProblem",
-                      "role_name_archived": "#/components/schemas/RoleNameArchivedProblem"
+                      "role_holders_exceed_user_type": "#/components/schemas/RoleHoldersExceedUserTypeProblem",
+                      "role_name_archived": "#/components/schemas/RoleNameArchivedProblem",
+                      "role_requires_root_scope": "#/components/schemas/RoleRequiresRootScopeProblem"
                     }
                   }
                 }
@@ -4728,7 +4766,7 @@
           "ROLES"
         ],
         "summary": "Add Role Permission",
-        "description": "Grant one permission to a role (idempotent). Returns the role's permissions.\nOnly a permission the caller holds can be granted (403 grant_exceeds_own_permissions); a built-in role gets\npermissions only by seeding (409 builtin_role_permissions_fixed).",
+        "description": "Grant one permission to a role (idempotent). Returns the role's permissions.\nOnly a permission the caller holds can be granted (403 grant_exceeds_own_permissions); a built-in role gets\npermissions only by seeding (409 builtin_role_permissions_fixed). The permission applies at once to every holder\nwho is not archived: a system permission needs every such assignment of the role at the root (409\nrole_requires_root_scope), and the type of every such holder must allow it (409 role_holders_exceed_user_type).",
         "operationId": "add_role_permission",
         "security": [
           {
@@ -4885,11 +4923,29 @@
             }
           },
           "409": {
-            "description": "`builtin_role_permissions_fixed`: The permissions of built-in roles cannot be changed",
+            "description": "`builtin_role_permissions_fixed`: The permissions of built-in roles cannot be changed; `role_holders_exceed_user_type`: The type of a user holding this role does not allow the added permissions; `role_requires_root_scope`: This role can be assigned only at the root",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BuiltinRolePermissionsFixedProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/BuiltinRolePermissionsFixedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RoleHoldersExceedUserTypeProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RoleRequiresRootScopeProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "builtin_role_permissions_fixed": "#/components/schemas/BuiltinRolePermissionsFixedProblem",
+                      "role_holders_exceed_user_type": "#/components/schemas/RoleHoldersExceedUserTypeProblem",
+                      "role_requires_root_scope": "#/components/schemas/RoleRequiresRootScopeProblem"
+                    }
+                  }
                 }
               }
             }
@@ -20265,6 +20321,24 @@
             "description": "Filter by post ID"
           },
           {
+            "name": "user_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/UserType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Users of this type (GET /user-types)",
+              "title": "User Type"
+            },
+            "description": "Users of this type (GET /user-types)"
+          },
+          {
             "name": "is_active",
             "in": "query",
             "required": false,
@@ -25302,6 +25376,129 @@
         "title": "DatabaseStatsModel",
         "description": "Database statistics model"
       },
+      "ExcessAssignment": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "role": {
+            "$ref": "#/components/schemas/ExcessRole"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ExcessScope"
+          },
+          "excess_permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Excess Permissions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "role",
+          "scope",
+          "excess_permissions"
+        ],
+        "title": "ExcessAssignment",
+        "description": "An assignment whose role holds permissions the ceiling of the user's type does not allow"
+      },
+      "ExcessHolder": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "user_type": {
+            "type": "string",
+            "title": "User Type"
+          },
+          "excess_permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Excess Permissions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "username",
+          "user_type",
+          "excess_permissions"
+        ],
+        "title": "ExcessHolder",
+        "description": "A user holding a role whose added permissions the ceiling of the user's type does not allow"
+      },
+      "ExcessRole": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "display_name"
+        ],
+        "title": "ExcessRole"
+      },
+      "ExcessScope": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "root",
+              "group",
+              "post"
+            ],
+            "title": "Kind"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id",
+            "description": "Id of the group or the post; null at the root"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Name of the group or the post; the application name at the root"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "id",
+          "name"
+        ],
+        "title": "ExcessScope",
+        "description": "The node of an assignment: the root, a scope group or a post"
+      },
       "FieldError": {
         "properties": {
           "code": {
@@ -26451,12 +26648,11 @@
               }
             ],
             "title": "Post Id",
-            "description": "Home post of the user"
+            "description": "Home post of the user (membership: who manages them); null for none"
           },
-          "is_admin": {
-            "type": "boolean",
-            "title": "Is Admin",
-            "description": "Holds the built-in admin role at the root (no route checks it, every route checks its own permissions)"
+          "user_type": {
+            "$ref": "#/components/schemas/UserType",
+            "description": "The type of the user (GET /user-types): which pages the web client shows"
           },
           "permissions": {
             "items": {
@@ -26464,30 +26660,34 @@
             },
             "type": "array",
             "title": "Permissions",
-            "description": "Permissions held at some node of the scope tree"
+            "description": "Permissions held at some node of the scope tree (the menu)"
           },
-          "roles": {
+          "assignments": {
             "items": {
-              "$ref": "#/components/schemas/RoleBriefResponse"
+              "$ref": "#/components/schemas/AssignmentResponse"
             },
             "type": "array",
-            "title": "Roles",
-            "description": "The roles of the user's assignments"
+            "title": "Assignments",
+            "description": "The role assignments of the user, as GET /users/{user_id}/assignments lists them (assignments of archived roles included: role.is_deleted, they grant nothing)"
           },
-          "accessible_post_ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "integer"
-                },
-                "type": "array"
+          "root_permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Root Permissions",
+            "description": "Permissions held at the root: in effect at every post"
+          },
+          "post_permissions": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
               },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Accessible Post Ids",
-            "description": "Posts where observation.view is in effect (archived posts only through a group or the root). null means every post (observation.view at the root)"
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Post Permissions",
+            "description": "Post id -> the permissions the assignments at groups and posts put in effect at that post, for every post they reach (an assignment on an archived post stops applying there, a group's keep applying to its archived posts). In effect at a post = root_permissions plus its entry"
           },
           "access_token": {
             "type": "string",
@@ -26517,7 +26717,12 @@
         },
         "type": "object",
         "required": [
-          "is_admin",
+          "post_id",
+          "user_type",
+          "permissions",
+          "assignments",
+          "root_permissions",
+          "post_permissions",
           "access_token",
           "refresh_token",
           "expires_in",
@@ -30816,6 +31021,19 @@
             },
             "type": "array",
             "title": "Any"
+          },
+          "post_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Post Id",
+            "description": "Evaluate at this post: allowed when the permissions are in effect there (held at the root, at a group above it, or at the post while it is not archived); without it, held anywhere"
           }
         },
         "type": "object",
@@ -31093,8 +31311,7 @@
           },
           "level": {
             "$ref": "#/components/schemas/PermissionLevel",
-            "description": "system: assignable only at the root; scoped: at any node",
-            "default": "scoped"
+            "description": "system: assignable only at the root; scoped: at any node"
           }
         },
         "additionalProperties": false,
@@ -31103,7 +31320,8 @@
           "id",
           "name",
           "display_name",
-          "description"
+          "description",
+          "level"
         ],
         "title": "PermissionResponse"
       },
@@ -32190,29 +32408,6 @@
         "title": "RequiredPermissions",
         "description": "Permission requirement of a route, mirrors auth.require.Require"
       },
-      "RoleBriefResponse": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "display_name": {
-            "type": "string",
-            "title": "Display Name"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "name",
-          "display_name"
-        ],
-        "title": "RoleBriefResponse"
-      },
       "RoleClone": {
         "properties": {
           "name": {
@@ -32514,6 +32709,87 @@
             "status": 409,
             "title": "Role is still assigned to active users; unassign it before deleting permanently",
             "type": "https://example.org/problems/role_has_active_users"
+          }
+        ]
+      },
+      "RoleHoldersExceedUserTypeProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "The type of a user holding this role does not allow the added permissions",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "The type of a user holding this role does not allow the added permissions"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "role_holders_exceed_user_type",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          },
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/ExcessHolder"
+            },
+            "type": "array",
+            "title": "Users"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code",
+          "users"
+        ],
+        "title": "RoleHoldersExceedUserTypeProblem",
+        "description": "The type of a user holding this role does not allow the added permissions (HTTP 409). Problem type role_holders_exceed_user_type.",
+        "examples": [
+          {
+            "code": "role_holders_exceed_user_type",
+            "detail": "The type of a user holding this role does not allow the added permissions",
+            "instance": "/api/v1/...",
+            "status": 409,
+            "title": "The type of a user holding this role does not allow the added permissions",
+            "type": "https://example.org/problems/role_holders_exceed_user_type",
+            "users": [
+              {
+                "excess_permissions": [
+                  "observation.update"
+                ],
+                "id": 3,
+                "user_type": "viewer",
+                "username": "viewer1"
+              }
+            ]
           }
         ]
       },
@@ -32969,13 +33245,11 @@
           "is_builtin": {
             "type": "boolean",
             "title": "Is Builtin",
-            "description": "Built-in roles are owned by the system: no rename, no permission change, no archive",
-            "default": false
+            "description": "Built-in roles are owned by the system: no rename, no permission change, no archive"
           },
           "level": {
             "$ref": "#/components/schemas/PermissionLevel",
-            "description": "system when the role holds a system permission (assignable only at the root), else scoped",
-            "default": "scoped"
+            "description": "system when the role holds a system permission (assignable only at the root), else scoped"
           }
         },
         "additionalProperties": false,
@@ -32986,7 +33260,10 @@
           "display_name",
           "description",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "builtin_key",
+          "is_builtin",
+          "level"
         ],
         "title": "RoleResponse"
       },
@@ -34555,7 +34832,8 @@
           "account_deactivated",
           "account_archived",
           "certificate_changed",
-          "ended_by_admin"
+          "ended_by_admin",
+          "user_type_changed"
         ],
         "title": "SessionRevokeCause",
         "description": "What made the server revoke a session; the account itself may stay as it is"
@@ -38040,12 +38318,11 @@
               }
             ],
             "title": "Post Id",
-            "description": "Home post of the user"
+            "description": "Home post of the user (membership: who manages them); null for none"
           },
-          "is_admin": {
-            "type": "boolean",
-            "title": "Is Admin",
-            "description": "Holds the built-in admin role at the root (no route checks it, every route checks its own permissions)"
+          "user_type": {
+            "$ref": "#/components/schemas/UserType",
+            "description": "The type of the user (GET /user-types): which pages the web client shows"
           },
           "permissions": {
             "items": {
@@ -38053,30 +38330,34 @@
             },
             "type": "array",
             "title": "Permissions",
-            "description": "Permissions held at some node of the scope tree"
+            "description": "Permissions held at some node of the scope tree (the menu)"
           },
-          "roles": {
+          "assignments": {
             "items": {
-              "$ref": "#/components/schemas/RoleBriefResponse"
+              "$ref": "#/components/schemas/AssignmentResponse"
             },
             "type": "array",
-            "title": "Roles",
-            "description": "The roles of the user's assignments"
+            "title": "Assignments",
+            "description": "The role assignments of the user, as GET /users/{user_id}/assignments lists them (assignments of archived roles included: role.is_deleted, they grant nothing)"
           },
-          "accessible_post_ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "integer"
-                },
-                "type": "array"
+          "root_permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Root Permissions",
+            "description": "Permissions held at the root: in effect at every post"
+          },
+          "post_permissions": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
               },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Accessible Post Ids",
-            "description": "Posts where observation.view is in effect (archived posts only through a group or the root). null means every post (observation.view at the root)"
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Post Permissions",
+            "description": "Post id -> the permissions the assignments at groups and posts put in effect at that post, for every post they reach (an assignment on an archived post stops applying there, a group's keep applying to its archived posts). In effect at a post = root_permissions plus its entry"
           },
           "id": {
             "type": "integer",
@@ -38133,7 +38414,12 @@
         },
         "type": "object",
         "required": [
-          "is_admin",
+          "post_id",
+          "user_type",
+          "permissions",
+          "assignments",
+          "root_permissions",
+          "post_permissions",
           "id",
           "username",
           "is_active",
@@ -38357,6 +38643,10 @@
             ],
             "title": "Post Id"
           },
+          "user_type": {
+            "$ref": "#/components/schemas/UserType",
+            "description": "The type of the user (GET /user-types): the pages of the web client"
+          },
           "is_active": {
             "type": "boolean",
             "title": "Is Active"
@@ -38420,6 +38710,7 @@
           "username",
           "username_alias",
           "post_id",
+          "user_type",
           "is_active",
           "created_at",
           "updated_at",
@@ -38658,6 +38949,101 @@
         "title": "UserType",
         "description": "The type of a user; the order is the order of the catalog. The key of the built-in role is the same string"
       },
+      "UserTypeCeilingExceededProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Assignments of the user exceed the ceiling of the new type",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "A user of type {user_type} cannot hold the roles of the listed assignments: remove them first"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "user_type_ceiling_exceeded",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          },
+          "user_type": {
+            "type": "string",
+            "title": "User Type"
+          },
+          "assignments": {
+            "items": {
+              "$ref": "#/components/schemas/ExcessAssignment"
+            },
+            "type": "array",
+            "title": "Assignments"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code",
+          "user_type",
+          "assignments"
+        ],
+        "title": "UserTypeCeilingExceededProblem",
+        "description": "Assignments of the user exceed the ceiling of the new type (HTTP 409). Problem type user_type_ceiling_exceeded.",
+        "examples": [
+          {
+            "assignments": [
+              {
+                "excess_permissions": [
+                  "media.update"
+                ],
+                "id": 12,
+                "role": {
+                  "display_name": "Media editors",
+                  "id": 9,
+                  "name": "media_editors"
+                },
+                "scope": {
+                  "id": 7,
+                  "kind": "post",
+                  "name": "Post 7"
+                }
+              }
+            ],
+            "code": "user_type_ceiling_exceeded",
+            "detail": "A user of type <user_type> cannot hold the roles of the listed assignments: remove them first",
+            "instance": "/api/v1/...",
+            "status": 409,
+            "title": "Assignments of the user exceed the ceiling of the new type",
+            "type": "https://example.org/problems/user_type_ceiling_exceeded",
+            "user_type": "<user_type>"
+          }
+        ]
+      },
       "UserTypeResponse": {
         "properties": {
           "key": {
@@ -38778,6 +39164,17 @@
               }
             ],
             "title": "Is Active"
+          },
+          "user_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserType"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Another type (GET /user-types): every assignment of the old type's built-in role gets the new type's built-in role at the same node (at the root when it holds system permissions), every other assignment must fit the new ceiling, and the user's sessions end"
           },
           "certificate": {
             "anyOf": [

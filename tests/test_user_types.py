@@ -1,10 +1,24 @@
-"""User types: permission levels, the type catalog (base and ceiling sets) and GET /user-types."""
+"""User types: permission levels, the type catalog (base and ceiling sets) and GET /user-types; the type change of
+PATCH /users/{user_id} (spec section 4 and section 6 rules 2, 4 and 5), role edits bounded by the types of the
+role's holders, and the user_type filter of the user list."""
+from dataclasses import dataclass
+
+import pytest
+from sqlmodel import select
+
 from app.backend.api.v1 import V1
+from app.backend.auth.scope import Node, ROOT
 from app.backend.auth.user_types import USER_TYPES, excess_permissions
 from app.backend.bootstrap.permissions import PERMISSION_LEVELS, PERMISSION_META, permission_level, role_level
 from app.backend.enums.general import PermissionLevel, Permissions, UserType
-from app.backend.enums.routes import UserTypeRoutes
-from tests.helpers import make_user
+from app.backend.enums.routes import AuthRoutes, RoleRoutes, SearchRoutes, UserRoutes, UserTypeRoutes
+from app.backend.models.audit import AuditLog
+from app.backend.models.post import Post
+from app.backend.models.role import Permission, Role, RolePermission
+from app.backend.models.role_assignment import RoleAssignment
+from app.backend.models.scope_group import ScopeGroup
+from app.backend.models.user import User, UserSession
+from tests.helpers import assign, make_admin, make_group, make_post, make_role, make_user
 
 
 def test_every_permission_declares_a_level():
@@ -85,3 +99,374 @@ async def test_user_types_catalog(client, db, headers):
 async def test_user_types_need_authentication(client, db):
     response = await client.get(V1.path(UserTypeRoutes.ROOT))
     assert response.status_code == 401
+
+
+# =================================================================== behaviour (spec section 4 and section 6 rule 4)
+# Tree: East > Kharkiv > posts A, A2; West > post B.
+
+@dataclass
+class Tree:
+    east: ScopeGroup
+    kharkiv: ScopeGroup
+    west: ScopeGroup
+    a: Post
+    a2: Post
+    b: Post
+
+
+@pytest.fixture
+async def tree(db) -> Tree:
+    east = await make_group(db, "East")
+    kharkiv = await make_group(db, "Kharkiv", parent_id=east.id)
+    west = await make_group(db, "West")
+    return Tree(east, kharkiv, west, await make_post(db, "A", group_id=kharkiv.id),
+                await make_post(db, "A2", group_id=kharkiv.id), await make_post(db, "B", group_id=west.id))
+
+
+ME = V1.path(AuthRoutes.ME)
+USERS = V1.path(UserRoutes.ROOT)
+ROLE = V1.path(RoleRoutes.ROLE_BY_ID)
+ROLE_PERMISSION = V1.path(RoleRoutes.ROLE_PERMISSION_BY_ID)
+
+
+async def builtin(db, user_type: UserType) -> Role:
+    return (await db.exec(select(Role).where(Role.builtin_key == user_type.value))).one()
+
+
+async def typed_user(db, user_type: UserType, post_id=None, node: Node = None) -> User:
+    """A user of the type holding the built-in role of the type at node (default: the home post, the root without
+    one)"""
+    user = await make_user(db, post_id=post_id, user_type=user_type)
+    if node is None:
+        node = Node.post(post_id) if post_id is not None else ROOT
+    await assign(db, user, await builtin(db, user_type), node)
+    return user
+
+
+async def permission_id(db, name: str) -> int:
+    return (await db.exec(select(Permission.id).where(Permission.name == name))).one()
+
+
+async def role_permissions(db, role: Role) -> set:
+    rows = await db.exec(select(Permission.name).join(RolePermission, RolePermission.permission_id == Permission.id)
+                         .where(RolePermission.role_id == role.id))
+    return set(rows.all())
+
+
+async def assignment_rows(db, user: User) -> list:
+    """(id, role id, scope key) of every assignment of the user, by id"""
+    rows = await db.exec(select(RoleAssignment.id, RoleAssignment.role_id, RoleAssignment.scope_key)
+                         .where(RoleAssignment.user_id == user.id).order_by(RoleAssignment.id))
+    return [tuple(row) for row in rows.all()]
+
+
+async def stored_type(db, user: User) -> str:
+    return (await db.exec(select(User.user_type).where(User.id == user.id))).one()
+
+
+async def change_type(client, login: dict, target: User, user_type: str):
+    return await client.patch(V1.path(UserRoutes.USER_BY_ID, user_id=target.id), data={"user_type": user_type},
+                              headers=login)
+
+
+def problem(response, status: int, code: str) -> dict:
+    assert response.status_code == status, response.text
+    body = response.json()
+    assert body["code"] == code, body
+    return body
+
+
+async def update_audit(db, user: User) -> AuditLog:
+    return (await db.exec(select(AuditLog).where(AuditLog.resource_type == "user", AuditLog.action == "update",
+                                                 AuditLog.resource_id == user.id))).one()
+
+
+# ----------------------------------------------------------------- type change
+async def test_type_change_swaps_base_role_and_ends_sessions(client, db, headers, tree):
+    admin = await make_admin(db)
+    operator = await typed_user(db, UserType.OPERATOR, post_id=tree.a.id)
+    (before,) = await assignment_rows(db, operator)
+    old_login = headers(operator)
+    assert (await client.get(ME, headers=old_login)).status_code == 200
+
+    changed = await change_type(client, headers(admin), operator, "senior_operator")
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["user_type"] == "senior_operator"
+    senior = await builtin(db, UserType.SENIOR_OPERATOR)
+    # The assignment keeps its id and its node; only the role changes
+    assert await assignment_rows(db, operator) == [(before[0], senior.id, f"p:{tree.a.id}")]
+    assert await stored_type(db, operator) == "senior_operator"
+
+    refused = await client.get(ME, headers=old_login)
+    assert refused.status_code == 401 and refused.json()["code"] == "session_expired"
+    ended = (await db.exec(select(UserSession.end_reason, UserSession.revoke_cause)
+                           .where(UserSession.user_id == operator.id))).all()
+    assert [tuple(row) for row in ended] == [("revoked", "user_type_changed")]
+
+    audit = await update_audit(db, operator)
+    assert audit.old_values["user_type"] == "operator" and audit.new_values["user_type"] == "senior_operator"
+    (replaced,) = audit.new_values["replaced_assignments"]
+    assert replaced["before"]["id"] == replaced["after"]["id"] == before[0]
+    assert (replaced["before"]["role_id"], replaced["after"]["role_id"]) == (before[1], senior.id)
+    assert replaced["after"]["scope_key"] == f"p:{tree.a.id}"
+
+    me = (await client.get(ME, headers=headers(operator))).json()
+    assert me["user_type"] == "senior_operator"
+
+
+async def test_downgrade_above_ceiling_refused(client, db, headers, tree):
+    admin = await make_admin(db)
+    senior = await typed_user(db, UserType.SENIOR_OPERATOR, post_id=tree.a.id)
+    media_editor = await make_role(db, ["media.update"])
+    extra = await assign(db, senior, media_editor, Node.post(tree.a.id))
+    before = await assignment_rows(db, senior)
+    login = headers(senior)
+
+    body = problem(await change_type(client, headers(admin), senior, "operator"), 409, "user_type_ceiling_exceeded")
+    assert body["user_type"] == "operator"
+    assert body["assignments"][0]["excess_permissions"] == ["media.update"]
+    assert body["assignments"] == [{
+        "id": extra.id,
+        "role": {"id": media_editor.id, "name": media_editor.name, "display_name": media_editor.display_name},
+        "scope": {"kind": "post", "id": tree.a.id, "name": "A"},
+        "excess_permissions": ["media.update"],
+    }]
+    # Nothing changed: type, assignments, sessions
+    assert await stored_type(db, senior) == "senior_operator"
+    assert await assignment_rows(db, senior) == before
+    assert (await client.get(ME, headers=login)).status_code == 200
+    assert not (await db.exec(select(AuditLog).where(AuditLog.resource_type == "user"))).all()
+
+
+async def test_ceiling_counts_assignments_of_archived_roles(client, db, headers, tree):
+    """An archived role grants nothing now, but its assignments apply again when it is restored"""
+    admin = await make_admin(db)
+    senior = await typed_user(db, UserType.SENIOR_OPERATOR, post_id=tree.a.id)
+    media_editor = await make_role(db, ["media.update"])
+    extra = await assign(db, senior, media_editor, Node.group(tree.kharkiv.id))
+    media_editor.is_deleted = True
+    db.add(media_editor)
+    await db.commit()
+
+    body = problem(await change_type(client, headers(admin), senior, "operator"), 409, "user_type_ceiling_exceeded")
+    assert [(item["id"], item["scope"]) for item in body["assignments"]] == [
+        (extra.id, {"kind": "group", "id": tree.kharkiv.id, "name": "Kharkiv"})]
+    assert await stored_type(db, senior) == "senior_operator"
+
+
+async def test_type_change_to_admin_puts_the_base_role_at_the_root(client, db, headers, tree):
+    """The admin role holds system permissions: its assignment goes to the root, like the default assignment; two old
+    base assignments become one (the second is merged into the first)"""
+    admin = await make_admin(db)
+    operator = await typed_user(db, UserType.OPERATOR, post_id=tree.a.id)
+    second = await assign(db, operator, await builtin(db, UserType.OPERATOR), Node.post(tree.b.id))
+    (first, _) = await assignment_rows(db, operator)
+    login = headers(operator)
+
+    changed = await change_type(client, headers(admin), operator, "admin")
+    assert changed.status_code == 200, changed.text
+    admin_role = await builtin(db, UserType.ADMIN)
+    assert await assignment_rows(db, operator) == [(first[0], admin_role.id, "root")]
+    assert (await client.get(ME, headers=login)).status_code == 401
+
+    replaced = (await update_audit(db, operator)).new_values["replaced_assignments"]
+    assert [item["before"]["id"] for item in replaced] == [first[0], second.id]
+    assert replaced[0]["after"]["scope_key"] == "root" and replaced[0]["after"]["scope_group_id"] is None
+    assert replaced[0]["after"]["scope_post_id"] is None
+    # The merged row is removed: the audit keeps a full copy of it
+    assert replaced[1]["merged_into"] == first[0] and "after" not in replaced[1]
+    assert set(replaced[1]["before"]) == {"id", "user_id", "role_id", "scope_group_id", "scope_post_id", "scope_key",
+                                          "created_at", "created_by"}
+    assert replaced[1]["before"]["scope_key"] == f"p:{tree.b.id}"
+
+
+async def test_type_change_merges_into_an_existing_assignment(client, db, headers, tree):
+    admin = await make_admin(db)
+    operator = await typed_user(db, UserType.OPERATOR, post_id=tree.a.id)
+    senior_role = await builtin(db, UserType.SENIOR_OPERATOR)
+    kept = await assign(db, operator, senior_role, Node.post(tree.a.id))   # fits the operator ceiling
+
+    changed = await change_type(client, headers(admin), operator, "senior_operator")
+    assert changed.status_code == 200, changed.text
+    assert await assignment_rows(db, operator) == [(kept.id, senior_role.id, f"p:{tree.a.id}")]
+    (replaced,) = (await update_audit(db, operator)).new_values["replaced_assignments"]
+    assert replaced["merged_into"] == kept.id
+
+
+async def test_type_change_without_the_old_base_role(client, db, headers, tree):
+    """Nothing to replace: the type changes, the ceiling is checked, the sessions end"""
+    admin = await make_admin(db)
+    user = await make_user(db, post_id=tree.a.id, user_type=UserType.OPERATOR)
+    reader = await make_role(db, ["observation.view"])
+    await assign(db, user, reader, Node.post(tree.a.id))
+    before = await assignment_rows(db, user)
+    login = headers(user)
+
+    changed = await change_type(client, headers(admin), user, "viewer")
+    assert changed.status_code == 200, changed.text
+    assert await assignment_rows(db, user) == before
+    assert await stored_type(db, user) == "viewer"
+    assert (await client.get(ME, headers=login)).status_code == 401
+    assert (await update_audit(db, user)).new_values["replaced_assignments"] == []
+
+
+async def test_same_type_again_changes_nothing(client, db, headers, tree):
+    admin = await make_admin(db)
+    operator = await typed_user(db, UserType.OPERATOR, post_id=tree.a.id)
+    before = await assignment_rows(db, operator)
+    login = headers(operator)
+
+    changed = await change_type(client, headers(admin), operator, "operator")
+    assert changed.status_code == 200, changed.text
+    assert await assignment_rows(db, operator) == before
+    assert (await client.get(ME, headers=login)).status_code == 200
+    assert "replaced_assignments" not in (await update_audit(db, operator)).new_values
+
+
+async def test_type_change_needs_the_new_base_role_at_the_node(client, db, headers, tree):
+    """Rule 4: the caller could grant every assignment of the user (rule 2) and holds every permission of the new base
+    role at the node of each replaced assignment"""
+    await make_admin(db)
+    east_admin = await typed_user(db, UserType.POST_ADMIN, node=Node.group(tree.east.id))
+    west_admin = await typed_user(db, UserType.POST_ADMIN, node=Node.group(tree.west.id))
+    operator = await typed_user(db, UserType.OPERATOR, post_id=tree.a.id)
+    before = await assignment_rows(db, operator)
+
+    problem(await change_type(client, headers(west_admin), operator, "senior_operator"), 403,
+            "target_user_more_privileged")
+    body = problem(await change_type(client, headers(east_admin), operator, "admin"), 403,
+                   "grant_exceeds_own_permissions")
+    assert "role.create" in body["missing"]
+    assert await assignment_rows(db, operator) == before and await stored_type(db, operator) == "operator"
+
+    changed = await change_type(client, headers(east_admin), operator, "senior_operator")
+    assert changed.status_code == 200, changed.text
+    senior_role = await builtin(db, UserType.SENIOR_OPERATOR)
+    assert await assignment_rows(db, operator) == [(before[0][0], senior_role.id, f"p:{tree.a.id}")]
+
+
+# ----------------------------------------------------------------- the last administrator (rule 5)
+async def test_last_admin_cannot_downgrade_self(client, db, headers):
+    admin = await make_admin(db)
+    before = await assignment_rows(db, admin)
+    login = headers(admin)
+
+    problem(await change_type(client, login, admin, "operator"), 409, "cannot_remove_own_admin")
+    assert await stored_type(db, admin) == "admin"
+    assert await assignment_rows(db, admin) == before
+    assert (await client.get(ME, headers=login)).status_code == 200
+
+
+async def test_admin_cannot_downgrade_self_while_another_admin_remains(client, db, headers):
+    admin = await make_admin(db)
+    peer = await make_admin(db)
+    problem(await change_type(client, headers(admin), admin, "analyst"), 409, "cannot_remove_own_admin")
+
+    changed = await change_type(client, headers(admin), peer, "analyst")
+    assert changed.status_code == 200, changed.text
+    analyst = await builtin(db, UserType.ANALYST)
+    assert [row[1:] for row in await assignment_rows(db, peer)] == [(analyst.id, "root")]
+
+
+async def test_the_only_admin_cannot_be_downgraded_by_another_caller(client, db, headers):
+    """A caller holding every permission through a custom role is not the administrator: downgrading the only holder of
+    the built-in admin role at the root leaves no administrator"""
+    only = await make_admin(db)
+    every = await make_role(db, [p.value for p in Permissions])
+    manager = await make_user(db, user_type=UserType.ADMIN)
+    await assign(db, manager, every, ROOT)
+
+    problem(await change_type(client, headers(manager), only, "analyst"), 409, "last_admin_required")
+    assert await stored_type(db, only) == "admin"
+    admin_role = await builtin(db, UserType.ADMIN)
+    assert [row[1:] for row in await assignment_rows(db, only)] == [(admin_role.id, "root")]
+
+
+# ----------------------------------------------------------------- role edits bounded by the holders
+async def test_role_update_refused_above_holder_ceiling(client, db, headers, tree):
+    admin = await make_admin(db)
+    viewer = await typed_user(db, UserType.VIEWER, post_id=tree.a.id)
+    reader = await make_role(db, ["observation.view"])
+    await assign(db, viewer, reader, Node.post(tree.a.id))
+    view_id, update_id = await permission_id(db, "observation.view"), await permission_id(db, "observation.update")
+    expected = [{"id": viewer.id, "username": viewer.username, "user_type": "viewer",
+                 "excess_permissions": ["observation.update"]}]
+
+    patched = await client.patch(ROLE.format(role_id=reader.id), headers=headers(admin),
+                                 json={"display_name": "Changed", "permission_ids": [view_id, update_id]})
+    assert problem(patched, 409, "role_holders_exceed_user_type")["users"] == expected
+    put = await client.put(ROLE_PERMISSION.format(role_id=reader.id, permission_id=update_id), headers=headers(admin))
+    assert problem(put, 409, "role_holders_exceed_user_type")["users"] == expected
+    # The role is unchanged
+    assert await role_permissions(db, reader) == {"observation.view"}
+    assert (await db.exec(select(Role.display_name).where(Role.id == reader.id))).one() == reader.display_name
+
+    # Within the ceiling of every holder
+    stats_id = await permission_id(db, "statistics.view")
+    allowed = await client.put(ROLE_PERMISSION.format(role_id=reader.id, permission_id=stats_id), headers=headers(admin))
+    assert allowed.status_code == 200, allowed.text
+    assert await role_permissions(db, reader) == {"observation.view", "statistics.view"}
+
+
+async def test_archived_holders_do_not_bound_role_edits(client, db, headers, tree):
+    admin = await make_admin(db)
+    viewer = await typed_user(db, UserType.VIEWER, post_id=tree.a.id)
+    reader = await make_role(db, ["observation.view"])
+    await assign(db, viewer, reader, ROOT)
+    viewer.is_deleted = True
+    db.add(viewer)
+    await db.commit()
+
+    update_id = await permission_id(db, "observation.update")
+    allowed = await client.put(ROLE_PERMISSION.format(role_id=reader.id, permission_id=update_id), headers=headers(admin))
+    assert allowed.status_code == 200, allowed.text
+
+
+async def test_role_edit_refused_with_system_permission_below_root(client, db, headers, tree):
+    admin = await make_admin(db)
+    group_admin = await typed_user(db, UserType.POST_ADMIN, node=Node.group(tree.east.id))
+    tagger = await make_role(db, ["tag.view"])
+    await assign(db, group_admin, tagger, Node.group(tree.east.id))
+    view_id, create_id = await permission_id(db, "tag.view"), await permission_id(db, "tag.create")
+
+    patched = await client.patch(ROLE.format(role_id=tagger.id), headers=headers(admin),
+                                 json={"permission_ids": [view_id, create_id]})
+    assert problem(patched, 409, "role_requires_root_scope")["system_permissions"] == ["tag.create"]
+    put = await client.put(ROLE_PERMISSION.format(role_id=tagger.id, permission_id=create_id), headers=headers(admin))
+    assert problem(put, 409, "role_requires_root_scope")["system_permissions"] == ["tag.create"]
+    assert await role_permissions(db, tagger) == {"tag.view"}
+
+    # The same change on a role held only at the root, by a user whose type allows it
+    root_holder = await typed_user(db, UserType.POST_ADMIN)
+    at_root = await make_role(db, ["tag.view"])
+    await assign(db, root_holder, at_root, ROOT)
+    allowed = await client.put(ROLE_PERMISSION.format(role_id=at_root.id, permission_id=create_id), headers=headers(admin))
+    assert allowed.status_code == 200, allowed.text
+
+
+# ----------------------------------------------------------------- the user list
+async def test_user_list_filters_by_type(client, db, headers, tree):
+    admin = await make_admin(db)
+    operator = await typed_user(db, UserType.OPERATOR, post_id=tree.a.id)
+    await typed_user(db, UserType.VIEWER, post_id=tree.a.id)
+
+    listed = await client.get(USERS, params={"user_type": "operator"}, headers=headers(admin))
+    assert listed.status_code == 200, listed.text
+    assert [(user["id"], user["user_type"]) for user in listed.json()] == [(operator.id, "operator")]
+    admins = (await client.get(USERS, params={"user_type": "admin"}, headers=headers(admin))).json()
+    assert [user["id"] for user in admins] == [admin.id]
+
+    searched = await client.get(V1.path(SearchRoutes.USERS), params={"user_type": "operator"}, headers=headers(admin))
+    assert searched.status_code == 200, searched.text
+    assert [user["id"] for user in searched.json()["items"]] == [operator.id] and searched.json()["total"] == 1
+
+    unknown = await client.get(USERS, params={"user_type": "boss"}, headers=headers(admin))
+    assert unknown.status_code == 422
+    one = await client.get(V1.path(UserRoutes.USER_BY_ID, user_id=operator.id), headers=headers(admin))
+    assert one.json()["user_type"] == "operator"
+
+
+def test_user_type_is_required_in_the_user_schema():
+    from app.main import fastapi_app
+    schemas = V1.openapi(fastapi_app)["components"]["schemas"]
+    assert "user_type" in schemas["UserResponse"]["required"]

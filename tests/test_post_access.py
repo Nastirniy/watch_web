@@ -83,7 +83,9 @@ async def test_extra_post_access_read_then_write(client, db, headers):
         listed = (await client.get(LIST, headers=headers(member))).json()
         assert {o["id"] for o in listed} == {obs_a.id, obs_b.id}
         me = (await client.get(V1.path(AuthRoutes.ME), headers=headers(member))).json()
-        assert me["accessible_post_ids"] == sorted([post_a.id, post_b.id])
+        assert me["root_permissions"] == []
+        assert {post_id for post_id, held in me["post_permissions"].items() if "observation.view" in held} == {
+            str(post_a.id), str(post_b.id)}
 
     read_only = await client.post(CREATE, json=observation_payload(post_b.id, ids["signal_type_id"]), headers=headers(reader))
     assert read_only.status_code == 403
@@ -106,7 +108,7 @@ async def test_post_access_all_sees_everything(client, db, headers):
     filtered = await client.get(LIST, params={"post_id": post_b.id}, headers=headers(supervisor))
     assert {o["id"] for o in filtered.json()} == {obs_b.id}
     me = (await client.get(V1.path(AuthRoutes.ME), headers=headers(supervisor))).json()
-    assert me["accessible_post_ids"] is None and me["is_admin"] is False
+    assert "observation.view" in me["root_permissions"] and "is_admin" not in me
 
 
 @pytest.mark.asyncio

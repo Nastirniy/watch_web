@@ -8,6 +8,7 @@ from typing import FrozenSet, Optional, Iterable
 from sqlalchemy import or_
 from sqlalchemy.sql.selectable import Select
 
+from app.backend.enums.general import UserType
 from app.backend.models.user import User
 from app.backend.auth.presence import online_user_ids_select
 from app.backend.filters.simple_engine import ListCriteria, SimpleFilterEngine
@@ -22,6 +23,7 @@ class UserCriteria(ListCriteria):
     username_alias: Optional[str] = None
     username_alias_contains: Optional[str] = None
     post_id: Optional[int] = None
+    user_type: Optional[UserType] = None
     is_active: Optional[bool] = None
     is_online: Optional[bool] = None
     created_at_from: Optional[datetime] = None
@@ -57,6 +59,11 @@ class UserFilterService(SimpleFilterEngine):
         return query
 
     @classmethod
+    def _apply_user_type(cls, query: Select, params: UserCriteria) -> Select:
+        """users.user_type holds the value of the enum (a plain string column)"""
+        return cls._apply_exact(query, User.user_type, params.user_type.value if params.user_type else None)
+
+    @classmethod
     def apply_filters(
         cls,
         query: Select,
@@ -82,6 +89,7 @@ class UserFilterService(SimpleFilterEngine):
         query = cls._apply_contains(query, User.username_alias, params.username_alias_contains)
 
         # Status
+        query = cls._apply_user_type(query, params)
         query = cls._apply_exact(query, User.is_active, params.is_active)
         if params.is_online is not None:
             online_ids = online_user_ids_select()
@@ -115,6 +123,7 @@ class UserFilterService(SimpleFilterEngine):
         query = cls._apply_contains(query, User.username, params.username_contains)
         query = cls._apply_exact(query, User.username_alias, params.username_alias)
         query = cls._apply_contains(query, User.username_alias, params.username_alias_contains)
+        query = cls._apply_user_type(query, params)
         query = cls._apply_exact(query, User.is_active, params.is_active)
         if params.is_online is not None:
             online_ids = online_user_ids_select()

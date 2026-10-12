@@ -19,7 +19,7 @@ services raise CodedError(ErrorCode.X, **params) (errors/coded.py).
 """
 import string
 from enum import Enum
-from typing import Any, Dict, List, NamedTuple, Optional
+from typing import Any, Dict, List, Literal, NamedTuple, Optional
 
 from pydantic import BaseModel, Field
 
@@ -33,6 +33,35 @@ class RequiredPermissions(BaseModel):
 class UserRef(BaseModel):
     id: int
     username: str
+
+
+class ExcessRole(BaseModel):
+    id: int
+    name: str
+    display_name: str
+
+
+class ExcessScope(BaseModel):
+    """The node of an assignment: the root, a scope group or a post"""
+    kind: Literal["root", "group", "post"]
+    id: Optional[int] = Field(description="Id of the group or the post; null at the root")
+    name: str = Field(description="Name of the group or the post; the application name at the root")
+
+
+class ExcessAssignment(BaseModel):
+    """An assignment whose role holds permissions the ceiling of the user's type does not allow"""
+    id: int
+    role: ExcessRole
+    scope: ExcessScope
+    excess_permissions: List[str]
+
+
+class ExcessHolder(BaseModel):
+    """A user holding a role whose added permissions the ceiling of the user's type does not allow"""
+    id: int
+    username: str
+    user_type: str
+    excess_permissions: List[str]
 
 
 class ProblemSpec(NamedTuple):
@@ -229,6 +258,15 @@ class ErrorCode(ProblemType):
         409, "The role holds permissions the user's type does not allow",
         "A user of type {user_type} cannot hold: {excess_permissions}",
         user_type=str, excess_permissions=List[str]))
+    # A type change keeps every other assignment: each must fit the ceiling of the new type (spec section 4)
+    USER_TYPE_CEILING_EXCEEDED = ("user_type_ceiling_exceeded", problem(
+        409, "Assignments of the user exceed the ceiling of the new type",
+        "A user of type {user_type} cannot hold the roles of the listed assignments: remove them first",
+        user_type=str, assignments=List[ExcessAssignment]))
+    # Permissions added to a role reach every holder of the role: each holder's type must allow them
+    ROLE_HOLDERS_EXCEED_USER_TYPE = ("role_holders_exceed_user_type", problem(
+        409, "The type of a user holding this role does not allow the added permissions",
+        users=List[ExcessHolder]))
 
     # ---------------------------------------------------------------- posts
     POST_NOT_FOUND = ("post_not_found", problem(404, "Post not found", post_id=Optional[int]))

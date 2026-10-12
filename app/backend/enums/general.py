@@ -222,6 +222,7 @@ class SessionRevokeCause(str, Enum):
     ACCOUNT_ARCHIVED = "account_archived"
     CERTIFICATE_CHANGED = "certificate_changed"  # the user got another certificate: the old one's sessions end
     ENDED_BY_ADMIN = "ended_by_admin"
+    USER_TYPE_CHANGED = "user_type_changed"      # the web must not keep showing the pages of the old type
 
 
 class ExportJobType(Enum):

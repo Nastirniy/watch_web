@@ -16,9 +16,9 @@ from app.backend.models.post import Post
 from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
 from app.backend.auth.access_control import AccessControlService
-from app.backend.auth.assignments import assignment_views, create_assignment, delete_assignment
+from app.backend.auth.assignments import assignment_views, change_user_type, create_assignment, delete_assignment
 from app.backend.auth.privileges import (
-    check_an_admin_remains, check_grant_at, check_target_user, role_permission_names,
+    check_admin_kept, check_an_admin_remains, check_grant_at, check_target_user, role_permission_names,
 )
 from app.backend.auth.scope import Node, ROOT
 from app.backend.bootstrap.permissions import role_level
@@ -258,6 +258,7 @@ async def create_user(
             username=user.username,
             username_alias=user.username_alias,
             post_id=user.post_id,
+            user_type=user.user_type,
             is_active=user.is_active,
             created_at=user.created_at,
             updated_at=user.updated_at,
@@ -311,9 +312,9 @@ async def get_user(
         ErrorCode.CANNOT_DEACTIVATE_SELF, ErrorCode.CERTIFICATE_FILE_EMPTY, ErrorCode.CERTIFICATE_INVALID,
         ErrorCode.CERTIFICATE_TAKEN, ErrorCode.USERNAME_TAKEN, ErrorCode.POST_NOT_FOUND, ErrorCode.POST_ARCHIVED,
         ErrorCode.USER_NOT_FOUND, ErrorCode.CERTIFICATE_FILE_TOO_LARGE, ErrorCode.FORM_CONTENT_TYPE_REQUIRED,
-        ErrorCode.LAST_ADMIN_REQUIRED,
+        ErrorCode.LAST_ADMIN_REQUIRED, ErrorCode.CANNOT_REMOVE_OWN_ADMIN, ErrorCode.USER_TYPE_CEILING_EXCEEDED,
         AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION,
-        *GUARDED,
+        AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
     ),
 )
 async def update_user(
@@ -336,13 +337,23 @@ async def update_user(
     - is_active: User's active status (boolean)
     - certificate: Update PKI certificate authentication data (file upload). A different certificate ends every
       session of the user, like deactivation: the old certificate's tokens stop working.
+    - user_type: Another type (GET /user-types). Every assignment of the old type's built-in role gets the new type's
+      built-in role at the same node (at the root when the new one holds system permissions, as for a new user; an
+      assignment of the new role the user already has at that node is kept and the old one merged into it). The
+      caller needs user.update and every permission of the new built-in role at each of these nodes (403
+      grant_exceeds_own_permissions); every other assignment, those of archived roles included, must fit the ceiling
+      of the new type (409 user_type_ceiling_exceeded with the assignments and their excess_permissions). The user's
+      sessions end (revoke_cause user_type_changed), so the web never shows the pages of the old type. The same type
+      again changes nothing.
 
     Only provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).
     The fields are form fields: any other body (JSON included) answers 415 instead of being ignored.
 
     Changing a user needs user.update covering them (their home post, the root for a user without one) and, for
-    another user, that the caller could grant every assignment they have (403 target_user_more_privileged). A
-    deactivation must leave an active holder of the built-in admin role at the root (409 last_admin_required).
+    another user, that the caller could grant every assignment they have (403 target_user_more_privileged); this
+    answers before the archived state of the user. A deactivation or a type change must leave an active holder of the
+    built-in admin role at the root (409 last_admin_required), and a caller cannot take it from themselves (409
+    cannot_remove_own_admin).
     """
     current_user = auth.user
     content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
@@ -354,9 +365,10 @@ async def update_user(
         )
 
     user = await _get_user_or_404(session, user_id)
+    # Scope before the state: an outsider gets the same 403 for an archived and a live user
+    await check_target_user(session, auth, user, Permissions.USER_UPDATE)
     if user.is_deleted:
         raise ApiError(ErrorCode.USER_NOT_FOUND)
-    await check_target_user(session, auth, user, Permissions.USER_UPDATE)
 
     # Store old values for auditing
     old_values = user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"})
@@ -445,12 +457,19 @@ async def update_user(
     user.updated_at = datetime.now(timezone.utc)
     session.add(user)
 
-    # Deactivation and a new certificate end every live session in the same transaction as the change, so the
-    # user's tokens stop working the moment the update is committed (the request dependency rejects them).
+    # Spec section 6 rule 4 (auth/assignments.py): None when the type stays the same
+    type_change = None
+    if update_data.user_type is not None:
+        type_change = await change_user_type(session, auth, user, update_data.user_type)
+
+    # Deactivation, a new certificate and a new type end every live session in the same transaction as the change,
+    # so the user's tokens stop working the moment the update is committed (the request dependency rejects them).
     # A certificate is replaced because the old one is lost, compromised or revoked: its sessions must not
-    # outlive it. An administrator replacing their own certificate ends their own session too.
+    # outlive it. An administrator replacing their own certificate ends their own session too. A new type changes
+    # the pages of the web client: a login of the old type must not keep showing them.
     revoke_cause = (SessionRevokeCause.ACCOUNT_DEACTIVATED if deactivating
-                    else SessionRevokeCause.CERTIFICATE_CHANGED if certificate_replaced else None)
+                    else SessionRevokeCause.CERTIFICATE_CHANGED if certificate_replaced
+                    else SessionRevokeCause.USER_TYPE_CHANGED if type_change is not None else None)
     if revoke_cause:
         invalidated_count = await AuthService.invalidate_all_user_sessions(
             session=session,
@@ -467,7 +486,11 @@ async def update_user(
         )
 
     try:
-        if deactivating:
+        if type_change is not None:
+            # The old type's built-in role may have been the admin role at the root: the caller keeps theirs, and
+            # someone keeps it (a deactivation too)
+            await check_admin_kept(session, auth, type_change.admin_held_before)
+        elif deactivating:
             # A change that may take the admin role at the root from its last holder (deactivating oneself is
             # refused above)
             await check_an_admin_remains(session)
@@ -475,7 +498,16 @@ async def update_user(
         await session.commit()
 
         await session.refresh(user)
-        
+
+        new_values = {
+            **user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"}),
+            "certificate_replaced": certificate_replaced,
+        }
+        message = f"User {current_user.username} updated user {user.username}"
+        if type_change is not None:
+            new_values["replaced_assignments"] = type_change.replaced
+            message += (f" (type {type_change.old_type.value} -> {type_change.new_type.value}, "
+                        f"{len(type_change.replaced)} assignments replaced)")
         # Create audit log
         await create_audit_log(
             session=session,
@@ -484,11 +516,8 @@ async def update_user(
             resource_id=user.id,
             user_id=current_user.id,
             old_values=old_values,
-            new_values={
-                **user.model_dump(exclude={"pki_certificate_cn_hash", "pki_certificate_serial_hash", "pki_certificate_fingerprint_hash"}),
-                "certificate_replaced": certificate_replaced,
-            },
-            details={"message": f"User {current_user.username} updated user {user.username}"},
+            new_values=new_values,
+            details={"message": message},
             **client_info(request, auth)
         )
         await session.commit()

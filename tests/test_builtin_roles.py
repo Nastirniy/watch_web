@@ -143,6 +143,14 @@ async def test_role_response_level_and_builtin_filter(client, db, headers):
     assert {p["name"]: p["level"] for p in permissions}["tag.view"] == "scoped"
 
 
+def test_role_fields_are_required_in_the_schema():
+    """Always present in every role and permission: openapi-typescript types them as non-optional"""
+    from app.main import fastapi_app
+    schemas = V1.openapi(fastapi_app)["components"]["schemas"]
+    assert {"builtin_key", "is_builtin", "level"} <= set(schemas["RoleResponse"]["required"])
+    assert "level" in schemas["PermissionResponse"]["required"]
+
+
 async def test_search_roles_reports_builtin_and_level(client, db, headers):
     h = headers(await make_admin(db))
     body = (await client.get(V1.path(SearchRoutes.ROLES), params={"is_builtin": "true"}, headers=h)).json()

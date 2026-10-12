@@ -54,12 +54,25 @@ def test_there_is_no_admin_gate():
 
 
 def test_the_built_in_admin_role_passes_by_its_permissions():
-    """is_admin is the built-in admin role at the root; require() never reads it"""
+    """The built-in admin role at the root counts only by its permissions; require() never asks who the role is"""
     spec = Require.of(all=[Permissions.OBSERVATION_VIEW])
     flag_only = AuthContext(user=None, grants=(Grant(1, "admin", "Admin", True, ROOT, frozenset()),))
-    assert flag_only.is_admin and not spec.evaluate(flag_only).allowed
+    assert not spec.evaluate(flag_only).allowed
     below_root = AuthContext(user=None, grants=(Grant(1, "admin", "Admin", True, Node.post(7), frozenset({"observation.view"})),))
-    assert not below_root.is_admin and spec.evaluate(below_root).allowed
+    assert spec.evaluate(below_root).allowed
+    assert not hasattr(AuthContext, "is_admin")
+
+
+def test_evaluate_at_a_post():
+    """POST /auth/check-permission with post_id: in effect at that post, not held anywhere"""
+    spec = Require.of(all=[Permissions.OBSERVATION_VIEW], any=[Permissions.OBSERVATION_UPDATE, Permissions.MEDIA_CREATE])
+    auth = AuthContext(user=None, grants=(
+        Grant(1, "viewer", "Viewer", True, ROOT, frozenset({"observation.view"})),
+        Grant(2, "editor", "Editor", False, Node.post(7), frozenset({"observation.update"})),
+    ))
+    assert spec.evaluate(auth).allowed and spec.evaluate(auth, post_id=7).allowed
+    elsewhere = spec.evaluate(auth, post_id=8)
+    assert not elsewhere.allowed and elsewhere.missing == ("observation.update", "media.create")
 
 
 def test_empty_require_only_needs_authentication():

@@ -14,7 +14,7 @@ from sqlmodel import delete, select
 from app.backend.api.v1 import V1
 from app.backend.auth.context import load_auth_context
 from app.backend.auth.privileges import (
-    check_admin_kept, check_an_admin_remains, check_grant_at, check_target_user,
+    check_admin_kept, check_an_admin_remains, check_grant_at, check_target_user, holds_admin_at_root,
 )
 from app.backend.auth.scope import Node, ROOT
 from app.backend.auth.service import AuthService
@@ -505,10 +505,11 @@ async def test_the_only_admin_cannot_drop_their_admin_at_root(db):
     cannot_remove_own_admin, the last administrator included (the more specific answer)"""
     admin = await make_admin(db)
     auth = await load_auth_context(db, admin)
-    assert auth.is_admin
+    held_before = await holds_admin_at_root(db, admin.id)
+    assert held_before
     await db.exec(delete(RoleAssignment).where(RoleAssignment.user_id == admin.id))
     with pytest.raises(ApiError) as caught:
-        await check_admin_kept(db, auth)
+        await check_admin_kept(db, auth, held_before)
     assert caught.value.code is ErrorCode.CANNOT_REMOVE_OWN_ADMIN
     await db.rollback()
 
@@ -521,10 +522,11 @@ async def test_the_last_admin_role_at_root_cannot_go_by_someone_else(db):
     every = await make_role(db, await stored_permissions(db, (await builtin_role(db)).id))
     manager = await make_user(db, role=every)
     auth = await load_auth_context(db, manager)
-    assert not auth.is_admin
+    held_before = await holds_admin_at_root(db, manager.id)
+    assert not held_before                     # every permission through a custom role: not the administrator
     await db.exec(delete(RoleAssignment).where(RoleAssignment.user_id == admin.id))
     with pytest.raises(ApiError) as caught:
-        await check_admin_kept(db, auth)
+        await check_admin_kept(db, auth, held_before)
     assert caught.value.code is ErrorCode.LAST_ADMIN_REQUIRED
     await db.rollback()
 
@@ -534,17 +536,35 @@ async def test_an_admin_cannot_drop_their_own_admin_while_others_remain(db):
     admin = await make_admin(db)
     peer_id = (await make_admin(db)).id
     auth = await load_auth_context(db, admin)
+    held_before = await holds_admin_at_root(db, admin.id)
 
     await db.exec(delete(RoleAssignment).where(RoleAssignment.user_id == admin.id))
     with pytest.raises(ApiError) as caught:
-        await check_admin_kept(db, auth)
+        await check_admin_kept(db, auth, held_before)
     assert caught.value.code is ErrorCode.CANNOT_REMOVE_OWN_ADMIN
     await db.rollback()
     await db.refresh(admin)
 
     await db.exec(delete(RoleAssignment).where(RoleAssignment.user_id == peer_id))
-    await check_admin_kept(db, auth)   # someone else's: allowed while the caller stays
+    await check_admin_kept(db, auth, held_before)   # someone else's: allowed while the caller stays
     await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_the_administrator_is_the_builtin_admin_role_at_the_root(db):
+    """One definition (R27): holds_admin_at_root reads the assignment, by builtin_key; the role's name, a custom copy
+    and the admin role below the root make nobody the administrator"""
+    post = await make_post(db)
+    admin = await make_admin(db)
+    full = await builtin_role(db)
+    copy = await make_role(db, await stored_permissions(db, full.id), name="admin_copy")
+    with_copy = await make_user(db, user_type=UserType.ADMIN)
+    await assign(db, with_copy, copy, ROOT)
+    below_root = await make_user(db, post_id=post.id, user_type=UserType.ADMIN)
+    await assign(db, below_root, full, Node.post(post.id))
+    assert await holds_admin_at_root(db, admin.id)
+    assert not await holds_admin_at_root(db, with_copy.id)
+    assert not await holds_admin_at_root(db, below_root.id)
 
 
 @pytest.mark.asyncio

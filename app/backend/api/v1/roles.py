@@ -14,6 +14,7 @@ from app.backend.models.user import User
 from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
 from app.backend.auth.access_control import AccessControlService
+from app.backend.auth.assignments import check_role_permissions_added
 from app.backend.auth.privileges import check_grant, role_permission_names
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import RoleRoutes
@@ -168,6 +169,7 @@ async def get_role(
     responses=problems(
         ErrorCode.ROLE_NAME_TAKEN, ErrorCode.PERMISSION_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND,
         ErrorCode.ROLE_NAME_ARCHIVED, ErrorCode.BUILTIN_ROLE_NOT_RENAMABLE, ErrorCode.BUILTIN_ROLE_PERMISSIONS_FIXED,
+        ErrorCode.ROLE_REQUIRES_ROOT_SCOPE, ErrorCode.ROLE_HOLDERS_EXCEED_USER_TYPE,
         AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
     ),
 )
@@ -181,7 +183,10 @@ async def update_role(
     """Update role and optionally replace all permissions. Archived roles answer 404 until restored (POST /{role_id}/restore).
 
     A built-in role keeps its name and its permissions (409); clone it to change them. The caller must hold every permission
-    permission_ids adds or removes (403 grant_exceeds_own_permissions).
+    permission_ids adds or removes (403 grant_exceeds_own_permissions). Added permissions apply at once to every
+    holder who is not archived: a system permission needs every such assignment of the role at the root (409
+    role_requires_root_scope), and the type of every such holder must allow them (409 role_holders_exceed_user_type,
+    with the users and their excess_permissions). Nothing is changed on any refusal.
     """
     current_user = auth.user
     role = await get_role_or_404(session, role_id)
@@ -197,6 +202,7 @@ async def update_role(
             raise ApiError(ErrorCode.BUILTIN_ROLE_PERMISSIONS_FIXED)
         removed = current_names - wanted_names
         check_grant(auth, (wanted_names - current_names) | removed)
+        await check_role_permissions_added(session, role_id, wanted_names - current_names)
 
     # Store old values for auditing
     old_values = role.model_dump()
@@ -529,6 +535,7 @@ async def _role_permissions(session: AsyncSession, role_id: Annotated[int, Path(
     response_model=List[PermissionResponse],
     responses=problems(
         ErrorCode.PERMISSION_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.BUILTIN_ROLE_PERMISSIONS_FIXED,
+        ErrorCode.ROLE_REQUIRES_ROOT_SCOPE, ErrorCode.ROLE_HOLDERS_EXCEED_USER_TYPE,
         AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
     ),
 )
@@ -541,7 +548,9 @@ async def add_role_permission(
 ):
     """Grant one permission to a role (idempotent). Returns the role's permissions.
     Only a permission the caller holds can be granted (403 grant_exceeds_own_permissions); a built-in role gets
-    permissions only by seeding (409 builtin_role_permissions_fixed)."""
+    permissions only by seeding (409 builtin_role_permissions_fixed). The permission applies at once to every holder
+    who is not archived: a system permission needs every such assignment of the role at the root (409
+    role_requires_root_scope), and the type of every such holder must allow it (409 role_holders_exceed_user_type)."""
     current_user = auth.user
     role = await get_role_or_404(session, role_id)
     permission = await get_permission_or_404(session, permission_id)
@@ -553,6 +562,7 @@ async def add_role_permission(
         if role.builtin_key is not None:
             raise ApiError(ErrorCode.BUILTIN_ROLE_PERMISSIONS_FIXED)
         check_grant(auth, [permission.name])
+        await check_role_permissions_added(session, role_id, [permission.name])
         # A rollback expires every loaded object: keep what is needed afterwards as plain values
         actor_id, actor_name, role_name, permission_name = current_user.id, current_user.username, role.name, permission.name
         session.add(RolePermission(role_id=role_id, permission_id=permission_id))

@@ -15,8 +15,9 @@ Nobody becomes able to do more than they could by changing access:
   included (they come back with the role's restore). 403 target_user_more_privileged.
 - check_an_admin_remains / check_admin_kept: run after the change is written to the session (flushed here, committed
   by the route): the caller has not taken the built-in admin role at the root from themselves (409
-  cannot_remove_own_admin, check_admin_kept, answered first), and an active, non-archived user still holds it (409
-  last_admin_required).
+  cannot_remove_own_admin, check_admin_kept, answered first; whether they held it is read with holds_admin_at_root
+  before the change), and an active, non-archived user still holds it (409 last_admin_required). The administrator
+  is the built-in admin role at the root (_admin_at_root), nothing else.
 
 What a user holds is context.grant_rows, the same definition as their AuthContext (check_target_user reads it with
 the archived roles too).
@@ -104,13 +105,18 @@ async def check_target_user(session: AsyncSession, auth: AuthContext, target: Us
 
 
 def _admin_at_root():
-    """Assignments of the built-in admin role at the root"""
+    """Assignments of the built-in admin role at the root: the one definition of the administrator"""
     return (
         select(RoleAssignment.user_id)
         .join(Role, Role.id == RoleAssignment.role_id)
         .where(Role.builtin_key == UserType.ADMIN.value, Role.is_deleted == False,
                RoleAssignment.scope_key == ROOT.key)
     )
+
+
+async def holds_admin_at_root(session: AsyncSession, user_id: int) -> bool:
+    """The user holds the built-in admin role at the root (as written to the session: flush first when it changed)"""
+    return (await session.exec(_admin_at_root().where(RoleAssignment.user_id == user_id).limit(1))).first() is not None
 
 
 async def check_an_admin_remains(session: AsyncSession) -> None:
@@ -126,13 +132,12 @@ async def check_an_admin_remains(session: AsyncSession) -> None:
         raise ApiError(ErrorCode.LAST_ADMIN_REQUIRED)
 
 
-async def check_admin_kept(session: AsyncSession, auth: AuthContext) -> None:
-    """After a change that may take the admin role at the root from its holders: the caller keeps theirs (checked
-    first: the answer to an administrator taking it from themselves, the last one included), and someone keeps it"""
+async def check_admin_kept(session: AsyncSession, auth: AuthContext, held_before: bool) -> None:
+    """After a change that may take the admin role at the root from its holders: the caller, who held it before the
+    change (held_before: holds_admin_at_root read before it), still holds it (checked first: the answer to an
+    administrator taking it from themselves, the last one included), and someone keeps it"""
     await session.flush()
-    if auth.is_admin:
-        kept = (await session.exec(_admin_at_root().where(RoleAssignment.user_id == auth.user.id).limit(1))).first()
-        if kept is None:
-            logger.warning(f"User {auth.user.username} tried to remove the admin role at the root from themselves")
-            raise ApiError(ErrorCode.CANNOT_REMOVE_OWN_ADMIN)
+    if held_before and not await holds_admin_at_root(session, auth.user.id):
+        logger.warning(f"User {auth.user.username} tried to remove the admin role at the root from themselves")
+        raise ApiError(ErrorCode.CANNOT_REMOVE_OWN_ADMIN)
     await check_an_admin_remains(session)

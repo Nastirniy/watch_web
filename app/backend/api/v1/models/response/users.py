@@ -1,5 +1,8 @@
 from typing import Optional
 
+from pydantic import Field
+
+from app.backend.enums.general import UserType
 from app.backend.utils.validators import ResponseDatetime, SecureBaseModel
 
 
@@ -8,6 +11,7 @@ class UserResponse(SecureBaseModel):
     username: str
     username_alias: str
     post_id: Optional[int]
+    user_type: UserType = Field(description="The type of the user (GET /user-types): the pages of the web client")
     is_active: bool
     created_at: ResponseDatetime
     updated_at: Optional[ResponseDatetime]

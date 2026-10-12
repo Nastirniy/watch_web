@@ -1,33 +1,32 @@
-from typing import Optional, List
+from typing import Dict, Iterable, Optional, List
 from pydantic import BaseModel, Field
 
 from app.backend.enums.errors import RequiredPermissions
-from app.backend.enums.general import Permissions, SessionEndReason, SessionRevokeCause, SessionStatus
+from app.backend.enums.general import SessionEndReason, SessionRevokeCause, SessionStatus, UserType
 from app.backend.models.user import UserSession
+from app.backend.api.v1.models.response.assignments import AssignmentResponse
+from app.backend.auth.assignments import AssignmentView
 from app.backend.auth.context import AuthContext
 from app.backend.auth.presence import online_threshold_seconds
 from app.backend.auth.sessions import SessionState
 from app.backend.utils.validators import PlainTextModel, ResponseDatetime
 
 
-class RoleBriefResponse(PlainTextModel):
-    id: int
-    name: str
-    display_name: str
-
-
 class AuthorizationInfo(PlainTextModel):
-    """Authorization data the GUI needs to build its interface"""
-    post_id: Optional[int] = Field(default=None, description="Home post of the user")
-    is_admin: bool = Field(description="Holds the built-in admin role at the root (no route checks it, every route "
-                                       "checks its own permissions)")
-    permissions: List[str] = Field(default_factory=list, description="Permissions held at some node of the scope tree")
-    roles: List[RoleBriefResponse] = Field(default_factory=list, description="The roles of the user's assignments")
-    accessible_post_ids: Optional[List[int]] = Field(
-        default=None,
-        description="Posts where observation.view is in effect (archived posts only through a group or the root). "
-                    "null means every post (observation.view at the root)"
-    )
+    """Authorization data the web client builds its interface from: the pages by user_type, the menu by permissions,
+    the buttons of a post by root_permissions plus the entry of the post in post_permissions. No route authorizes by
+    the type: every route checks its own permissions."""
+    post_id: Optional[int] = Field(description="Home post of the user (membership: who manages them); null for none")
+    user_type: UserType = Field(description="The type of the user (GET /user-types): which pages the web client shows")
+    permissions: List[str] = Field(description="Permissions held at some node of the scope tree (the menu)")
+    assignments: List[AssignmentResponse] = Field(
+        description="The role assignments of the user, as GET /users/{user_id}/assignments lists them (assignments of "
+                    "archived roles included: role.is_deleted, they grant nothing)")
+    root_permissions: List[str] = Field(description="Permissions held at the root: in effect at every post")
+    post_permissions: Dict[str, List[str]] = Field(
+        description="Post id -> the permissions the assignments at groups and posts put in effect at that post, for "
+                    "every post they reach (an assignment on an archived post stops applying there, a group's keep "
+                    "applying to its archived posts). In effect at a post = root_permissions plus its entry")
 
 
 class LoginResponse(AuthorizationInfo):
@@ -101,18 +100,19 @@ class RouteAccessResponse(BaseModel):
     routes: List[RouteAccessEntryResponse]
 
 
-def _authorization_fields(auth: AuthContext) -> dict:
-    readable = auth.posts_with(Permissions.OBSERVATION_VIEW)
+def _authorization_fields(auth: AuthContext, assignments: Iterable[AssignmentView]) -> dict:
     return {
         "post_id": auth.user.post_id,
-        "is_admin": auth.is_admin,
+        "user_type": auth.user.user_type,
         "permissions": sorted(auth.permissions),
-        "roles": [RoleBriefResponse(id=r.id, name=r.name, display_name=r.display_name) for r in auth.roles],
-        "accessible_post_ids": None if readable is None else sorted(readable),
+        "assignments": [AssignmentResponse.model_validate(view, from_attributes=True) for view in assignments],
+        "root_permissions": sorted(auth.root_permissions),
+        "post_permissions": {str(post_id): sorted(held) for post_id, held in auth.post_permissions().items()},
     }
 
 
-def build_user_info(auth: AuthContext) -> UserInfoResponse:
+def build_user_info(auth: AuthContext, assignments: Iterable[AssignmentView]) -> UserInfoResponse:
+    """assignments: auth/assignments.py assignment_views of the user"""
     user = auth.user
     return UserInfoResponse(
         id=user.id,
@@ -122,18 +122,20 @@ def build_user_info(auth: AuthContext) -> UserInfoResponse:
         last_login_at=user.last_login_at,
         last_activity_at=getattr(user, "last_activity_at", None),
         online_threshold_seconds=online_threshold_seconds(),
-        **_authorization_fields(auth),
+        **_authorization_fields(auth, assignments),
     )
 
 
-def build_login_response(auth: AuthContext, access_token: str, refresh_token: str, expires_in: int) -> LoginResponse:
+def build_login_response(auth: AuthContext, assignments: Iterable[AssignmentView], access_token: str,
+                         refresh_token: str, expires_in: int) -> LoginResponse:
+    """assignments: auth/assignments.py assignment_views of the user"""
     return LoginResponse(
         access_token=access_token,
         refresh_token=refresh_token,
         expires_in=expires_in,
         user_id=auth.user.id,
         username=auth.user.username,
-        **_authorization_fields(auth),
+        **_authorization_fields(auth, assignments),
     )
 
 

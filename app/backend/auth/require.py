@@ -14,7 +14,7 @@ administrator gate: an administration route requires its own permissions, like a
 """
 import builtins
 from dataclasses import dataclass
-from typing import List, Dict, Union, Any, Iterable, Tuple
+from typing import List, Dict, Optional, Union, Any, Iterable, Tuple
 
 from fastapi import Depends
 from loguru import logger
@@ -48,8 +48,9 @@ class Require:
             any=tuple(permission_name(p) for p in any),
         )
 
-    def evaluate(self, auth: AuthContext) -> PermissionCheckResult:
-        held = auth.held_anywhere
+    def evaluate(self, auth: AuthContext, post_id: Optional[int] = None) -> PermissionCheckResult:
+        """Held anywhere (the route requirement); with post_id: in effect at that post (POST /auth/check-permission)"""
+        held = auth.held_anywhere if post_id is None else auth.permissions_at_post(post_id)
         missing: List[str] = [p for p in self.all if p not in held]
         if self.any and not builtins.any(p in held for p in self.any):
             missing.extend(p for p in self.any if p not in missing)

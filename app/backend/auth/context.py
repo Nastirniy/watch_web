@@ -14,7 +14,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.auth.scope import Grant, Node, ROOT, ScopeTree
-from app.backend.enums.general import Permissions, UserType
+from app.backend.enums.general import Permissions
 from app.backend.models.user import User
 from app.backend.models.post import Post
 from app.backend.models.role import Role, Permission, RolePermission
@@ -25,13 +25,6 @@ from app.backend.models.scope_group import ScopeGroup
 def permission_name(permission: Union[Permissions, str]) -> str:
     """The name of a permission given as a Permissions member or a plain string (the one helper of auth/)"""
     return permission.value if isinstance(permission, Permissions) else str(permission)
-
-
-@dataclass(frozen=True)
-class RoleBrief:
-    id: int
-    name: str
-    display_name: str
 
 
 @dataclass(frozen=True)
@@ -51,21 +44,6 @@ class AuthContext:
     def permissions(self) -> FrozenSet[str]:
         """Every permission held at some node (held_anywhere): the menu of the web client, role edits"""
         return self._held_anywhere
-
-    @property
-    def roles(self) -> Tuple[RoleBrief, ...]:
-        """The distinct roles of the grants, by id"""
-        roles: Dict[int, RoleBrief] = {}
-        for grant in self.grants:
-            roles.setdefault(grant.role_id, RoleBrief(grant.role_id, grant.role_name, grant.role_display_name))
-        return tuple(roles[role_id] for role_id in sorted(roles))
-
-    @property
-    def is_admin(self) -> bool:
-        """Holds the built-in admin role at the root (a built-in role is named by its key). Only the auth response and
-        auth/privileges.py read it; no route authorizes by it"""
-        return any(grant.node == ROOT and grant.role_is_builtin and grant.role_name == UserType.ADMIN.value
-                   for grant in self.grants)
 
     # ------------------------------------------------------------------ grants on the scope tree
     @property
@@ -99,6 +77,30 @@ class AuthContext:
         name = permission_name(permission)
         in_effect = set(self.tree.nodes_in_effect_at_post(post_id))
         return any(name in grant.permissions and grant.node in in_effect for grant in self.grants)
+
+    def permissions_at_post(self, post_id: int) -> FrozenSet[str]:
+        """Every permission in effect at the post (has_at_post of each)"""
+        return self._held_at(post_id, self.grants)
+
+    def _held_at(self, post_id: int, grants: Iterable[Grant]) -> FrozenSet[str]:
+        in_effect = set(self.tree.nodes_in_effect_at_post(post_id))
+        return frozenset().union(*(grant.permissions for grant in grants if grant.node in in_effect))
+
+    @property
+    def root_permissions(self) -> FrozenSet[str]:
+        """Permissions held at the root: in effect at every post"""
+        return frozenset().union(*(grant.permissions for grant in self.grants if grant.node == ROOT))
+
+    def post_permissions(self) -> Dict[int, FrozenSet[str]]:
+        """post id -> the permissions the grants below the root (groups, posts) put in effect at that post, for every
+        post they reach. In effect at a post = root_permissions plus its entry (permissions_at_post): a grant on an
+        archived post stops applying there, a group's grants keep applying to its archived posts."""
+        below_root = [grant for grant in self.grants if grant.node != ROOT and grant.permissions]
+        reached: Set[int] = set()
+        for grant in below_root:
+            reached |= self.tree.posts_in_effect(grant.node)
+        entries = {post_id: self._held_at(post_id, below_root) for post_id in sorted(reached)}
+        return {post_id: held for post_id, held in entries.items() if held}
 
     def covers(self, permission: Union[Permissions, str], node: Node) -> bool:
         """The node lies inside a subtree where the permission is held (delegation). A grant at an archived node

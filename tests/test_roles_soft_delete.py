@@ -59,9 +59,10 @@ async def test_archive_lifecycle(client, db, headers):
     reuse = await client.post(ROLES, json={"name": "reviewer", "display_name": "Reviewer"}, headers=headers(admin))
     assert reuse.status_code == 409
 
-    # /auth/me shows no roles; the assignment row itself is kept
+    # /auth/me: the assignment is listed with its archived role and grants nothing; the row itself is kept
     me = (await client.get(V1.path(AuthRoutes.ME), headers=headers(user))).json()
-    assert me["roles"] == [] and me["permissions"] == []
+    assert [(a["role"]["id"], a["role"]["is_deleted"]) for a in me["assignments"]] == [(role.id, True)]
+    assert me["permissions"] == [] and me["post_permissions"] == {} and me["root_permissions"] == []
     assert (await db.exec(select(RoleAssignment).where(RoleAssignment.role_id == role.id))).first() is not None
 
     # restore

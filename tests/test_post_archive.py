@@ -219,9 +219,9 @@ async def test_home_and_access_row_users_lose_the_data_and_get_it_back_after_res
     for user in (scene.home, scene.reader):
         assert not await _reads_the_data(client, headers, scene, user)
         me = (await client.get(ME, headers=headers(user))).json()
-        assert scene.post.id not in me["accessible_post_ids"]
+        assert str(scene.post.id) not in me["post_permissions"]
     # The access row is kept; the reader still reads its home post
-    assert (await client.get(ME, headers=headers(scene.reader))).json()["accessible_post_ids"] == [scene.other.id]
+    assert set((await client.get(ME, headers=headers(scene.reader))).json()["post_permissions"]) == {str(scene.other.id)}
     assert (await db.exec(select(RoleAssignment).where(RoleAssignment.scope_post_id == scene.post.id))).all() != []
 
     assert (await client.post(_restore_path(scene.post.id), headers=headers(scene.admin))).status_code == 200

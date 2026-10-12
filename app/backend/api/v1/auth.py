@@ -8,6 +8,7 @@ from app.backend.auth.sessions import certificate_matches, live_clause, live_ses
 from datetime import datetime, timezone
 from sqlmodel import select
 from app.backend.auth.require import require
+from app.backend.auth.assignments import assignment_views
 from app.backend.auth.context import AuthContext, load_auth_context
 from app.backend.auth.require import Require
 from app.backend.auth.route_access import route_access_map, routes_allowed_for
@@ -142,7 +143,8 @@ async def login(
     )
 
     auth_context = await load_auth_context(session, user)
-    return build_login_response(auth_context, access_token, refresh_token, expires_in)
+    return build_login_response(auth_context, await assignment_views(session, user.id), access_token, refresh_token,
+                                expires_in)
 
 
 
@@ -208,7 +210,8 @@ async def refresh_token(
     _logger.info(f"Token refreshed for user {user.username}")
 
     auth_context = await load_auth_context(session, user)
-    return build_login_response(auth_context, access_token, new_refresh_token, expires_in)
+    return build_login_response(auth_context, await assignment_views(session, user.id), access_token,
+                                new_refresh_token, expires_in)
 
 
 @router.post(
@@ -245,8 +248,9 @@ async def get_current_user_info(
         auth: AuthContext = Depends(require()),
         session: AsyncSession = Depends(get_session)
 ):
-    """Get current user information"""
-    return build_user_info(auth)
+    """The current user and what the web client builds its interface from: user_type (pages), permissions (menu),
+    assignments, root_permissions and post_permissions (buttons at a post: root_permissions plus its entry)"""
+    return build_user_info(auth, await assignment_views(session, auth.user.id))
 
 
 @router.get(
@@ -274,8 +278,9 @@ async def check_permission(
         check: PermissionCheckRequest,
         auth: AuthContext = Depends(require())
 ):
-    """Evaluate a permission requirement for the current user without calling the guarded route"""
-    result = Require.of(all=check.all, any=check.any).evaluate(auth)
+    """Evaluate a permission requirement for the current user without calling the guarded route: held anywhere (what
+    route reachability checks), or with post_id in effect at that post (an unknown post id: only the root counts)"""
+    result = Require.of(all=check.all, any=check.any).evaluate(auth, post_id=check.post_id)
     return PermissionCheckResponse(allowed=result.allowed, missing=list(result.missing))
 
 

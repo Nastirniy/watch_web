@@ -1,5 +1,5 @@
-from typing import List
-from pydantic import BaseModel, Field, field_validator
+from typing import List, Optional
+from pydantic import BaseModel, Field, PositiveInt, field_validator
 import re
 
 from app.backend.enums.general import Permissions
@@ -45,6 +45,10 @@ class PermissionCheckRequest(BaseModel):
     """Same shape as a route requirement: every permission of all AND one of any"""
     all: List[str] = Field(default_factory=list)
     any: List[str] = Field(default_factory=list)
+    post_id: Optional[PositiveInt] = Field(
+        default=None, description="Evaluate at this post: allowed when the permissions are in effect there (held at "
+                                  "the root, at a group above it, or at the post while it is not archived); without "
+                                  "it, held anywhere")
 
     @field_validator('all', 'any')
     @classmethod

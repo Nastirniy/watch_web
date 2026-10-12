@@ -49,14 +49,14 @@ async def test_admin_sees_every_post_record(db):
     assert grant.node == ROOT and grant.role_is_builtin and grant.role_id == admin_role.id
     assert "admin.true" not in grant.permissions and "post.access_all" not in grant.permissions
     assert auth.covers(P.USER_UPDATE, ROOT) and auth.covers_user(P.USER_UPDATE, admin)
-    assert auth.is_admin and [role.name for role in auth.roles] == ["admin"]
+    assert auth.root_permissions == auth.held_anywhere and auth.post_permissions() == {}
+    assert not hasattr(auth, "is_admin") and not hasattr(auth, "roles")   # the administrator: privileges.holds_admin_at_root
 
 
 async def test_admin_true_record_exception_and_post_scope(db):
     a, b = await make_post(db), await make_post(db)
     user = await make_user(db, perms=[ADMIN_TRUE, P.POST_VIEW, P.USER_VIEW, P.OBSERVATION_VIEW], post_id=a.id)
     auth = await load_auth_context(db, user)
-    assert not auth.is_admin                                 # the built-in admin role at the root only
     assert auth.posts_with(P.POST_VIEW) is None              # post records: every post, like post_record_scope
     assert auth.posts_with(P.OBSERVATION_VIEW) == {a.id}     # data: the home post only
     assert not auth.has_at_post(P.OBSERVATION_VIEW, b.id)
@@ -167,7 +167,13 @@ async def test_grants_come_from_role_assignments(db):
     auth = await load_auth_context(db, user)
     assert [(g.assignment_id, g.node) for g in auth.grants] == [
         (at_group.id, Node.group(east.id)), (at_post.id, Node.post(outside.id)), (at_root.id, ROOT)]
-    assert [role.id for role in auth.roles] == sorted([viewer.id, editor.id])
+    assert sorted({g.role_id for g in auth.grants}) == sorted([viewer.id, editor.id])
+    assert auth.root_permissions == {"observation.view"}
+    # Below the root: the group's posts and the post of the editor grant; in effect = root_permissions + the entry
+    assert auth.post_permissions() == {a.id: {"observation.view"}, b.id: {"observation.view"},
+                                       outside.id: {"observation.view", "observation.update"}}
+    assert auth.permissions_at_post(outside.id) == {"observation.view", "observation.update"}
+    assert auth.permissions_at_post(a.id) == {"observation.view"}
     assert auth.posts_with(P.OBSERVATION_UPDATE) == {outside.id}
     assert auth.posts_with(P.OBSERVATION_VIEW) is None
 

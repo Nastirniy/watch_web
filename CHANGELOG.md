@@ -77,6 +77,32 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   removed row (every column) in `old_values`.
 - Problem types `assignment_not_found`, `assignment_exists`, `last_assignment_required`, `role_requires_root_scope`,
   `role_exceeds_user_type`; field codes `scope_id_required`, `scope_id_not_allowed`.
+- Type change: `PATCH /users/{user_id}` takes `user_type` (form field). Every assignment of the old type's built-in
+  role gets the new type's built-in role at the same node (same assignment id); at the root when the new role holds
+  system permissions (`admin`), as the default assignment of a new user; when the user already holds the new role at
+  that node the old row is removed (merged). A user without an assignment of the old built-in role keeps their
+  assignments. Checked in this order, nothing changes on a refusal: `user.update` covering the user and every
+  assignment of the user grantable by the caller (403 `target_user_more_privileged`); `user.update` and every
+  permission of the new built-in role held by the caller at each node it lands on (403
+  `grant_exceeds_own_permissions`); every assignment of the user, those of archived roles included, within the
+  ceiling of the new type (409 `user_type_ceiling_exceeded` with `user_type` and `assignments`: [{`id`, `role`
+  {`id`, `name`, `display_name`}, `scope` {`kind`, `id`, `name`}, `excess_permissions`}]); then the built-in `admin`
+  role at the root stays with an active user and is not taken from oneself (409 `last_admin_required` /
+  `cannot_remove_own_admin`). Every session of the user ends (new `SessionRevokeCause` `user_type_changed`), so the
+  web client never shows the pages of the old type. The same type again changes nothing. The audit row (`update`,
+  `user`) carries `replaced_assignments`: per replaced assignment `before` (every column) and `after` (every column)
+  or `merged_into` (the id of the assignment it was merged into).
+- `UserResponse.user_type`; `GET /users/` and `GET /search/users` filter by `user_type` (422 for an unknown type).
+- Auth fields for pages and buttons: `/auth/me`, the login and the refresh response carry `user_type` (pages),
+  `permissions` (held at some node: the menu), `assignments` (as `GET /users/{user_id}/assignments` lists them,
+  assignments of archived roles included with `role.is_deleted`), `root_permissions` (held at the root: in effect at
+  every post) and `post_permissions` (`{"7": [...]}`: per post the permissions that assignments at groups and posts
+  put in effect there, for every post they reach; an assignment on an archived post stops applying there, a group's
+  keep applying to its archived posts). The permissions in effect at a post are `root_permissions` plus its entry.
+  `post_id` and these fields are always present (required in the schema).
+- `POST /auth/check-permission` takes an optional `post_id` (positive integer): `allowed` when the permissions are in
+  effect at that post (without it: held at some node, as before).
+- Problem types `user_type_ceiling_exceeded` and `role_holders_exceed_user_type`.
 
 ### Changed
 
@@ -180,9 +206,18 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - `DELETE /roles/{role_id}` removes the role's assignments (the holders are read from `role_assignments`); the audit
   copy lists them under `assignments`, each with every column of the removed row (`id`, `user_id`, `role_id`,
   `scope_group_id`, `scope_post_id`, `scope_key`, `created_at`, `created_by`).
-- `/auth/me` and the login response (until the auth fields of the next step): `permissions` are the permissions held
-  at some node, `roles` the roles of the user's assignments, `is_admin` means the built-in `admin` role at the root,
-  `accessible_post_ids` the posts where `observation.view` is in effect (null: held at the root).
+- `/auth/me` and the login response: `permissions` are the permissions held at some node (see Added for the other
+  auth fields).
+- Role edits are bounded by the role's holders: permissions added by `PATCH /roles/{role_id}` (`permission_ids`) or
+  `PUT /roles/{role_id}/permissions/{permission_id}` apply at once to every assignment of the role held by a user who
+  is not archived. A system permission needs every such assignment at the root (409 `role_requires_root_scope`,
+  `system_permissions`), and the type of every such holder must allow the added permissions (409
+  `role_holders_exceed_user_type`, `users`: [{`id`, `username`, `user_type`, `excess_permissions`}]); answered after
+  the 403 `grant_exceeds_own_permissions`, the role stays unchanged.
+- `PATCH /users/{user_id}`: the check of the caller's reach (403 `target_user_more_privileged`) answers before the
+  archived state of the user (404 `user_not_found`), so an outsider gets the same 403 for an archived and a live user.
+- `RoleResponse.builtin_key`, `is_builtin`, `level` and `PermissionResponse.level` are required in the schema (they
+  were always present; openapi-typescript typed them as optional).
 - The permission catalog no longer has `admin.true` and `post.access_all` (migration 023 removes the rows and their
   grants; `POST /auth/check-permission` with them answers 422 like any unknown permission).
 - `cli/init_user`: `--user-type` (the base role of the type at the root) instead of `--role-ids`, `--list-types`
@@ -200,11 +235,14 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - `POST /posts/{post_id}/restore` of a post whose group is archived answers 404 `scope_group_not_found` (restore the
   group first), like a group restored under an archived parent; before, the post came back live inside an archived
   group. The post scope (403) and the post state (404, 409) answer first.
-- `PATCH /users/{user_id}` no longer declares `cannot_remove_own_admin` (deactivating oneself is refused with
-  `cannot_deactivate_self` before); a deactivation answers only `last_admin_required`.
+- `PATCH /users/{user_id}`: a deactivation answers only `last_admin_required` (deactivating oneself is refused with
+  `cannot_deactivate_self` before); `cannot_remove_own_admin` is declared for the type change.
 
 ### Removed
 
+- `is_admin`, `accessible_post_ids` and `roles` of `/auth/me` and the login and refresh responses, with the schema
+  `RoleBriefResponse`: pages follow `user_type`, buttons `root_permissions` plus `post_permissions`, the roles are in
+  `assignments`. Nothing in the API answers who is "the administrator" by a flag.
 - 403 `admin_required`: the problem type and every declaration of it.
 - The admin flag of a requirement: `required` in 403 bodies and in `GET /auth/route-access` entries is `{all, any}`;
   `POST /auth/check-permission` no longer takes `admin` and no longer answers `admin_required`.
