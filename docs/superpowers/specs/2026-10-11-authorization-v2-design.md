@@ -32,7 +32,7 @@ Success:
 | Presets wanted | `viewer`, `operator`, `senior_operator`, `analyst`, `post_admin`, plus the existing `admin` |
 | `admin.true` | Removed. Granular permissions everywhere (industry practice, see Background) |
 | Page split in the web | Explicit `user_type`, exactly one per user, fixed list in code |
-| Ceiling | Each type has a ceiling defined in code and published by the API (`GET /user-types`); going above it means changing the type |
+| Ceiling | Each type has a ceiling defined in code and published by the API (`GET /user-types/`); going above it means changing the type |
 | Type change on downgrade | 409 `user_type_ceiling_exceeded` with the offending assignments; nothing removed silently |
 | Data scope | Azure-style role assignments: user + role + scope node, inherited down the tree |
 | Hierarchy | Nested groups of posts (`/` > group > subgroup > ... > post), at most 6 group levels |
@@ -125,7 +125,7 @@ A role that holds at least one `system` permission can be assigned only at `/` (
 | `category/signal_type/tag.create/update/archive` | system | dictionaries |
 | `media_format.create/update/archive` | system | accepted upload formats |
 | `scope_group.create/update/archive` (new) | system | the group structure |
-| `media.monitor` (new) | system | `GET /media/storage-statistics`, `GET /media/posters-status` (protected only by the admin gate before) |
+| `media.monitor` (new) | system | `GET /media/statistics`, `GET /media/posters/status` (protected only by the admin gate before) |
 | `audit.view` | system | audit log |
 
 Removed: `admin.true` (replaced by the `admin` type and granular permissions), `post.access_all` (replaced by an
@@ -156,7 +156,7 @@ Rules:
 
 - Every user has exactly one type. Every assignment's role must fit within the type's ceiling (409
   `role_exceeds_user_type` with `user_type` and `excess_permissions`).
-- `GET /user-types` publishes the catalog: `key`, `display_name`, `description`, `base_role` (`id`, `name`,
+- `GET /user-types/` publishes the catalog: `key`, `display_name`, `description`, `base_role` (`id`, `name`,
   `display_name`), `base_permissions`, `allowed_permissions` (the full ceiling, a superset of the base).
 - Creating a user creates one default assignment: the base role at the home post, or at `/` when there is no home
   post or the base role holds `system` permissions (`admin`).
@@ -244,7 +244,7 @@ Every new path is first a member of its group in `enums/routes.py`; literal path
 
 | Route | Requirement | Behaviour |
 |-------|-------------|-----------|
-| `GET /user-types` | `require()` | the type catalog of section 4 |
+| `GET /user-types/` | `require()` | the type catalog of section 4 |
 | `GET /scope-groups/tree` | `scope_group.view` | the subtrees the caller may see, with their posts (`post.view`), for the scope picker |
 | `GET /scope-groups/` | `scope_group.view` | flat list, filters `parent_id`, `include_deleted` (query model + criteria) |
 | `POST /scope-groups/` | `scope_group.view` + `scope_group.create` | `name`, `parent_id`, `description`; 409 `scope_group_name_taken`, `scope_group_depth_exceeded` |
@@ -304,10 +304,11 @@ Three revisions (the plan split the built-in role column into its own revision):
 
 Seeding (after migrations, at start) creates and syncs the built-in roles and inserts the new permissions.
 
-### Conversion of one user (frozen in the 022 file)
+### Conversion of one user (frozen in `migrations/support/authz_v2.py`)
 
 The conversion function and its tables (permission levels, the gated-only set, type ceilings) are copied into the
-migration file, so later code changes never change what 022 does. For user U with roles R (archived roles converted
+frozen module `app/backend/migrations/support/authz_v2.py` (standard library only), which 023 and the report use, so
+later code changes never change what 023 does. For user U with roles R (archived roles converted
 the same way; derived roles of an archived role are archived too):
 
 1. Holder of the built-in `admin` role: type `admin`, assignment `admin @ /`. Done.
@@ -345,8 +346,8 @@ Differences the new model cannot express 1:1 are reported, never hidden:
 
 ### Report
 
-- Before the upgrade: `python -m app.backend.cli.authz_report [--json]` loads the conversion function from the 022
-  file and runs it read-only on the current (022) database: every user, inferred type, assignments before and
+- Before the upgrade: `python -m app.backend.cli.authz_report [--json] [--url URL]` loads the frozen conversion
+  module and runs it read-only on a database at revision 022 (upgrade a copy to `022_builtin_roles` first): every user, inferred type, assignments before and
   after, derived roles, removed dead permissions, every difference. Run it on a copy of the production database.
 - During the migration: one audit row per converted user (`action=migrate`, `resource_type=user`) with the same
   details, written with core inserts.
@@ -417,8 +418,8 @@ Tasks (the plan details them):
 
 1. Scope tree: `scope_groups`, `posts.group_id`, migration 021, `/scope-groups` API.
 2. Permission levels, `UserType` and the type catalog, built-in roles with sync and clone, `builtin_role_*` codes,
-   `GET /user-types`.
-3. `role_assignments`, AuthContext v2, migration 022 with the conversion and the log, `authz_report` CLI.
+   `GET /user-types/`.
+3. `role_assignments`, AuthContext v2, migration 023 with the conversion and the log, `authz_report` CLI.
 4. `require` without `admin=`, `AccessControlService` with permissions; routes of posts and users.
 5. Routes of observations, media, export, statistics, dictionaries, formats.
 6. Users API: `user_type`, assignments, delegation rules, last admin, default assignment.
