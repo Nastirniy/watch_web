@@ -7,7 +7,7 @@ from sqlmodel import select
 from app.backend.api.v1 import V1
 from app.backend.auth.scope import Node, ROOT as ROOT_NODE
 from app.backend.enums.general import Permissions, UserType
-from app.backend.enums.routes import PostRoutes, ScopeGroupRoutes
+from app.backend.enums.routes import AuthRoutes, PostRoutes, ScopeGroupRoutes
 from app.backend.models.audit import AuditLog
 from app.backend.models.role import Role
 from app.backend.services.scope_groups import MAX_GROUP_DEPTH
@@ -250,6 +250,51 @@ async def test_group_writes_need_scope_group_view_at_the_group(client, db, heade
     assert created.status_code == 200, created.text
     renamed = await client.patch(_group(east.id), json={"name": "East 2"}, headers=h)
     assert renamed.status_code == 200, renamed.text
+
+
+async def test_a_group_move_needs_post_update_at_the_old_and_the_new_parent(client, db, headers):
+    """R37: a move takes every post below the group along, so it needs post.update covering the old and the new parent
+    location, like a post move; checked before the tree rules, nothing moves on a refusal"""
+    east = await make_group(db, "East")
+    kharkiv = await make_group(db, "Kharkiv", parent_id=east.id)
+    west = await make_group(db, "West")
+    a = await make_post(db, "A", group_id=kharkiv.id)
+    mover = await _caller(db, ROOT_NODE, Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_UPDATE,
+                          user_type=UserType.ADMIN)
+    await assign(db, mover, await make_role(db, [Permissions.OBSERVATION_VIEW, Permissions.OBSERVATION_UPDATE]),
+                 Node.group(west.id))
+    h = headers(mover)
+    check = V1.path(AuthRoutes.CHECK_PERMISSION)
+    at_a = {"all": ["observation.update"], "post_id": a.id}
+    assert (await client.post(check, json=at_a, headers=h)).json()["allowed"] is False
+
+    for parent_id in (west.id, east.id + kharkiv.id + west.id + 1000):   # a live parent and an unknown one alike
+        r = await client.patch(_group(kharkiv.id), json={"parent_id": parent_id}, headers=h)
+        assert r.status_code == 403, r.text
+        body = r.json()
+        assert (body["code"], body["action"], body["permission"], body["missing"]) == (
+            "permission_required_for_action", "move_scope_group", "post.update", ["post.update"])
+    await db.refresh(kharkiv)
+    assert kharkiv.parent_id == east.id
+    assert (await client.post(check, json=at_a, headers=h)).json()["allowed"] is False
+    # A rename is no move
+    renamed = await client.patch(_group(kharkiv.id), json={"name": "Kharkiv 2", "parent_id": east.id}, headers=h)
+    assert renamed.status_code == 200, renamed.text
+
+    # post.update at both parents: the move to West is allowed, the root is a location of its own
+    both = await _caller(db, Node.group(east.id), Permissions.POST_UPDATE, user_type=UserType.ADMIN)
+    await assign(db, both, await make_role(db, [Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_UPDATE]), ROOT_NODE)
+    await assign(db, both, await make_role(db, [Permissions.POST_UPDATE]), Node.group(west.id))
+    moved = await client.patch(_group(kharkiv.id), json={"parent_id": west.id}, headers=headers(both))
+    assert moved.status_code == 200 and moved.json()["parent_id"] == west.id, moved.text
+    r = await client.patch(_group(kharkiv.id), json={"parent_id": None}, headers=headers(both))
+    assert r.status_code == 403 and r.json()["action"] == "move_scope_group", r.text
+
+    admin = headers(await make_admin(db))
+    r = await client.patch(_group(kharkiv.id), json={"parent_id": None}, headers=admin)
+    assert r.status_code == 200 and r.json()["parent_id"] is None, r.text
+    r = await client.patch(_group(kharkiv.id), json={"parent_id": 999999}, headers=admin)
+    assert r.status_code == 404 and r.json()["code"] == "scope_group_not_found", r.text
 
 
 async def test_tree_posts_follow_post_view(client, db, headers):

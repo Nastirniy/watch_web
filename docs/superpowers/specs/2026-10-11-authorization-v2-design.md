@@ -249,7 +249,7 @@ Every new path is first a member of its group in `enums/routes.py`; literal path
 | `GET /scope-groups/` | `scope_group.view` | flat list, filters `parent_id`, `include_deleted` (query model + criteria) |
 | `POST /scope-groups/` | `scope_group.view` + `scope_group.create` | `name`, `parent_id`, `description`; 409 `scope_group_name_taken`, `scope_group_depth_exceeded` |
 | `GET /scope-groups/{group_id}` | `scope_group.view` | one group |
-| `PATCH /scope-groups/{group_id}` | `scope_group.view` + `scope_group.update` | rename, move (`parent_id`); 409 `scope_group_cycle`, `scope_group_depth_exceeded`, `scope_group_name_taken` |
+| `PATCH /scope-groups/{group_id}` | `scope_group.view` + `scope_group.update` | rename, move (`parent_id`); a move needs `post.update` covering the old and the new parent location (403 `permission_required_for_action`); 409 `scope_group_cycle`, `scope_group_depth_exceeded`, `scope_group_name_taken` |
 | `POST /scope-groups/{group_id}/archive`, `/restore` | `scope_group.view` + `scope_group.archive` | archive only an empty group (no active posts or subgroups, 409 `scope_group_not_empty`) |
 | `GET /users/{user_id}/assignments` | `user.view` covering the user | assignments with `role` (`id`, `name`, `display_name`, `is_builtin`) and `scope` (`kind`: root / group / post, `id`, `name`) |
 | `POST /users/{user_id}/assignments` | `user.view` + `user.update` | body `{role_id, scope: {kind, id}}`; rules of section 6; 409 `assignment_exists` |

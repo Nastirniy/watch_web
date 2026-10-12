@@ -16,7 +16,7 @@ from app.backend.api.v1.models.response.scope_groups import (
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
-from app.backend.auth.scope import Node
+from app.backend.auth.scope import Node, ROOT
 from app.backend.database import get_session
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.enums.general import Permissions
@@ -71,12 +71,22 @@ async def _check_parent(session: AsyncSession, group_id: Optional[int], parent_i
         raise ApiError.from_coded(exc)
 
 
+def _location(parent_id: Optional[int]) -> Node:
+    """Where a group sits: its parent group, the root for a group directly under it"""
+    return Node.group(parent_id) if parent_id is not None else ROOT
+
+
 async def _check_chosen_parent(session: AsyncSession, auth: AuthContext, group_id: Optional[int],
-                               parent_id: Optional[int]) -> None:
+                               parent_id: Optional[int], old_parent_id: Optional[int] = None) -> None:
     """A parent the caller names (create, move): outside the caller's scope_group.view it answers 404 like an
-    unknown one, before the tree rules"""
+    unknown one. A move (group_id) takes every post below the group along: it needs post.update covering the old and
+    the new parent location, as a post move (403 permission_required_for_action, move_scope_group). Both before the
+    tree rules (the parent exists and is live, no cycle, the depth)."""
     if parent_id is not None:
         _check_visible(auth, parent_id)
+    if group_id is not None:
+        for location in (_location(old_parent_id), _location(parent_id)):
+            AccessControlService.check_covers(auth, Permissions.POST_UPDATE, location, "move_scope_group")
     await _check_parent(session, group_id, parent_id)
 
 
@@ -206,7 +216,7 @@ async def get_scope_group(
 @router.patch(
     ScopeGroupRoutes.GROUP_BY_ID.value,
     response_model=ScopeGroupResponse,
-    responses=problems(*TREE_PROBLEMS, *GUARDED),
+    responses=problems(*TREE_PROBLEMS, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
 )
 async def update_scope_group(
         request: Request,
@@ -218,7 +228,10 @@ async def update_scope_group(
 ):
     """Rename, describe or move a group (parent_id null: directly under the root). Only the fields sent change.
     A group cannot move into its own subtree, and the moved subtree must still fit 6 levels. Archived, or outside
-    the caller's scope_group.view (the group or the new parent): 404."""
+    the caller's scope_group.view (the group or the new parent): 404. A move takes every post below the group along:
+    it also needs post.update covering the old and the new parent location (the group or above it; the root for a
+    group directly under it), otherwise 403 permission_required_for_action (action move_scope_group), answered before
+    the existence of the new parent and the tree rules; nothing changes on a refusal."""
     group = await _group_or_404(session, auth, group_id)
     update_data = data.model_dump(exclude_unset=True)
     old_values = group.model_dump()
@@ -226,7 +239,7 @@ async def update_scope_group(
     new_parent = update_data.get("parent_id", group.parent_id)
     new_name = update_data.get("name", group.name)
     if "parent_id" in update_data and new_parent != group.parent_id:
-        await _check_chosen_parent(session, auth, group.id, new_parent)
+        await _check_chosen_parent(session, auth, group.id, new_parent, old_parent_id=group.parent_id)
     if ("parent_id" in update_data or "name" in update_data) and await _name_taken(
             session, new_name, new_parent, exclude_id=group.id):
         raise ApiError(ErrorCode.SCOPE_GROUP_NAME_TAKEN)

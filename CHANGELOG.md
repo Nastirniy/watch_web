@@ -267,6 +267,12 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   in `posts`, the posts directly under the root (with `scope_group.view` at the root) and the posts where it is held
   on the post itself. A post or group below an archived group is left out (a post restored while its group is
   archived was shown as a post of the root).
+- Moving a scope group (`PATCH /scope-groups/{group_id}` with a `parent_id` other than the current one) takes every
+  post below it along, so it also needs `post.update` covering the old and the new parent location (the group or
+  above it, the root for a group directly under it), like a post move: otherwise 403
+  `permission_required_for_action` (`action` `move_scope_group`, `permission` `post.update`), answered before the
+  new parent's existence and the tree rules (cycle, depth, name), nothing moved. Before, `scope_group.update` alone
+  moved posts into the reach of the caller's group assignments.
 - `POST /posts/{post_id}/restore` of a post whose group is archived answers 404 `scope_group_not_found` (restore the
   group first), like a group restored under an archived parent; before, the post came back live inside an archived
   group. The post scope (403) and the post state (404, 409) answer first.
