@@ -29,7 +29,8 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `/search/roles` take `is_builtin`.
 - `POST /roles/{role_id}/clone` (`role.view` + `role.create`): a custom copy of a role with its permissions
   (403 `grant_exceeds_own_permissions` when the caller lacks one); audit `create` with `cloned_from`.
-- Permission `media.monitor` (system level): `GET /media/statistics` and `GET /media/posters/status`.
+- Permission `media.monitor` (system level): `GET /media/statistics`, `GET /media/posters/status` and
+  `POST /media/posters/reconcile`.
 
 ### Changed
 
@@ -84,7 +85,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   (`post_access_denied`, or `post_write_denied` with `missing` `["export.create"]`). With `include_deleted`, archived
   bands and observations are included only where `observation.archive` is in effect.
 - `GET /media/statistics` and `GET /media/posters/status` need `media.monitor` (before: `media.view` behind the admin
-  gate; administrators who held `media.view` hold `media.monitor` at the root).
+  gate; administrators who held `media.view` hold `media.monitor` at the root). `POST /media/posters/reconcile` acts
+  on every post: it needs `media.view` + `media.update` + `media.monitor` (before: `media.view` + `media.update`
+  behind the admin gate), so `media.update` held at a group or post is not enough.
 - Observations and media follow the permission at the post. Lists and searches (`GET /observations/list-all`,
   `GET /search/observations`, `GET /media/`, `GET /search/media`) cover the posts where `observation.view` /
   `media.view` is in effect; with `include_deleted`, archived rows only where `observation.archive` / `media.archive`

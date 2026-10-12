@@ -14515,7 +14515,7 @@
           "MEDIA"
         ],
         "summary": "Reconcile Posters",
-        "description": "Re-queue videos whose poster is missing on disk or untracked; optionally retry failed ones (administration).",
+        "description": "Re-queue videos whose poster is missing on disk or untracked; optionally retry failed ones. Acts on every post:\nmedia.view and media.update plus media.monitor (system level, held at the root).",
         "operationId": "reconcile_posters",
         "requestBody": {
           "content": {

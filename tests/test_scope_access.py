@@ -493,6 +493,24 @@ async def test_media_monitor_route(client, db, headers):
         assert (await client.get(path, headers=headers(manager))).status_code == 200, path
 
 
+async def test_poster_reconcile_needs_media_monitor(client, db, headers, with_grants, tmp_path, monkeypatch):
+    """R16: reconcile acts on every post, so media.view + media.update (scoped) are not enough without media.monitor"""
+    monkeypatch.setattr(settings.storage, "upload_path", str(tmp_path))
+    reconcile = V1.path(MediaRoutes.POSTERS_RECONCILE)
+    east = await _group(db, "East")
+    post = await make_post(db, group_id=east.id)
+    perms = [P.MEDIA_VIEW, P.MEDIA_UPDATE]
+    post_admin = await make_user(db, perms=[P.IS_ADMIN, *perms], post_id=post.id)
+    with_grants(post_admin, grant(Node.group(east.id), *perms))
+    body = _denied(await client.post(reconcile, json={}, headers=headers(post_admin)), "permission_denied", ["media.monitor"])
+    assert body["required"] == {"all": ["media.view", "media.update", "media.monitor"], "any": []}
+
+    assert (await client.post(reconcile, json={}, headers=headers(await make_admin(db)))).status_code == 200
+    # a converted administrator with media.view holds media.monitor at the root (R10) and keeps the route
+    manager = await make_user(db, perms=[P.IS_ADMIN, *perms], post_id=post.id)
+    assert (await client.post(reconcile, json={}, headers=headers(manager))).status_code == 200
+
+
 async def test_manage_any_applies_at_its_posts_only(client, db, headers, with_grants):
     a, b = await make_post(db), await make_post(db)
     ids = await make_dictionary(db)

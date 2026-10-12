@@ -153,9 +153,10 @@ async def reconcile_posters(
     request: Request,
     body: PosterReconcileRequest,
     session: AsyncSession = Depends(get_session),
-    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW, Permissions.MEDIA_UPDATE]))
+    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW, Permissions.MEDIA_UPDATE, Permissions.MEDIA_MONITOR]))
 ):
-    """Re-queue videos whose poster is missing on disk or untracked; optionally retry failed ones (administration)."""
+    """Re-queue videos whose poster is missing on disk or untracked; optionally retry failed ones. Acts on every post:
+    media.view and media.update plus media.monitor (system level, held at the root)."""
     counts = await jobs.reconcile_posters(session, storage_root(), retry_failed=body.retry_failed)
     await create_audit_log(
         session=session, action="reconcile", resource_type="media_posters",
