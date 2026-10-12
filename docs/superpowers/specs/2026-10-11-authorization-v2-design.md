@@ -224,8 +224,10 @@ empty, so this only matters after a restore).
    relevant `user.*` covering U, and could grant every existing assignment of U (holds the role's permissions at
    its node); otherwise 403 `target_user_more_privileged`, as today. Moving the home post needs `user.update`
    covering both the old and the new post.
-3. **Changing a custom role** (`role.*` are `system`, so only holders at `/`): `check_grant` on the permissions
-   added or removed, as today.
+3. **Changing a custom role** (`role.*` are `system`, so only holders at `/`): removed permissions held anywhere
+   (`check_grant`); added permissions held at every node the role is assigned at (`check_grant_at`), assignments of
+   archived users included (held anywhere for a role assigned nowhere); restore of a role: its permissions held at
+   every node it is assigned at.
 4. **Changing the type**: rule 2, plus the caller holds every permission of the new base role at the nodes of the
    assignments being changed, plus the ceiling check of section 4.
 5. **Last administrator**: after any change at least one active, non-archived user holds the built-in `admin` role

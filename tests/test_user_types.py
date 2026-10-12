@@ -574,6 +574,96 @@ async def test_role_edit_refused_with_system_permission_below_root(client, db, h
     assert allowed.status_code == 200, allowed.text
 
 
+# ----------------------------------------------------------------- role edits bounded by the editor's nodes (R36)
+async def role_editor(db, tree, *root_perms) -> User:
+    """Type admin, holding a custom role with the root_perms (default role.view + role.update) at the root and
+    {observation.view, observation.update} at post A only (a converted custom administrator)"""
+    editor = await make_user(db, user_type=UserType.ADMIN)
+    await assign(db, editor, await make_role(db, root_perms or ["role.view", "role.update"]), ROOT)
+    await assign(db, editor, await make_role(db, ["observation.view", "observation.update"]), Node.post(tree.a.id))
+    return editor
+
+
+async def test_added_permissions_need_the_editor_at_every_node_of_the_role(client, db, headers, tree):
+    """R36: a permission added to a role applies at every node the role is assigned at, so the editor must hold it
+    there: holding it at post A does not let it reach the root (the editor's own role) or West (another user's)"""
+    admin = await make_admin(db)
+    editor = await role_editor(db, tree)
+    login = headers(editor)
+    own_role = (await db.exec(select(RoleAssignment.role_id).where(RoleAssignment.user_id == editor.id,
+                                                                    RoleAssignment.scope_key == ROOT.key))).one()
+    own = (await db.exec(select(Role).where(Role.id == own_role))).one()
+    operator = await make_user(db, post_id=tree.b.id, user_type=UserType.OPERATOR)
+    at_west = await make_role(db, ["observation.view"])
+    await assign(db, operator, at_west, Node.group(tree.west.id))
+    view_id, update_id = await permission_id(db, "observation.view"), await permission_id(db, "observation.update")
+    role_ids = [await permission_id(db, "role.view"), await permission_id(db, "role.update")]
+
+    for role, kept in ((own, {"role.view", "role.update"}), (at_west, {"observation.view"})):
+        put = await client.put(ROLE_PERMISSION.format(role_id=role.id, permission_id=update_id), headers=login)
+        assert problem(put, 403, "grant_exceeds_own_permissions")["missing"] == ["observation.update"]
+        wanted = [*role_ids, update_id] if role is own else [view_id, update_id]
+        patched = await client.patch(ROLE.format(role_id=role.id), headers=login,
+                                     json={"display_name": "Changed", "permission_ids": wanted})
+        assert problem(patched, 403, "grant_exceeds_own_permissions")["missing"] == ["observation.update"]
+        assert await role_permissions(db, role) == kept
+        assert (await db.exec(select(Role.display_name).where(Role.id == role.id))).one() == role.display_name
+    me = (await client.get(ME, headers=login)).json()
+    assert "observation.update" not in me["root_permissions"]
+
+    # A role assigned only where the editor holds the permission (post A) gets it
+    at_a = await make_role(db, ["observation.view"])
+    await assign(db, operator, at_a, Node.post(tree.a.id))
+    allowed = await client.put(ROLE_PERMISSION.format(role_id=at_a.id, permission_id=update_id), headers=login)
+    assert allowed.status_code == 200, allowed.text
+    # A full administrator (the admin role at the root) edits any role
+    allowed = await client.put(ROLE_PERMISSION.format(role_id=at_west.id, permission_id=update_id), headers=headers(admin))
+    assert allowed.status_code == 200, allowed.text
+    assert await role_permissions(db, at_west) == {"observation.view", "observation.update"}
+
+
+async def test_added_permissions_count_assignments_of_archived_users(client, db, headers, tree):
+    """R36 with R28: an archived user's assignment comes back with the restore, so its node counts too"""
+    editor = await role_editor(db, tree)
+    holder = await make_user(db, post_id=tree.b.id, user_type=UserType.OPERATOR)
+    role = await make_role(db, ["observation.view"])
+    await assign(db, holder, role, Node.post(tree.b.id))
+    holder.is_deleted, holder.is_active = True, False
+    db.add(holder)
+    await db.commit()
+
+    put = await client.put(ROLE_PERMISSION.format(role_id=role.id, permission_id=await permission_id(db, "observation.update")),
+                           headers=headers(editor))
+    assert problem(put, 403, "grant_exceeds_own_permissions")["missing"] == ["observation.update"]
+    assert await role_permissions(db, role) == {"observation.view"}
+
+
+async def test_role_restore_needs_its_permissions_at_every_node_of_the_role(client, db, headers, tree):
+    """R36: a restore gives the role's permissions back at every node it is assigned at"""
+    admin = await make_admin(db)
+    restorer = await role_editor(db, tree, "role.view", "role.archive")
+    holder = await make_user(db, post_id=tree.b.id, user_type=UserType.OPERATOR)
+    at_b, at_a, unassigned = [await make_role(db, ["observation.view"]) for _ in range(3)]
+    await assign(db, holder, at_b, Node.post(tree.b.id))
+    await assign(db, holder, at_a, Node.post(tree.a.id))
+    for role in (at_b, at_a, unassigned):
+        role.is_deleted = True
+        db.add(role)
+    await db.commit()
+    restore = V1.path(RoleRoutes.ROLE_RESTORE)
+
+    refused = await client.post(restore.format(role_id=at_b.id), headers=headers(restorer))
+    assert problem(refused, 403, "grant_exceeds_own_permissions")["missing"] == ["observation.view"]
+    assert (await db.exec(select(Role.is_deleted).where(Role.id == at_b.id))).one() is True
+
+    # Held at the node of every assignment (post A), or held anywhere for a role assigned nowhere
+    for role in (at_a, unassigned):
+        restored = await client.post(restore.format(role_id=role.id), headers=headers(restorer))
+        assert restored.status_code == 200, restored.text
+    restored = await client.post(restore.format(role_id=at_b.id), headers=headers(admin))
+    assert restored.status_code == 200, restored.text
+
+
 # ----------------------------------------------------------------- the user list
 async def test_user_list_filters_by_type(client, db, headers, tree):
     admin = await make_admin(db)

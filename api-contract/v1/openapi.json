@@ -3833,7 +3833,7 @@
           "ROLES"
         ],
         "summary": "Update Role",
-        "description": "Update role and optionally replace all permissions. Archived roles answer 404 until restored (POST /{role_id}/restore).\n\nA built-in role keeps its name and its permissions (409); clone it to change them. The caller must hold every permission\npermission_ids adds or removes (403 grant_exceeds_own_permissions). Added permissions apply at once to every\nholder who is not archived: a system permission needs every such assignment of the role at the root (409\nrole_requires_root_scope), and the type of every such holder must allow them (409 role_holders_exceed_user_type,\nwith the users and their excess_permissions). Nothing is changed on any refusal.",
+        "description": "Update role and optionally replace all permissions. Archived roles answer 404 until restored (POST /{role_id}/restore).\n\nA built-in role keeps its name and its permissions (409); clone it to change them. Permissions permission_ids\nremoves must be held by the caller (at some node). Permissions it adds apply at once at every assignment of the\nrole, those of archived users included (restoring a user gives the role back as it is), so the caller must hold\neach of them at every node the role is assigned at (at some node for a role assigned nowhere): otherwise 403\ngrant_exceeds_own_permissions with the permissions missing. Then a system permission needs every assignment of the\nrole at the root (409 role_requires_root_scope), and the type of every holder, archived ones included, must allow\nthe added permissions (409 role_holders_exceed_user_type, with the users and their excess_permissions). Nothing is\nchanged on any refusal.",
         "operationId": "update_role",
         "security": [
           {
@@ -4329,7 +4329,7 @@
           "ROLES"
         ],
         "summary": "Restore Role",
-        "description": "Restore an archived role (is_deleted=false): it grants its permissions again and can be assigned. Not archived: 409.\nThe caller must hold every permission of the role (403 grant_exceeds_own_permissions).",
+        "description": "Restore an archived role (is_deleted=false): it grants its permissions again and can be assigned. Not archived: 409.\nThe role's permissions apply again at every node it is assigned at (assignments of archived users included), so the\ncaller must hold every permission of the role at each of these nodes (at some node for a role assigned nowhere):\notherwise 403 grant_exceeds_own_permissions with the permissions missing.",
         "operationId": "restore_role",
         "security": [
           {
@@ -4770,7 +4770,7 @@
           "ROLES"
         ],
         "summary": "Add Role Permission",
-        "description": "Grant one permission to a role (idempotent). Returns the role's permissions.\nOnly a permission the caller holds can be granted (403 grant_exceeds_own_permissions); a built-in role gets\npermissions only by seeding (409 builtin_role_permissions_fixed). The permission applies at once to every holder\nwho is not archived: a system permission needs every such assignment of the role at the root (409\nrole_requires_root_scope), and the type of every such holder must allow it (409 role_holders_exceed_user_type).",
+        "description": "Grant one permission to a role (idempotent). Returns the role's permissions.\nA built-in role gets permissions only by seeding (409 builtin_role_permissions_fixed). The permission applies at\nonce at every assignment of the role, those of archived users included (restoring a user gives the role back as it\nis), so the caller must hold it at every node the role is assigned at (at some node for a role assigned nowhere):\notherwise 403 grant_exceeds_own_permissions. Then a system permission needs every assignment of the role at the\nroot (409 role_requires_root_scope), and the type of every holder, archived ones included, must allow it (409\nrole_holders_exceed_user_type).",
         "operationId": "add_role_permission",
         "security": [
           {

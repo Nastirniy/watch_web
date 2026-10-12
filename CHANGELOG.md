@@ -240,6 +240,15 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   permissions (409 `role_holders_exceed_user_type`, `users`: [{`id`, `username`, `user_type`,
   `excess_permissions`}], each holder once, archived holders listed too); answered after the 403
   `grant_exceeds_own_permissions`, the role stays unchanged.
+- Role edits are bounded by where the caller holds the permissions: a permission added to a role (`PATCH
+  /roles/{role_id}` `permission_ids`, `PUT /roles/{role_id}/permissions/{permission_id}`) must be held by the caller
+  at every node the role is assigned at, assignments of archived users included, and `POST /roles/{role_id}/restore`
+  needs every permission of the role at each of these nodes (a role assigned nowhere: held at some node, as before).
+  Before, a permission held at one post could be added to a role held at the root or at another group, which put it
+  in effect there. 403 `grant_exceeds_own_permissions` (`missing`: the permissions lacking at any of these nodes),
+  answered before the 409s, nothing changed. Removing permissions and archiving a role still need them held at some
+  node. The descriptions of both edits in the OpenAPI document state the rule (they said archived holders did not
+  count).
 - `PATCH /users/{user_id}`: the check of the caller's reach (403 `target_user_more_privileged`) answers before the
   archived state of the user (404 `user_not_found`), so an outsider gets the same 403 for an archived and a live user.
 - `RoleResponse.builtin_key`, `is_builtin`, `level` and `PermissionResponse.level` are required in the schema (they

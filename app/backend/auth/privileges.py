@@ -2,9 +2,15 @@
 
 Nobody becomes able to do more than they could by changing access:
 
-- check_grant: role edits (permissions added to or removed from a role, a role archived, restored or cloned) need
-  every permission the change grants or revokes, held anywhere (role.* are system permissions: only holders at the
-  root edit roles). 403 grant_exceeds_own_permissions with the permissions the caller lacks.
+- check_grant: role edits that grant nothing new where a role is held (a role created or cloned, permissions removed
+  from a role, a role archived) need every permission the change revokes or copies, held anywhere (role.* are system
+  permissions: only holders at the root edit roles). 403 grant_exceeds_own_permissions with the permissions the
+  caller lacks.
+- check_role_grant: permissions added to a role (PATCH permission_ids, PUT of one permission) and the permissions of a
+  restored role apply at once at every node the role is assigned at (role_nodes: assignments of archived users
+  included, their restore gives the role back as it is), so the caller holds each of them at every such node
+  (check_grant_at at each); a role assigned nowhere: held anywhere (check_grant). Removed permissions: held anywhere.
+  One 403 grant_exceeds_own_permissions listing every permission lacking (an added one lacking at any node).
 - check_grant_at: an assignment at a node (a new user's default assignment, the assignment API) needs every permission
   of the role covered at that node (AuthContext.covers). 403 grant_exceeds_own_permissions. check_assign_at (the
   assignment API, create and delete) also needs user.update covered at the node, so a role without permissions
@@ -53,7 +59,8 @@ async def role_permission_names(session: AsyncSession, role_ids: Iterable[int]) 
 
 
 def check_grant(auth: AuthContext, permissions: Iterable[str]) -> None:
-    """The caller holds every permission the change grants or revokes (anywhere: role edits)"""
+    """The caller holds every permission the change revokes or copies, anywhere (a role created or cloned, a role's
+    removals, its archive)"""
     missing = sorted(set(permissions) - auth.permissions)
     if missing:
         logger.warning(f"User {auth.user.username} tried to grant or revoke permissions they lack: {missing}")
@@ -71,6 +78,29 @@ def check_grant_at(auth: AuthContext, permissions: Iterable[str], node: Node) ->
     if missing:
         logger.warning(f"User {auth.user.username} tried to grant at {node.key} permissions they lack there: {missing}")
         raise access_denied(AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, missing=missing)
+
+
+async def role_nodes(session: AsyncSession, role_id: int) -> FrozenSet[Node]:
+    """Every node the role is assigned at, assignments of archived users included (R28)"""
+    keys = await session.exec(select(RoleAssignment.scope_key).where(RoleAssignment.role_id == role_id).distinct())
+    return frozenset(Node.parse(key) for key in keys.all())
+
+
+def check_role_grant(auth: AuthContext, nodes: Iterable[Node], added: Iterable[str] = (),
+                     removed: Iterable[str] = ()) -> None:
+    """A role edit (spec section 6 rule 3): the permissions removed held anywhere; the permissions added (a restore:
+    every permission of the role) held at every node the role is assigned at, anywhere for a role assigned nowhere"""
+    nodes, added = frozenset(nodes), set(added)
+    missing = set(removed) - auth.permissions
+    if nodes:
+        for node in nodes:
+            missing |= _not_covered(auth, added, node)
+    else:
+        missing |= added - auth.permissions
+    if missing:
+        logger.warning(f"User {auth.user.username} tried to change a role held at {sorted(n.key for n in nodes)} "
+                       f"with permissions they lack there: {sorted(missing)}")
+        raise access_denied(AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, missing=sorted(missing))
 
 
 def check_assign_at(auth: AuthContext, permissions: Iterable[str], node: Node) -> None:

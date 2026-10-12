@@ -15,7 +15,7 @@ from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.assignments import check_role_permissions_added
-from app.backend.auth.privileges import check_grant, role_permission_names
+from app.backend.auth.privileges import check_grant, check_role_grant, role_nodes, role_permission_names
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import RoleRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
@@ -184,11 +184,14 @@ async def update_role(
 ):
     """Update role and optionally replace all permissions. Archived roles answer 404 until restored (POST /{role_id}/restore).
 
-    A built-in role keeps its name and its permissions (409); clone it to change them. The caller must hold every permission
-    permission_ids adds or removes (403 grant_exceeds_own_permissions). Added permissions apply at once to every
-    holder who is not archived: a system permission needs every such assignment of the role at the root (409
-    role_requires_root_scope), and the type of every such holder must allow them (409 role_holders_exceed_user_type,
-    with the users and their excess_permissions). Nothing is changed on any refusal.
+    A built-in role keeps its name and its permissions (409); clone it to change them. Permissions permission_ids
+    removes must be held by the caller (at some node). Permissions it adds apply at once at every assignment of the
+    role, those of archived users included (restoring a user gives the role back as it is), so the caller must hold
+    each of them at every node the role is assigned at (at some node for a role assigned nowhere): otherwise 403
+    grant_exceeds_own_permissions with the permissions missing. Then a system permission needs every assignment of the
+    role at the root (409 role_requires_root_scope), and the type of every holder, archived ones included, must allow
+    the added permissions (409 role_holders_exceed_user_type, with the users and their excess_permissions). Nothing is
+    changed on any refusal.
     """
     current_user = auth.user
     role = await get_role_or_404(session, role_id)
@@ -202,9 +205,9 @@ async def update_role(
         current_names = await role_permission_names(session, [role_id])
         if role.builtin_key is not None and wanted_names != current_names:
             raise ApiError(ErrorCode.BUILTIN_ROLE_PERMISSIONS_FIXED)
-        removed = current_names - wanted_names
-        check_grant(auth, (wanted_names - current_names) | removed)
-        await check_role_permissions_added(session, role_id, wanted_names - current_names)
+        added, removed = wanted_names - current_names, current_names - wanted_names
+        check_role_grant(auth, await role_nodes(session, role_id), added=added, removed=removed)
+        await check_role_permissions_added(session, role_id, added)
 
     # Store old values for auditing
     old_values = role.model_dump()
@@ -330,12 +333,14 @@ async def restore_role(
         auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW, Permissions.ROLE_ARCHIVE]))
 ):
     """Restore an archived role (is_deleted=false): it grants its permissions again and can be assigned. Not archived: 409.
-    The caller must hold every permission of the role (403 grant_exceeds_own_permissions)."""
+    The role's permissions apply again at every node it is assigned at (assignments of archived users included), so the
+    caller must hold every permission of the role at each of these nodes (at some node for a role assigned nowhere):
+    otherwise 403 grant_exceeds_own_permissions with the permissions missing."""
     current_user = auth.user
     role = await get_role_or_404(session, role_id, include_deleted=True)
     if not role.is_deleted:
         raise ApiError(ErrorCode.ROLE_NOT_ARCHIVED)
-    check_grant(auth, await role_permission_names(session, [role_id]))
+    check_role_grant(auth, await role_nodes(session, role_id), added=await role_permission_names(session, [role_id]))
 
     old_values = role.model_dump()
     role.is_deleted = False
@@ -552,10 +557,12 @@ async def add_role_permission(
         auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW, Permissions.ROLE_UPDATE]))
 ):
     """Grant one permission to a role (idempotent). Returns the role's permissions.
-    Only a permission the caller holds can be granted (403 grant_exceeds_own_permissions); a built-in role gets
-    permissions only by seeding (409 builtin_role_permissions_fixed). The permission applies at once to every holder
-    who is not archived: a system permission needs every such assignment of the role at the root (409
-    role_requires_root_scope), and the type of every such holder must allow it (409 role_holders_exceed_user_type)."""
+    A built-in role gets permissions only by seeding (409 builtin_role_permissions_fixed). The permission applies at
+    once at every assignment of the role, those of archived users included (restoring a user gives the role back as it
+    is), so the caller must hold it at every node the role is assigned at (at some node for a role assigned nowhere):
+    otherwise 403 grant_exceeds_own_permissions. Then a system permission needs every assignment of the role at the
+    root (409 role_requires_root_scope), and the type of every holder, archived ones included, must allow it (409
+    role_holders_exceed_user_type)."""
     current_user = auth.user
     role = await get_role_or_404(session, role_id)
     permission = await get_permission_or_404(session, permission_id)
@@ -566,7 +573,7 @@ async def add_role_permission(
     if not existing.first():
         if role.builtin_key is not None:
             raise ApiError(ErrorCode.BUILTIN_ROLE_PERMISSIONS_FIXED)
-        check_grant(auth, [permission.name])
+        check_role_grant(auth, await role_nodes(session, role_id), added=[permission.name])
         await check_role_permissions_added(session, role_id, [permission.name])
         # A rollback expires every loaded object: keep what is needed afterwards as plain values
         actor_id, actor_name, role_name, permission_name = current_user.id, current_user.username, role.name, permission.name
