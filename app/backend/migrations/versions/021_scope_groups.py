@@ -6,6 +6,10 @@ with its index. A post without a group stays directly under the root. Nothing re
 Guarded with inspector checks: fresh installs built by 002_sync_schema from the models already have them (002 creates
 scope_groups before posts when it creates posts).
 
+Downgrade also deletes the permissions the code of this revision introduced (scope_group.view, .create, .update,
+.archive: seeding inserts them at start) with every grant of them, so a database taken back to 020 has the catalog it
+had (controller ruling R31).
+
 Revision ID: 021_scope_groups
 Revises: 020_post_archive
 Create Date: 2026-10-12
@@ -23,6 +27,10 @@ POSTS = "posts"
 COLUMN = "group_id"
 INDEX = "ix_posts_group_id"
 FK_NAME = "fk_posts_group_id_scope_groups"
+# Permissions the code of this revision added to the catalog
+ADDED_PERMISSIONS = ("scope_group.view", "scope_group.create", "scope_group.update", "scope_group.archive")
+PERMISSIONS = sa.table("permissions", sa.column("id", sa.Integer), sa.column("name", sa.String))
+ROLE_PERMISSIONS = sa.table("role_permissions", sa.column("role_id", sa.Integer), sa.column("permission_id", sa.Integer))
 
 
 def _log(message: str) -> None:
@@ -67,6 +75,7 @@ def downgrade() -> None:
     Order matters on MySQL: the foreign key needs the index of its column, so the constraint goes first, then the
     index, then the column, then the table the constraint pointed at.
     """
+    _delete_added_permissions()
     inspector = sa.inspect(op.get_bind())
     if POSTS in inspector.get_table_names():
         fk_names = [
@@ -84,3 +93,21 @@ def downgrade() -> None:
                 batch.drop_column(COLUMN)
     if TABLE in sa.inspect(op.get_bind()).get_table_names():
         op.drop_table(TABLE)
+
+
+def _delete_added_permissions() -> None:
+    """scope_group.* rows and their grants, when present (seeding inserts them; a database that never started the
+    newer code has none)"""
+    bind = op.get_bind()
+    tables = set(sa.inspect(bind).get_table_names())
+    if "permissions" not in tables:
+        return
+    rows = bind.execute(sa.select(PERMISSIONS.c.id, PERMISSIONS.c.name)
+                        .where(PERMISSIONS.c.name.in_(ADDED_PERMISSIONS))).all()
+    if not rows:
+        return
+    ids = [permission_id for permission_id, _ in rows]
+    _log(f"deleting permission(s) {', '.join(sorted(name for _, name in rows))} and their grants")
+    if "role_permissions" in tables:
+        bind.execute(sa.delete(ROLE_PERMISSIONS).where(ROLE_PERMISSIONS.c.permission_id.in_(ids)))
+    bind.execute(sa.delete(PERMISSIONS).where(PERMISSIONS.c.id.in_(ids)))

@@ -48,6 +48,14 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   and the database lacks (`media.monitor` before the first start of this version) is inserted by it. The log's
   `converted` row, written with the converted rows, marks the data as converted: a rerun after an interrupted upgrade
   (MySQL commits the conversion with the first table rename) never converts again and finishes the renames.
+- Exact downgrade to 020 also after the new version has started (seeding ran). `022_builtin_roles` records in a
+  table of its own, `builtin_roles_migration_log` (`kind`, `ref_id`, JSON `data`), every rename to `<key>_custom`,
+  the texts of the `admin` role it marks and the display texts of every permission; its downgrade deletes the
+  built-in roles seeding created (all but `admin`, which existed before) with their grants, gives every renamed role
+  its old name back, restores the texts seeding refreshed, deletes `media.monitor` with its grants and drops the
+  column and the log. A built-in role a legacy `user_roles` row refers to is kept, and a role whose old name another
+  role holds keeps `<key>_custom`; the output says so. `021_scope_groups`'s downgrade deletes `scope_group.*` with
+  their grants. A downgrade and upgrade again no longer leave `<key>_custom` copies of the built-in roles behind.
 - `python -m app.backend.cli.authz_report [--json] [--url URL]`: dry run of the conversion on a database at
   `022_builtin_roles` (run it on a copy of production before the upgrade; read-only): the plan of every user, as the
   migration's audit rows will record it, and the derived roles. A database at 023 or later answers
