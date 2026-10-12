@@ -75,7 +75,12 @@ async def _set_archived(db, post: Post, archived: bool = True) -> None:
 
 
 async def _observation_ids(client, headers, user, **params) -> list:
+    """The observations the user lists; none when the user holds observation.view nowhere (403 permission_denied:
+    a grant only on an archived post applies nowhere, R39)"""
     response = await client.get(OBSERVATIONS, params=params, headers=headers(user))
+    if response.status_code == 403:
+        assert response.json()["code"] == "permission_denied", response.text
+        return []
     assert response.status_code == 200, response.text
     return [item["id"] for item in response.json()]
 
@@ -267,7 +272,9 @@ async def test_statistics_and_observation_stats_follow_the_scope(client, db, hea
 
     await _set_archived(db, scene.post)
     assert (await client.get(STATISTICS, headers=headers(scene.reader))).json()["post_ids"] == [scene.other.id]
-    assert (await client.get(STATISTICS, headers=headers(scene.home))).json()["post_ids"] == []
+    # Its only post archived, the home user holds statistics.view nowhere (R39; before: an empty list of posts)
+    home = await client.get(STATISTICS, headers=headers(scene.home))
+    assert home.status_code == 403 and home.json()["missing"] == ["statistics.view"], home.text
     refused = await client.get(stats, headers=headers(scene.home))
     assert refused.status_code == 403, refused.text
     # Counters are aggregates: administrators count any post, post.access_all reads every post

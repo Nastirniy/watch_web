@@ -144,8 +144,10 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - A permission whose only grants are on archived posts or at archived scope groups is held nowhere (spec section 5:
   such assignments do not apply): it is left out of `permissions` (`/auth/me`, the login and the refresh response),
   does not pass a route requirement (403 `permission_denied` with `missing`; before: `no_post_assigned`, or a list
-  answered empty), `POST /auth/check-permission` and `GET /auth/route-access`, and does not count for role edits.
-  The assignments are kept and apply again when the post or the group is restored.
+  or statistics answered empty), `POST /auth/check-permission` and `GET /auth/route-access`, and does not count for
+  role edits. A user whose only post is archived therefore also loses the reads without a post (dictionaries, media
+  formats, roles) that the grants of that post gave. The assignments are kept and apply again when the post or the
+  group is restored.
 - The admin gate is removed from `POST /posts/`, `PUT /posts/{post_id}`, `POST /posts/{post_id}/archive` and
   `/restore` (403 `admin_required` is no longer declared there). Each checks its permission at the post:
   `post.update` / `post.archive` in effect at the post (403 `post_write_denied`, `no_post_assigned`); creating a post

@@ -106,6 +106,10 @@ def test_the_conversion_never_widens_and_reports_every_narrowing():
         archived_posts = frozenset(rng.sample(POSTS, rng.randint(0, 2)))
         tree = ScopeTree(group_parent={}, archived_groups=frozenset(), post_group={post: None for post in POSTS},
                          archived_posts=archived_posts)
+        # Held anywhere is compared as the plan writes it: a grant on an archived post is held nowhere (spec section
+        # 5, R39), a rule of the evaluator the conversion does not report; the comparison per post covers them
+        unarchived = ScopeTree(group_parent={}, archived_groups=frozenset(), post_group=tree.post_group,
+                               archived_posts=frozenset())
         users = [random_user(rng, batch * 100 + n) for n in range(USERS_PER_BATCH)]
         plan = plan_conversion(users, roles, ADMIN_ROLE_ID, [role.name for role in roles.values()])
         plans = {user_plan.user_id: user_plan for user_plan in plan.users}
@@ -114,11 +118,13 @@ def test_the_conversion_never_widens_and_reports_every_narrowing():
             user_plan = plans[user.id]
             live, legacy_at = legacy_semantics(user, roles, archived_posts)
             auth = planned_context(plan, user_plan, roles, tree)
+            held = planned_context(plan, user_plan, roles, unarchived).held_anywhere
+            assert auth.held_anywhere <= held
             reported: Set[str] = set(user_plan.dropped)
             shape = (user, sorted(r for r in user.role_ids), sorted(archived_posts))
 
-            assert auth.held_anywhere <= live, ("widened anywhere", auth.held_anywhere - live, shape)
-            for permission in live - auth.held_anywhere:
+            assert held <= live, ("widened anywhere", held - live, shape)
+            for permission in live - held:
                 assert permission in reported, ("unreported loss", permission, shape)
             for permission in UNIVERSE:
                 if permission in conv.GLOBAL_VIEW:
@@ -130,5 +136,5 @@ def test_the_conversion_never_widens_and_reports_every_narrowing():
                     if before and not after:
                         assert permission in reported, ("unreported narrowing", permission, post_id, shape)
             # the inferred type always allows what the user holds
-            assert auth.held_anywhere & conv.TYPE_CEILINGS["admin"] <= conv.TYPE_CEILINGS[user_plan.user_type], shape
+            assert held & conv.TYPE_CEILINGS["admin"] <= conv.TYPE_CEILINGS[user_plan.user_type], shape
     assert checks > 100_000

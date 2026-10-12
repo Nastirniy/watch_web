@@ -15,6 +15,7 @@ from sqlmodel import select
 from app.main import fastapi_app
 from app.backend.auth.route_access import route_access_map
 from app.backend.auth.context import load_auth_context
+from app.backend.auth.privileges import role_nodes
 from app.backend.models.observation import ObservationFrequency
 from app.backend.models.role import Permission
 from app.backend.models.role_assignment import RoleAssignment
@@ -36,6 +37,15 @@ def persona_permissions(entry, persona) -> list:
 
 async def expected(db, entry, user):
     return entry.require.evaluate(await load_auth_context(db, user))
+
+
+async def grantable_permission(db, user, role_id: int, perms: list) -> int:
+    """A permission the persona holds at every node the role is assigned at (anywhere for a role assigned nowhere):
+    adding one the caller lacks there is refused past the gate (R36)"""
+    auth = await load_auth_context(db, user)
+    nodes = await role_nodes(db, role_id)
+    names = [name for name in perms if all(auth.covers(name, node) for node in nodes)]
+    return (await db.exec(select(Permission.id).where(Permission.name.in_(names)).order_by(Permission.id))).first() or 1
 
 
 @pytest.mark.asyncio
@@ -61,9 +71,9 @@ async def test_route_gate(client, db, headers, entry, persona):
             ObservationFrequency.observation_id == observation.id))).first(),
         "role_id": role_id,
         "assignment_id": assignment_id,
-        # a permission the persona holds: granting or revoking one the caller lacks is refused past the gate
-        "permission_id": (await db.exec(select(Permission.id).where(
-            Permission.name.in_(perms)).order_by(Permission.id))).first() or 1,
+        # a permission the persona holds (where the role is assigned): granting or revoking one the caller lacks
+        # is refused past the gate
+        "permission_id": await grantable_permission(db, user, role_id, perms),
         "format_id": 1,
         "group_id": 1,
         "upload_id": "0" * 32,
