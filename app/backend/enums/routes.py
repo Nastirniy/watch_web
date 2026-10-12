@@ -269,6 +269,13 @@ class StatisticsRoutes(str, Enum):
         return "STATISTICS"
 
 
+class SignerRoutes(str, Enum):
+    """Paths of the signing service (a separate app on a Unix socket, not part of the main app)"""
+    SIGN_CLIENT = "/sign/client"
+    SIGN_CRL = "/sign/crl"
+    HEALTH = "/health"
+
+
 class Routes:
     """Every route group (tests/test_route_registry.py checks none is missing)"""
     API_VERSION = APIVersionRoutes

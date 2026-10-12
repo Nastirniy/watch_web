@@ -35,7 +35,10 @@ def build_crl(
     entries: Sequence[CrlEntry],
 ) -> x509.CertificateRevocationList:
     """A CRL signed with SHA-256; CRLReason is written only for a reason other than unspecified"""
-    ca_ski = ca_cert.extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value
+    try:
+        ca_ski = ca_cert.extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value
+    except x509.ExtensionNotFound:  # an authority made without extensions (the legacy root)
+        ca_ski = x509.SubjectKeyIdentifier.from_public_key(ca_cert.public_key())
     builder = (
         x509.CertificateRevocationListBuilder()
         .issuer_name(ca_cert.subject)
