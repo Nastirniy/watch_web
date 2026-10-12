@@ -313,10 +313,15 @@ the same way; derived roles of an archived role are archived too):
    `media_format.create/update/archive`, `export.create`.
 3. U holds `post.access_all`: every R becomes `P(R) @ /`.
 4. Otherwise, for each R:
-   - root part = `system` permissions of `P(R)`, plus `post.view`, `user.view`, `statistics.view` of `P(R)` when U
-     holds `admin.true` (the old record exception and global statistics), assigned at `/` when not empty;
-   - post part = the `scoped` rest, assigned at the home post and at every access row with `can_write`;
-   - view part = the `*.view` permissions of the post part, assigned at every access row without `can_write`.
+   - root part = `system` permissions of `P(R)`, plus, when U holds `admin.true`, the record administration and
+     global aggregates of `P(R)`: `post.view/create/update/archive`, `user.view/create/update/archive`,
+     `scope_group.view`, `statistics.view` (the old record exception: these acted on every post and user record),
+     plus `media.monitor` when `P(R)` holds `media.view` (storage statistics and poster status were `media.view` +
+     the gate); assigned at `/` when not empty;
+   - post part = the `scoped` rest (without what the root part holds), assigned at the home post and at every access
+     row with `can_write`;
+   - view part = the `*.view` permissions of the post part plus `export.create` when present (an export reads the
+     data of read-only rows today), assigned at every access row without `can_write`.
 5. Each (permission set, node) is assigned to the role whose set is exactly that: R itself when it matches, an
    already derived role, or a new derived role `<R.name>_system` / `_posts` / `_view` (display name with
    "(система)" / "(пости)" / "(перегляд)"), made unique with a numeric suffix when needed.
