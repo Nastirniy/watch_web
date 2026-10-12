@@ -49,7 +49,7 @@ def _tags_module() -> SimpleNamespace:
 
     @router.post(TagRoutes.CREATE.value, response_model=TagResponse)
     async def create_tag(
-            auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW, Permissions.TAG_CREATE], admin=True)),
+            auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW, Permissions.TAG_CREATE])),
     ) -> TagResponse:
         return TagResponse(id=1, label="new")
 

@@ -4,7 +4,7 @@ MediaFilterService - Filter service for MediaFile entity
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Iterable
+from typing import FrozenSet, Optional, Iterable
 from sqlalchemy import and_, not_, or_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql.selectable import Select
@@ -62,11 +62,18 @@ class MediaFilterService(SimpleFilterEngine):
         return query.where(ready) if has_thumbnail else query.where(not_(ready))
 
     @classmethod
-    def _apply_scope(cls, query: Select, params: MediaCriteria, access_post_ids: Optional[Iterable[int]]) -> Select:
-        """Archived media only on include_deleted; media of an archived observation never (the media routes answer
-        404 for it); the post scope through the observation's post_id"""
-        query = cls._apply_soft_delete(query, params)
+    def _apply_scope(
+        cls,
+        query: Select,
+        params: MediaCriteria,
+        access_post_ids: Optional[Iterable[int]],
+        archived_post_ids: Optional[FrozenSet[int]],
+    ) -> Select:
+        """Archived media only on include_deleted, and then only at archived_post_ids (None: every post); media of an
+        archived observation never (the media routes answer 404 for it); the post scope through the observation's
+        post_id"""
         query = query.join(Observation, MediaFile.observation_id == Observation.id)
+        query = cls._apply_soft_delete(query, params, Observation.post_id, archived_post_ids)
         query = query.where(Observation.is_deleted == False)
         if access_post_ids is not None:
             query = query.where(Observation.post_id.in_(list(access_post_ids)))
@@ -77,13 +84,15 @@ class MediaFilterService(SimpleFilterEngine):
         cls,
         query: Select,
         params: MediaCriteria,
-        access_post_ids: Optional[Iterable[int]] = None
+        access_post_ids: Optional[Iterable[int]] = None,
+        archived_post_ids: Optional[FrozenSet[int]] = None,
     ) -> Select:
-        """Apply all filters from MediaCriteria"""
+        """Apply all filters from MediaCriteria. archived_post_ids: with include_deleted, the posts whose archived
+        media are shown (None: every post)"""
         params = cls.criteria(params)
         query = query.options(selectinload(MediaFile.user))
 
-        query = cls._apply_scope(query, params, access_post_ids)
+        query = cls._apply_scope(query, params, access_post_ids, archived_post_ids)
 
         query = cls._apply_exact(query, MediaFile.id, params.id)
         query = cls._apply_exact(query, MediaFile.observation_id, params.observation_id)
@@ -108,11 +117,12 @@ class MediaFilterService(SimpleFilterEngine):
         cls,
         query: Select,
         params: MediaCriteria,
-        access_post_ids: Optional[Iterable[int]] = None
+        access_post_ids: Optional[Iterable[int]] = None,
+        archived_post_ids: Optional[FrozenSet[int]] = None,
     ) -> Select:
         """Apply filters without pagination"""
         params = cls.criteria(params)
-        query = cls._apply_scope(query, params, access_post_ids)
+        query = cls._apply_scope(query, params, access_post_ids, archived_post_ids)
 
         query = cls._apply_exact(query, MediaFile.id, params.id)
         query = cls._apply_exact(query, MediaFile.observation_id, params.observation_id)

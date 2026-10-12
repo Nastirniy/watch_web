@@ -15,7 +15,7 @@ from app.backend.auth.access_control import AccessControlService
 from app.backend.services.media_manager import FileValidationConfig
 from app.backend.services.media import formats, jobs, renderer, urls as thumb_urls
 from app.backend.services.media.probe import has_no_video_stream, metadata_for, resolve_tools
-from app.backend.enums.general import MediaType, ThumbnailFormat, ThumbnailSize
+from app.backend.enums.general import MediaType, Permissions, ThumbnailFormat, ThumbnailSize
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.services.audit import create_audit_log
 from app.backend.utils.logging_config import get_api_logger
@@ -78,14 +78,15 @@ def check_declared_format(registry: formats.FormatRegistry, media_type: str, fil
 
 
 async def load_observation_for_upload(session: AsyncSession, auth: AuthContext, observation_id: int) -> Observation:
-    """The observation an upload goes to: 404 when missing or archived, 403 without write access to its post, 409
-    post_archived when its post is archived"""
+    """The observation an upload goes to: 404 when missing or archived, 403 without media.view and media.create in
+    effect at its post, 409 post_archived when its post is archived"""
     observation = (await session.exec(
         select(Observation).where(Observation.id == observation_id, Observation.is_deleted == False)
     )).first()
     if not observation:
         raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
-    AccessControlService.check_post_write(auth, observation.post_id, "media")
+    AccessControlService.check_post(auth, Permissions.MEDIA_VIEW, observation.post_id, "media")
+    AccessControlService.check_post(auth, Permissions.MEDIA_CREATE, observation.post_id, "media")
     await ensure_post_not_archived(session, observation.post_id)
     return observation
 

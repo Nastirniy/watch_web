@@ -15,8 +15,7 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   groups nest at most 6 levels deep, a group cannot move into its own subtree, only an empty group can be archived.
   Errors: `scope_group_not_found`, `scope_group_not_archived`, `scope_group_not_empty`, `scope_group_cycle`,
   `scope_group_depth_exceeded` (`max_depth`), `scope_group_name_taken`.
-- Permissions `scope_group.view`, `scope_group.create`, `scope_group.update`, `scope_group.archive` (the routes also need
-  `admin.true` for now; nothing reads the tree for authorization yet).
+- Permissions `scope_group.view`, `scope_group.create`, `scope_group.update`, `scope_group.archive`.
 - `group_id` on `PostCreate`, `PostUpdate` and `PostResponse` (null: directly under the root); an unknown or archived
   group answers 404 `scope_group_not_found`.
 - User types and built-in roles (migration `022_builtin_roles`, column `roles.builtin_key`, unique): one code-owned role
@@ -28,9 +27,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - Permission levels: `level` (`system` or `scoped`) on `RoleResponse` (system when the role holds a system permission)
   and on `PermissionResponse`. `RoleResponse` also has `is_builtin` and `builtin_key`; the role list and
   `/search/roles` take `is_builtin`.
-- `POST /roles/{role_id}/clone` (`role.view` + `role.create`, admin): a custom copy of a role with its permissions
+- `POST /roles/{role_id}/clone` (`role.view` + `role.create`): a custom copy of a role with its permissions
   (403 `grant_exceeds_own_permissions` when the caller lacks one); audit `create` with `cloned_from`.
-- Permission `media.monitor` (system level; nothing requires it yet).
+- Permission `media.monitor` (system level): `GET /media/statistics` and `GET /media/posters/status`.
 
 ### Changed
 
@@ -72,6 +71,45 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   before).
 - `GET /media/uploads`: other users' sessions only at the posts where `media.manage_any` is in effect (`admin.true`
   no longer widens the list to every post); the caller's own sessions are always listed.
+- The admin gate is removed from every route: a route requires only its listed permissions, held at some node (403
+  `permission_denied` with `required` and `missing`). It was on the dictionary writes (`/categories`, `/signal-types`,
+  `/tags`: create, update, archive, restore), the `/media-formats` writes, every `/roles` route and `GET /search/roles`,
+  every `/scope-groups` route, the user writes (`POST /users/`, `PATCH /users/{user_id}`, post access, archive,
+  restore, ending sessions), `GET /users/{user_id}/roles`, `/post-access` and `/sessions`, `POST /observations/report`,
+  `GET /media/statistics`, `GET /media/posters/status`, `POST /media/posters/reconcile` and
+  `POST /media/{media_id}/thumbnail/regenerate`. A permission that did nothing without `admin.true` is held nowhere,
+  so no route opens to a user who could not call it before; `admin.true` alone passes no route.
+- `POST /observations/report` needs `observation.view` + `export.create` and covers the posts where both are in effect
+  (before: every readable post, behind the admin gate). A `post_ids` entry outside them answers 403
+  (`post_access_denied`, or `post_write_denied` with `missing` `["export.create"]`). With `include_deleted`, archived
+  bands and observations are included only where `observation.archive` is in effect.
+- `GET /media/statistics` and `GET /media/posters/status` need `media.monitor` (before: `media.view` behind the admin
+  gate; administrators who held `media.view` hold `media.monitor` at the root).
+- Observations and media follow the permission at the post. Lists and searches (`GET /observations/list-all`,
+  `GET /search/observations`, `GET /media/`, `GET /search/media`) cover the posts where `observation.view` /
+  `media.view` is in effect; with `include_deleted`, archived rows only where `observation.archive` / `media.archive`
+  is in effect (before: archived rows of every readable post, read-only access rows included); the band list of one
+  observation likewise. A change checks `X.view` at the post, then the permission of the change there: create
+  `observation.create`; update, disappeared, band add and band update `observation.update`; archive, restore and the
+  band archive / restore `observation.archive`; media archive / restore `media.archive`; thumbnail regenerate
+  `media.update`; uploads and upload sessions `media.create` (before: write access to the post, which any of these
+  permissions gave). 403 `post_access_denied` without `X.view` there, `post_write_denied` naming the permission
+  otherwise; both now carry `required` and `missing`. Media info, download, stream, thumbnail, storyboard, share and
+  the media of an observation check `media.view` at the post.
+- `observation.manage_any` and `media.manage_any` apply at the posts where they are in effect (before: wherever the
+  caller could write); another user's upload session needs `media.manage_any` at its post.
+- Archiving or restoring an observation of an archived post needs `post.archive` in effect at the post (before:
+  `admin.true` with `post.access_all`); everyone else gets 409 `post_archived`.
+- `GET /users/{user_id}/sessions`, `/roles` and `/post-access` need `user.view` covering the user (the caller, or
+  `user.view` in effect at the user's home post, at the root for a user without one), otherwise 403 `user_self_only`.
+- Regenerating the thumbnail of a media file without an observation needs `media.update` at the root (403
+  `permission_required_for_action`).
+
+### Removed
+
+- 403 `admin_required`: the problem type and every declaration of it.
+- The admin flag of a requirement: `required` in 403 bodies and in `GET /auth/route-access` entries is `{all, any}`;
+  `POST /auth/check-permission` no longer takes `admin` and no longer answers `admin_required`.
 
 ## Post archiving and certificate name hash
 

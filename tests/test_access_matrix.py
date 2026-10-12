@@ -5,7 +5,8 @@ must either pass the permission gate (status not 401/403) or be rejected with
 a 403 carrying the expected code and missing list. Data scope is satisfied by
 building every referenced resource inside the persona's own post. The expected
 answer is the route's requirement evaluated on the persona's real AuthContext
-(its grants: a permission that is dead without admin.true does not count).
+(its grants: a permission that is dead without admin.true does not count). There is no admin gate: admin.true
+alone passes no route, every refusal is permission_denied.
 """
 import pytest
 from sqlmodel import select
@@ -78,6 +79,6 @@ async def test_route_gate(client, db, headers, entry, persona):
         if entry.method == "HEAD":
             return  # HEAD answers carry no body (HTTP semantics); the status code is the whole contract
         detail = response.json()
-        assert detail["code"] == ("admin_required" if result.admin_missing else "permission_denied")
+        assert detail["code"] == "permission_denied"
         assert detail["missing"] == list(result.missing)
         assert detail["required"] == entry.require.as_dict()

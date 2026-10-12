@@ -1311,14 +1311,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions",
+            "description": "`grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/GrantExceedsOwnPermissionsProblem"
                     },
@@ -1329,7 +1326,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
                       "grant_exceeds_own_permissions": "#/components/schemas/GrantExceedsOwnPermissionsProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem"
                     }
@@ -1671,14 +1667,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold",
+            "description": "`grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/GrantExceedsOwnPermissionsProblem"
                     },
@@ -1692,7 +1685,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
                       "grant_exceeds_own_permissions": "#/components/schemas/GrantExceedsOwnPermissionsProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem",
                       "target_user_more_privileged": "#/components/schemas/TargetUserMorePrivilegedProblem"
@@ -1787,7 +1779,7 @@
           "USERS"
         ],
         "summary": "List User Roles",
-        "description": "List all roles assigned to a user - requires both USER_VIEW and ROLE_VIEW permissions",
+        "description": "List all roles assigned to a user - requires user.view (covering the user: 403 user_self_only otherwise) and\nrole.view",
         "operationId": "list_user_roles",
         "security": [
           {
@@ -1886,23 +1878,23 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions; `user_self_only`: You can only view your own account or users of your assigned posts",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
                     {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
                     },
                     {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                      "$ref": "#/components/schemas/UserSelfOnlyProblem"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "user_self_only": "#/components/schemas/UserSelfOnlyProblem"
                     }
                   }
                 }
@@ -1928,7 +1920,7 @@
           "USERS"
         ],
         "summary": "List User Post Access",
-        "description": "Extra post access rows of a user (the home post is users.post_id and is not listed here)",
+        "description": "Extra post access rows of a user (the home post is users.post_id and is not listed here). user.view must\ncover the user (403 user_self_only otherwise).",
         "operationId": "list_user_post_access",
         "security": [
           {
@@ -2026,23 +2018,23 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions; `user_self_only`: You can only view your own account or users of your assigned posts",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
                     {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
                     },
                     {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                      "$ref": "#/components/schemas/UserSelfOnlyProblem"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "user_self_only": "#/components/schemas/UserSelfOnlyProblem"
                     }
                   }
                 }
@@ -2191,14 +2183,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold",
+            "description": "`permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/PermissionDeniedProblem"
                     },
@@ -2209,7 +2198,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem",
                       "target_user_more_privileged": "#/components/schemas/TargetUserMorePrivilegedProblem"
                     }
@@ -2355,14 +2343,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold",
+            "description": "`permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/PermissionDeniedProblem"
                     },
@@ -2373,7 +2358,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem",
                       "target_user_more_privileged": "#/components/schemas/TargetUserMorePrivilegedProblem"
                     }
@@ -2519,14 +2503,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold",
+            "description": "`permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/PermissionDeniedProblem"
                     },
@@ -2537,7 +2518,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem",
                       "target_user_more_privileged": "#/components/schemas/TargetUserMorePrivilegedProblem"
                     }
@@ -2669,14 +2649,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold",
+            "description": "`permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/PermissionDeniedProblem"
                     },
@@ -2687,7 +2664,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem",
                       "target_user_more_privileged": "#/components/schemas/TargetUserMorePrivilegedProblem"
                     }
@@ -2725,7 +2701,7 @@
           "USERS"
         ],
         "summary": "List User Sessions",
-        "description": "Login sessions of a user, newest first. status is computed when read: online (a request within\nsecurity.online_threshold_seconds), idle (live, client quiet) or ended; a session past its absolute end or\nidle timeout is ended even if nothing has recorded it yet. Archived users are listed too.",
+        "description": "Login sessions of a user, newest first. status is computed when read: online (a request within\nsecurity.online_threshold_seconds), idle (live, client quiet) or ended; a session past its absolute end or\nidle timeout is ended even if nothing has recorded it yet. Archived users are listed too. user.view must cover\nthe user (403 user_self_only otherwise).",
         "operationId": "list_user_sessions",
         "security": [
           {
@@ -2850,23 +2826,23 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions; `user_self_only`: You can only view your own account or users of your assigned posts",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
                     {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
                     },
                     {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                      "$ref": "#/components/schemas/UserSelfOnlyProblem"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "user_self_only": "#/components/schemas/UserSelfOnlyProblem"
                     }
                   }
                 }
@@ -2987,14 +2963,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold",
+            "description": "`permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/PermissionDeniedProblem"
                     },
@@ -3005,7 +2978,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem",
                       "target_user_more_privileged": "#/components/schemas/TargetUserMorePrivilegedProblem"
                     }
@@ -3138,14 +3110,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold",
+            "description": "`permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/PermissionDeniedProblem"
                     },
@@ -3156,7 +3125,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem",
                       "target_user_more_privileged": "#/components/schemas/TargetUserMorePrivilegedProblem"
                     }
@@ -3540,14 +3508,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action",
+            "description": "`permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/PermissionDeniedProblem"
                     },
@@ -3558,7 +3523,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem",
                       "permission_required_for_action": "#/components/schemas/PermissionRequiredForActionProblem"
                     }
@@ -3677,14 +3641,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions",
+            "description": "`grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/GrantExceedsOwnPermissionsProblem"
                     },
@@ -3695,7 +3656,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
                       "grant_exceeds_own_permissions": "#/components/schemas/GrantExceedsOwnPermissionsProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem"
                     }
@@ -3815,25 +3775,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -3947,25 +3893,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -4102,14 +4034,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions",
+            "description": "`grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/GrantExceedsOwnPermissionsProblem"
                     },
@@ -4120,7 +4049,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
                       "grant_exceeds_own_permissions": "#/components/schemas/GrantExceedsOwnPermissionsProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem"
                     }
@@ -4284,25 +4212,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -4449,14 +4363,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions",
+            "description": "`grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/GrantExceedsOwnPermissionsProblem"
                     },
@@ -4467,7 +4378,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
                       "grant_exceeds_own_permissions": "#/components/schemas/GrantExceedsOwnPermissionsProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem"
                     }
@@ -4618,14 +4528,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions",
+            "description": "`grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/GrantExceedsOwnPermissionsProblem"
                     },
@@ -4636,7 +4543,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
                       "grant_exceeds_own_permissions": "#/components/schemas/GrantExceedsOwnPermissionsProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem"
                     }
@@ -4789,14 +4695,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions",
+            "description": "`grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/GrantExceedsOwnPermissionsProblem"
                     },
@@ -4807,7 +4710,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
                       "grant_exceeds_own_permissions": "#/components/schemas/GrantExceedsOwnPermissionsProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem"
                     }
@@ -4944,25 +4846,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -5095,14 +4983,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions",
+            "description": "`grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/GrantExceedsOwnPermissionsProblem"
                     },
@@ -5113,7 +4998,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
                       "grant_exceeds_own_permissions": "#/components/schemas/GrantExceedsOwnPermissionsProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem"
                     }
@@ -5272,14 +5156,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions",
+            "description": "`grant_exceeds_own_permissions`: You can only grant or revoke permissions you hold yourself; `permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/GrantExceedsOwnPermissionsProblem"
                     },
@@ -5290,7 +5171,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
                       "grant_exceeds_own_permissions": "#/components/schemas/GrantExceedsOwnPermissionsProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem"
                     }
@@ -5761,25 +5641,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -6044,25 +5910,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -6180,25 +6032,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -6326,25 +6164,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -7072,25 +6896,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -7365,25 +7175,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -7525,25 +7321,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -7661,25 +7443,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -8125,25 +7893,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -8408,25 +8162,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -8544,25 +8284,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -8680,25 +8406,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -8732,7 +8444,7 @@
           "OBSERVATIONS"
         ],
         "summary": "List Observations",
-        "description": "List observations with the ids of their media. Every filter is an optional query parameter.\n\nA user sees the posts of their data scope (post.access_all: every post). Media files are loaded with\nselectinload: two queries for any number of observations.",
+        "description": "List observations with the ids of their media. Every filter is an optional query parameter.\n\nThe observations of the posts where observation.view is in effect; archived ones only with include_deleted\n(requires observation.archive), and only at the posts where observation.archive is in effect. Media files are\nloaded with selectinload: two queries for any number of observations.",
         "operationId": "list_observations",
         "security": [
           {
@@ -9391,7 +9103,7 @@
           "OBSERVATIONS"
         ],
         "summary": "Create Observation",
-        "description": "Create new observation.\nUsers can only create observations for their assigned post. An archived post: 409 post_archived.\nNote: Field validation is handled by Pydantic model validators.",
+        "description": "Create new observation.\nNeeds observation.view and observation.create in effect at the post. An archived post: 409 post_archived.\nNote: Field validation is handled by Pydantic model validators.",
         "operationId": "create_observation",
         "requestBody": {
           "content": {
@@ -9572,7 +9284,7 @@
           "OBSERVATIONS"
         ],
         "summary": "Update Observation",
-        "description": "Update existing observation (tags included).\nUsers can only update observations from their assigned post.\nArchived observations answer 404 until restored (POST /{observation_id}/restore); an archived post: 409 post_archived.",
+        "description": "Update existing observation (tags included).\nNeeds observation.view and observation.update in effect at its post; owner or observation.manage_any there.\nArchived observations answer 404 until restored (POST /{observation_id}/restore); an archived post: 409 post_archived.",
         "operationId": "update_observation",
         "security": [
           {
@@ -9768,7 +9480,7 @@
           "OBSERVATIONS"
         ],
         "summary": "Mark Observation Disappeared",
-        "description": "Mark observation as disappeared.\nUsers can only mark observations from their assigned post. An archived post: 409 post_archived.",
+        "description": "Mark observation as disappeared.\nNeeds observation.view and observation.update in effect at its post; owner or observation.manage_any there.\nAn archived post: 409 post_archived.",
         "operationId": "mark_observation_disappeared",
         "security": [
           {
@@ -10041,7 +9753,7 @@
           "OBSERVATIONS"
         ],
         "summary": "Generate Observation Report",
-        "description": "Generate an Excel (.xlsx) report for observations. Admin only.\n\nThe report header contains the filter criteria used (in Ukrainian).\nOne row per frequency band (rc_freq_part: rc bands, video_freq_part: video bands, all_fields: every band);\nthe observation columns repeat for each of its bands. Bands of archived observations and archived bands\nappear only with include_deleted. Posts outside the caller's scope are never included.\nall_fields columns: user, post, signal type, band kind, emitter group, frequency min/max/center, bandwidth,\nobserved time, disappeared time, duration (minutes, one decimal), comment, creation date, tags.\nAll datetimes are displayed in Kyiv local time (EET/EEST).\n\nFilter combinations supported:\n- By specific observation IDs\n- By date range (observed_at or created_at)\n- By user IDs (one or many)\n- By post IDs (one or many)\n- By signal type IDs\n- By statuses\n- Any combination of the above",
+        "description": "Generate an Excel (.xlsx) report for observations (observation.view and export.create).\n\nThe report header contains the filter criteria used (in Ukrainian).\nOne row per frequency band (rc_freq_part: rc bands, video_freq_part: video bands, all_fields: every band);\nthe observation columns repeat for each of its bands. Bands of archived observations and archived bands\nappear only with include_deleted (requires observation.archive), and only for the posts where\nobservation.archive is in effect. Only the posts where both observation.view and export.create are in effect\nare included; a post_ids entry outside them answers 403.\nall_fields columns: user, post, signal type, band kind, emitter group, frequency min/max/center, bandwidth,\nobserved time, disappeared time, duration (minutes, one decimal), comment, creation date, tags.\nAll datetimes are displayed in Kyiv local time (EET/EEST).\n\nFilter combinations supported:\n- By specific observation IDs\n- By date range (observed_at or created_at)\n- By user IDs (one or many)\n- By post IDs (one or many)\n- By signal type IDs\n- By statuses\n- Any combination of the above",
         "operationId": "generate_observation_report",
         "requestBody": {
           "content": {
@@ -10138,14 +9850,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `no_post_assigned`: You are not assigned to any post. Please contact an administrator.; `permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action; `post_access_denied`: No access to the data of this post",
+            "description": "`no_post_assigned`: You are not assigned to any post. Please contact an administrator.; `permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action; `post_access_denied`: No access to the data of this post; `post_write_denied`: Read-only access to this post",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/NoPostAssignedProblem"
                     },
@@ -10157,16 +9866,19 @@
                     },
                     {
                       "$ref": "#/components/schemas/PostAccessDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PostWriteDeniedProblem"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
                       "no_post_assigned": "#/components/schemas/NoPostAssignedProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem",
                       "permission_required_for_action": "#/components/schemas/PermissionRequiredForActionProblem",
-                      "post_access_denied": "#/components/schemas/PostAccessDeniedProblem"
+                      "post_access_denied": "#/components/schemas/PostAccessDeniedProblem",
+                      "post_write_denied": "#/components/schemas/PostWriteDeniedProblem"
                     }
                   }
                 }
@@ -10187,7 +9899,7 @@
           "OBSERVATIONS"
         ],
         "summary": "Archive Observation",
-        "description": "Archive an observation (is_deleted=true). Owner or observation.manage_any, write access to its post.\n\nNothing is removed: media files stay attached, the row is hidden from lists unless include_deleted=true.\nUndo with POST /{observation_id}/restore. Already archived or unknown: 404. In an archived post it needs\nadmin.true AND post.access_all; post.access_all without admin.true gets 409 post_archived, a home-post or\naccess-row user 403.",
+        "description": "Archive an observation (is_deleted=true). observation.view and observation.archive in effect at its post;\nowner or observation.manage_any in effect there.\n\nNothing is removed: media files stay attached, the row is hidden from lists unless include_deleted=true.\nUndo with POST /{observation_id}/restore. Already archived or unknown: 404. In an archived post it also needs\npost.archive in effect at the post (otherwise 409 post_archived); a grant on the archived post itself no longer\napplies (403).",
         "operationId": "archive_observation",
         "security": [
           {
@@ -10359,7 +10071,7 @@
           "OBSERVATIONS"
         ],
         "summary": "Restore Observation",
-        "description": "Restore an archived observation (is_deleted=false). Same rules as archive (an archived post: only\nadmin.true AND post.access_all). Not archived: 409.",
+        "description": "Restore an archived observation (is_deleted=false). Same rules as archive (an archived post: post.archive\nin effect at it). Not archived: 409.",
         "operationId": "restore_observation",
         "security": [
           {
@@ -10535,7 +10247,7 @@
           "OBSERVATIONS"
         ],
         "summary": "List Observation Frequencies",
-        "description": "Bands of one observation. Archived bands and bands of an archived observation need include_deleted=true.",
+        "description": "Bands of one observation. Archived bands and bands of an archived observation need include_deleted=true\n(requires observation.archive) and observation.archive in effect at the observation's post.",
         "operationId": "list_observation_frequencies",
         "security": [
           {
@@ -10691,7 +10403,7 @@
           "OBSERVATIONS"
         ],
         "summary": "Add Observation Frequency",
-        "description": "Add a band to an observation. Owner or observation.manage_any, write access to its post.\nArchived or unknown observation: 404. An archived post: 409 post_archived (every band change).",
+        "description": "Add a band to an observation. observation.view and observation.update in effect at its post; owner or\nobservation.manage_any in effect there.\nArchived or unknown observation: 404. An archived post: 409 post_archived (every band change).",
         "operationId": "add_observation_frequency",
         "security": [
           {
@@ -11050,7 +10762,7 @@
           "OBSERVATIONS"
         ],
         "summary": "Archive Observation Frequency",
-        "description": "Archive a band (is_deleted=true): it leaves the observation response, lists, filters and reports.\nOwner or observation.manage_any, write access to the post. Already archived, unknown, or archived\nobservation: 404. The last active band of an observation: 409.",
+        "description": "Archive a band (is_deleted=true): it leaves the observation response, lists, filters and reports.\nOwner or observation.manage_any, observation.view and observation.archive in effect at the post. Already\narchived, unknown, or archived observation: 404. The last active band of an observation: 409.",
         "operationId": "archive_observation_frequency",
         "security": [
           {
@@ -12654,7 +12366,7 @@
           "POSTS"
         ],
         "summary": "Archive Post",
-        "description": "Archive a post (is_deleted=true). post.archive must be in effect at the post.\n\nNothing is removed and no user row changes. The post leaves the data scope of its home users and of its\nuser_post_access rows until it is restored (they keep the rows); only post.access_all still reads its data. Its\nobservations and media become read-only history: writes answer 409 post_archived, except that callers with\nadmin.true AND post.access_all (plus observation.view, observation.archive and ownership or\nobservation.manage_any) still archive and restore its observations. It cannot\nbecome a home post or get new access rows. Hidden from lists unless include_deleted=true.\nUndo with POST /{post_id}/restore. Already archived or unknown: 404.",
+        "description": "Archive a post (is_deleted=true). post.archive must be in effect at the post.\n\nNothing is removed and no user row changes. Permissions granted on the post itself (its home users, its\nuser_post_access rows) stop applying until it is restored; permissions inherited from a group or the root keep\nread access to its data. Its observations and media become read-only history: writes answer 409 post_archived,\nexcept that callers with post.archive in effect at the post (plus observation.view, observation.archive and\nownership or observation.manage_any) still archive and restore its observations. It cannot\nbecome a home post or get new access rows. Hidden from lists unless include_deleted=true.\nUndo with POST /{post_id}/restore. Already archived or unknown: 404.",
         "operationId": "archive_post",
         "security": [
           {
@@ -13163,14 +12875,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action",
+            "description": "`permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/PermissionDeniedProblem"
                     },
@@ -13181,7 +12890,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem",
                       "permission_required_for_action": "#/components/schemas/PermissionRequiredForActionProblem"
                     }
@@ -13290,25 +12998,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -13438,14 +13132,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action",
+            "description": "`permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/PermissionDeniedProblem"
                     },
@@ -13456,7 +13147,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem",
                       "permission_required_for_action": "#/components/schemas/PermissionRequiredForActionProblem"
                     }
@@ -13573,25 +13263,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -13717,25 +13393,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -13881,25 +13543,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -14027,25 +13675,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -14202,7 +13836,7 @@
           "MEDIA"
         ],
         "summary": "List Media Files",
-        "description": "List media files with filters. Each item carries thumbnail_status and signed thumbnail_urls.",
+        "description": "List media files with filters. Each item carries thumbnail_status and signed thumbnail_urls.\n\nMedia of the posts where media.view is in effect; archived media only with include_deleted (requires\nmedia.archive), and only at the posts where media.archive is in effect.",
         "operationId": "list_media_files",
         "security": [
           {
@@ -14679,7 +14313,7 @@
           "MEDIA"
         ],
         "summary": "Get Storage Statistics",
-        "description": "Get storage statistics and health information",
+        "description": "Get storage statistics and health information (media.monitor)",
         "operationId": "get_storage_statistics",
         "responses": {
           "200": {
@@ -14757,25 +14391,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -14794,7 +14414,7 @@
           "MEDIA"
         ],
         "summary": "Get Poster Status",
-        "description": "Poster queue depth by status and the media worker heartbeats (administration).",
+        "description": "Poster queue depth by status and the media worker heartbeats (media.monitor).",
         "operationId": "get_poster_status",
         "responses": {
           "200": {
@@ -14872,25 +14492,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -14997,25 +14603,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -17428,7 +17020,7 @@
           "MEDIA"
         ],
         "summary": "Regenerate Thumbnail",
-        "description": "Video: delete the poster and queue extraction again. Images are rendered on demand, nothing to regenerate.\nMedia of an archived post: 409 post_archived.",
+        "description": "Video: delete the poster and queue extraction again. Images are rendered on demand, nothing to regenerate.\nNeeds media.view and media.update in effect at the post of the media (media.update at the root for media\nwithout an observation). Media of an archived post: 409 post_archived.",
         "operationId": "regenerate_thumbnail",
         "security": [
           {
@@ -17536,19 +17128,19 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `no_post_assigned`: You are not assigned to any post. Please contact an administrator.; `permission_denied`: Insufficient permissions; `post_access_denied`: No access to the data of this post; `post_write_denied`: Read-only access to this post",
+            "description": "`no_post_assigned`: You are not assigned to any post. Please contact an administrator.; `permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action; `post_access_denied`: No access to the data of this post; `post_write_denied`: Read-only access to this post",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
                     {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
                       "$ref": "#/components/schemas/NoPostAssignedProblem"
                     },
                     {
                       "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionRequiredForActionProblem"
                     },
                     {
                       "$ref": "#/components/schemas/PostAccessDeniedProblem"
@@ -17560,9 +17152,9 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
                       "no_post_assigned": "#/components/schemas/NoPostAssignedProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "permission_required_for_action": "#/components/schemas/PermissionRequiredForActionProblem",
                       "post_access_denied": "#/components/schemas/PostAccessDeniedProblem",
                       "post_write_denied": "#/components/schemas/PostWriteDeniedProblem"
                     }
@@ -19389,25 +18981,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -19690,25 +19268,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -19826,25 +19390,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -19986,25 +19536,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions",
+            "description": "`permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
-                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
-                    }
-                  }
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -21942,14 +21478,11 @@
             }
           },
           "403": {
-            "description": "`admin_required`: Administrator access required; `permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action",
+            "description": "`permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AdminRequiredProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/PermissionDeniedProblem"
                     },
@@ -21960,7 +21493,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "admin_required": "#/components/schemas/AdminRequiredProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem",
                       "permission_required_for_action": "#/components/schemas/PermissionRequiredForActionProblem"
                     }
@@ -24169,79 +23701,6 @@
             "status": 401,
             "title": "Account not found",
             "type": "https://example.org/problems/account_not_found"
-          }
-        ]
-      },
-      "AdminRequiredProblem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "title": "Type",
-            "description": "URI of the problem type; dereference it for its documentation"
-          },
-          "title": {
-            "type": "string",
-            "const": "Administrator access required",
-            "title": "Title",
-            "description": "Summary of the problem type"
-          },
-          "status": {
-            "type": "integer",
-            "const": 403,
-            "title": "Status",
-            "description": "HTTP status code"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "Explanation of this occurrence",
-            "examples": [
-              "Administrator access required"
-            ]
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "description": "Path of the request that failed"
-          },
-          "code": {
-            "type": "string",
-            "const": "admin_required",
-            "title": "Code",
-            "description": "Key of exactly this problem in the localization package"
-          },
-          "required": {
-            "$ref": "#/components/schemas/RequiredPermissions"
-          },
-          "missing": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Missing"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "code"
-        ],
-        "title": "AdminRequiredProblem",
-        "description": "Administrator access required (HTTP 403). Problem type admin_required.",
-        "examples": [
-          {
-            "code": "admin_required",
-            "detail": "Administrator access required",
-            "instance": "/api/v1/...",
-            "status": 403,
-            "title": "Administrator access required",
-            "type": "https://example.org/problems/admin_required"
           }
         ]
       },
@@ -26872,7 +26331,7 @@
           "is_admin": {
             "type": "boolean",
             "title": "Is Admin",
-            "description": "Holds admin.true: may open the administration area"
+            "description": "Holds admin.true (legacy flag: no route checks it, every route checks its own permissions)"
           },
           "permissions": {
             "items": {
@@ -31231,16 +30690,11 @@
             },
             "type": "array",
             "title": "Any"
-          },
-          "admin": {
-            "type": "boolean",
-            "title": "Admin",
-            "default": false
           }
         },
         "type": "object",
         "title": "PermissionCheckRequest",
-        "description": "Same shape as a route requirement: all AND any AND (admin.true if admin)"
+        "description": "Same shape as a route requirement: every permission of all AND one of any"
       },
       "PermissionCheckResponse": {
         "properties": {
@@ -31254,18 +30708,12 @@
             },
             "type": "array",
             "title": "Missing",
-            "description": "Granular permissions the caller lacks"
-          },
-          "admin_required": {
-            "type": "boolean",
-            "title": "Admin Required",
-            "description": "True when admin.true was required and the caller lacks it"
+            "description": "Permissions the caller lacks"
           }
         },
         "type": "object",
         "required": [
-          "allowed",
-          "admin_required"
+          "allowed"
         ],
         "title": "PermissionCheckResponse"
       },
@@ -32736,17 +32184,11 @@
             "type": "array",
             "title": "Any",
             "description": "At least one permission in this list is required"
-          },
-          "admin": {
-            "type": "boolean",
-            "title": "Admin",
-            "description": "admin.true is additionally required",
-            "default": false
           }
         },
         "type": "object",
         "title": "RequiredPermissions",
-        "description": "Permission requirement of a route, mirrors services.permissions.Require"
+        "description": "Permission requirement of a route, mirrors auth.require.Require"
       },
       "RoleArchivedNotAssignableProblem": {
         "properties": {
@@ -35861,7 +35303,7 @@
               }
             ],
             "title": "Post Ids",
-            "description": "Posts the figures are limited to; null means every post (administrators and post.access_all)"
+            "description": "Posts the figures are limited to; null means every post (statistics.view held at the root)"
           },
           "posts": {
             "$ref": "#/components/schemas/PostStatistics"
@@ -38453,7 +37895,7 @@
           "is_admin": {
             "type": "boolean",
             "title": "Is Admin",
-            "description": "Holds admin.true: may open the administration area"
+            "description": "Holds admin.true (legacy flag: no route checks it, every route checks its own permissions)"
           },
           "permissions": {
             "items": {
@@ -39084,7 +38526,7 @@
           "expires_at"
         ],
         "title": "UserSessionResponse",
-        "description": "A session as administrators see it, ended ones included"
+        "description": "A session as the session routes of a user list it, ended ones included"
       },
       "UserSessionsResponse": {
         "properties": {

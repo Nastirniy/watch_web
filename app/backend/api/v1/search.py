@@ -57,7 +57,7 @@ from app.backend.api.v1.models.response.tags import TagResponse
 from app.backend.api.v1.models.response.media import MediaFileInfo
 from app.backend.api.v1.models.response.media_formats import MediaFormatResponse
 from app.backend.api.v1.models.response.search import SearchResponse
-from app.backend.errors.openapi import ADMIN, GUARDED, problems
+from app.backend.errors.openapi import GUARDED, problems
 from app.backend.enums.errors import AccessErrorCode
 
 
@@ -105,11 +105,11 @@ async def search_observations(
     auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW])),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse[ObservationWithMedia]:
-    access_post_ids = AccessControlService.resolve_post_scope(auth, params.post_id)
-
-    AccessControlService.check_include_deleted(auth, params, Permissions.OBSERVATION_ARCHIVE)
+    # Scope of GET /observations/list-all: observation.view, archived rows where observation.archive is in effect
+    archived = AccessControlService.archived_scope(auth, params, Permissions.OBSERVATION_ARCHIVE)
+    access_post_ids = AccessControlService.resolve_scope(auth, Permissions.OBSERVATION_VIEW, params.post_id)
     query = select(Observation)
-    query = ObservationFilterService.apply_filters(query, params, access_post_ids)
+    query = ObservationFilterService.apply_filters(query, params, access_post_ids, archived_post_ids=archived)
     result = await session.exec(query)
     items = result.all()
 
@@ -117,7 +117,7 @@ async def search_observations(
     processed_items = [ObservationWithMedia.model_validate(obs) for obs in items]
 
     count_query = select(func.count()).select_from(Observation)
-    count_query = ObservationFilterService.apply_filters_for_count(count_query, params, access_post_ids)
+    count_query = ObservationFilterService.apply_filters_for_count(count_query, params, access_post_ids, archived_post_ids=archived)
     total = (await session.exec(count_query)).one()
 
     await log_search(request, session, auth, "observations", params.model_dump(exclude_none=True), len(items))
@@ -205,12 +205,12 @@ async def search_posts(
     response_model=SearchResponse[RoleResponse],
     summary="Search roles",
     description="Search roles with typed filters.",
-    responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *ADMIN),
+    responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
 )
 async def search_roles(
     request: Request,
     params: Annotated[RoleFilterParams, Query()],
-    auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW], admin=True)),
+    auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW])),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse[RoleResponse]:
     AccessControlService.check_include_deleted(auth, params, Permissions.ROLE_ARCHIVE)
@@ -338,16 +338,17 @@ async def search_media(
     auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW])),
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse[MediaFileInfo]:
-    AccessControlService.check_include_deleted(auth, params, Permissions.MEDIA_ARCHIVE)
-    access_post_ids = AccessControlService.post_scope(auth)
+    # Scope of GET /media/: media.view, archived media where media.archive is in effect
+    archived = AccessControlService.archived_scope(auth, params, Permissions.MEDIA_ARCHIVE)
+    access_post_ids = AccessControlService.scope_for(auth, Permissions.MEDIA_VIEW)
 
     query = select(MediaFile)
-    query = MediaFilterService.apply_filters(query, params, access_post_ids)
+    query = MediaFilterService.apply_filters(query, params, access_post_ids, archived_post_ids=archived)
     result = await session.exec(query)
     items = result.all()
 
     count_query = select(func.count()).select_from(MediaFile)
-    count_query = MediaFilterService.apply_filters_for_count(count_query, params, access_post_ids)
+    count_query = MediaFilterService.apply_filters_for_count(count_query, params, access_post_ids, archived_post_ids=archived)
     total = (await session.exec(count_query)).one()
 
     await log_search(request, session, auth, "media", params.model_dump(exclude_none=True), len(items))

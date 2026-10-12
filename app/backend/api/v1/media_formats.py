@@ -34,7 +34,7 @@ from app.backend.api.v1.models.query.media_formats import MediaFormatFilterParam
 from app.backend.filters.media_format_filter import MediaFormatFilterService
 from app.backend.errors.problems import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
-from app.backend.errors.openapi import ADMIN, GUARDED, problems
+from app.backend.errors.openapi import GUARDED, problems
 
 router = APIRouter(prefix=MediaFormatRoutes.BASE.value, tags=[MediaFormatRoutes.tag()])
 
@@ -103,14 +103,14 @@ async def list_media_formats(
     responses=problems(
         ErrorCode.MEDIA_FORMAT_CONTENT_TYPE_CLASH, ErrorCode.MEDIA_FORMAT_EXISTS,
         ErrorCode.MEDIA_FORMAT_EXTENSION_CLASH, ErrorCode.MEDIA_FORMAT_SIZE_ABOVE_CEILING,
-        *ADMIN,
+        *GUARDED,
     ),
 )
 async def create_media_format(
         request: Request,
         data: MediaFormatCreate,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.MEDIA_FORMAT_VIEW, Permissions.MEDIA_FORMAT_CREATE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.MEDIA_FORMAT_VIEW, Permissions.MEDIA_FORMAT_CREATE]))
 ):
     """Add an accepted format. Creating an archived content_type again restores it with the new values."""
     current_user = auth.user
@@ -161,7 +161,7 @@ async def get_media_format(
         auth: AuthContext = Depends(require(all=[Permissions.MEDIA_FORMAT_VIEW]))
 ):
     """One format; archived rows are visible to holders of media_format.archive so they can be restored."""
-    row = await _get_format(session, format_id, include_deleted=auth.has(Permissions.MEDIA_FORMAT_ARCHIVE))
+    row = await _get_format(session, format_id, include_deleted=auth.has_anywhere(Permissions.MEDIA_FORMAT_ARCHIVE))
     return MediaFormatResponse.model_validate(row)
 
 
@@ -172,7 +172,7 @@ async def get_media_format(
         ErrorCode.MEDIA_FORMAT_CONTENT_TYPE_CLASH, ErrorCode.MEDIA_FORMAT_CONTENT_TYPE_MISMATCH,
         ErrorCode.MEDIA_FORMAT_EXISTS, ErrorCode.MEDIA_FORMAT_EXTENSION_CLASH, ErrorCode.MEDIA_FORMAT_NO_FIELDS,
         ErrorCode.MEDIA_FORMAT_SIZE_ABOVE_CEILING, ErrorCode.MEDIA_FORMAT_NOT_FOUND,
-        *ADMIN,
+        *GUARDED,
     ),
 )
 async def update_media_format(
@@ -180,7 +180,7 @@ async def update_media_format(
         format_id: int,
         data: MediaFormatUpdate,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.MEDIA_FORMAT_VIEW, Permissions.MEDIA_FORMAT_UPDATE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.MEDIA_FORMAT_VIEW, Permissions.MEDIA_FORMAT_UPDATE]))
 ):
     """Partial update. Archived formats answer 404 until restored (POST /{format_id}/restore)."""
     current_user = auth.user
@@ -228,13 +228,13 @@ async def update_media_format(
 @router.post(
     MediaFormatRoutes.FORMAT_ARCHIVE.value,
     response_model=MediaFormatResponse,
-    responses=problems(ErrorCode.MEDIA_FORMAT_NOT_FOUND, *ADMIN),
+    responses=problems(ErrorCode.MEDIA_FORMAT_NOT_FOUND, *GUARDED),
 )
 async def archive_media_format(
         request: Request,
         format_id: int,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.MEDIA_FORMAT_VIEW, Permissions.MEDIA_FORMAT_ARCHIVE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.MEDIA_FORMAT_VIEW, Permissions.MEDIA_FORMAT_ARCHIVE]))
 ):
     """Archive a format (is_deleted=true): it stops being accepted immediately, uploaded files are untouched.
     Undo with POST /{format_id}/restore or by creating the same content_type again. Already archived or unknown: 404."""
@@ -261,14 +261,14 @@ async def archive_media_format(
     response_model=MediaFormatResponse,
     responses=problems(
         ErrorCode.MEDIA_FORMAT_CONTENT_TYPE_CLASH, ErrorCode.MEDIA_FORMAT_EXTENSION_CLASH,
-        ErrorCode.MEDIA_FORMAT_NOT_FOUND, ErrorCode.MEDIA_FORMAT_NOT_ARCHIVED, *ADMIN,
+        ErrorCode.MEDIA_FORMAT_NOT_FOUND, ErrorCode.MEDIA_FORMAT_NOT_ARCHIVED, *GUARDED,
     ),
 )
 async def restore_media_format(
         request: Request,
         format_id: int,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.MEDIA_FORMAT_VIEW, Permissions.MEDIA_FORMAT_ARCHIVE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.MEDIA_FORMAT_VIEW, Permissions.MEDIA_FORMAT_ARCHIVE]))
 ):
     """Restore an archived format (is_deleted=false): it is accepted again. Its extensions and aliases must not
     collide with a live format (400). Not archived: 409."""

@@ -408,7 +408,8 @@ async def test_poster_regenerate_in_an_archived_post_answers_post_archived(clien
 
 @pytest.mark.asyncio
 async def test_administrators_archive_and_restore_observations_of_an_archived_post(client, db, headers):
-    """admin.true with observation.view and observation.archive; every other caller gets post_archived"""
+    """post.archive in effect at the archived post (here the built-in admin role at the root) with observation.view
+    and observation.archive; post.access_all without post.archive gets post_archived, a home-post user 403"""
     scene = await _scene(db)
     await _set_archived(db, scene.post)
     archive = V1.path(ObservationRoutes.OBSERVATION_ARCHIVE, observation_id=scene.observation.id)

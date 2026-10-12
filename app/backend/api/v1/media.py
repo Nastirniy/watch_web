@@ -21,6 +21,7 @@ from app.backend.models.storyboard import VideoStoryboard
 from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
 from app.backend.auth.access_control import AccessControlService
+from app.backend.auth.scope import ROOT
 from app.backend.services.media.manager import get_media_manager
 from app.backend.services.media import formats, jobs, renderer, uploads, urls as thumb_urls
 from app.backend.services.media.storyboards import build_vtt, layout_usable, status_for
@@ -66,7 +67,7 @@ from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.errors.problems import ApiError
 from app.backend.errors.coded import CodedError
 from app.backend.api.shared.openapi_docs import empty_response, file_response, header
-from app.backend.errors.openapi import ADMIN, GUARDED, problems
+from app.backend.errors.openapi import GUARDED, problems
 
 router = APIRouter(prefix=MediaRoutes.BASE.value, tags=[MediaRoutes.tag()])
 _logger = get_api_logger()
@@ -102,20 +103,25 @@ async def list_media_files(
     session: AsyncSession = Depends(get_session),
     auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW]))
 ):
-    """List media files with filters. Each item carries thumbnail_status and signed thumbnail_urls."""
-    AccessControlService.check_include_deleted(auth, filters, Permissions.MEDIA_ARCHIVE)
+    """List media files with filters. Each item carries thumbnail_status and signed thumbnail_urls.
+
+    Media of the posts where media.view is in effect; archived media only with include_deleted (requires
+    media.archive), and only at the posts where media.archive is in effect."""
+    archived = AccessControlService.archived_scope(auth, filters, Permissions.MEDIA_ARCHIVE)
     query = select(MediaFile)
-    query = MediaFilterService.apply_filters(query, filters, AccessControlService.post_scope(auth))
+    query = MediaFilterService.apply_filters(
+        query, filters, AccessControlService.scope_for(auth, Permissions.MEDIA_VIEW), archived_post_ids=archived,
+    )
     result = await session.exec(query)
     return [MediaFileInfo.model_validate(mf) for mf in result.all()]
 
 
-@router.get(MediaRoutes.STORAGE_STATISTICS.value, response_model=StorageStatisticsResponse, responses=problems(*ADMIN))
+@router.get(MediaRoutes.STORAGE_STATISTICS.value, response_model=StorageStatisticsResponse, responses=problems(*GUARDED))
 async def get_storage_statistics(
     session: AsyncSession = Depends(get_session),
-    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW], admin=True))
+    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_MONITOR]))
 ):
-    """Get storage statistics and health information"""
+    """Get storage statistics and health information (media.monitor)"""
     return await get_media_manager().get_storage_statistics(session)
 
 
@@ -123,12 +129,12 @@ async def get_storage_statistics(
 # Poster queue administration (declared before the /{media_id} routes)
 # ---------------------------------------------------------------------------
 
-@router.get(MediaRoutes.POSTERS_STATUS.value, response_model=PosterStatusResponse, responses=problems(*ADMIN))
+@router.get(MediaRoutes.POSTERS_STATUS.value, response_model=PosterStatusResponse, responses=problems(*GUARDED))
 async def get_poster_status(
     session: AsyncSession = Depends(get_session),
-    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW], admin=True))
+    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_MONITOR]))
 ):
-    """Poster queue depth by status and the media worker heartbeats (administration)."""
+    """Poster queue depth by status and the media worker heartbeats (media.monitor)."""
     counts = await jobs.poster_counts(session)
     workers = []
     for row in await jobs.worker_heartbeats(session):
@@ -142,12 +148,12 @@ async def get_poster_status(
     return PosterStatusResponse(posters=counts, workers=workers, worker_alive=alive)
 
 
-@router.post(MediaRoutes.POSTERS_RECONCILE.value, response_model=PosterReconcileResponse, responses=problems(*ADMIN))
+@router.post(MediaRoutes.POSTERS_RECONCILE.value, response_model=PosterReconcileResponse, responses=problems(*GUARDED))
 async def reconcile_posters(
     request: Request,
     body: PosterReconcileRequest,
     session: AsyncSession = Depends(get_session),
-    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW, Permissions.MEDIA_UPDATE], admin=True))
+    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW, Permissions.MEDIA_UPDATE]))
 ):
     """Re-queue videos whose poster is missing on disk or untracked; optionally retry failed ones (administration)."""
     counts = await jobs.reconcile_posters(session, storage_root(), retry_failed=body.retry_failed)
@@ -187,7 +193,7 @@ async def get_media_info(
         raise ApiError(ErrorCode.MEDIA_NOT_FOUND)
 
     observation = await get_observation_from_media(session, media_file)
-    AccessControlService.check_post_view(auth, observation.post_id, "media")
+    AccessControlService.check_post(auth, Permissions.MEDIA_VIEW, observation.post_id, "media")
     return MediaFileInfo.model_validate(media_file)
 
 
@@ -213,7 +219,7 @@ async def download_media_file(
     """Download the original as an attachment. nginx serves it via X-Accel-Redirect; otherwise FileResponse with Range support."""
     media_file = await get_media_or_404(session, media_id)
     observation = await get_observation_from_media(session, media_file)
-    AccessControlService.check_post_view(auth, observation.post_id, "media")
+    AccessControlService.check_post(auth, Permissions.MEDIA_VIEW, observation.post_id, "media")
     return original_file_response(media_file, "attachment", request.headers.get("range"))
 
 
@@ -239,20 +245,22 @@ async def stream_media_file(
     """Serve the original inline (video and audio players). Same transport as download, with Range support."""
     media_file = await get_media_or_404(session, media_id)
     observation = await get_observation_from_media(session, media_file)
-    AccessControlService.check_post_view(auth, observation.post_id, "media")
+    AccessControlService.check_post(auth, Permissions.MEDIA_VIEW, observation.post_id, "media")
     return original_file_response(media_file, "inline", request.headers.get("range"))
 
 
 async def _set_media_archived(request: Request, session: AsyncSession, auth: AuthContext, media_id: int, archived: bool) -> MediaFileInfo:
-    """Shared body of archive / restore: post write access, ownership (media.manage_any overrides), flag flip, audit row.
-    Media of an archived post: 409 post_archived (after the 403 checks)."""
+    """Shared body of archive / restore: media.view and media.archive in effect at the post, ownership
+    (media.manage_any in effect there overrides), flag flip, audit row. Media of an archived post: 409 post_archived
+    (after the 403 checks)."""
     current_user = auth.user
     media_file = await get_media_or_404(session, media_id, include_deleted=True)
 
     observation = None
     if media_file.observation_id:
         observation = await get_observation_from_media(session, media_file)
-        AccessControlService.check_post_write(auth, observation.post_id, "media")
+        AccessControlService.check_post(auth, Permissions.MEDIA_VIEW, observation.post_id, "media")
+        AccessControlService.check_post(auth, Permissions.MEDIA_ARCHIVE, observation.post_id, "media")
     AccessControlService.check_media_ownership(auth, media_file, observation)
     if observation is not None:
         await ensure_post_not_archived(session, observation.post_id)
@@ -487,7 +495,7 @@ async def list_media_for_observation(
     )).first()
     if not observation:
         raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
-    AccessControlService.check_post_view(auth, observation.post_id, "observation media")
+    AccessControlService.check_post(auth, Permissions.MEDIA_VIEW, observation.post_id, "observation media")
 
     media_query = select(MediaFile).options(selectinload(MediaFile.user)).where(
         MediaFile.observation_id == request.observation_id,
@@ -575,7 +583,7 @@ async def get_media_thumbnail(
     """
     media_file = await get_media_or_404(session, media_id)
     observation = await get_observation_from_media(session, media_file)
-    AccessControlService.check_post_view(auth, observation.post_id, "media thumbnail")
+    AccessControlService.check_post(auth, Permissions.MEDIA_VIEW, observation.post_id, "media thumbnail")
 
     if media_file.thumbnail_status != ThumbnailStatus.READY.value:
         return _not_ready_response(media_file)
@@ -623,7 +631,7 @@ async def get_media_storyboard(
     """
     media_file = await get_media_or_404(session, media_id)
     observation = await get_observation_from_media(session, media_file)
-    AccessControlService.check_post_view(auth, observation.post_id, "media storyboard")
+    AccessControlService.check_post(auth, Permissions.MEDIA_VIEW, observation.post_id, "media storyboard")
 
     config = settings.storage.storyboard
     # The row loaded here decides, not the job status read with the media row: it may have changed in between
@@ -697,7 +705,7 @@ async def share_media_thumbnail(
     """Signed, expiring public URL for a thumbnail or preview. Loads in an <img> without a bearer token."""
     media_file = await get_media_or_404(session, media_id)
     observation = await get_observation_from_media(session, media_file)
-    AccessControlService.check_post_view(auth, observation.post_id, "media thumbnail")
+    AccessControlService.check_post(auth, Permissions.MEDIA_VIEW, observation.post_id, "media thumbnail")
 
     if media_file.thumbnail_status != ThumbnailStatus.READY.value:
         return _not_ready_response(media_file)
@@ -722,23 +730,27 @@ async def share_media_thumbnail(
     MediaRoutes.MEDIA_THUMBNAIL_REGENERATE.value,
     response_model=ThumbnailRegenerateResponse,
     responses=problems(
-        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED,
-        ErrorCode.MEDIA_NOT_FOUND, ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.POST_ARCHIVED,
-        ErrorCode.THUMBNAILS_UNSUPPORTED, *ADMIN,
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION,
+        AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.MEDIA_NOT_FOUND,
+        ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.POST_ARCHIVED, ErrorCode.THUMBNAILS_UNSUPPORTED, *GUARDED,
     ),
 )
 async def regenerate_thumbnail(
     media_id: int,
     session: AsyncSession = Depends(get_session),
-    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW, Permissions.MEDIA_UPDATE], admin=True)),
+    auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW, Permissions.MEDIA_UPDATE])),
 ):
     """Video: delete the poster and queue extraction again. Images are rendered on demand, nothing to regenerate.
-    Media of an archived post: 409 post_archived."""
+    Needs media.view and media.update in effect at the post of the media (media.update at the root for media
+    without an observation). Media of an archived post: 409 post_archived."""
     media_file = await get_media_or_404(session, media_id, include_deleted=True)
     if media_file.observation_id:
         observation = await get_observation_from_media(session, media_file)
-        AccessControlService.check_post_write(auth, observation.post_id, "media")
+        AccessControlService.check_post(auth, Permissions.MEDIA_VIEW, observation.post_id, "media")
+        AccessControlService.check_post(auth, Permissions.MEDIA_UPDATE, observation.post_id, "media")
         await ensure_post_not_archived(session, observation.post_id)
+    else:
+        AccessControlService.check_covers(auth, Permissions.MEDIA_UPDATE, ROOT, "regenerate_thumbnail")
 
     if media_file.is_video:
         poster = media_file.resolve_poster_path(storage_root())

@@ -22,7 +22,7 @@ from app.backend.api.v1.models.query.signal_types import SignalTypeFilterParams
 from app.backend.filters.signal_type_filter import SignalTypeFilterService
 from app.backend.errors.problems import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
-from app.backend.errors.openapi import ADMIN, GUARDED, problems
+from app.backend.errors.openapi import GUARDED, problems
 
 router = APIRouter(prefix=SignalTypeRoutes.BASE.value, tags=[SignalTypeRoutes.tag()])
 
@@ -50,14 +50,14 @@ async def list_signal_types(
     SignalTypeRoutes.CREATE.value,
     response_model=SignalTypeResponse,
     responses=problems(
-        ErrorCode.SIGNAL_TYPE_CODE_ARCHIVED, ErrorCode.SIGNAL_TYPE_CODE_TAKEN, ErrorCode.CATEGORY_NOT_FOUND, *ADMIN,
+        ErrorCode.SIGNAL_TYPE_CODE_ARCHIVED, ErrorCode.SIGNAL_TYPE_CODE_TAKEN, ErrorCode.CATEGORY_NOT_FOUND, *GUARDED,
     ),
 )
 async def create_signal_type(
         request: Request,
         signal_type_data: SignalTypeCreate,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.SIGNAL_TYPE_VIEW, Permissions.SIGNAL_TYPE_CREATE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.SIGNAL_TYPE_VIEW, Permissions.SIGNAL_TYPE_CREATE]))
 ):
     current_user = auth.user
     # Validate category if provided
@@ -148,7 +148,7 @@ async def get_signal_type(
     response_model=SignalTypeResponse,
     responses=problems(
         ErrorCode.SIGNAL_TYPE_CODE_ARCHIVED, ErrorCode.SIGNAL_TYPE_CODE_TAKEN, ErrorCode.CATEGORY_NOT_FOUND,
-        ErrorCode.SIGNAL_TYPE_NOT_FOUND, *ADMIN,
+        ErrorCode.SIGNAL_TYPE_NOT_FOUND, *GUARDED,
     ),
 )
 async def update_signal_type(
@@ -156,7 +156,7 @@ async def update_signal_type(
         signal_type_id: int,
         signal_type_data: SignalTypeUpdate,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.SIGNAL_TYPE_VIEW, Permissions.SIGNAL_TYPE_UPDATE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.SIGNAL_TYPE_VIEW, Permissions.SIGNAL_TYPE_UPDATE]))
 ):
     current_user = auth.user
     result = await session.exec(
@@ -233,13 +233,13 @@ async def update_signal_type(
 @router.post(
     SignalTypeRoutes.SIGNAL_TYPE_ARCHIVE.value,
     response_model=SignalTypeResponse,
-    responses=problems(ErrorCode.SIGNAL_TYPE_HAS_OBSERVATIONS, ErrorCode.SIGNAL_TYPE_NOT_FOUND, *ADMIN),
+    responses=problems(ErrorCode.SIGNAL_TYPE_HAS_OBSERVATIONS, ErrorCode.SIGNAL_TYPE_NOT_FOUND, *GUARDED),
 )
 async def archive_signal_type(
         request: Request,
         signal_type_id: int,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.SIGNAL_TYPE_VIEW, Permissions.SIGNAL_TYPE_ARCHIVE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.SIGNAL_TYPE_VIEW, Permissions.SIGNAL_TYPE_ARCHIVE]))
 ):
     """Archive a signal type (is_deleted=true). Nothing is removed: the row is hidden from lists unless
     include_deleted=true and cannot be used for new data. Undo with POST /{signal_type_id}/restore. Already archived or unknown: 404."""
@@ -279,14 +279,14 @@ async def archive_signal_type(
     response_model=SignalTypeResponse,
     responses=problems(
         ErrorCode.SIGNAL_TYPE_CATEGORY_ARCHIVED, ErrorCode.SIGNAL_TYPE_NOT_FOUND, ErrorCode.SIGNAL_TYPE_NOT_ARCHIVED,
-        *ADMIN,
+        *GUARDED,
     ),
 )
 async def restore_signal_type(
         request: Request,
         signal_type_id: int,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.SIGNAL_TYPE_VIEW, Permissions.SIGNAL_TYPE_ARCHIVE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.SIGNAL_TYPE_VIEW, Permissions.SIGNAL_TYPE_ARCHIVE]))
 ):
     """Restore an archived signal type (is_deleted=false). Not archived: 409."""
     current_user = auth.user

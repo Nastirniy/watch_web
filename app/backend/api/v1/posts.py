@@ -332,11 +332,11 @@ async def archive_post(
 ):
     """Archive a post (is_deleted=true). post.archive must be in effect at the post.
 
-    Nothing is removed and no user row changes. The post leaves the data scope of its home users and of its
-    user_post_access rows until it is restored (they keep the rows); only post.access_all still reads its data. Its
-    observations and media become read-only history: writes answer 409 post_archived, except that callers with
-    admin.true AND post.access_all (plus observation.view, observation.archive and ownership or
-    observation.manage_any) still archive and restore its observations. It cannot
+    Nothing is removed and no user row changes. Permissions granted on the post itself (its home users, its
+    user_post_access rows) stop applying until it is restored; permissions inherited from a group or the root keep
+    read access to its data. Its observations and media become read-only history: writes answer 409 post_archived,
+    except that callers with post.archive in effect at the post (plus observation.view, observation.archive and
+    ownership or observation.manage_any) still archive and restore its observations. It cannot
     become a home post or get new access rows. Hidden from lists unless include_deleted=true.
     Undo with POST /{post_id}/restore. Already archived or unknown: 404.
     """

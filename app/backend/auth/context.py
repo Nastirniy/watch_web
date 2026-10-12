@@ -1,14 +1,15 @@
 """Per-request authorization context.
 
-Loaded once per request by dependencies.get_auth_context. Every permission,
-admin and post scope check reads from this object; nothing queries the
-database again during the request.
+Loaded once per request by dependencies.get_auth_context. Every permission and
+post scope check reads from this object; nothing queries the database again
+during the request.
 
 Two views of the same access live here during the move to authorization v2:
-- the legacy fields (permissions, roles, readable_post_ids, writable_post_ids and the methods on them), which
-  every route reads today, with their old semantics;
 - grants on the scope tree (grants, tree, held_anywhere, has_at_post, posts_with, covers, ...), computed from the
-  same old tables through the frozen conversion (legacy_grants.py) until role assignments replace them.
+  old tables through the frozen conversion (legacy_grants.py) until role assignments replace them: every route
+  and every AccessControlService check reads only these;
+- the legacy fields (permissions, roles, readable_post_ids, writable_post_ids and the methods on them), with their
+  old semantics, read only by the auth response (is_admin, accessible_post_ids) and auth/privileges.py.
 """
 from dataclasses import dataclass, field
 from typing import Dict, FrozenSet, List, Optional, Set, Tuple, Union
@@ -26,7 +27,8 @@ from app.backend.models.scope_group import ScopeGroup
 from app.backend.models.user_post_access import UserPostAccess
 
 
-def _permission_name(permission: Union[Permissions, str]) -> str:
+def permission_name(permission: Union[Permissions, str]) -> str:
+    """The name of a permission given as a Permissions member or a plain string (the one helper of auth/)"""
     return permission.value if isinstance(permission, Permissions) else str(permission)
 
 
@@ -56,7 +58,7 @@ class AuthContext:
 
     @property
     def is_admin(self) -> bool:
-        """Holds admin.true: may open the administration area (gate only, no wildcard)."""
+        """Holds admin.true (legacy): only the auth response and auth/privileges.py read it, no route does"""
         return Permissions.IS_ADMIN.value in self.permissions
 
     @property
@@ -68,7 +70,7 @@ class AuthContext:
         return frozenset(role.id for role in self.roles)
 
     def has(self, permission: Union[Permissions, str]) -> bool:
-        return _permission_name(permission) in self.permissions
+        return permission_name(permission) in self.permissions
 
     def can_view_post(self, post_id: int) -> bool:
         return self.has_post_access_all or post_id in self.readable_post_ids
@@ -91,16 +93,16 @@ class AuthContext:
         return self._held_anywhere
 
     def has_anywhere(self, permission: Union[Permissions, str]) -> bool:
-        return _permission_name(permission) in self.held_anywhere
+        return permission_name(permission) in self.held_anywhere
 
     def has_at_root(self, permission: Union[Permissions, str]) -> bool:
-        name = _permission_name(permission)
+        name = permission_name(permission)
         return any(grant.node == ROOT and name in grant.permissions for grant in self.grants)
 
     def posts_with(self, permission: Union[Permissions, str]) -> Optional[FrozenSet[int]]:
         """Posts where the permission is in effect. None means every post (held at the root); otherwise every post
         below the non-archived groups holding it plus the non-archived posts holding it directly."""
-        name = _permission_name(permission)
+        name = permission_name(permission)
         posts: Set[int] = set()
         for grant in self.grants:
             if name in grant.permissions:
@@ -113,14 +115,14 @@ class AuthContext:
     def has_at_post(self, permission: Union[Permissions, str], post_id: int) -> bool:
         """The permission is in effect at the post: held at the root, at a non-archived group above it, or at the
         post itself when it is not archived"""
-        name = _permission_name(permission)
+        name = permission_name(permission)
         in_effect = set(self.tree.nodes_in_effect_at_post(post_id))
         return any(name in grant.permissions and grant.node in in_effect for grant in self.grants)
 
     def covers(self, permission: Union[Permissions, str], node: Node) -> bool:
         """The node lies inside a subtree where the permission is held (delegation). A grant at an archived node
         covers nothing."""
-        name = _permission_name(permission)
+        name = permission_name(permission)
         return any(
             name in grant.permissions and not self.tree.is_archived(grant.node) and self.tree.contains(grant.node, node)
             for grant in self.grants
@@ -157,7 +159,7 @@ def role_permission_rows(user_id: int):
 async def effective_permissions(session: AsyncSession, user_id: int) -> FrozenSet[str]:
     """Permission names a user holds through roles that are not archived (AuthContext.permissions of that user)"""
     rows = (await session.exec(role_permission_rows(user_id))).all()
-    return frozenset(permission_name for *_, permission_name in rows if permission_name)
+    return frozenset(name for *_, name in rows if name)
 
 
 def access_rows(user_id: int):
@@ -201,12 +203,12 @@ async def load_auth_context(session: AsyncSession, user: User, session_id: Optio
     roles: Dict[int, RoleBrief] = {}
     permissions: Set[str] = set()
     admin_role_id: Optional[int] = None
-    for role_id, role_name, role_display_name, builtin_key, permission_name in role_rows:
+    for role_id, role_name, role_display_name, builtin_key, name in role_rows:
         roles.setdefault(role_id, RoleBrief(id=role_id, name=role_name, display_name=role_display_name))
         if builtin_key == UserType.ADMIN.value:
             admin_role_id = role_id
-        if permission_name:
-            permissions.add(permission_name)
+        if name:
+            permissions.add(name)
 
     readable, writable = _legacy_data_scope(user, rows, tree)
     return AuthContext(

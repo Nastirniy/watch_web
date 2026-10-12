@@ -122,7 +122,7 @@ async def test_post_access_management_validation(client, db, headers):
     assert missing_post.status_code == 404
     not_admin = await client.put(post_access_url(user.id, post_b.id), json={}, headers=headers(user))
     assert not_admin.status_code == 403
-    assert not_admin.json()["code"] == "admin_required"
+    assert not_admin.json()["code"] == "permission_denied"
 
 
 @pytest.mark.asyncio

@@ -36,7 +36,7 @@ from app.backend.api.v1.models.query.users import UserFilterParams
 from app.backend.filters.user_filter import UserFilterService
 from app.backend.errors.problems import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
-from app.backend.errors.openapi import ADMIN, GUARDED, problems
+from app.backend.errors.openapi import GUARDED, problems
 
 router = APIRouter(prefix=UserRoutes.BASE.value, tags=[UserRoutes.tag()])
 _logger = get_api_logger()
@@ -129,14 +129,14 @@ async def list_users(
         ErrorCode.CERTIFICATE_FILE_EMPTY, ErrorCode.CERTIFICATE_INVALID, ErrorCode.CERTIFICATE_TAKEN,
         ErrorCode.ROLE_ARCHIVED_NOT_ASSIGNABLE, ErrorCode.USERNAME_OR_CERTIFICATE_TAKEN, ErrorCode.USERNAME_TAKEN,
         ErrorCode.POST_NOT_FOUND, ErrorCode.POST_ARCHIVED, ErrorCode.ROLE_NOT_FOUND, ErrorCode.CERTIFICATE_FILE_TOO_LARGE,
-        ErrorCode.DATA_TOO_LONG, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *ADMIN,
+        ErrorCode.DATA_TOO_LONG, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
     ),
 )
 async def create_user(
         request: Request,
         user_data: Annotated[UserCreateForm, Form()],
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_CREATE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_CREATE]))
 ):
     """
     Create new user with PKI certificate authentication
@@ -306,7 +306,7 @@ async def get_user(
         ErrorCode.CERTIFICATE_FILE_TOO_LARGE, ErrorCode.FORM_CONTENT_TYPE_REQUIRED,
         ErrorCode.LAST_ADMIN_REQUIRED, ErrorCode.CANNOT_REMOVE_OWN_ADMIN,
         AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, AccessErrorCode.TARGET_USER_MORE_PRIVILEGED,
-        *ADMIN,
+        *GUARDED,
     ),
 )
 async def update_user(
@@ -314,7 +314,7 @@ async def update_user(
         user_id: Annotated[int, Path(ge=1)],
         update_data: Annotated[UserUpdateForm, Form()],
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE]))
 ):
     """
     Update user fields - all fields are optional
@@ -537,14 +537,15 @@ async def update_user(
 @router.get(
     UserRoutes.USER_ROLES.value,
     response_model=List[UserRoleResponse],
-    responses=problems(ErrorCode.USER_NOT_FOUND, *ADMIN),
+    responses=problems(ErrorCode.USER_NOT_FOUND, AccessErrorCode.USER_SELF_ONLY, *GUARDED),
 )
 async def list_user_roles(
         user_id: Annotated[int, Path(ge=1)],
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.ROLE_VIEW], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.ROLE_VIEW]))
 ):
-    """List all roles assigned to a user - requires both USER_VIEW and ROLE_VIEW permissions"""
+    """List all roles assigned to a user - requires user.view (covering the user: 403 user_self_only otherwise) and
+    role.view"""
     current_user = auth.user
 
     # Check if user exists
@@ -555,6 +556,7 @@ async def list_user_roles(
 
     if not user:
         raise ApiError(ErrorCode.USER_NOT_FOUND)
+    AccessControlService.check_user_view(auth, user)
 
     # Get all roles for this user
     result = await session.exec(
@@ -589,15 +591,16 @@ async def _get_active_user_or_404(session: AsyncSession, user_id: int) -> User:
 @router.get(
     UserRoutes.USER_POST_ACCESS.value,
     response_model=List[UserPostAccessResponse],
-    responses=problems(ErrorCode.USER_NOT_FOUND, *ADMIN),
+    responses=problems(ErrorCode.USER_NOT_FOUND, AccessErrorCode.USER_SELF_ONLY, *GUARDED),
 )
 async def list_user_post_access(
         user_id: int,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.POST_VIEW], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.POST_VIEW]))
 ):
-    """Extra post access rows of a user (the home post is users.post_id and is not listed here)"""
-    await _get_active_user_or_404(session, user_id)
+    """Extra post access rows of a user (the home post is users.post_id and is not listed here). user.view must
+    cover the user (403 user_self_only otherwise)."""
+    AccessControlService.check_user_view(auth, await _get_active_user_or_404(session, user_id))
     result = await session.exec(
         select(UserPostAccess).where(UserPostAccess.user_id == user_id).order_by(UserPostAccess.post_id)
     )
@@ -609,7 +612,7 @@ async def list_user_post_access(
     response_model=UserPostAccessResponse,
     responses=problems(
         ErrorCode.POST_ACCESS_HOME_POST, ErrorCode.POST_NOT_FOUND, ErrorCode.POST_ARCHIVED, ErrorCode.USER_NOT_FOUND,
-        AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *ADMIN,
+        AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *GUARDED,
     ),
 )
 async def upsert_user_post_access(
@@ -618,7 +621,7 @@ async def upsert_user_post_access(
         post_id: int,
         access_data: UserPostAccessUpsert,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE, Permissions.POST_VIEW], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE, Permissions.POST_VIEW]))
 ):
     """Grant a user read (can_write=false) or read+write (can_write=true) access to an additional post.
     A user holding permissions the caller lacks: 403 target_user_more_privileged. An archived post: 409 post_archived
@@ -685,7 +688,7 @@ async def upsert_user_post_access(
     UserRoutes.USER_POST_ACCESS_BY_POST.value,
     status_code=status.HTTP_204_NO_CONTENT,
     responses=problems(
-        ErrorCode.POST_ACCESS_NOT_FOUND, ErrorCode.USER_NOT_FOUND, AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *ADMIN,
+        ErrorCode.POST_ACCESS_NOT_FOUND, ErrorCode.USER_NOT_FOUND, AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *GUARDED,
     ),
 )
 async def delete_user_post_access(
@@ -693,7 +696,7 @@ async def delete_user_post_access(
         user_id: int,
         post_id: int,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE, Permissions.POST_VIEW], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE, Permissions.POST_VIEW]))
 ):
     """Revoke access of a user to an additional post.
     A user holding permissions the caller lacks: 403 target_user_more_privileged."""
@@ -734,14 +737,14 @@ async def delete_user_post_access(
     response_model=UserResponse,
     responses=problems(
         ErrorCode.CANNOT_ARCHIVE_SELF, ErrorCode.USER_NOT_FOUND, ErrorCode.LAST_ADMIN_REQUIRED,
-        AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *ADMIN,
+        AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *GUARDED,
     ),
 )
 async def archive_user(
         request: Request,
         user_id: int,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_ARCHIVE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_ARCHIVE]))
 ):
     """Archive a user (is_deleted=true): deactivates the account and invalidates its sessions.
 
@@ -791,14 +794,14 @@ async def archive_user(
     UserRoutes.USER_RESTORE.value,
     response_model=UserResponse,
     responses=problems(
-        ErrorCode.USER_NOT_FOUND, ErrorCode.USER_NOT_ARCHIVED, AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *ADMIN,
+        ErrorCode.USER_NOT_FOUND, ErrorCode.USER_NOT_ARCHIVED, AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *GUARDED,
     ),
 )
 async def restore_user(
         request: Request,
         user_id: int,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_ARCHIVE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_ARCHIVE]))
 ):
     """Restore an archived user (is_deleted=false, is_active=true): the account can log in again. Not archived: 409.
     A user holding permissions the caller lacks: 403 target_user_more_privileged."""
@@ -835,20 +838,23 @@ async def restore_user(
 @router.get(
     UserRoutes.USER_SESSIONS.value,
     response_model=List[UserSessionResponse],
-    responses=problems(ErrorCode.USER_NOT_FOUND, *ADMIN),
+    responses=problems(ErrorCode.USER_NOT_FOUND, AccessErrorCode.USER_SELF_ONLY, *GUARDED),
 )
 async def list_user_sessions(
         user_id: Annotated[int, Path(ge=1)],
         include_ended: bool = Query(False, description="Also list ended sessions, with end_reason and revoke_cause"),
         limit: int = Query(50, ge=1, le=500, description="Newest first"),
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW]))
 ):
     """Login sessions of a user, newest first. status is computed when read: online (a request within
     security.online_threshold_seconds), idle (live, client quiet) or ended; a session past its absolute end or
-    idle timeout is ended even if nothing has recorded it yet. Archived users are listed too."""
-    if not (await session.exec(select(User.id).where(User.id == user_id))).first():
+    idle timeout is ended even if nothing has recorded it yet. Archived users are listed too. user.view must cover
+    the user (403 user_self_only otherwise)."""
+    target = (await session.exec(select(User).where(User.id == user_id))).first()
+    if not target:
         raise ApiError(ErrorCode.USER_NOT_FOUND)
+    AccessControlService.check_user_view(auth, target)
     query = select(UserSession).where(UserSession.user_id == user_id)
     if not include_ended:
         query = query.where(session_lifetimes.live_clause())
@@ -860,13 +866,13 @@ async def list_user_sessions(
 @router.post(
     UserRoutes.USER_SESSIONS_END.value,
     response_model=SessionsEndedResponse,
-    responses=problems(ErrorCode.USER_NOT_FOUND, AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *ADMIN),
+    responses=problems(ErrorCode.USER_NOT_FOUND, AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *GUARDED),
 )
 async def end_user_sessions(
         request: Request,
         user_id: Annotated[int, Path(ge=1)],
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE]))
 ):
     """Revoke every live session of a user (revoke_cause ended_by_admin); the account stays as it is and can log
     in again. The caller's own session ends too when user_id is the caller. Archived users: 404.
@@ -889,7 +895,7 @@ async def end_user_sessions(
     response_model=UserSessionResponse,
     responses=problems(
         ErrorCode.USER_NOT_FOUND, ErrorCode.SESSION_NOT_FOUND, ErrorCode.SESSION_ALREADY_ENDED,
-        AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *ADMIN,
+        AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *GUARDED,
     ),
 )
 async def end_user_session(
@@ -897,7 +903,7 @@ async def end_user_session(
         user_id: Annotated[int, Path(ge=1)],
         session_id: Annotated[str, Path(max_length=128)],
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE]))
 ):
     """Revoke one live session of a user (revoke_cause ended_by_admin). Ended already: 409 with its end_reason.
     A user holding permissions the caller lacks: 403 target_user_more_privileged."""

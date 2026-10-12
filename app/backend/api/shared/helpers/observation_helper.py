@@ -11,6 +11,7 @@ from app.backend.auth.context import AuthContext
 from app.backend.api.shared.helpers.post_helper import ensure_post_not_archived
 from app.backend.errors.problems import ApiError, field_problem
 from app.backend.enums.errors import ErrorCode, FieldErrorCode
+from app.backend.enums.general import Permissions
 from app.backend.filters.observation_frequency_filter import ObservationFrequencyFilter
 from app.backend.utils.datetime_utils import as_utc
 from app.backend.utils.validators import INT_MAX
@@ -21,9 +22,12 @@ async def get_observation_for_write(
         auth: AuthContext,
         observation_id: int,
         lock: bool = False,
+        permission: Permissions = Permissions.OBSERVATION_UPDATE,
 ) -> Observation:
-    """Observation the caller may modify: 404 when missing or archived, 403 without post write access or ownership,
-    409 post_archived when its post is archived (after the 403 checks).
+    """Observation the caller may modify: 404 when missing or archived; 403 without observation.view and the
+    permission of the change (observation.update, observation.archive for a band archive) in effect at its post, or
+    without ownership (observation.manage_any in effect there overrides); 409 post_archived when its post is
+    archived (after the 403 checks).
     lock=True takes a row lock (MySQL) so concurrent band changes of one observation run one after another."""
     query = select(Observation).where(Observation.id == observation_id).options(selectinload(Observation.all_frequencies))
     if lock:
@@ -32,7 +36,8 @@ async def get_observation_for_write(
     if not observation:
         raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
 
-    AccessControlService.check_post_write(auth, observation.post_id, "observation")
+    AccessControlService.check_post(auth, Permissions.OBSERVATION_VIEW, observation.post_id, "observation")
+    AccessControlService.check_post(auth, permission, observation.post_id, "observation")
     AccessControlService.check_observation_ownership(auth, observation)
     await ensure_post_not_archived(session, observation.post_id)
 

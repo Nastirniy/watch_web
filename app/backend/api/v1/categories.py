@@ -22,7 +22,7 @@ from app.backend.api.v1.models.query.categories import CategoryFilterParams
 from app.backend.filters.category_filter import CategoryFilterService
 from app.backend.errors.problems import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
-from app.backend.errors.openapi import ADMIN, GUARDED, problems
+from app.backend.errors.openapi import GUARDED, problems
 
 router = APIRouter(prefix=CategoryRoutes.BASE.value, tags=[CategoryRoutes.tag()])
 
@@ -49,13 +49,13 @@ async def list_categories(
 @router.post(
     CategoryRoutes.CREATE.value,
     response_model=CategoryResponse,
-    responses=problems(ErrorCode.CATEGORY_NAME_ARCHIVED, ErrorCode.CATEGORY_NAME_TAKEN, *ADMIN),
+    responses=problems(ErrorCode.CATEGORY_NAME_ARCHIVED, ErrorCode.CATEGORY_NAME_TAKEN, *GUARDED),
 )
 async def create_category(
         request: Request,
         category_data: CategoryCreate,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW, Permissions.CATEGORY_CREATE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW, Permissions.CATEGORY_CREATE]))
 ):
     current_user = auth.user
     existing_result = await session.exec(
@@ -127,7 +127,7 @@ async def get_category(
     response_model=CategoryResponse,
     responses=problems(
         ErrorCode.CATEGORY_NAME_ARCHIVED, ErrorCode.CATEGORY_NAME_TAKEN, ErrorCode.CATEGORY_NOT_FOUND,
-        *ADMIN,
+        *GUARDED,
     ),
 )
 async def update_category(
@@ -135,7 +135,7 @@ async def update_category(
         category_id: int,
         category_data: CategoryUpdate,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW, Permissions.CATEGORY_UPDATE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW, Permissions.CATEGORY_UPDATE]))
 ):
     current_user = auth.user
     result = await session.exec(
@@ -198,13 +198,13 @@ async def update_category(
 @router.post(
     CategoryRoutes.CATEGORY_ARCHIVE.value,
     response_model=CategoryResponse,
-    responses=problems(ErrorCode.CATEGORY_HAS_SIGNAL_TYPES, ErrorCode.CATEGORY_NOT_FOUND, *ADMIN),
+    responses=problems(ErrorCode.CATEGORY_HAS_SIGNAL_TYPES, ErrorCode.CATEGORY_NOT_FOUND, *GUARDED),
 )
 async def archive_category(
         request: Request,
         category_id: int,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW, Permissions.CATEGORY_ARCHIVE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW, Permissions.CATEGORY_ARCHIVE]))
 ):
     """Archive a category (is_deleted=true). Nothing is removed: the row is hidden from lists unless
     include_deleted=true and cannot be used for new data. Undo with POST /{category_id}/restore. Already archived or unknown: 404."""
@@ -242,13 +242,13 @@ async def archive_category(
 @router.post(
     CategoryRoutes.CATEGORY_RESTORE.value,
     response_model=CategoryResponse,
-    responses=problems(ErrorCode.CATEGORY_NOT_FOUND, ErrorCode.CATEGORY_NOT_ARCHIVED, *ADMIN),
+    responses=problems(ErrorCode.CATEGORY_NOT_FOUND, ErrorCode.CATEGORY_NOT_ARCHIVED, *GUARDED),
 )
 async def restore_category(
         request: Request,
         category_id: int,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW, Permissions.CATEGORY_ARCHIVE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW, Permissions.CATEGORY_ARCHIVE]))
 ):
     """Restore an archived category (is_deleted=false). Not archived: 409."""
     current_user = auth.user

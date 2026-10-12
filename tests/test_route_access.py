@@ -27,6 +27,14 @@ def test_every_api_route_is_guarded():
     assert not missing, f"routes without require(): {missing}"
 
 
+def test_route_access_has_no_admin_flag():
+    """No route has an admin gate: a requirement is its permissions only"""
+    entries = route_access_map(fastapi_app)
+    assert entries
+    for entry in entries:
+        assert set(entry.require.as_dict()) == {"all", "any"}, (entry.method, entry.path)
+
+
 @pytest.mark.asyncio
 async def test_admin_sees_every_guarded_route(client, db, headers):
     admin = await make_admin(db)
@@ -36,7 +44,7 @@ async def test_admin_sees_every_guarded_route(client, db, headers):
     assert len(routes) == len(route_access_map(fastapi_app))
     sample = routes[0]
     assert set(sample) == {"method", "path", "name", "tags", "required"}
-    assert set(sample["required"]) == {"all", "any", "admin"}
+    assert set(sample["required"]) == {"all", "any"}
 
 
 @pytest.mark.asyncio
@@ -45,7 +53,7 @@ async def test_user_without_permissions_sees_only_authenticated_routes(client, d
     routes = (await client.get(ROUTE_ACCESS, headers=headers(user))).json()["routes"]
     assert routes, "authenticated-only routes must be listed"
     for route in routes:
-        assert route["required"] == {"all": [], "any": [], "admin": False}, route
+        assert route["required"] == {"all": [], "any": []}, route
     paths = {r["path"] for r in routes}
     assert V1.path(AuthRoutes.ME) in paths
     assert ROUTE_ACCESS in paths

@@ -17,7 +17,7 @@ The join to observations goes through its primary key.
 from decimal import Decimal
 from typing import Iterable, List, Optional, Union
 
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.selectable import Select
 from sqlmodel import select
@@ -84,14 +84,20 @@ class ObservationFrequencyFilter:
     def rows_query(
         access_post_ids: Optional[Iterable[int]] = None,
         include_deleted: bool = False,
+        archived_post_ids: Optional[Iterable[int]] = None,
     ) -> Select:
         """Bands joined with their observation, archive flags and post scope applied.
-        include_deleted also returns archived bands and bands of archived observations."""
+        include_deleted also returns archived bands and bands of archived observations, at archived_post_ids only
+        (None: every post)."""
         query = select(ObservationFrequency).join(
             Observation, Observation.id == ObservationFrequency.observation_id
         )
+        live = and_(ObservationFrequency.is_deleted == False, Observation.is_deleted == False)
         if not include_deleted:
-            query = query.where(ObservationFrequency.is_deleted == False, Observation.is_deleted == False)
+            query = query.where(live)
+        elif archived_post_ids is not None:
+            archived = sorted(archived_post_ids)
+            query = query.where(or_(live, Observation.post_id.in_(archived)) if archived else live)
         if access_post_ids is not None:
             query = query.where(Observation.post_id.in_(list(access_post_ids)))
         return query

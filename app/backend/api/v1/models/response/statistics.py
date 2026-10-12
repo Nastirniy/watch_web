@@ -46,7 +46,7 @@ class StatisticsResponse(BaseModel):
     period: StatisticsPeriod
     post_ids: Optional[List[int]] = Field(
         default=None,
-        description="Posts the figures are limited to; null means every post (administrators and post.access_all)"
+        description="Posts the figures are limited to; null means every post (statistics.view held at the root)"
     )
     posts: PostStatistics
     users: UserStatistics

@@ -1,7 +1,7 @@
 """Observation counters of one post by created_at (GET /posts/{post_id}/observation-stats).
 
-Aggregates follow the split of GET /statistics: administrators (admin.true plus
-observation.view) count any post, everyone else posts of their data scope.
+The route counts a post where observation.view is in effect (a holder at the
+root counts any post).
 Archived observations are never mixed into not_archived; they are counted
 separately on explicit request only. That request needs no observation.archive:
 it returns counts, never archived rows.

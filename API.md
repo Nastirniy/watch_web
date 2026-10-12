@@ -123,11 +123,11 @@ Send `Authorization: Bearer <access token>` from `POST /api/v1/auth/login`.
 
 Session lifetime: a session lives while it is used. It ends after `security.session_idle_timeout_minutes` (30) without a request; every request and every refresh moves that end (`expires_at` of the session). `security.session_max_hours` can add a hard limit since the login (0, the default: none). Every refresh issues a new access and refresh token; a refresh token stays usable for the access token lifetime plus the idle timeout, so a client that refreshes when its access token expires never loses an active session.
 
-A session opened through nginx with a client certificate is bound to it: every request and refresh must present the same certificate, so a copied token is useless elsewhere (`token_certificate_mismatch`). `GET /auth/sessions` lists the caller's live sessions with `status` (`online` / `idle`); administrators see any user's sessions, ended ones with `end_reason` / `revoke_cause`, under `/users/{id}/sessions`.
+A session opened through nginx with a client certificate is bound to it: every request and refresh must present the same certificate, so a copied token is useless elsewhere (`token_certificate_mismatch`). `GET /auth/sessions` lists the caller's live sessions with `status` (`online` / `idle`); holders of `user.view` covering a user see that user's sessions, ended ones with `end_reason` / `revoke_cause`, under `/users/{id}/sessions`.
 
 ### Not allowed (403)
 
-The body adds `required` (`{all, any, admin}`) and `missing` (permissions the user lacks). `GET /api/v1/auth/route-access` tells in advance which routes the user may call.
+The body adds `required` (`{all, any}`) and `missing` (permissions the user lacks). `GET /api/v1/auth/route-access` tells in advance which routes the user may call.
 
 ### Server errors (500 `internal_error`)
 

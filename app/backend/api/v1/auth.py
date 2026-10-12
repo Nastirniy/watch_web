@@ -275,12 +275,8 @@ async def check_permission(
         auth: AuthContext = Depends(require())
 ):
     """Evaluate a permission requirement for the current user without calling the guarded route"""
-    result = Require.of(all=check.all, any=check.any, admin=check.admin).evaluate(auth)
-    return PermissionCheckResponse(
-        allowed=result.allowed,
-        missing=list(result.missing),
-        admin_required=result.admin_missing
-    )
+    result = Require.of(all=check.all, any=check.any).evaluate(auth)
+    return PermissionCheckResponse(allowed=result.allowed, missing=list(result.missing))
 
 
 @router.get(AuthRoutes.ROUTE_ACCESS.value, response_model=RouteAccessResponse)

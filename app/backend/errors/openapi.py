@@ -77,7 +77,7 @@ _EXAMPLE_VALUES: Dict[str, Any] = {
     "errors": [{"code": "string_too_short", "detail": "String should have at least 3 characters", "pointer": "#/username", "min_length": 3}],
     "error_id": "3f1c2a9b7d8e4f60a1b2c3d4e5f60718",
     "missing": ["post.view"],
-    "required": {"all": ["post.view"], "any": [], "admin": False},
+    "required": {"all": ["post.view"], "any": []},
     "accepted_content_types": ["image/jpeg", "image/png"],
     "accepted_extensions": [".jpg", ".png"],
     "tag_ids": [7, 9],
@@ -142,9 +142,8 @@ def problem_models() -> Dict[ProblemType, type]:
 AUTHENTICATED = (AuthErrorCode.CREDENTIALS_REQUIRED, AuthErrorCode.INVALID_TOKEN, AuthErrorCode.SESSION_EXPIRED,
                  AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH, AuthErrorCode.ACCOUNT_NOT_FOUND,
                  AuthErrorCode.ACCOUNT_DEACTIVATED, AuthErrorCode.ACCOUNT_DELETED)
-# 403 of require(all=[...]) and of require(all=[...], admin=True)
+# 403 of require(all=[...], any=[...])
 GUARDED = (AccessErrorCode.PERMISSION_DENIED,)
-ADMIN = (AccessErrorCode.PERMISSION_DENIED, AccessErrorCode.ADMIN_REQUIRED)
 
 # FastAPI merges responses per status by replacement (app, version router, route): a route that declares
 # its own 500 or 422 keeps the generic member of that status
@@ -155,7 +154,7 @@ def problems(*codes: ProblemType) -> Dict[int, Dict[str, Any]]:
     """`responses=` of a route, app or router: the problem types it answers, grouped by status.
 
         @router.put(PostRoutes.POST_BY_ID.value, response_model=PostResponse,
-                    responses=problems(ErrorCode.POST_NOT_FOUND, ErrorCode.POST_CODE_TAKEN, *ADMIN))
+                    responses=problems(ErrorCode.POST_NOT_FOUND, ErrorCode.POST_CODE_TAKEN, *GUARDED))
 
     One code per status is its model, several are a union discriminated by "code"; FastAPI registers the
     component schemas itself. Combine with success helpers: responses={**file_response(...), **problems(...)}."""

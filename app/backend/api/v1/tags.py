@@ -20,7 +20,7 @@ from app.backend.api.v1.models.query.tags import TagFilterParams
 from app.backend.filters.tag_filter import TagFilterService
 from app.backend.errors.problems import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
-from app.backend.errors.openapi import ADMIN, GUARDED, problems
+from app.backend.errors.openapi import GUARDED, problems
 
 router = APIRouter(prefix=TagRoutes.BASE.value, tags=[TagRoutes.tag()])
 
@@ -47,13 +47,13 @@ async def list_tags(
 @router.post(
     TagRoutes.CREATE.value,
     response_model=TagResponse,
-    responses=problems(ErrorCode.TAG_NAME_ARCHIVED, ErrorCode.TAG_NAME_TAKEN, *ADMIN),
+    responses=problems(ErrorCode.TAG_NAME_ARCHIVED, ErrorCode.TAG_NAME_TAKEN, *GUARDED),
 )
 async def create_tag(
         request: Request,
         tag_data: TagCreate,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW, Permissions.TAG_CREATE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW, Permissions.TAG_CREATE]))
 ):
     current_user = auth.user
     existing_result = await session.exec(
@@ -122,7 +122,7 @@ async def get_tag(
     response_model=TagResponse,
     responses=problems(
         ErrorCode.TAG_NAME_ARCHIVED, ErrorCode.TAG_NAME_TAKEN, ErrorCode.TAG_NOT_FOUND,
-        *ADMIN,
+        *GUARDED,
     ),
 )
 async def update_tag(
@@ -130,7 +130,7 @@ async def update_tag(
         tag_id: int,
         tag_data: TagUpdate,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW, Permissions.TAG_UPDATE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW, Permissions.TAG_UPDATE]))
 ):
     current_user = auth.user
     result = await session.exec(
@@ -193,13 +193,13 @@ async def update_tag(
 @router.post(
     TagRoutes.TAG_ARCHIVE.value,
     response_model=TagResponse,
-    responses=problems(ErrorCode.TAG_NOT_FOUND, *ADMIN),
+    responses=problems(ErrorCode.TAG_NOT_FOUND, *GUARDED),
 )
 async def archive_tag(
         request: Request,
         tag_id: int,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW, Permissions.TAG_ARCHIVE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW, Permissions.TAG_ARCHIVE]))
 ):
     """Archive a tag (is_deleted=true). Nothing is removed: the row is hidden from lists unless
     include_deleted=true and cannot be used for new data. Undo with POST /{tag_id}/restore. Already archived or unknown: 404."""
@@ -231,13 +231,13 @@ async def archive_tag(
 @router.post(
     TagRoutes.TAG_RESTORE.value,
     response_model=TagResponse,
-    responses=problems(ErrorCode.TAG_NOT_FOUND, ErrorCode.TAG_NOT_ARCHIVED, *ADMIN),
+    responses=problems(ErrorCode.TAG_NOT_FOUND, ErrorCode.TAG_NOT_ARCHIVED, *GUARDED),
 )
 async def restore_tag(
         request: Request,
         tag_id: int,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW, Permissions.TAG_ARCHIVE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW, Permissions.TAG_ARCHIVE]))
 ):
     """Restore an archived tag (is_deleted=false). Not archived: 409."""
     current_user = auth.user

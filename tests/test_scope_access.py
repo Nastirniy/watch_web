@@ -8,7 +8,9 @@ posts. Grants at a group (and a permission at one post only) cannot be built fro
 assignment API exists.
 """
 import dataclasses
+import io
 
+import openpyxl
 import pytest
 from sqlmodel import select
 
@@ -20,14 +22,20 @@ from app.backend.auth.scope import Grant, Node, ROOT, ScopeTree
 from app.backend.enums.errors import AccessErrorCode
 from app.backend.enums.general import Permissions as P
 from app.backend.errors.problems import ApiError
-from app.backend.enums.routes import MediaRoutes, PostRoutes, SearchRoutes, StatisticsRoutes, UserRoutes
+from app.backend.config import settings
+from app.backend.enums.routes import (
+    MediaRoutes, ObservationRoutes, PostRoutes, RoleRoutes, ScopeGroupRoutes, SearchRoutes, StatisticsRoutes, TagRoutes,
+    UserRoutes,
+)
 from app.backend.filters.post_filter import PostCriteria, PostFilterService
 from app.backend.filters.user_filter import UserCriteria, UserFilterService
 from app.backend.models.post import Post
 from app.backend.models.scope_group import ScopeGroup
 from app.backend.models.user import User
 from app.backend.services.media import uploads
-from tests.helpers import make_admin, make_dictionary, make_observation, make_post, make_user, perm_name
+from tests.helpers import (
+    make_admin, make_dictionary, make_media, make_observation, make_post, make_user, observation_payload, perm_name,
+)
 
 POSTS = V1.path(PostRoutes.ROOT)
 USERS = V1.path(UserRoutes.ROOT)
@@ -107,7 +115,7 @@ async def test_post_records_follow_post_view(client, db, headers):
     user = await make_user(db, perms=[P.POST_VIEW, P.OBSERVATION_VIEW], post_id=a.id)
 
     body = _denied(await client.get(_post_url(b.id), headers=headers(user)), "post_access_denied", ["post.view"])
-    assert body["required"] == {"all": ["post.view"], "any": [], "admin": False}
+    assert body["required"] == {"all": ["post.view"], "any": []}
     assert body["post_id"] == b.id and body["resource_type"] == "post"
     assert (await client.get(_post_url(a.id), headers=headers(user))).status_code == 200
     assert _ids(await client.get(POSTS, headers=headers(user))) == {a.id}
@@ -174,7 +182,7 @@ async def test_removed_gate_does_not_widen(client, db, headers):
     creator = await make_user(db, perms=[P.POST_VIEW, P.POST_CREATE], post_id=post.id)
     body = _denied(await client.post(POSTS, json={"name": "New", "code": "NEW-1"}, headers=headers(creator)),
                    "permission_denied", ["post.create"])
-    assert body["required"] == {"all": ["post.view", "post.create"], "any": [], "admin": False}
+    assert body["required"] == {"all": ["post.view", "post.create"], "any": []}
 
     editor = await make_user(db, perms=[P.POST_VIEW, P.POST_UPDATE], post_id=post.id)
     _denied(await client.put(_post_url(post.id), json={"name": "x"}, headers=headers(editor)),
@@ -393,3 +401,286 @@ async def test_upload_list_follows_manage_any_at_its_posts(client, db, headers):
     assert _ids(await client.get(UPLOADS, headers=headers(uploader_a))) == {at_a}
     admin = await make_admin(db)
     assert _ids(await client.get(UPLOADS, headers=headers(admin))) == {at_a, at_b, own_at_c}
+
+
+# ================================================================= remaining routes, no admin gate anywhere
+REPORT = V1.path(ObservationRoutes.REPORT)
+ALL_FIELDS = {"report_type": "all_fields"}
+OBSERVATIONS = V1.path(ObservationRoutes.LIST_ALL)
+SEARCH_OBSERVATIONS = V1.path(SearchRoutes.OBSERVATIONS)
+MEDIA = V1.path(MediaRoutes.ROOT)
+SEARCH_MEDIA = V1.path(SearchRoutes.MEDIA)
+MONITOR_ROUTES = (V1.path(MediaRoutes.STORAGE_STATISTICS), V1.path(MediaRoutes.POSTERS_STATUS))
+
+
+def _observation_url(route, observation_id: int) -> str:
+    return V1.path(route, observation_id=observation_id)
+
+
+async def _observation(db, user, post, signal_type_id, comment=None, archived=False):
+    observation = await make_observation(db, user, post, signal_type_id)
+    observation.comment = comment
+    observation.is_deleted = archived
+    db.add(observation)
+    await db.commit()
+    await db.refresh(observation)
+    return observation
+
+
+def _report_texts(response) -> set:
+    assert response.status_code == 200, response.text
+    sheet = openpyxl.load_workbook(io.BytesIO(response.content)).active
+    return {cell.value for row in sheet.iter_rows() for cell in row if isinstance(cell.value, str)}
+
+
+async def test_export_without_gate(client, db, headers):
+    post = await make_post(db)
+    exporter = await make_user(db, perms=[P.OBSERVATION_VIEW, P.EXPORT_CREATE], post_id=post.id)
+    # export.create did nothing without admin.true: still refused, now as a missing permission
+    body = _denied(await client.post(REPORT, json=ALL_FIELDS, headers=headers(exporter)), "permission_denied", ["export.create"])
+    assert body["required"] == {"all": ["observation.view", "export.create"], "any": []}
+    admin = await make_admin(db)
+    assert (await client.post(REPORT, json=ALL_FIELDS, headers=headers(admin))).status_code == 200
+    # admin.true with both permissions keeps the export (the conversion puts export.create where observation.view is)
+    manager = await make_user(db, perms=[P.IS_ADMIN, P.OBSERVATION_VIEW, P.EXPORT_CREATE], post_id=post.id)
+    assert (await client.post(REPORT, json=ALL_FIELDS, headers=headers(manager))).status_code == 200
+
+
+async def test_export_covers_observation_view_and_export_create(client, db, headers, with_grants):
+    a, b = await make_post(db), await make_post(db)
+    ids = await make_dictionary(db)
+    owner = await make_admin(db)
+    await _observation(db, owner, a, ids["signal_type_id"], comment="seen at A")
+    await _observation(db, owner, b, ids["signal_type_id"], comment="seen at B")
+    exporter = await make_user(db, perms=[P.IS_ADMIN, P.OBSERVATION_VIEW, P.EXPORT_CREATE], post_id=a.id,
+                               extra_access={b.id: False})
+    with_grants(exporter, grant(Node.post(a.id), P.OBSERVATION_VIEW, P.EXPORT_CREATE),
+                grant(Node.post(b.id), P.OBSERVATION_VIEW))
+
+    texts = _report_texts(await client.post(REPORT, json=ALL_FIELDS, headers=headers(exporter)))
+    assert "seen at A" in texts and "seen at B" not in texts
+    body = _denied(await client.post(REPORT, json={**ALL_FIELDS, "post_ids": [b.id]}, headers=headers(exporter)),
+                   "post_write_denied", ["export.create"])
+    assert body["post_id"] == b.id
+
+
+async def test_export_includes_archived_rows_only_where_observation_archive_is_held(client, db, headers, with_grants):
+    a, b = await make_post(db), await make_post(db)
+    ids = await make_dictionary(db)
+    owner = await make_admin(db)
+    await _observation(db, owner, a, ids["signal_type_id"], comment="archived at A", archived=True)
+    await _observation(db, owner, b, ids["signal_type_id"], comment="archived at B", archived=True)
+    await _observation(db, owner, b, ids["signal_type_id"], comment="live at B")
+    perms = [P.OBSERVATION_VIEW, P.EXPORT_CREATE]
+    exporter = await make_user(db, perms=[P.IS_ADMIN, *perms, P.OBSERVATION_ARCHIVE], post_id=a.id,
+                               extra_access={b.id: True})
+    with_grants(exporter, grant(Node.post(a.id), *perms, P.OBSERVATION_ARCHIVE), grant(Node.post(b.id), *perms))
+
+    texts = _report_texts(await client.post(REPORT, json={**ALL_FIELDS, "include_deleted": True}, headers=headers(exporter)))
+    assert {"archived at A", "live at B"} <= texts and "archived at B" not in texts
+
+
+async def test_media_monitor_route(client, db, headers):
+    post = await make_post(db)
+    viewer = await make_user(db, perms=[P.MEDIA_VIEW], post_id=post.id)
+    admin = await make_admin(db)
+    # storage monitoring was media.view behind the admin gate: an admin.true holder with media.view keeps it
+    manager = await make_user(db, perms=[P.IS_ADMIN, P.MEDIA_VIEW], post_id=post.id)
+    for path in MONITOR_ROUTES:
+        body = _denied(await client.get(path, headers=headers(viewer)), "permission_denied", ["media.monitor"])
+        assert body["required"] == {"all": ["media.monitor"], "any": []}
+        assert (await client.get(path, headers=headers(admin))).status_code == 200, path
+        assert (await client.get(path, headers=headers(manager))).status_code == 200, path
+
+
+async def test_manage_any_applies_at_its_posts_only(client, db, headers, with_grants):
+    a, b = await make_post(db), await make_post(db)
+    ids = await make_dictionary(db)
+    owner = await make_user(db, perms=[P.OBSERVATION_VIEW, P.OBSERVATION_CREATE], post_id=a.id, extra_access={b.id: True})
+    at_a = await _observation(db, owner, a, ids["signal_type_id"])
+    at_b = await _observation(db, owner, b, ids["signal_type_id"])
+    manager = await make_user(db, perms=[P.OBSERVATION_VIEW, P.OBSERVATION_ARCHIVE, P.OBSERVATION_MANAGE_ANY],
+                              post_id=a.id, extra_access={b.id: True})
+    with_grants(manager, grant(Node.post(a.id), P.OBSERVATION_VIEW, P.OBSERVATION_ARCHIVE, P.OBSERVATION_MANAGE_ANY),
+                grant(Node.post(b.id), P.OBSERVATION_VIEW, P.OBSERVATION_ARCHIVE))
+
+    _denied(await client.post(_observation_url(ObservationRoutes.OBSERVATION_ARCHIVE, at_b.id), headers=headers(manager)),
+            "observation_not_owner", ["observation.manage_any"])
+    archived = await client.post(_observation_url(ObservationRoutes.OBSERVATION_ARCHIVE, at_a.id), headers=headers(manager))
+    assert archived.status_code == 200, archived.text
+
+
+async def test_media_manage_any_applies_at_its_posts_only(client, db, headers, with_grants):
+    a, b = await make_post(db), await make_post(db)
+    ids = await make_dictionary(db)
+    owner = await make_user(db, perms=[P.MEDIA_VIEW, P.MEDIA_CREATE], post_id=a.id, extra_access={b.id: True})
+    media_a = await make_media(db, await _observation(db, owner, a, ids["signal_type_id"]), owner)
+    media_b = await make_media(db, await _observation(db, owner, b, ids["signal_type_id"]), owner)
+    manager = await make_user(db, perms=[P.MEDIA_VIEW, P.MEDIA_ARCHIVE, P.MEDIA_MANAGE_ANY], post_id=a.id,
+                              extra_access={b.id: True})
+    with_grants(manager, grant(Node.post(a.id), P.MEDIA_VIEW, P.MEDIA_ARCHIVE, P.MEDIA_MANAGE_ANY),
+                grant(Node.post(b.id), P.MEDIA_VIEW, P.MEDIA_ARCHIVE))
+
+    _denied(await client.post(V1.path(MediaRoutes.MEDIA_ARCHIVE, media_id=media_b.id), headers=headers(manager)),
+            "media_not_owner", ["media.manage_any"])
+    archived = await client.post(V1.path(MediaRoutes.MEDIA_ARCHIVE, media_id=media_a.id), headers=headers(manager))
+    assert archived.status_code == 200, archived.text
+
+
+async def test_upload_session_of_another_user_needs_manage_any_at_its_post(client, db, headers, with_grants):
+    a, b = await make_post(db), await make_post(db)
+    ids = await make_dictionary(db)
+    perms = [P.MEDIA_VIEW, P.MEDIA_CREATE]
+    uploader = await make_user(db, perms=perms, post_id=a.id, extra_access={b.id: True})
+    sessions = {}
+    for post in (a, b):
+        observation = await _observation(db, uploader, post, ids["signal_type_id"])
+        row = uploads.new_session(uploader.id, observation.id, post.id, "image", "a.png", 100, "image/png", None)
+        db.add(row)
+        await db.commit()
+        sessions[post.id] = row.id
+    manager = await make_user(db, perms=[*perms, P.MEDIA_MANAGE_ANY], post_id=a.id, extra_access={b.id: True})
+    with_grants(manager, grant(Node.post(a.id), *perms, P.MEDIA_MANAGE_ANY), grant(Node.post(b.id), *perms))
+
+    _denied(await client.get(V1.path(MediaRoutes.UPLOAD_SESSION, upload_id=sessions[b.id]), headers=headers(manager)),
+            "upload_session_not_owner", ["media.manage_any"])
+    shown = await client.get(V1.path(MediaRoutes.UPLOAD_SESSION, upload_id=sessions[a.id]), headers=headers(manager))
+    assert shown.status_code == 200, shown.text
+
+
+async def test_observation_writes_need_their_permission_at_the_post(client, db, headers, with_grants):
+    a, b = await make_post(db), await make_post(db)
+    ids = await make_dictionary(db)
+    perms = [P.OBSERVATION_VIEW, P.OBSERVATION_CREATE, P.OBSERVATION_UPDATE]
+    editor = await make_user(db, perms=perms, post_id=a.id, extra_access={b.id: True})
+    with_grants(editor, grant(Node.post(a.id), *perms), grant(Node.post(b.id), P.OBSERVATION_VIEW))
+    at_a = await _observation(db, editor, a, ids["signal_type_id"])
+    at_b = await _observation(db, editor, b, ids["signal_type_id"])
+
+    url_b = _observation_url(ObservationRoutes.OBSERVATION_BY_ID, at_b.id)
+    _denied(await client.put(url_b, json={"comment": "x"}, headers=headers(editor)), "post_write_denied", ["observation.update"])
+    _denied(await client.post(V1.path(ObservationRoutes.CREATE), json=observation_payload(b.id, ids["signal_type_id"]),
+                              headers=headers(editor)), "post_write_denied", ["observation.create"])
+    url_a = _observation_url(ObservationRoutes.OBSERVATION_BY_ID, at_a.id)
+    assert (await client.put(url_a, json={"comment": "x"}, headers=headers(editor))).status_code == 200
+    # a post where observation.view is not in effect at all: no access to its data
+    c = await make_post(db)
+    _denied(await client.post(V1.path(ObservationRoutes.CREATE), json=observation_payload(c.id, ids["signal_type_id"]),
+                              headers=headers(editor)), "post_access_denied", ["observation.view"])
+
+
+async def test_observations_of_an_archived_post_need_post_archive_at_it(client, db, headers, with_grants):
+    post = await make_post(db)
+    ids = await make_dictionary(db)
+    owner = await make_admin(db)
+    observation = await _observation(db, owner, post, ids["signal_type_id"])
+    await _archive(db, post)
+    perms = [P.IS_ADMIN, P.POST_ACCESS_ALL, P.OBSERVATION_VIEW, P.OBSERVATION_ARCHIVE, P.OBSERVATION_MANAGE_ANY]
+    archiver = await make_user(db, perms=perms)
+    with_grants(archiver, grant(ROOT, P.OBSERVATION_VIEW, P.OBSERVATION_ARCHIVE, P.OBSERVATION_MANAGE_ANY))
+    url = _observation_url(ObservationRoutes.OBSERVATION_ARCHIVE, observation.id)
+
+    refused = await client.post(url, headers=headers(archiver))
+    assert refused.status_code == 409 and refused.json()["code"] == "post_archived", refused.text
+    with_grants(archiver, grant(ROOT, P.OBSERVATION_VIEW, P.OBSERVATION_ARCHIVE, P.OBSERVATION_MANAGE_ANY, P.POST_ARCHIVE))
+    assert (await client.post(url, headers=headers(archiver))).status_code == 200
+
+
+async def test_archived_observations_are_listed_only_where_observation_archive_is_held(client, db, headers, with_grants):
+    a, b = await make_post(db), await make_post(db)
+    ids = await make_dictionary(db)
+    owner = await make_admin(db)
+    live_a = await _observation(db, owner, a, ids["signal_type_id"])
+    gone_a = await _observation(db, owner, a, ids["signal_type_id"], archived=True)
+    live_b = await _observation(db, owner, b, ids["signal_type_id"])
+    gone_b = await _observation(db, owner, b, ids["signal_type_id"], archived=True)
+    perms = [P.OBSERVATION_VIEW, P.OBSERVATION_ARCHIVE]
+    reader = await make_user(db, perms=perms, post_id=a.id, extra_access={b.id: True})
+    with_grants(reader, grant(Node.post(a.id), *perms), grant(Node.post(b.id), P.OBSERVATION_VIEW))
+
+    for path in (OBSERVATIONS, SEARCH_OBSERVATIONS):
+        listed = _ids(await client.get(path, params={"include_deleted": "true"}, headers=headers(reader)))
+        assert listed == {live_a.id, gone_a.id, live_b.id}, path
+
+    def bands(observation_id):
+        return client.get(V1.path(ObservationRoutes.OBSERVATION_FREQUENCIES, observation_id=observation_id),
+                          params={"include_deleted": "true"}, headers=headers(reader))
+    assert (await bands(gone_a.id)).status_code == 200
+    hidden = await bands(gone_b.id)
+    assert hidden.status_code == 404 and hidden.json()["code"] == "observation_not_found", hidden.text
+
+
+async def test_archived_media_is_listed_only_where_media_archive_is_held(client, db, headers, with_grants):
+    a, b = await make_post(db), await make_post(db)
+    ids = await make_dictionary(db)
+    owner = await make_admin(db)
+    obs_a = await _observation(db, owner, a, ids["signal_type_id"])
+    obs_b = await _observation(db, owner, b, ids["signal_type_id"])
+    live_a, gone_a = await make_media(db, obs_a, owner), await make_media(db, obs_a, owner, is_deleted=True)
+    live_b = await make_media(db, obs_b, owner)
+    await make_media(db, obs_b, owner, is_deleted=True)
+    perms = [P.MEDIA_VIEW, P.MEDIA_ARCHIVE]
+    reader = await make_user(db, perms=perms, post_id=a.id, extra_access={b.id: True})
+    with_grants(reader, grant(Node.post(a.id), *perms), grant(Node.post(b.id), P.MEDIA_VIEW))
+
+    for path in (MEDIA, SEARCH_MEDIA):
+        listed = _ids(await client.get(path, params={"include_deleted": "true"}, headers=headers(reader)))
+        assert listed == {live_a.id, gone_a.id, live_b.id}, path
+
+
+async def test_regenerate_needs_media_update_at_the_post(client, db, headers, with_grants, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings.storage, "upload_path", str(tmp_path))
+    a, b = await make_post(db), await make_post(db)
+    ids = await make_dictionary(db)
+    owner = await make_admin(db)
+    video_b = await make_media(db, await _observation(db, owner, b, ids["signal_type_id"]), owner,
+                               media_type="video", poster_status="ready")
+    video_a = await make_media(db, await _observation(db, owner, a, ids["signal_type_id"]), owner,
+                               media_type="video", poster_status="ready")
+    editor = await make_user(db, perms=[P.IS_ADMIN, P.MEDIA_VIEW, P.MEDIA_UPDATE], post_id=a.id, extra_access={b.id: True})
+    with_grants(editor, grant(Node.post(a.id), P.MEDIA_VIEW, P.MEDIA_UPDATE), grant(Node.post(b.id), P.MEDIA_VIEW))
+
+    _denied(await client.post(V1.path(MediaRoutes.MEDIA_THUMBNAIL_REGENERATE, media_id=video_b.id), headers=headers(editor)),
+            "post_write_denied", ["media.update"])
+    ok = await client.post(V1.path(MediaRoutes.MEDIA_THUMBNAIL_REGENERATE, media_id=video_a.id), headers=headers(editor))
+    assert ok.status_code == 200, ok.text
+
+
+async def test_user_reads_of_another_user_need_user_view_covering_them(client, db, headers, with_grants):
+    """The session, role and post-access lists of a user lost the admin gate: user.view must cover the target"""
+    a, b = await make_post(db), await make_post(db)
+    colleague, stranger = await make_user(db, post_id=a.id), await make_user(db, post_id=b.id)
+    viewer = await make_user(db, perms=[P.USER_VIEW, P.POST_VIEW, P.ROLE_VIEW], post_id=a.id)
+    with_grants(viewer, grant(Node.post(a.id), P.USER_VIEW, P.POST_VIEW), grant(ROOT, P.ROLE_VIEW))
+
+    for route in (UserRoutes.USER_SESSIONS, UserRoutes.USER_POST_ACCESS, UserRoutes.USER_ROLES):
+        _denied(await client.get(V1.path(route, user_id=stranger.id), headers=headers(viewer)), "user_self_only", [])
+        for target in (colleague, viewer):
+            shown = await client.get(V1.path(route, user_id=target.id), headers=headers(viewer))
+            assert shown.status_code == 200, (route, shown.text)
+
+
+async def test_user_sessions_need_user_view_covering_the_user(client, db, headers):
+    """R11 on legacy data: user.view at the home post lists the sessions of the users of that post only"""
+    a, b = await make_post(db), await make_post(db)
+    colleague, stranger = await make_user(db, post_id=a.id), await make_user(db, post_id=b.id)
+    viewer = await make_user(db, perms=[P.USER_VIEW], post_id=a.id)
+    sessions = V1.path(UserRoutes.USER_SESSIONS, user_id=stranger.id)
+    _denied(await client.get(sessions, headers=headers(viewer)), "user_self_only", [])
+    assert (await client.get(V1.path(UserRoutes.USER_SESSIONS, user_id=colleague.id), headers=headers(viewer))).status_code == 200
+    assert (await client.get(sessions, headers=headers(await make_admin(db)))).status_code == 200
+
+
+async def test_administration_routes_need_only_their_permissions(client, db, headers, with_grants):
+    """Dictionaries, formats, roles and groups: the permissions of the route at some node, no admin.true"""
+    editor = await make_user(db, perms=[P.TAG_VIEW, P.TAG_CREATE, P.SCOPE_GROUP_VIEW, P.ROLE_VIEW])
+    with_grants(editor, grant(ROOT, P.TAG_VIEW, P.TAG_CREATE, P.SCOPE_GROUP_VIEW, P.ROLE_VIEW))
+    created = await client.post(V1.path(TagRoutes.CREATE), json={"name": "no-gate"}, headers=headers(editor))
+    assert created.status_code == 200, created.text
+    assert (await client.get(V1.path(ScopeGroupRoutes.TREE), headers=headers(editor))).status_code == 200
+    assert (await client.get(V1.path(RoleRoutes.ROOT), headers=headers(editor))).status_code == 200
+
+    # tag.create in a role without admin.true did nothing and still does nothing
+    tagger = await make_user(db, perms=[P.TAG_VIEW, P.TAG_CREATE])
+    _denied(await client.post(V1.path(TagRoutes.CREATE), json={"name": "dead"}, headers=headers(tagger)),
+            "permission_denied", ["tag.create"])

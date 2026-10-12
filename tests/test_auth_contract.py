@@ -70,10 +70,10 @@ async def test_check_permission(client, db, headers):
     user = await make_user(db, perms=["tag.view"])
     ok = await client.post(CHECK, json={"all": ["tag.view"]}, headers=headers(user))
     assert ok.status_code == 200, ok.text
-    assert ok.json() == {"allowed": True, "missing": [], "admin_required": False}
+    assert ok.json() == {"allowed": True, "missing": []}
 
-    denied = await client.post(CHECK, json={"all": ["tag.view", "tag.archive"], "admin": True}, headers=headers(user))
-    assert denied.json() == {"allowed": False, "missing": ["tag.archive"], "admin_required": True}
+    denied = await client.post(CHECK, json={"all": ["tag.view", "tag.archive"]}, headers=headers(user))
+    assert denied.json() == {"allowed": False, "missing": ["tag.archive"]}
 
     unknown = await client.post(CHECK, json={"all": ["does.not.exist"]}, headers=headers(user))
     assert unknown.status_code == 422
@@ -86,7 +86,7 @@ async def test_403_body_is_structured(client, db, headers):
     response = await client.post(V1.path(TagRoutes.CREATE), json={"name": "x"}, headers=headers(user))
     assert response.status_code == 403
     detail = response.json()
-    assert detail["code"] == "admin_required"
-    assert detail["required"] == {"all": ["tag.view", "tag.create"], "any": [], "admin": True}
+    assert detail["code"] == "permission_denied"
+    assert detail["required"] == {"all": ["tag.view", "tag.create"], "any": []}
     assert detail["missing"] == ["tag.create"]
-    assert detail["title"] == "Administrator access required" and detail["status"] == 403
+    assert detail["title"] == "Insufficient permissions" and detail["status"] == 403

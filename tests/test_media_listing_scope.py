@@ -150,7 +150,7 @@ async def test_regenerate_needs_access_to_the_post_of_the_media(client, db, head
 
 @pytest.mark.asyncio
 async def test_regenerate_by_an_administrator_without_a_post_is_no_post_assigned(client, db, headers, tmp_path, monkeypatch):
-    """check_post_write answers no_post_assigned to a caller whose media permissions apply at no post (their only
+    """check_post answers no_post_assigned to a caller whose media permissions apply at no post (their only
     post is archived; without any post they would hold them nowhere and the route refuse them); the route declares it"""
     monkeypatch.setattr(settings.storage, "upload_path", str(tmp_path))
     _, _, owner, observation = await _scene(db)

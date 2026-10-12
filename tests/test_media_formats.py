@@ -159,7 +159,8 @@ async def test_media_format_crud(client, db, headers):
                "aliases": ["image/avif-sequence"], "max_file_size_bytes": 20 * formats.MB, "sort_order": 9}
     assert (await client.post(CREATE, json=payload, headers=headers(viewer))).status_code == 403
     denied = await client.post(CREATE, json=payload, headers=headers(granular))
-    assert denied.status_code == 403 and denied.json()["code"] == "admin_required"
+    assert denied.status_code == 403 and denied.json()["code"] == "permission_denied"
+    assert denied.json()["missing"] == ["media_format.create"]
 
     created = await client.post(CREATE, json=payload, headers=headers(admin))
     assert created.status_code == 200, created.text

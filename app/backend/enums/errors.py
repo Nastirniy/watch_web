@@ -25,10 +25,9 @@ from pydantic import BaseModel, Field
 
 
 class RequiredPermissions(BaseModel):
-    """Permission requirement of a route, mirrors services.permissions.Require"""
+    """Permission requirement of a route, mirrors auth.require.Require"""
     all: List[str] = Field(default_factory=list, description="Every permission in this list is required")
     any: List[str] = Field(default_factory=list, description="At least one permission in this list is required")
-    admin: bool = Field(default=False, description="admin.true is additionally required")
 
 
 class UserRef(BaseModel):
@@ -123,7 +122,6 @@ class AuthErrorCode(ProblemType):
 class AccessErrorCode(ProblemType):
     """403: authorization failures, with the required / missing permissions."""
     PERMISSION_DENIED = ("permission_denied", problem(403, "Insufficient permissions", **_ACCESS))
-    ADMIN_REQUIRED = ("admin_required", problem(403, "Administrator access required", **_ACCESS))
     PERMISSION_REQUIRED_FOR_ACTION = ("permission_required_for_action", problem(
         403, "Permission required for this action", "Permission {permission} is required for {action}",
         permission=str, action=str, **_ACCESS))

@@ -5,9 +5,9 @@ chunks at explicit offsets, asks the server for the current offset after any
 failure and continues from there, then completes. See UPLOADS.md for the
 client-facing contract.
 
-Permissions match the one-shot upload routes: media.view + media.create and
-write access to the observation's post. A session belongs to the user who
-opened it; media.manage_any may operate on any session.
+Permissions match the one-shot upload routes: media.view + media.create in
+effect at the observation's post. A session belongs to the user who opened it;
+media.manage_any may operate on the sessions of the posts where it is in effect.
 """
 from typing import List, Optional
 
@@ -90,17 +90,19 @@ def _to_response(row: UploadSession, version: PublishedVersion) -> UploadSession
 
 
 async def _owned_session(session: AsyncSession, auth: AuthContext, upload_id: str) -> UploadSession:
-    """The session, visible to its creator or media.manage_any, with post write access still valid"""
+    """The session, visible to its creator or to media.manage_any in effect at its post, while media.view and
+    media.create are still in effect there"""
     row = await uploads.get_session_row(session, upload_id)
     if row is None:
         raise ApiError(ErrorCode.UPLOAD_SESSION_NOT_FOUND)
-    if row.user_id != auth.user.id and not auth.has(Permissions.MEDIA_MANAGE_ANY):
+    if row.user_id != auth.user.id and not auth.has_at_post(Permissions.MEDIA_MANAGE_ANY, row.post_id):
         raise access_denied(
             AccessErrorCode.UPLOAD_SESSION_NOT_OWNER,
             required=Require.of(all=[Permissions.MEDIA_MANAGE_ANY]),
             missing=[Permissions.MEDIA_MANAGE_ANY.value],
         )
-    AccessControlService.check_post_write(auth, row.post_id, "media")
+    AccessControlService.check_post(auth, Permissions.MEDIA_VIEW, row.post_id, "media")
+    AccessControlService.check_post(auth, Permissions.MEDIA_CREATE, row.post_id, "media")
     return row
 
 

@@ -61,10 +61,19 @@ class ObservationReportFilter:
     MODEL = ObservationFrequency
 
     @classmethod
-    def build_query(cls, params: ObservationReportCriteria, access_post_ids: Optional[Iterable[int]] = None) -> Select:
-        """Bands matching the report filters, their observation and its report relations eager-loaded."""
+    def build_query(
+            cls,
+            params: ObservationReportCriteria,
+            access_post_ids: Optional[Iterable[int]] = None,
+            archived_post_ids: Optional[Iterable[int]] = None,
+    ) -> Select:
+        """Bands matching the report filters, their observation and its report relations eager-loaded.
+        access_post_ids: the posts covered (None: every post); archived_post_ids: with include_deleted, the posts
+        whose archived bands and observations are included (None: every post)."""
         params = as_criteria(ObservationReportCriteria, params)
-        query = ObservationFrequencyFilter.rows_query(access_post_ids, include_deleted=params.include_deleted)
+        query = ObservationFrequencyFilter.rows_query(
+            access_post_ids, include_deleted=params.include_deleted, archived_post_ids=archived_post_ids,
+        )
 
         # Band filters: the report type selects the kind
         query = query.where(*ObservationFrequencyFilter.band_conditions(

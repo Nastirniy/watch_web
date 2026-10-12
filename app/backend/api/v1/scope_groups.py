@@ -21,7 +21,7 @@ from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import ScopeGroupRoutes
 from app.backend.errors.coded import CodedError
-from app.backend.errors.openapi import ADMIN, GUARDED, problems
+from app.backend.errors.openapi import GUARDED, problems
 from app.backend.errors.problems import ApiError
 from app.backend.filters.scope_group_filter import ScopeGroupFilterService
 from app.backend.models.post import Post
@@ -80,12 +80,12 @@ async def _audit(request: Request, session: AsyncSession, auth: AuthContext, act
 @router.get(
     ScopeGroupRoutes.ROOT.value,
     response_model=List[ScopeGroupResponse],
-    responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *ADMIN),
+    responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
 )
 async def list_scope_groups(
         filters: Annotated[ScopeGroupFilterParams, Query()],
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW]))
 ):
     """List scope groups with filters. Archived ones only with include_deleted (requires scope_group.archive)."""
     AccessControlService.check_include_deleted(auth, filters, Permissions.SCOPE_GROUP_ARCHIVE)
@@ -97,14 +97,14 @@ async def list_scope_groups(
 @router.post(
     ScopeGroupRoutes.ROOT.value,
     response_model=ScopeGroupResponse,
-    responses=problems(*TREE_PROBLEMS, *ADMIN),
+    responses=problems(*TREE_PROBLEMS, *GUARDED),
 )
 async def create_scope_group(
         request: Request,
         data: ScopeGroupCreate,
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(
-            all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_CREATE], admin=True))
+            all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_CREATE]))
 ):
     """Create a group under parent_id (null: directly under the root). Names are unique within a parent; groups
     nest at most 6 levels deep."""
@@ -128,11 +128,11 @@ async def create_scope_group(
 @router.get(
     ScopeGroupRoutes.TREE.value,
     response_model=ScopeTreeResponse,
-    responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *ADMIN),
+    responses=problems(AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
 )
 async def get_scope_tree(
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW]))
 ):
     """The whole tree below the root: groups with their subgroups and posts, then the posts directly under the
     root. Archived groups and posts are left out."""
@@ -158,12 +158,12 @@ async def get_scope_tree(
 @router.get(
     ScopeGroupRoutes.GROUP_BY_ID.value,
     response_model=ScopeGroupResponse,
-    responses=problems(ErrorCode.SCOPE_GROUP_NOT_FOUND, *ADMIN),
+    responses=problems(ErrorCode.SCOPE_GROUP_NOT_FOUND, *GUARDED),
 )
 async def get_scope_group(
         group_id: int,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW]))
 ):
     """Get a scope group by ID. An archived group answers 404."""
     return ScopeGroupResponse.model_validate(await _group_or_404(session, group_id))
@@ -172,7 +172,7 @@ async def get_scope_group(
 @router.patch(
     ScopeGroupRoutes.GROUP_BY_ID.value,
     response_model=ScopeGroupResponse,
-    responses=problems(*TREE_PROBLEMS, *ADMIN),
+    responses=problems(*TREE_PROBLEMS, *GUARDED),
 )
 async def update_scope_group(
         request: Request,
@@ -180,7 +180,7 @@ async def update_scope_group(
         data: ScopeGroupUpdate,
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(
-            all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_UPDATE], admin=True))
+            all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_UPDATE]))
 ):
     """Rename, describe or move a group (parent_id null: directly under the root). Only the fields sent change.
     A group cannot move into its own subtree, and the moved subtree must still fit 6 levels. Archived: 404."""
@@ -213,14 +213,14 @@ async def update_scope_group(
 @router.post(
     ScopeGroupRoutes.GROUP_ARCHIVE.value,
     response_model=ScopeGroupResponse,
-    responses=problems(ErrorCode.SCOPE_GROUP_NOT_FOUND, ErrorCode.SCOPE_GROUP_NOT_EMPTY, *ADMIN),
+    responses=problems(ErrorCode.SCOPE_GROUP_NOT_FOUND, ErrorCode.SCOPE_GROUP_NOT_EMPTY, *GUARDED),
 )
 async def archive_scope_group(
         request: Request,
         group_id: int,
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(
-            all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_ARCHIVE], admin=True))
+            all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_ARCHIVE]))
 ):
     """Archive a group (is_deleted=true). Only an empty group: no active subgroup and no active post (409
     scope_group_not_empty). Already archived or unknown: 404. Undo with POST /{group_id}/restore."""
@@ -243,14 +243,14 @@ async def archive_scope_group(
 @router.post(
     ScopeGroupRoutes.GROUP_RESTORE.value,
     response_model=ScopeGroupResponse,
-    responses=problems(ErrorCode.SCOPE_GROUP_NOT_ARCHIVED, *TREE_PROBLEMS, *ADMIN),
+    responses=problems(ErrorCode.SCOPE_GROUP_NOT_ARCHIVED, *TREE_PROBLEMS, *GUARDED),
 )
 async def restore_scope_group(
         request: Request,
         group_id: int,
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(
-            all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_ARCHIVE], admin=True))
+            all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_ARCHIVE]))
 ):
     """Restore an archived group (is_deleted=false) under its former parent. Unknown: 404, and 404 when the
     parent is archived (restore the parent first). Not archived: 409."""

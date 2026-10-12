@@ -19,7 +19,8 @@ class RoleBriefResponse(PlainTextModel):
 class AuthorizationInfo(PlainTextModel):
     """Authorization data the GUI needs to build its interface"""
     post_id: Optional[int] = Field(default=None, description="Home post of the user")
-    is_admin: bool = Field(description="Holds admin.true: may open the administration area")
+    is_admin: bool = Field(description="Holds admin.true (legacy flag: no route checks it, every route checks its "
+                                       "own permissions)")
     permissions: List[str] = Field(default_factory=list, description="Effective permission names")
     roles: List[RoleBriefResponse] = Field(default_factory=list)
     accessible_post_ids: Optional[List[int]] = Field(
@@ -66,7 +67,7 @@ class SessionInfoResponse(BaseModel):
 
 
 class UserSessionResponse(SessionInfoResponse):
-    """A session as administrators see it, ended ones included"""
+    """A session as the session routes of a user list it, ended ones included"""
     ended_at: Optional[ResponseDatetime] = None
     end_reason: Optional[SessionEndReason] = Field(
         default=None, description="Ended sessions: logout, expired, idle_timeout or revoked (null for sessions "
@@ -85,8 +86,7 @@ class SessionsEndedResponse(BaseModel):
 
 class PermissionCheckResponse(BaseModel):
     allowed: bool
-    missing: List[str] = Field(default_factory=list, description="Granular permissions the caller lacks")
-    admin_required: bool = Field(description="True when admin.true was required and the caller lacks it")
+    missing: List[str] = Field(default_factory=list, description="Permissions the caller lacks")
 
 
 class RouteAccessEntryResponse(BaseModel):

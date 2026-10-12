@@ -51,7 +51,7 @@ from app.backend.services.observation_report_service import ObservationReportSer
 from app.backend.errors.problems import ApiError, field_problem
 from app.backend.enums.errors import AccessErrorCode, ErrorCode, FieldErrorCode
 from app.backend.api.shared.openapi_docs import file_response, header
-from app.backend.errors.openapi import ADMIN, GUARDED, problems
+from app.backend.errors.openapi import GUARDED, problems
 
 router = APIRouter(prefix=ObservationRoutes.BASE.value, tags=[ObservationRoutes.tag()])
 
@@ -115,16 +115,15 @@ async def list_observations(
 ):
     """List observations with the ids of their media. Every filter is an optional query parameter.
 
-    A user sees the posts of their data scope (post.access_all: every post). Media files are loaded with
-    selectinload: two queries for any number of observations."""
-
-    # Apply post access filter (enforced for regular users, optional for admins)
-    AccessControlService.check_include_deleted(auth, filters, Permissions.OBSERVATION_ARCHIVE)
-    filtered_post_ids = AccessControlService.resolve_post_scope(auth, filters.post_id)
+    The observations of the posts where observation.view is in effect; archived ones only with include_deleted
+    (requires observation.archive), and only at the posts where observation.archive is in effect. Media files are
+    loaded with selectinload: two queries for any number of observations."""
+    archived = AccessControlService.archived_scope(auth, filters, Permissions.OBSERVATION_ARCHIVE)
+    filtered_post_ids = AccessControlService.resolve_scope(auth, Permissions.OBSERVATION_VIEW, filters.post_id)
 
     # Build base query and apply filters
     query = select(Observation).options(*OBSERVATION_LOAD_OPTIONS)
-    query = ObservationFilterService.apply_filters(query, filters, filtered_post_ids)
+    query = ObservationFilterService.apply_filters(query, filters, filtered_post_ids, archived_post_ids=archived)
 
     # Execute query
     result = await session.exec(query)
@@ -151,12 +150,14 @@ async def create_observation(
 ):
     """
     Create new observation.
-    Users can only create observations for their assigned post. An archived post: 409 post_archived.
+    Needs observation.view and observation.create in effect at the post. An archived post: 409 post_archived.
     Note: Field validation is handled by Pydantic model validators.
     """
     current_user = auth.user
-    # Access first: an unknown post id and a foreign one answer alike (403), only post.access_all learns 404
-    AccessControlService.check_post_write(auth, observation_data.post_id, "observation")
+    # Access first: an unknown post id and a foreign one answer alike (403); only a caller whose permissions apply
+    # at every post (held at the root) learns 404
+    AccessControlService.check_post(auth, Permissions.OBSERVATION_VIEW, observation_data.post_id, "observation")
+    AccessControlService.check_post(auth, Permissions.OBSERVATION_CREATE, observation_data.post_id, "observation")
 
     post = (await session.exec(select(Post).where(Post.id == observation_data.post_id))).first()
     if not post:
@@ -236,7 +237,7 @@ async def update_observation(
 ):
     """
     Update existing observation (tags included).
-    Users can only update observations from their assigned post.
+    Needs observation.view and observation.update in effect at its post; owner or observation.manage_any there.
     Archived observations answer 404 until restored (POST /{observation_id}/restore); an archived post: 409 post_archived.
     """
     current_user = auth.user
@@ -254,8 +255,9 @@ async def update_observation(
     # Store old values for auditing
     old_values = observation_audit_values(observation)
 
-    # Check if user has access to this observation's post
-    AccessControlService.check_post_write(auth, observation.post_id, "observation")
+    # Permission at the observation's post, then ownership
+    AccessControlService.check_post(auth, Permissions.OBSERVATION_VIEW, observation.post_id, "observation")
+    AccessControlService.check_post(auth, Permissions.OBSERVATION_UPDATE, observation.post_id, "observation")
     AccessControlService.check_observation_ownership(auth, observation)
     await ensure_post_not_archived(session, observation.post_id)
 
@@ -333,7 +335,8 @@ async def mark_observation_disappeared(
 ):
     """
     Mark observation as disappeared.
-    Users can only mark observations from their assigned post. An archived post: 409 post_archived.
+    Needs observation.view and observation.update in effect at its post; owner or observation.manage_any there.
+    An archived post: 409 post_archived.
     """
     current_user = auth.user
     result = await session.exec(
@@ -350,8 +353,9 @@ async def mark_observation_disappeared(
     # Store old values for auditing
     old_values = observation.model_dump()
 
-    # Check if user has access to this observation's post
-    AccessControlService.check_post_write(auth, observation.post_id, "observation")
+    # Permission at the observation's post, then ownership
+    AccessControlService.check_post(auth, Permissions.OBSERVATION_VIEW, observation.post_id, "observation")
+    AccessControlService.check_post(auth, Permissions.OBSERVATION_UPDATE, observation.post_id, "observation")
     AccessControlService.check_observation_ownership(auth, observation)
     await ensure_post_not_archived(session, observation.post_id)
 
@@ -403,22 +407,24 @@ async def get_report_types(
                             {"Content-Disposition": header('attachment; filename="<report>.xlsx"')}),
         **problems(
             AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION,
-            AccessErrorCode.POST_ACCESS_DENIED, *ADMIN,
+            AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, *GUARDED,
         ),
     },
 )
 async def generate_observation_report(
         params: ObservationReportParams,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW, Permissions.EXPORT_CREATE], admin=True))
+        auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW, Permissions.EXPORT_CREATE]))
 ):
     """
-    Generate an Excel (.xlsx) report for observations. Admin only.
+    Generate an Excel (.xlsx) report for observations (observation.view and export.create).
 
     The report header contains the filter criteria used (in Ukrainian).
     One row per frequency band (rc_freq_part: rc bands, video_freq_part: video bands, all_fields: every band);
     the observation columns repeat for each of its bands. Bands of archived observations and archived bands
-    appear only with include_deleted. Posts outside the caller's scope are never included.
+    appear only with include_deleted (requires observation.archive), and only for the posts where
+    observation.archive is in effect. Only the posts where both observation.view and export.create are in effect
+    are included; a post_ids entry outside them answers 403.
     all_fields columns: user, post, signal type, band kind, emitter group, frequency min/max/center, bandwidth,
     observed time, disappeared time, duration (minutes, one decimal), comment, creation date, tags.
     All datetimes are displayed in Kyiv local time (EET/EEST).
@@ -432,10 +438,12 @@ async def generate_observation_report(
     - By statuses
     - Any combination of the above
     """
-    AccessControlService.check_include_deleted(auth, params, Permissions.OBSERVATION_ARCHIVE)
+    archived = AccessControlService.archived_scope(auth, params, Permissions.OBSERVATION_ARCHIVE)
     for post_id in params.post_ids or []:
-        AccessControlService.check_post_view(auth, post_id)
-    query = ObservationReportFilter.build_query(params, AccessControlService.post_scope(auth))
+        AccessControlService.check_post(auth, Permissions.OBSERVATION_VIEW, post_id)
+        AccessControlService.check_post(auth, Permissions.EXPORT_CREATE, post_id)
+    scope = AccessControlService.scope_for_all(auth, Permissions.OBSERVATION_VIEW, Permissions.EXPORT_CREATE)
+    query = ObservationReportFilter.build_query(params, scope, archived_post_ids=archived)
 
     result = await session.exec(query)
     frequencies = list(result.all())
@@ -461,19 +469,20 @@ async def _set_observation_archived(
         observation_id: int,
         archived: bool,
 ) -> ObservationWithMedia:
-    """Shared body of archive / restore: ownership rules, flag flip, audit row. In an archived post only
-    callers with admin.true AND post.access_all archive and restore (the routes require observation.view and
-    observation.archive; ownership or observation.manage_any as always); post.access_all without admin.true gets
-    409 post_archived, home-post and access-row users 403."""
+    """Shared body of archive / restore: observation.view and observation.archive in effect at the post, ownership
+    (observation.manage_any in effect there overrides), flag flip, audit row. In an archived post only grants
+    inherited from a group or the root apply (a grant on the post itself stops applying: 403), and only callers with
+    post.archive in effect at the post archive and restore; everyone else gets 409 post_archived."""
     current_user = auth.user
     result = await session.exec(select(Observation).where(Observation.id == observation_id))
     observation = result.first()
     if not observation:
         raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
 
-    AccessControlService.check_post_write(auth, observation.post_id, "observation")
+    AccessControlService.check_post(auth, Permissions.OBSERVATION_VIEW, observation.post_id, "observation")
+    AccessControlService.check_post(auth, Permissions.OBSERVATION_ARCHIVE, observation.post_id, "observation")
     AccessControlService.check_observation_ownership(auth, observation)
-    if not auth.is_admin:
+    if not auth.has_at_post(Permissions.POST_ARCHIVE, observation.post_id):
         await ensure_post_not_archived(session, observation.post_id)
 
     # The state after the scope and ownership checks: an outsider gets the same 403 whatever the row looks like
@@ -527,12 +536,13 @@ async def archive_observation(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW, Permissions.OBSERVATION_ARCHIVE]))
 ):
-    """Archive an observation (is_deleted=true). Owner or observation.manage_any, write access to its post.
+    """Archive an observation (is_deleted=true). observation.view and observation.archive in effect at its post;
+    owner or observation.manage_any in effect there.
 
     Nothing is removed: media files stay attached, the row is hidden from lists unless include_deleted=true.
-    Undo with POST /{observation_id}/restore. Already archived or unknown: 404. In an archived post it needs
-    admin.true AND post.access_all; post.access_all without admin.true gets 409 post_archived, a home-post or
-    access-row user 403.
+    Undo with POST /{observation_id}/restore. Already archived or unknown: 404. In an archived post it also needs
+    post.archive in effect at the post (otherwise 409 post_archived); a grant on the archived post itself no longer
+    applies (403).
     """
     return await _set_observation_archived(request, session, auth, observation_id, archived=True)
 
@@ -552,8 +562,8 @@ async def restore_observation(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW, Permissions.OBSERVATION_ARCHIVE]))
 ):
-    """Restore an archived observation (is_deleted=false). Same rules as archive (an archived post: only
-    admin.true AND post.access_all). Not archived: 409."""
+    """Restore an archived observation (is_deleted=false). Same rules as archive (an archived post: post.archive
+    in effect at it). Not archived: 409."""
     return await _set_observation_archived(request, session, auth, observation_id, archived=False)
 
 
@@ -598,16 +608,18 @@ async def list_observation_frequencies(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW]))
 ):
-    """Bands of one observation. Archived bands and bands of an archived observation need include_deleted=true."""
-    AccessControlService.check_include_deleted(auth, params, Permissions.OBSERVATION_ARCHIVE)
+    """Bands of one observation. Archived bands and bands of an archived observation need include_deleted=true
+    (requires observation.archive) and observation.archive in effect at the observation's post."""
+    archived = AccessControlService.archived_scope(auth, params, Permissions.OBSERVATION_ARCHIVE)
     observation = (await session.exec(select(Observation).where(Observation.id == observation_id))).first()
     if not observation:
         raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
-    AccessControlService.check_post_view(auth, observation.post_id, "observation")
-    if observation.is_deleted and not params.include_deleted:
+    AccessControlService.check_post(auth, Permissions.OBSERVATION_VIEW, observation.post_id, "observation")
+    include_deleted = params.include_deleted and (archived is None or observation.post_id in archived)
+    if observation.is_deleted and not include_deleted:
         raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
 
-    result = await session.exec(ObservationFrequencyFilter.of_observation(observation_id, params.include_deleted))
+    result = await session.exec(ObservationFrequencyFilter.of_observation(observation_id, include_deleted))
     return [ObservationFrequencyResponse.model_validate(f) for f in result.all()]
 
 
@@ -626,7 +638,8 @@ async def add_observation_frequency(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW, Permissions.OBSERVATION_UPDATE]))
 ):
-    """Add a band to an observation. Owner or observation.manage_any, write access to its post.
+    """Add a band to an observation. observation.view and observation.update in effect at its post; owner or
+    observation.manage_any in effect there.
     Archived or unknown observation: 404. An archived post: 409 post_archived (every band change)."""
     observation = await get_observation_for_write(session, auth, observation_id, lock=True)
 
@@ -700,8 +713,10 @@ async def _set_frequency_archived(
         frequency_id: int,
         archived: bool,
 ) -> ObservationFrequencyResponse:
-    """Shared body of band archive / restore"""
-    observation = await get_observation_for_write(session, auth, observation_id, lock=True)
+    """Shared body of band archive / restore: observation.view and observation.archive in effect at the post"""
+    observation = await get_observation_for_write(
+        session, auth, observation_id, lock=True, permission=Permissions.OBSERVATION_ARCHIVE,
+    )
     frequency = get_frequency_or_404(observation, frequency_id)
     if archived and frequency.is_deleted:
         raise ApiError(ErrorCode.FREQUENCY_NOT_FOUND)
@@ -742,8 +757,8 @@ async def archive_observation_frequency(
         auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW, Permissions.OBSERVATION_ARCHIVE]))
 ):
     """Archive a band (is_deleted=true): it leaves the observation response, lists, filters and reports.
-    Owner or observation.manage_any, write access to the post. Already archived, unknown, or archived
-    observation: 404. The last active band of an observation: 409."""
+    Owner or observation.manage_any, observation.view and observation.archive in effect at the post. Already
+    archived, unknown, or archived observation: 404. The last active band of an observation: 409."""
     return await _set_frequency_archived(request, session, auth, observation_id, frequency_id, archived=True)
 
 

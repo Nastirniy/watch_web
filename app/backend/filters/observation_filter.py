@@ -6,7 +6,7 @@ Uses simple typed params for clear FastAPI docs
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional, Iterable, List
+from typing import FrozenSet, Optional, Iterable, List
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql.selectable import Select
 
@@ -89,15 +89,17 @@ class ObservationFilterService(SimpleFilterEngine):
         cls,
         query: Select,
         params: ObservationCriteria,
-        access_post_ids: Optional[Iterable[int]] = None
+        access_post_ids: Optional[Iterable[int]] = None,
+        archived_post_ids: Optional[FrozenSet[int]] = None,
     ) -> Select:
-        """Apply all filters from ObservationCriteria"""
+        """Apply all filters from ObservationCriteria. access_post_ids: the posts listed (None: every post);
+        archived_post_ids: with include_deleted, the posts whose archived observations are shown (None: every post)"""
         params = cls.criteria(params)
 
-        # Soft delete
-        query = cls._apply_soft_delete(query, params)
+        # Soft delete: archived rows only with include_deleted, at archived_post_ids
+        query = cls._apply_soft_delete(query, params, Observation.post_id, archived_post_ids)
 
-        # Access control (non-admin sees only their post)
+        # Post scope
         if access_post_ids is not None:
             query = query.where(Observation.post_id.in_(list(access_post_ids)))
 
@@ -164,12 +166,13 @@ class ObservationFilterService(SimpleFilterEngine):
         cls,
         query: Select,
         params: ObservationCriteria,
-        access_post_ids: Optional[Iterable[int]] = None
+        access_post_ids: Optional[Iterable[int]] = None,
+        archived_post_ids: Optional[FrozenSet[int]] = None,
     ) -> Select:
         """Apply filters without pagination (for counting)"""
         params = cls.criteria(params)
         # Same as apply_filters but without pagination and eager loading
-        query = cls._apply_soft_delete(query, params)
+        query = cls._apply_soft_delete(query, params, Observation.post_id, archived_post_ids)
 
         if access_post_ids is not None:
             query = query.where(Observation.post_id.in_(list(access_post_ids)))

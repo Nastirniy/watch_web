@@ -42,10 +42,9 @@ class RefreshRequest(BaseModel):
 
 
 class PermissionCheckRequest(BaseModel):
-    """Same shape as a route requirement: all AND any AND (admin.true if admin)"""
+    """Same shape as a route requirement: every permission of all AND one of any"""
     all: List[str] = Field(default_factory=list)
     any: List[str] = Field(default_factory=list)
-    admin: bool = False
 
     @field_validator('all', 'any')
     @classmethod
