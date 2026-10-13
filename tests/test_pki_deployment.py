@@ -24,6 +24,7 @@ def test_signer_has_no_network_and_its_own_env():
     assert signer["env_file"] == "signer.env"
     assert signer["command"][-1] == "serve"
     assert signer["image"] == "watch-web"
+    assert signer["pull_policy"] == "never"
     assert "PKI_SIGNER_UID" in signer["user"]
     assert signer["restart"] == "unless-stopped"
 
@@ -81,3 +82,9 @@ def test_deployment_files_are_ascii():
     for relative in ("docker-compose.pki.yml", "signer.env.example", ".env.example", "nginx.conf",
                      "deploy/pki/remove-old-root.cmd", "deploy/systemd/watch-web-crl.path"):
         (ROOT / relative).read_bytes().decode("ascii")
+
+
+def test_signer_env_stays_out_of_git_and_the_image():
+    for name in (".gitignore", ".dockerignore"):
+        lines = (ROOT / name).read_text(encoding="utf-8").splitlines()
+        assert ".env" in lines and "signer.env" in lines, name

@@ -17,6 +17,7 @@ certificates/
 app/certificates/
 app/*.pem
 .env
+signer.env
 *.md
 nul
 =11.0.0

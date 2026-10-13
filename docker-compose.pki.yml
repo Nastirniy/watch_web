@@ -14,6 +14,8 @@
 services:
   pki-signer:
     image: watch-web
+    # built by the api service (or loaded with `docker load` on air-gapped servers): never pulled from a registry
+    pull_policy: never
     network_mode: none
     env_file: signer.env
     # primary group MEDIA_GID: the socket in run/ (0770, group MEDIA_GID) is reachable by the api container
