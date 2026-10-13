@@ -1,0 +1,41 @@
+# PKI client certificates: the signer container and the API's PKI mounts (PKI.md, DEPLOYMENT.md).
+#
+# An override file, off by default, so docker-compose.yml works without PKI_DIR. Enable it in .env:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.pki.yml
+#   PKI_DIR=/srv/watch_web/pki           # host directory, bind-mounted at the SAME path into the containers
+#   PKI_SIGNER_UID=...                   # the user that owns PKI_DIR/private (`id -u watch-web-signer`)
+#
+# Only the signer sees the CA private key: no network (it listens on a Unix socket in run/), its own
+# environment file (signer.env, from signer.env.example), read-only ca/ and private/. The API gets the CA
+# certificate (read-only), the CRL folder, the store of issued certificates and the socket. It does not wait
+# for the signer: the API starts without it and answers 503 on issue until the signer is there.
+# media-worker and imgproxy get nothing of PKI_DIR.
+
+services:
+  pki-signer:
+    image: watch-web
+    network_mode: none
+    env_file: signer.env
+    # primary group MEDIA_GID: the socket in run/ (0770, group MEDIA_GID) is reachable by the api container
+    user: "${PKI_SIGNER_UID:?set PKI_SIGNER_UID in .env}:${MEDIA_GID:-10001}"
+    command: ["python", "-m", "app.backend.signer", "serve"]
+    volumes:
+      - ${PKI_DIR:?set PKI_DIR in .env}/ca:${PKI_DIR}/ca:ro
+      - ${PKI_DIR}/private:${PKI_DIR}/private:ro
+      - ${PKI_DIR}/run:${PKI_DIR}/run
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "5" }
+
+  api:
+    environment:
+      MYSETTINGS_PKI__CA_CERT_PATH: ${PKI_DIR:?set PKI_DIR in .env}/ca/client-ca.crt
+      MYSETTINGS_PKI__SIGNER_SOCKET: ${PKI_DIR}/run/signer.sock
+      MYSETTINGS_PKI__STORE_DIR: ${PKI_DIR}/issued
+      MYSETTINGS_PKI__CRL_PATH: ${PKI_DIR}/crl/nginx.crl
+    volumes:
+      - ${PKI_DIR}/ca:${PKI_DIR}/ca:ro
+      - ${PKI_DIR}/crl:${PKI_DIR}/crl
+      - ${PKI_DIR}/issued:${PKI_DIR}/issued
+      - ${PKI_DIR}/run:${PKI_DIR}/run

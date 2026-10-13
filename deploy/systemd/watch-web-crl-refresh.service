@@ -1,0 +1,11 @@
+# Started by watch-web-crl-refresh.timer: the api container signs and publishes the CRL; the path unit reloads nginx
+[Unit]
+Description=Publish the watch_web client certificate CRL
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# edit: the directory with docker-compose.yml and .env
+WorkingDirectory=/opt/watch_web
+ExecStart=/usr/bin/docker compose exec -T api python -m app.backend.cli.pki crl

@@ -1,0 +1,11 @@
+# Signs the CRL again every day, so its nextUpdate never passes (nginx refuses every client after that).
+[Unit]
+Description=Refresh the watch_web client certificate CRL daily
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target

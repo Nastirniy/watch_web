@@ -1,0 +1,12 @@
+# Reloads nginx when the API publishes a new CRL (nginx reads ssl_crl only at reload). PKI.md, "nginx".
+# Install: cp deploy/systemd/watch-web-crl.* /etc/systemd/system/ && systemctl enable --now watch-web-crl.path
+[Unit]
+Description=Watch the client certificate CRL published by watch_web
+
+[Path]
+# edit: PKI_DIR/crl/nginx.crl (the file is replaced by a rename; if the path unit does not fire, watch the directory)
+PathChanged=/srv/watch_web/pki/crl/nginx.crl
+Unit=watch-web-crl.service
+
+[Install]
+WantedBy=multi-user.target

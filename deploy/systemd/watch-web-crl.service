@@ -1,0 +1,7 @@
+# Started by watch-web-crl.path: reload nginx so it reads the new CRL (only when the configuration is valid)
+[Unit]
+Description=Reload nginx after watch_web published a new CRL
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'nginx -t && nginx -s reload'

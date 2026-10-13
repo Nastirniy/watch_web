@@ -101,6 +101,8 @@ def test_production_server_requires_a_verified_client_certificate():
     servers = _blocks(SERVERS, "server")
     tls = [body for _, body in servers if "listen 443 ssl" in body]
     assert len(tls) == 1
+    for directive in ("ssl_verify_depth 1;", "ssl_crl ", "/etc/letsencrypt/live/"):
+        assert directive in tls[0], directive
     for directive in ("ssl_verify_client on;", "ssl_client_certificate ", "ssl_crl ", f"include {APP_SNIPPET};"):
         assert directive in tls[0], directive
     # every other server only redirects to it: no location is ever served without TLS
