@@ -8,6 +8,7 @@ from app.backend.database import get_session_maker
 from app.backend.pki.authority import CaCheckError, load_ca_certificate
 from app.backend.pki.crl import split_pem_crls
 from app.backend.services.crl_publisher import publish_crl
+from app.backend.services.signer_client import SignerRefused
 from app.backend.utils.logging_config import get_main_logger
 
 _logger = get_main_logger()
@@ -52,11 +53,21 @@ def check_pki_settings(pki: PkiConfig) -> None:
 
 
 async def publish_crl_at_startup() -> None:
-    """Publish the CRL when the file is missing or half of its validity has passed (a signer that does not answer
-    is logged and does not stop the start)"""
+    """Publish the CRL when the file is missing or half of its validity has passed. The signer is not required for
+    the API to start (spec section 3): a signer that does not answer or refuses (MYSETTINGS_PKI__CRL_DAYS above
+    SIGNER_MAX_CRL_DAYS), an extra CRL that does not parse or a file that cannot be written is logged, the start goes
+    on and /health shows the state of the CRL."""
     if not settings.pki.is_configured():
         return
     session_maker = await get_session_maker()
     async with session_maker() as session:
-        if await publish_crl(session, only_if_due=True):
+        try:
+            published = await publish_crl(session, only_if_due=True)
+        except SignerRefused as exc:
+            _logger.error(f"CRL not published at start: the signer refused ({exc})")
+            return
+        except OSError as exc:
+            _logger.error(f"CRL not published at start: {settings.pki.crl_path} cannot be written ({exc!r})")
+            return
+        if published:
             _logger.info("CRL published at start")

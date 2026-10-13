@@ -11,9 +11,10 @@ Upgrade (spec section 4):
    built by 002 from the models) has only the scheme column, which 019 added.
 
 Downgrade restores the columns (the scheme SMALLINT NOT NULL DEFAULT 1, as 019 adds it):
-- a user with a legacy row gets its values back exactly (a revoked one too: the older code knows no revocation, the
-  output names those users);
-- the others get the hashes of their newest active row (not revoked, not expired);
+- a user with a legacy row that is not revoked gets its values back exactly;
+- the others get the hashes of their newest active row (not revoked, not expired). A revoked legacy row is never
+  restored: the older code knows no revocation and would let it log in again (fails closed, the output names those
+  users);
 - a user with none, or whose CN or serial hash a user restored before holds already (the columns are unique; legacy
   rows come first, then the other users by id), gets the placeholder unassigned:<user_id> in the three hash columns
   (scheme 1), which matches no certificate; the output names every such user;
@@ -259,14 +260,20 @@ def _restore_hashes(has_certificates: bool) -> None:
     newest: Dict[int, sa.Row] = {}
     for row in rows:
         if row.source == LEGACY:
-            legacy.setdefault(row.user_id, row)
+            if row.revoked_at is None:
+                legacy.setdefault(row.user_id, row)
+            else:
+                # The older code knows no revocation: restoring it would let the certificate log in again
+                _log(f"user {row.user_id} ({names.get(row.user_id)}): its legacy certificate is revoked and is not "
+                     f"restored (the newest active certificate or the placeholder instead)")
         not_after = _naive(row.not_after)
         if row.revoked_at is None and (not_after is None or not_after >= now):
             best = newest.get(row.user_id)
             if best is None or (_naive(row.created_at), row.id) > (_naive(best.created_at), best.id):
                 newest[row.user_id] = row
 
-    # Legacy rows first (their values come back exactly), then the newest active row of every other user by id
+    # Legacy rows that are not revoked first (their values come back exactly), then the newest active row of every
+    # other user by id
     candidates: List[Tuple[int, int, Optional[sa.Row]]] = [(0, user_id, row) for user_id, row in legacy.items()]
     candidates += [(1, user.id, newest.get(user.id)) for user in users if user.id not in legacy]
     taken_cn: Set[str] = set()
@@ -282,9 +289,6 @@ def _restore_hashes(has_certificates: bool) -> None:
             taken_cn.add(row.cn_hash)
             taken_serial.add(row.serial_hash)
             _restore(user_id, row, names)
-            if row.source == LEGACY and row.revoked_at is not None:
-                _log(f"user {user_id} ({names.get(user_id)}): its legacy certificate is revoked, the older code knows "
-                     f"no revocation and lets it log in again")
 
     issued = sum(1 for row in rows if row.source == ISSUED)
     revoked = sum(1 for row in rows if row.revoked_at is not None)

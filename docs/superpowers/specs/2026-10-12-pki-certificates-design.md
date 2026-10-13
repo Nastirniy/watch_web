@@ -663,3 +663,10 @@ Decisions and findings of the implementation (branch `pki-certificates`, ledger
   `uq_users_pki_certificate_fingerprint_hash` (a database made by the old code names them after the column) and the
   four columns at the end of the table. Accepted: same uniqueness, types and defaults; a later upgrade handles both
   names.
+- Final review: the 024 downgrade never restores a revoked `legacy` row (the older code knows no revocation): its
+  user gets the newest active row or the placeholder, fails closed, and the output names them.
+- Final review: `store_dir` (`PKI_DIR/issued/`) is 0770 root:`PKI_SOCKET_GID`, not 0700 of the api uid (sections 2
+  and 3): that uid is often the nginx user's. The folders inside stay 0700.
+- Final review: the extra CRL files are parsed at every publication and written again as PEM; a missing or
+  unparsable one publishes nothing (the previous file stays). A publication that fails after a revocation or at
+  start (signer refusing, file not writable) is logged; the revocation answers 200 and the API starts.

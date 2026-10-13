@@ -232,6 +232,31 @@ def test_cli_sign_crl_for_another_ca(tmp_path):
     assert crl.extensions.get_extension_for_class(x509.CRLNumber).value.crl_number == 1
 
 
+def test_cli_sign_crl_never_leaves_a_partial_file(tmp_path, monkeypatch):
+    """sign-crl writes a temporary file next to --out and renames it: a failed write leaves the previous CRL whole
+    and no temporary file"""
+    cert_path, key_path = write_ca_files(tmp_path, legacy_root())
+    out_dir = tmp_path / "crl"
+    out_dir.mkdir()
+    out = out_dir / "legacy-root.crl"
+    out.write_bytes(b"the previous CRL")
+    next_update = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
+    args = ["sign-crl", "--ca-cert", str(cert_path), "--ca-key", str(key_path), "--next-update", next_update,
+            "--out", str(out)]
+
+    def disk_full(*_):
+        raise OSError(28, "No space left on device")
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "replace", disk_full)
+        assert main(args) == 1
+    assert out.read_bytes() == b"the previous CRL"
+    assert [p.name for p in out_dir.iterdir()] == [out.name]
+
+    assert main(args) == 0
+    assert [p.name for p in out_dir.iterdir()] == [out.name]
+    assert x509.load_pem_x509_crl(out.read_bytes()).is_signature_valid(legacy_root()[0].public_key())
+
+
 @pytest.mark.skipif(os.name == "nt", reason="Unix sockets")
 def test_serve_socket_is_owner_and_group_only(tmp_path):
     """serve binds the socket itself (uvicorn chmods a path it binds to 0666): 0660 whatever the umask, and the

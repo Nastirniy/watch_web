@@ -2,15 +2,15 @@
 import os
 import secrets
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
 @dataclass(frozen=True)
 class CertificateFiles:
     certificate_pem: bytes
-    p12: bytes
-    password: str
+    p12: bytes = field(repr=False)      # secrets: never in a repr, so never in a log line or an exception text
+    password: str = field(repr=False)
     info: str
 
 

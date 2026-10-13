@@ -226,21 +226,22 @@ Seek previews (sprite sheets) made by the media worker with ffmpeg, only while t
 
 ## Client certificates (PKI)
 
-Optional: PKI is configured when the four paths are all set, and the API refuses to start with only some of them.
+Optional: PKI is configured when the four paths are all set, and the API refuses to start with only some of them,
+or with one of the numbers below out of its range.
 With Docker, `docker-compose.pki.yml` sets the four paths from `PKI_DIR`; do not set them in `.env`. Setup: `PKI.md`.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MYSETTINGS_PKI__CA_CERT_PATH` | *(empty)* | The client CA certificate (PEM), read-only (`PKI_DIR/ca/client-ca.crt`) |
 | `MYSETTINGS_PKI__SIGNER_SOCKET` | *(empty)* | The Unix socket of the `pki-signer` container (`PKI_DIR/run/signer.sock`) |
-| `MYSETTINGS_PKI__STORE_DIR` | *(empty)* | Folder of every issued package, `<user_id>/<certificate_id>/` (`PKI_DIR/issued`, 0700) |
+| `MYSETTINGS_PKI__STORE_DIR` | *(empty)* | Folder of every issued package, `<user_id>/<certificate_id>/` (`PKI_DIR/issued`, 0770 root:`PKI_SOCKET_GID`, never owned by `MEDIA_UID`) |
 | `MYSETTINGS_PKI__CRL_PATH` | *(empty)* | The CRL file nginx reads (`ssl_crl`), written by the API (`PKI_DIR/crl/nginx.crl`) |
 | `MYSETTINGS_PKI__EXTRA_CRL_PATHS` | `[]` | JSON list of CRL files appended to the published one: the existing root's CRL while its certificates live |
-| `MYSETTINGS_PKI__VALIDITY_DAYS` | `365` | Default validity of a new certificate |
-| `MYSETTINGS_PKI__MAX_VALIDITY_DAYS` | `730` | Longest validity a request may ask for (`validity_days_too_long` above) |
-| `MYSETTINGS_PKI__KEY_SIZE` | `2048` | RSA key size of user keys |
+| `MYSETTINGS_PKI__VALIDITY_DAYS` | `365` | Default validity of a new certificate; 1 to `MAX_VALIDITY_DAYS` |
+| `MYSETTINGS_PKI__MAX_VALIDITY_DAYS` | `730` | Longest validity a request may ask for (`validity_days_too_long` above); at most `SIGNER_MAX_VALIDITY_DAYS`, or the signer refuses (500 on issue) |
+| `MYSETTINGS_PKI__KEY_SIZE` | `2048` | RSA key size of user keys, 2048 to 4096 |
 | `MYSETTINGS_PKI__P12_ENCRYPTION` | `aes256` | `aes256` (AES-256 with SHA-256), or `legacy` (3DES with SHA-1) for old Windows and macOS |
-| `MYSETTINGS_PKI__CRL_DAYS` | `7` | How long a signed CRL stays valid (`next_update`); it is signed again daily |
+| `MYSETTINGS_PKI__CRL_DAYS` | `7` | How long a signed CRL stays valid (`next_update`), at least 1; it is signed again daily. At most `SIGNER_MAX_CRL_DAYS`, or the signer refuses every CRL (logged; `/health` turns `degraded` as the published CRL ages) |
 
 Compose variables of `.env` for the override: `COMPOSE_FILE=docker-compose.yml:docker-compose.pki.yml`, `PKI_DIR`
 (host directory outside the project directory), `PKI_SIGNER_UID` (owner of `PKI_DIR/private`, runs the signer),

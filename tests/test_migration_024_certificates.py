@@ -1,6 +1,6 @@
 """024_user_certificates: the certificate hashes of users become legacy rows of user_certificates, the columns leave
-users; the downgrade gives users their columns back (exactly from a legacy row, else the newest active row, else a
-placeholder that matches no certificate) and drops both tables.
+users; the downgrade gives users their columns back (exactly from a legacy row that is not revoked, else the newest
+active row, else a placeholder that matches no certificate) and drops both tables.
 
 The legacy data is written into a database downgraded to 023_authorization_v2, the shape production has before the
 upgrade (as the tests of 023 do at 022)."""
@@ -215,3 +215,28 @@ def test_downgrade_placeholder_for_a_taken_cn_hash(tmp_path):
     for user_id, username in ((2, "second"), (3, "nothing"), (4, "serial"), (5, "early")):
         assert f"user {user_id} ({username})" in output, output
     assert "user 1 (" not in output and "user 6 (" not in output
+
+
+@pytest.mark.slow
+def test_downgrade_never_revives_a_revoked_legacy_certificate(tmp_path):
+    """The older code knows no revocation: a revoked legacy row is no candidate. The user gets their newest active
+    row, else the placeholder (fails closed); the output names them."""
+    db_file = migrated(tmp_path, "revoked.db")
+    conn = sqlite3.connect(db_file)
+    insert_user(conn, 1, "renewed")
+    insert_user(conn, 2, "revoked")
+    insert_certificate(conn, 1, "legacy-1", source="legacy", scheme=1, revoked_at="2026-03-02 00:00:00")
+    insert_certificate(conn, 1, "uploaded-1", created_at="2026-04-01 00:00:00")
+    insert_certificate(conn, 2, "legacy-2", source="legacy", scheme=1, revoked_at="2026-03-02 00:00:00")
+    conn.commit()
+    conn.close()
+
+    restored, output = downgraded_users(db_file)
+    assert restored == {
+        1: ("cn-uploaded-1", 2, "sn-uploaded-1", "fp-uploaded-1"),
+        2: ("unassigned:2", 1, "unassigned:2", "unassigned:2"),
+    }
+    assert "user 1 (renewed): its legacy certificate is revoked" in output, output
+    assert "user 2 (revoked): its legacy certificate is revoked" in output, output
+    assert "user 2 (revoked): no active certificate; placeholder unassigned:2" in output, output
+    assert "logs in again" not in output, output

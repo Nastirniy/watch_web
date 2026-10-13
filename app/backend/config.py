@@ -1,7 +1,7 @@
 import os
 from typing import Optional
 from pathlib import Path
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 import toml
 
@@ -323,17 +323,26 @@ class PkiConfig(BaseModel):
     store_dir: str = ""             # the folder holding every issued certificate (<user_id>/<certificate_id>/)
     crl_path: str = ""              # the CRL file nginx reads (ssl_crl), written by the API
     extra_crl_paths: list[str] = []  # CRL files appended to the published one (the existing root's)
-    validity_days: int = 365        # default validity of a new certificate
-    max_validity_days: int = 730    # upper limit a request may ask for
-    key_size: int = 2048            # RSA key size of user keys
+    # Out of range refuses to start. The signer has its own limits (signer.env): max_validity_days must stay at most
+    # SIGNER_MAX_VALIDITY_DAYS and crl_days at most SIGNER_MAX_CRL_DAYS, or it refuses to sign (PKI.md, section 3)
+    validity_days: int = Field(default=365, ge=1)       # default validity of a new certificate, <= max_validity_days
+    max_validity_days: int = Field(default=730, ge=1)   # upper limit a request may ask for
+    key_size: int = Field(default=2048, ge=2048, le=4096)   # RSA key size of user keys
     p12_encryption: P12Encryption = P12Encryption.AES256  # legacy: 3DES / SHA-1 for old Windows and macOS
-    crl_days: int = 7               # how long a signed CRL stays valid (next_update)
+    crl_days: int = Field(default=7, ge=1)              # how long a signed CRL stays valid (next_update)
 
     @field_validator('extra_crl_paths', mode='before')
     @classmethod
     def parse_extra_crl_paths(cls, v):
         # Environment overrides arrive as strings: MYSETTINGS_PKI__EXTRA_CRL_PATHS=["/pki/crl/legacy-root.crl"]
         return _parse_json_sequence(v)
+
+    @model_validator(mode='after')
+    def validity_within_the_limit(self):
+        if self.validity_days > self.max_validity_days:
+            raise ValueError(f"pki.validity_days ({self.validity_days}) must be at most pki.max_validity_days "
+                             f"({self.max_validity_days})")
+        return self
 
     def is_configured(self) -> bool:
         return all((self.ca_cert_path, self.signer_socket, self.store_dir, self.crl_path))

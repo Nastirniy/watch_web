@@ -48,7 +48,7 @@ What a stolen secret gives:
 |--------|-------|---------------|
 | Client CA key (`PKI_DIR/private/`) | Forged login certificates for watch_web, until noticed and the CA replaced | Any website certificate: no client trusts the CA, and its EKU is `clientAuth` |
 | The API (process or account) | Client certificates from the signer, the database | The CA key; a server or CA certificate; it already decided who logs in |
-| `PKI_DIR/issued/` | The `.p12` and password of issued certificates: logging in as those people | Anything else; 0700, the api's uid only |
+| `PKI_DIR/issued/` | The `.p12` and password of issued certificates: logging in as those people | Anything else; 0770 root:`PKI_SOCKET_GID`, which only the api container joins (never the nginx user, even when it is `MEDIA_UID`) |
 | The existing root key | Until it leaves the clients: impersonating any website to them | Hence removed from clients early in the rollout, key offline |
 
 ## 2. The server certificate
@@ -94,7 +94,7 @@ the CA key and the issued packages into the build context.
 | `crl/` | `MEDIA_UID` | 0755 | written by the api, read by nginx |
 | `crl/nginx.crl` | `MEDIA_UID` | 0644 | published by the api (`crl_path`, nginx `ssl_crl`) |
 | `crl/legacy-root.crl` | root | 0644 | signed offline for the existing root (`extra_crl_paths`) |
-| `issued/` | `MEDIA_UID` | 0700 | `store_dir`: every issued package, 0700 directories, `.p12` and `password.txt` 0600 |
+| `issued/` | root, group `PKI_SOCKET_GID` | 0770 | `store_dir`: every issued package; inside, 0700 directories of the api's uid, `.p12` and `password.txt` 0600 |
 | `run/` | `PKI_SIGNER_UID`, group `PKI_SOCKET_GID` | 0770 | the signer's socket `signer.sock`, 0660, group `PKI_SOCKET_GID` |
 
 `MEDIA_UID` / `MEDIA_GID` are the uid and gid the api container runs as (`.env`, DEPLOYMENT.md "Media storage").
@@ -104,6 +104,9 @@ authentication. It is 0660 in `run/` (0770), both of the group `PKI_SOCKET_GID`:
 account in it. The signer runs with it as its group, and the api container joins it (`group_add` in
 `docker-compose.pki.yml`); only the api container mounts `run/`. It is not `MEDIA_GID`: that group is often shared
 with host accounts (the nginx worker user, when `MEDIA_UID` is `www-data`), which must never reach the signer.
+`issued/` belongs to the same group for the same reason: the api writes its packages there as a member of
+`PKI_SOCKET_GID`, and a host account, even the one with the uid `MEDIA_UID`, cannot open the folder (the per-user
+folders inside are 0700 of `MEDIA_UID`, but the way to them goes through `issued/`).
 
 As root on the host:
 
@@ -119,7 +122,7 @@ install -d -m 0755 "$PKI_DIR"
 install -d -m 0755 -o "$PKI_SIGNER_UID" -g "$PKI_SOCKET_GID" "$PKI_DIR/ca"
 install -d -m 0700 -o "$PKI_SIGNER_UID" -g "$PKI_SOCKET_GID" "$PKI_DIR/private"
 install -d -m 0755 -o "$MEDIA_UID" -g "$MEDIA_GID" "$PKI_DIR/crl"
-install -d -m 0700 -o "$MEDIA_UID" -g "$MEDIA_GID" "$PKI_DIR/issued"
+install -d -m 0770 -o root -g "$PKI_SOCKET_GID" "$PKI_DIR/issued"      # not MEDIA_UID (section 1)
 install -d -m 0770 -o "$PKI_SIGNER_UID" -g "$PKI_SOCKET_GID" "$PKI_DIR/run"
 ```
 
@@ -142,7 +145,13 @@ Compose sets `MYSETTINGS_PKI__CA_CERT_PATH`, `SIGNER_SOCKET`, `STORE_DIR` and `C
 them in `.env`. The other settings (`VALIDITY_DAYS` 365, `MAX_VALIDITY_DAYS` 730, `KEY_SIZE` 2048, `P12_ENCRYPTION`
 `aes256` or `legacy`, `CRL_DAYS` 7) are listed in `.env.example`. PKI is configured when all four paths are set; the
 API refuses to start with only some of them, with a CA certificate it cannot read, with a folder it cannot write or
-with an extra CRL that does not parse.
+with an extra CRL that does not parse. It also refuses `KEY_SIZE` outside 2048..4096, `CRL_DAYS` or `VALIDITY_DAYS`
+below 1 and `VALIDITY_DAYS` above `MAX_VALIDITY_DAYS`.
+
+The signer keeps its own limits (`signer.env`, below), which the API does not see: keep
+`MYSETTINGS_PKI__MAX_VALIDITY_DAYS` at most `SIGNER_MAX_VALIDITY_DAYS` and `MYSETTINGS_PKI__CRL_DAYS` at most
+`SIGNER_MAX_CRL_DAYS`. Otherwise the signer refuses: an issue asking for more days answers 500, and every CRL
+publication fails (logged, `/health` reports the CRL stale and then expiring).
 
 The signer never reads `.env` (the database password and the secret key never reach it) and the api never reads
 `signer.env` (the CA key password never reaches it):
@@ -264,7 +273,11 @@ replaced.
      `--key-password-file F` for an encrypted key; `--serial HEX ...` lists old certificates as revoked by hand (the
      API can only block a `legacy` certificate, it has only its hashes).
    - Put it into `MYSETTINGS_PKI__EXTRA_CRL_PATHS` (section 3) and restart the api: the published file is the CRL of
-     the client CA followed by every extra CRL, read again at every publication.
+     the client CA followed by the CRLs of every extra file, read and parsed again at every publication (only the
+     CRLs are written, nothing else of the file). When an extra file is missing or does not parse then, nothing is
+     published: the previous file stays, the api logs `CRL not published: pki.extra_crl_paths: ...`, `/health`
+     shows a revocation since then as `crl_stale` and turns `degraded` as the file's `next_update` nears.
+     `sign-crl` writes `--out` through a temporary file it renames, so a publication never reads half a file.
    - After signing it again by hand, run `docker compose exec api python -m app.backend.cli.pki crl` so the published
      file picks it up. `GET /health` reports `crl_next_update_in_days` as the earliest `next_update` of every CRL in
      the file and turns `degraded` below 2 days: sign it again before that.
@@ -279,6 +292,9 @@ replaced.
    remove-old-root.cmd <thumbprint>          (machine store, from an administrator prompt)
    remove-old-root.cmd <thumbprint> user     (store of the current user)
    ```
+
+   It takes exactly 40 hexadecimal characters and nothing else (exit code 1 with its usage otherwise): certutil also
+   accepts an index, a serial number or a name there, and would delete whatever certificate matches it.
 
    The thumbprint is the SHA-1 of the certificate itself: `openssl x509 -in rootCA.crt -noout -fingerprint -sha1`
    without the colons, or the line `Cert Hash(sha1)` of `certutil -dump rootCA.crt`. (`certutil -hashfile` hashes the
@@ -371,7 +387,8 @@ systemctl list-timers watch-web-crl-refresh.timer
   watch the directory instead: `PathChanged=<PKI_DIR>/crl/`.
 - A CRL is valid `crl_days` (7) and signed again every day, at every revocation of a certificate this server issued,
   and at API start when half of its validity has passed: a timer or signer outage has at least six days before nginx
-  refuses the new certificates (`GET /health` is `degraded` from 2 days before).
+  refuses the new certificates (`GET /health` is `degraded` from 2 days before). A publication that fails is logged
+  and changes nothing else: the revocation stands, the API starts, the previous file stays.
 
 ## 7. Checks
 
@@ -429,6 +446,9 @@ show a start after the publication. If it does not, switch to watching the direc
 | The web client is logged out after a revocation (401 `session_expired`) | Revoking ends the sessions of that certificate | Log in with another certificate |
 | 503 `certificate_authority_unavailable` on issue | The signer does not answer, or the api cannot open its socket | `docker compose ps pki-signer`, `docker compose logs pki-signer`; `PKI_SOCKET_GID` in `.env`, owner and group of `run/` (section 3) |
 | 503 `certificate_authority_not_configured` | `settings.pki` is not set in the api | `COMPOSE_FILE` in `.env` (section 3), restart the api |
+| 500 `internal_error` on issue, the api logs `signer answered 422 ... validity_days` | The request asked for more days than `SIGNER_MAX_VALIDITY_DAYS` (`MYSETTINGS_PKI__MAX_VALIDITY_DAYS` is above it) | Lower `MAX_VALIDITY_DAYS` or raise the signer's limit (section 3) |
+| `/health` `crl_stale` true, the api logs `CRL not published` | A publication failed: the signer does not answer or refuses (`signer answered 422 ... crl_dates`: `CRL_DAYS` above `SIGNER_MAX_CRL_DAYS`), an extra CRL is missing or does not parse, or `crl/` is not writable. A revocation stands all the same, and the API starts | Fix what the log line names, then `docker compose exec api python -m app.backend.cli.pki crl` |
 | The api does not start: `PKI is partly configured`, `not a usable CA certificate`, `not a writable directory`, `extra_crl_paths ... is not a readable CRL file` | `settings.pki` points at something missing | Fix the path or the owner the message names |
+| The api does not start: `validation error for PkiConfig` | `KEY_SIZE`, `CRL_DAYS`, `VALIDITY_DAYS` or `MAX_VALIDITY_DAYS` out of range (section 3) | Fix the value the message names |
 | The signer does not start: `signer: the CA is not usable: <reason>` | See section 3, "Creating the client CA" | `signer.env` paths, `SIGNER_CA_KEY_PASSWORD`, owner of `private/` |
 | Windows import: "The password you entered is incorrect" with the right password | An old Windows or macOS that cannot open AES-256 packages | `MYSETTINGS_PKI__P12_ENCRYPTION=legacy`, issue again |

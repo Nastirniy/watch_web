@@ -1,6 +1,8 @@
 """Deployment files of the PKI: the signer container, the API mounts, the env examples and the systemd units"""
+import os
 from pathlib import Path
 
+import pytest
 import yaml
 
 from app.backend.signer.settings import SignerSettings
@@ -98,3 +100,32 @@ def test_signer_env_stays_out_of_git_and_the_image():
     for name in (".gitignore", ".dockerignore"):
         lines = (ROOT / name).read_text(encoding="utf-8").splitlines()
         assert ".env" in lines and "signer.env" in lines, name
+
+
+THUMBPRINT = "0123456789abcdefABCDEF0123456789abcdef01"
+
+
+def _remove_old_root(tmp_path, *args):
+    """deploy/pki/remove-old-root.cmd as a dry run: certutil only echoed, the certificate stores never touched"""
+    import subprocess
+    script = tmp_path / "remove-old-root.cmd"
+    script.write_bytes((ROOT / "deploy" / "pki" / "remove-old-root.cmd").read_bytes()
+                       .replace(b"certutil -", b"echo certutil -"))
+    return subprocess.run(["cmd", "/c", str(script), *args], capture_output=True, text=True, timeout=30)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="cmd.exe")
+def test_remove_old_root_takes_only_a_thumbprint(tmp_path):
+    """certutil's CertId also matches an index, a serial or a CN: anything but 40 hex characters is refused"""
+    for args in ((), ("0",), ("My Root CA",), (THUMBPRINT[:-1],), (THUMBPRINT + "0",), (THUMBPRINT[:-1] + "g",),
+                 ("01:23:45:67:89:ab:cd:ef:01:23:45:67:89:ab:cd:ef:01:23:45:67",)):
+        result = _remove_old_root(tmp_path, *args)
+        output = result.stdout + result.stderr
+        assert result.returncode == 1, (args, output)
+        assert "Usage" in output and "certutil" not in output, (args, output)
+    machine = _remove_old_root(tmp_path, THUMBPRINT)
+    assert machine.returncode == 0, machine.stdout + machine.stderr
+    assert f'certutil -delstore Root "{THUMBPRINT}"' in machine.stdout
+    user = _remove_old_root(tmp_path, THUMBPRINT, "user")
+    assert user.returncode == 0, user.stdout + user.stderr
+    assert f'certutil -user -delstore Root "{THUMBPRINT}"' in user.stdout

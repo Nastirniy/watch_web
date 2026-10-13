@@ -21,8 +21,10 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   hashes and name hash scheme (`created_at` = the user's): every certificate from before the upgrade keeps logging
   in. Its downgrade gives `users` the columns back: the values of the user's `legacy` row exactly, otherwise the
   hashes of the newest active row; a user with none, or whose CN or serial hash another restored user holds (the
-  columns are unique), gets the placeholder `unassigned:<user_id>`, which matches no certificate. The downgrade
-  output names every such user and counts the certificates, revocations and exports it drops.
+  columns are unique), gets the placeholder `unassigned:<user_id>`, which matches no certificate. A revoked `legacy`
+  row is never restored (the older code knows no revocation and would let it log in again): its user gets the
+  newest active row or the placeholder. The downgrade output names every such user and counts the certificates,
+  revocations and exports it drops.
 - `POST /users/`: optional `certificate_label`, the readable name of the certificate (1 to 64 characters after
   trimming, no control characters; field code `certificate_label_invalid`; default the CN cut to 64 characters).
 - 401 `certificate_revoked` on `POST /auth/login`: the certificate is registered but revoked (the person asks for a
@@ -32,8 +34,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   as before; the sessions of the user's other certificates stay.
 - Settings `settings.pki` (`MYSETTINGS_PKI__*`): `ca_cert_path`, `signer_socket`, `store_dir`, `crl_path`,
   `extra_crl_paths`, `validity_days` (365), `max_validity_days` (730), `key_size` (2048), `p12_encryption`
-  (`aes256` or `legacy`), `crl_days` (7). An uploaded certificate signed by the client CA of `ca_cert_path` is
-  `ca_issued` (it goes on the CRL when revoked).
+  (`aes256` or `legacy`), `crl_days` (7). Out of range the API refuses to start: `key_size` 2048..4096, `crl_days`
+  and `validity_days` at least 1, `validity_days` at most `max_validity_days`. An uploaded certificate signed by the
+  client CA of `ca_cert_path` is `ca_issued` (it goes on the CRL when revoked).
 - `python -m app.backend.cli.init_user`: the certificate path is optional; `--label` names the certificate (default
   its CN).
 - `GET /certificates/authority` (any authenticated user): the client CA (`subject`, `not_after`, `fingerprint_sha256`,
@@ -79,8 +82,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
     live sessions bound to that certificate in the same transaction (revoke cause `certificate_revoked`: that device's
     next request answers 401 `session_expired`; the user's other devices keep working, a later login with it answers
     401 `certificate_revoked`). A certificate this server
-    issued is then published on the CRL; when the signing service does not answer the answer is still 200 and the
-    next publication lists it (`GET /health` reports a stale CRL). 409 `certificate_already_revoked`.
+    issued is then published on the CRL; when that publication fails (the signing service does not answer or
+    refuses, an extra CRL file is missing or does not parse, the CRL file cannot be written) the answer is still 200
+    and the next publication lists it (`GET /health` reports a stale CRL). 409 `certificate_already_revoked`.
 - `GET /certificates/` (`certificate.view`, tag `CERTIFICATES`): the certificates of non-archived users whose home
   post is where both `certificate.view` and `user.view` are in effect (users without a home post: both at the
   root); filters `state`, `source`, `user_id`, `post_id` (403 where the two are not in effect), `expires_within_days`
@@ -93,17 +97,24 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `certificate_not_exportable` (409), `certificate_files_missing` (410), `certificate_already_revoked` (409); field code `validity_days_too_long`
   (param `max_days`: the limit is `settings.pki.max_validity_days`).
 - Audit rows `resource_type` `user_certificate`, actions `issue`, `upload`, `export`, `revoke` (also `reason`, `sessions_ended`): label, serial,
-  `sha256_fingerprint`, `not_after` (never a key, a `.p12` or a password; `export` also `export_count`).
+  `sha256_fingerprint`, `not_after` (never a key, a `.p12` or a password; `export` also `export_count`). A `revoke`
+  row has `sha256_fingerprint` only when the certificate file is stored (issued here) and `not_after` only when the
+  row has one: left out for a `legacy` or `configured` row, never made up.
 - `python -m app.backend.cli.pki issue --username U --label L [--days N] --out DIR`: issues for an existing user
   exactly like the API (folder, audit row with `via: cli`, `created_by` null) and writes `<label>.p12` and
   `password.txt` into `DIR` (a new or empty directory).
 - The signing service `pki-signer` (`python -m app.backend.signer serve`): the only holder of the client CA key,
   without any network, answering on a Unix socket; `init` creates the client CA, `sign-crl` signs a CRL for another
-  CA (the existing root) offline. Deployment: the compose override `docker-compose.pki.yml` (enabled with
+  CA (the existing root) offline (written to a temporary file renamed over `--out`). The published CRL file is the
+  client CA's CRL followed by the CRLs parsed from every `extra_crl_paths` file, written again as PEM; when one is
+  missing or does not parse nothing is published and the previous file stays. A publication at start that fails
+  (the signer does not answer or refuses, the file cannot be written) is logged and the API starts.
+  Deployment: the compose override `docker-compose.pki.yml` (enabled with
   `COMPOSE_FILE` in `.env`, `PKI_DIR`, `PKI_SIGNER_UID`, `PKI_SOCKET_GID`: the socket, 0660, belongs to a group of
   its own that only the api joins), `signer.env.example`, `deploy/systemd/watch-web-crl.*` (nginx reloads when the
   CRL file changes; verified in a systemd container, to be confirmed once on the host, PKI.md section 7) and
-  `watch-web-crl-refresh.*` (daily CRL), `deploy/pki/remove-old-root.cmd`;
+  `watch-web-crl-refresh.*` (daily CRL), `deploy/pki/remove-old-root.cmd` (only a 40-hex thumbprint);
+  `PKI_DIR/issued/` is 0770 root:`PKI_SOCKET_GID`, out of reach of host accounts such as the nginx user;
   `nginx.conf` trusts the bundle `PKI_DIR/ca/nginx-client-cas.pem`, reads `PKI_DIR/crl/nginx.crl` and verifies depth
   1. The guide is `PKI.md`; the order of the upgrade is in DEPLOYMENT.md.
 

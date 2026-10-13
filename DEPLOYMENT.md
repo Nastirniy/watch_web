@@ -81,7 +81,7 @@ Edit before reloading:
 | nginx-app.conf | `client_max_body_size 65m;` in the `/api/v1/media/uploads` location | above `storage.upload.max_chunk_bytes`, never equal: the API answers an oversized chunk itself (`upload_chunk_too_large`) |
 | nginx-app.conf | `client_max_body_size 11G;` (server level) | above `storage.max_file_size_gb`, never equal: the API answers an oversized file itself (`media_file_too_large`) |
 
-The API container mounts `NGINX_UPLOAD_TEMP` at the same path, so the temp file nginx names in `X-File-Name` is the file the API moves. The directory must be writable by nginx and readable by `MEDIA_UID`; the simplest arrangement is `MEDIA_UID` = the nginx worker user (`www-data`).
+The API container mounts `NGINX_UPLOAD_TEMP` at the same path, so the temp file nginx names in `X-File-Name` is the file the API moves. The directory must be writable by nginx and readable by `MEDIA_UID`; the simplest arrangement is `MEDIA_UID` = the nginx worker user (`www-data`). With PKI that is why nothing secret is owned by `MEDIA_UID`: `PKI_DIR/issued/` (the packages) belongs to root and the group `PKI_SOCKET_GID`, which only the api container joins (PKI.md, section 3).
 
 If another nginx or a load balancer sits in front of this host, keep this server block as is and pass TLS through to it (TCP, no TLS termination in front): this nginx must see the client certificate. The cache and the internal locations must live on the nginx that can read `MEDIA_ROOT`.
 
@@ -258,17 +258,17 @@ keeps logging in until it expires or is revoked. The steps, each explained in `P
    and `MYSETTINGS_PKI__EXTRA_CRL_PATHS` (PKI.md, section 4, step 5).
 
 Downgrade (with the new code, before the old one starts): `python -m alembic downgrade 023_authorization_v2`. The
-users get their certificate columns back: the values of their `legacy` row exactly (checked live on MySQL 8 and
-MariaDB 11: the `users` data come back exactly), otherwise the hashes of their newest active certificate, otherwise a
+users get their certificate columns back: the values of their `legacy` row exactly unless it was revoked (checked
+live on MySQL 8 and MariaDB 11: the `users` data come back exactly), otherwise the hashes of their newest active certificate, otherwise a
 placeholder that matches no certificate (`unassigned:<user_id>`). The schema differs from the old one only in form:
 the unique indexes of the serial and fingerprint hashes come back as `uq_users_pki_certificate_serial_hash` and
 `uq_users_pki_certificate_fingerprint_hash` (a database made by the old code names them after the column), and the
 four columns come back at the end of the table; uniqueness, types and defaults are the same, and a later upgrade
 handles either name. Certificates issued or uploaded since the upgrade, revocations and exports
-are lost; the output counts them and names every user who got a placeholder. The old code knows no revocation: a
-`legacy` certificate revoked since the upgrade logs in again (the output names those users; deactivate them if they
-must stay out). Turn the PKI override off (`COMPOSE_FILE`) and put the old `ssl_client_certificate` / `ssl_crl` back
-in nginx.
+are lost; the output counts them and names every user who got a placeholder. The old code knows no revocation, so a
+`legacy` certificate revoked since the upgrade is not restored: its user gets the hashes of their newest active
+certificate, otherwise the placeholder (the output names those users). Turn the PKI override off (`COMPOSE_FILE`)
+and put the old `ssl_client_certificate` / `ssl_crl` back in nginx.
 
 ### Scheduled cleanup (cron)
 
@@ -289,7 +289,7 @@ directory that holds `docker-compose.yml`):
 - Each run prints `removed N file(s), X MB` and, when it could not delete something, `skipped N file(s) ...`; check the
   log after the first runs (`tail /var/log/watch-web-sweep.log`). A skipped file is a permission problem: the API user
   (`MEDIA_UID`) must be able to delete files nginx wrote there (see "Host nginx": the simplest arrangement is
-  `MEDIA_UID` = the nginx worker user).
+  `MEDIA_UID` = the nginx worker user; `PKI_DIR/issued/` then stays out of its reach, PKI.md section 3).
 - The api container must be running; the command uses the same settings (`.env`) as the API.
 
 ## Storyboards (seek previews)

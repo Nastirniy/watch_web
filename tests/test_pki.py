@@ -201,10 +201,25 @@ def test_write_certificate_dir(tmp_path):
         read_package(tmp_path, "3/9")
 
 
+def test_secrets_never_appear_in_a_repr():
+    """The .p12 and its password stay out of a repr, so out of a log line or an exception text"""
+    from app.backend.models.user_certificate import UserCertificate
+    from app.backend.services.certificates import CertificatePackage
+
+    package = CertificatePackage(certificate=UserCertificate(id=9, label="Laptop"), p12=b"P12DATA",
+                                 password="pass-word", filename="Laptop-9.p12")
+    for value in (_files(), package):
+        text = repr(value)
+        assert "P12DATA" not in text and "pass-word" not in text, text
+    assert "Laptop-9.p12" in repr(package) and "info text" in repr(_files())
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX permissions")
 def test_certificate_dir_permissions(tmp_path):
+    tmp_path.chmod(0o770)   # the store as deployed: root, group PKI_SOCKET_GID (PKI.md, section 3)
     write_certificate_dir(tmp_path, 3, 9, _files())
     folder = tmp_path / "3" / "9"
+    assert (tmp_path / "3").stat().st_mode & 0o777 == 0o700
     assert folder.stat().st_mode & 0o777 == 0o700
     assert (folder / "certificate.p12").stat().st_mode & 0o777 == 0o600
     assert (folder / "password.txt").stat().st_mode & 0o777 == 0o600

@@ -116,3 +116,87 @@ async def test_status_is_stale_when_revoked_rows_were_never_published(db, pki):
     user = await make_user(db)
     await revoked_row(db, user, pki)
     assert (await crl_status(db)).stale is True
+
+
+# A PEM block whose content is no CRL: split_pem_crls raises ValueError on it
+BROKEN_PEM_CRL = b"-----BEGIN X509 CRL-----\nbm90IGEgY3Js\n-----END X509 CRL-----\n"
+
+
+async def crl_number(db) -> int:
+    """The number of the last published CRL (0 while the state row is missing: nothing was ever published)"""
+    db.expire_all()
+    state = (await db.exec(select(CertificateAuthorityState))).first()
+    return 0 if state is None else state.crl_number
+
+
+async def test_a_broken_extra_crl_keeps_the_published_file(db, pki, tmp_path, monkeypatch):
+    """A missing, unparsable or CRL-less extra file publishes nothing: the file nginx reads stays as it was, the
+    number is not consumed"""
+    assert await publish_crl(db) is True
+    before = pki.crl_path.read_bytes()
+    extra = tmp_path / "legacy-root.crl"
+    monkeypatch.setattr(settings.pki, "extra_crl_paths", [str(extra)])
+    for content in (None, b"not a crl", BROKEN_PEM_CRL):
+        if content is None:
+            extra.unlink(missing_ok=True)
+        else:
+            extra.write_bytes(content)
+        assert await publish_crl(db) is False, content
+        assert pki.crl_path.read_bytes() == before
+        assert await crl_number(db) == 1
+    assert [p.name for p in pki.crl_path.parent.iterdir()] == [pki.crl_path.name]
+
+
+async def test_extra_crls_are_published_as_parsed(db, pki, tmp_path, monkeypatch):
+    """Only the CRLs of an extra file reach the published one, re-serialized: no comment, no stray text, no CRLF"""
+    root = legacy_root()
+    now = datetime.now(timezone.utc)
+    first = build_crl(root[0], root[1], 5, now, now + timedelta(days=30), [])
+    second = build_crl(root[0], root[1], 6, now, now + timedelta(days=30), [])
+    extra = tmp_path / "legacy-root.crl"
+    extra.write_bytes(b"# the existing root\r\n" + pem(first).replace(b"\n", b"\r\n") + b"stray words\n" + pem(second))
+    monkeypatch.setattr(settings.pki, "extra_crl_paths", [str(extra)])
+
+    assert await publish_crl(db) is True
+
+    data = pki.crl_path.read_bytes()
+    assert data.endswith(b"-----END X509 CRL-----\n" + pem(first) + pem(second))
+    assert b"#" not in data and b"stray" not in data and b"\r" not in data
+    numbers = [crl.extensions.get_extension_for_class(x509.CRLNumber).value.crl_number
+               for crl in split_pem_crls(data)]
+    assert numbers == [1, 5, 6]
+
+
+async def test_status_of_an_unusable_published_file(db, pki):
+    """A published file that cannot be read or parsed is no usable CRL (health degraded), never an error"""
+    assert await publish_crl(db) is True
+    pki.crl_path.write_bytes(BROKEN_PEM_CRL)
+    assert (await crl_status(db)).earliest_next_update is None
+    pki.crl_path.unlink()
+    pki.crl_path.mkdir()   # reading it fails with an OSError
+    assert (await crl_status(db)).earliest_next_update is None
+
+
+async def startup_with(session_maker, monkeypatch) -> None:
+    """publish_crl_at_startup() on the test database"""
+    from app.backend.bootstrap import pki as startup
+
+    async def maker():
+        return session_maker
+    monkeypatch.setattr(startup, "get_session_maker", maker)
+    await startup.publish_crl_at_startup()
+
+
+async def test_startup_survives_a_refusing_signer(db, pki, session_maker, monkeypatch):
+    """crl_days above SIGNER_MAX_CRL_DAYS: the signer refuses every CRL; the API still starts (spec section 3: the
+    signer is not required to start), /health shows the CRL state"""
+    monkeypatch.setattr(settings.pki, "crl_days", pki.signer_settings.max_crl_days + 1)
+    await startup_with(session_maker, monkeypatch)
+    assert not pki.crl_path.exists()
+    assert await crl_number(db) == 0
+
+
+async def test_startup_survives_an_unwritable_crl_folder(db, pki, session_maker, monkeypatch, tmp_path):
+    monkeypatch.setattr(settings.pki, "crl_path", str(tmp_path / "gone" / "nginx.crl"))
+    await startup_with(session_maker, monkeypatch)
+    assert await crl_number(db) == 0

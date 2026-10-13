@@ -262,8 +262,9 @@ async def revoke_user_certificate(
 ):
     """Revoke a certificate for good: the login with it is refused (401 certificate_revoked) and the live sessions
     bound to it end in the same transaction (the user's other devices keep working). A certificate this server issued
-    goes on the CRL, published after the commit; when the signing service does not answer the revocation stands, the
-    answer is still 200 and the next publication (daily, at start-up) lists it (GET /health shows a stale CRL).
+    goes on the CRL, published after the commit; when that publication fails (the signing service does not answer,
+    for example) the revocation stands, the answer is still 200 and the next publication (daily, at start-up) lists
+    it (GET /health shows a stale CRL).
 
     Needs certificate.revoke covering the user and every assignment of the user grantable by the caller (403
     target_user_more_privileged). 409 certificate_already_revoked for a revoked one. The body may be left out
@@ -279,14 +280,18 @@ async def revoke_user_certificate(
         raise ApiError.from_coded(exc)
     _logger.info(f"User {auth.user.username} revoked certificate {row.id} of user {user.username} ({reason.value})")
     result = certificate_to_response(row)
-    # Read now: publish_crl rolls the session back on a signer that does not answer, which expires the row
+    # Read now: publish_crl rolls the session back when it does not publish, which expires the row
     revoked_id, publishes = row.id, row.ca_issued
     if publishes and settings.pki.is_configured():
+        # The revocation is committed: a failed publication only leaves the CRL stale (GET /health), never an error
+        # answer
         try:
             published = await publish_crl(session)
         except SignerRefused as exc:
-            # The revocation is committed: a refusal only leaves the CRL stale (GET /health), never an error answer
             _logger.error(f"CRL not published after revoking certificate {revoked_id}: the signer refused ({exc})")
+        except OSError as exc:
+            _logger.error(f"CRL not published after revoking certificate {revoked_id}: the file cannot be written "
+                          f"({exc!r})")
         else:
             if not published:
                 _logger.warning(f"CRL not published after revoking certificate {revoked_id}: it stays stale")

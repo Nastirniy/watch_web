@@ -4,6 +4,7 @@ import os
 import socket
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from cryptography import x509
@@ -15,6 +16,7 @@ from app.backend.enums.general import RevocationReason
 from app.backend.pki.authority import CaCheckError
 from app.backend.pki.crl import CrlEntry, build_crl
 from app.backend.pki.profile import build_client_ca
+from app.backend.pki.store import write_atomically
 from app.backend.signer.settings import SignerSettings
 
 
@@ -129,8 +131,13 @@ def _sign_crl(args: argparse.Namespace) -> int:
         print("signer: --serial must be hex", file=sys.stderr)
         return 1
     crl = build_crl(cert, key, args.number, now, next_update, entries)
-    with open(args.out, "wb") as handle:
-        handle.write(crl.public_bytes(serialization.Encoding.PEM))
+    try:
+        # A temporary file next to --out, renamed over it: nginx never reads a half-written CRL
+        write_atomically(Path(args.out), crl.public_bytes(serialization.Encoding.PEM))
+    except OSError as exc:
+        print(f"signer: the CRL could not be written to {args.out} ({exc.strerror or type(exc).__name__}); "
+              f"the previous file is unchanged", file=sys.stderr)
+        return 1
     print(f"signer: CRL number {args.number} with {len(entries)} entries written to {args.out}")
     return 0
 

@@ -1,13 +1,15 @@
 """Publishing the CRL file nginx reads (spec section 7).
 
 The API builds the list of revoked serials, the signer signs it, the API writes `settings.pki.crl_path` (the signed
-CRL, then the files of `extra_crl_paths`) and records the number and dates in `certificate_authority_state`.
+CRL, then the CRLs parsed from the files of `extra_crl_paths`) and records the number and dates in
+`certificate_authority_state`.
 """
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+from cryptography.hazmat.primitives import serialization
 from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -15,7 +17,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.config import settings
 from app.backend.enums.general import RevocationReason
 from app.backend.models.user_certificate import CertificateAuthorityState, UserCertificate
-from app.backend.pki.crl import CrlEntry, earliest_next_update
+from app.backend.pki.crl import CrlEntry, earliest_next_update, split_pem_crls
 from app.backend.pki.store import write_atomically
 from app.backend.services.signer_client import SignerUnavailable, signer_client
 from app.backend.utils.datetime_utils import as_utc, assume_utc
@@ -71,11 +73,29 @@ async def _entries(session: AsyncSession, now: datetime) -> list[CrlEntry]:
             for row in rows]
 
 
-def _file_content(signed_pem: str) -> bytes:
-    """The signed CRL, then each extra file (read now, at every publish)"""
-    parts = [signed_pem.encode("ascii")]
-    parts += [Path(path).read_bytes() for path in settings.pki.extra_crl_paths]
-    return b"".join(part if part.endswith(b"\n") else part + b"\n" for part in parts)
+class ExtraCrlError(Exception):
+    """An extra CRL file is missing, unreadable or holds no parsable CRL"""
+
+
+def _extra_crls() -> bytes:
+    """The CRLs of every extra file, read and parsed now (at every publish) and written again as PEM: only CRLs reach
+    the file nginx reads, never a comment or a damaged block. ExtraCrlError names the file that is not usable."""
+    parts = []
+    for path in settings.pki.extra_crl_paths:
+        try:
+            crls = split_pem_crls(Path(path).read_bytes())
+        except (OSError, ValueError) as exc:
+            raise ExtraCrlError(f"{path} is not a readable CRL file ({type(exc).__name__})") from None
+        if not crls:
+            raise ExtraCrlError(f"{path} holds no PEM CRL")
+        parts += [crl.public_bytes(serialization.Encoding.PEM) for crl in crls]
+    return b"".join(parts)
+
+
+def _file_content(signed_pem: str, extra: bytes) -> bytes:
+    """The signed CRL, then the extra CRLs"""
+    signed = signed_pem.encode("ascii")
+    return (signed if signed.endswith(b"\n") else signed + b"\n") + extra
 
 
 async def publish_crl(session: AsyncSession, only_if_due: bool = False) -> bool:
@@ -83,8 +103,10 @@ async def publish_crl(session: AsyncSession, only_if_due: bool = False) -> bool:
 
     Locks the state row, so two API processes never overwrite a newer CRL with an older one. only_if_due (the
     start-up) re-checks inside the lock whether the file is still missing or past half of its validity. A signer
-    that does not answer rolls back (the number is not consumed), is logged and gives False. Without PKI settings
-    nothing happens."""
+    that does not answer, or an extra CRL file that is missing or does not parse, rolls back (the number is not
+    consumed, the published file stays as it is), is logged and gives False. Any other failure (SignerRefused, an
+    OSError writing the file) rolls back as well and propagates: the revoke route and the start-up log it, the CLI
+    fails. Without PKI settings nothing happens."""
     if not settings.pki.is_configured():
         return False
     crl_path = Path(settings.pki.crl_path)
@@ -93,16 +115,25 @@ async def publish_crl(session: AsyncSession, only_if_due: bool = False) -> bool:
     if only_if_due and not _is_due(state, crl_path, now):
         await session.rollback()
         return False
-    entries = await _entries(session, now)
-    number = state.crl_number + 1
-    next_update = now + timedelta(days=settings.pki.crl_days)
     try:
+        extra = _extra_crls()
+        entries = await _entries(session, now)
+        number = state.crl_number + 1
+        next_update = now + timedelta(days=settings.pki.crl_days)
         signed = await signer_client().sign_crl(number, now, next_update, entries)
+        write_atomically(crl_path, _file_content(signed, extra))
+    except ExtraCrlError as exc:
+        await session.rollback()
+        _logger.error(f"CRL not published: pki.extra_crl_paths: {exc}")
+        return False
     except SignerUnavailable as exc:
         await session.rollback()
         _logger.warning(f"CRL not published: the signer does not answer ({exc})")
         return False
-    write_atomically(crl_path, _file_content(signed))
+    except BaseException:
+        # Cleanup on any other failure (the lock and the number are given back), then the error goes on
+        await session.rollback()
+        raise
     state.crl_number = number
     state.this_update, state.next_update = as_utc(now), as_utc(next_update)
     state.revoked_count = len(entries)
@@ -127,6 +158,9 @@ async def crl_status(session: AsyncSession) -> CrlStatus:
             earliest = earliest_next_update(Path(settings.pki.crl_path).read_bytes())
         except FileNotFoundError:
             pass
+        except (OSError, ValueError) as exc:
+            # No usable CRL: without an earliest next_update /health is degraded
+            _logger.error(f"The published CRL file cannot be read or parsed ({type(exc).__name__})")
     return CrlStatus(
         this_update=assume_utc(state.this_update), next_update=assume_utc(state.next_update),
         revoked_count=state.revoked_count, published_at=published_at, stale=stale, earliest_next_update=earliest)

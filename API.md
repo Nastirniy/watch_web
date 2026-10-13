@@ -273,8 +273,9 @@ made elsewhere (PEM or DER); an already expired file is accepted and listed as `
 `key_compromise`, `affiliation_changed`, `superseded` (replaced by a new one) or `cessation_of_operation`. The
 sessions opened with it end at once: that device's next request answers 401 `session_expired` (`revoke_cause`
 `certificate_revoked` in the session lists), the user's other devices stay logged in. A certificate this server
-issued then goes on the CRL, and nginx refuses it within seconds (an infrastructure 400, not a problem). Revoking a
-user's last certificate leaves the account in place: they log in again once a new one is issued.
+issued then goes on the CRL, and nginx refuses it within seconds (an infrastructure 400, not a problem). The answer
+is 200 once the revocation is stored, even when that CRL cannot be published at once (the server publishes it
+later). Revoking a user's last certificate leaves the account in place: they log in again once a new one is issued.
 
 **`GET /auth/me`** carries `certificate`: `id`, `label`, `not_after`, `state` of the certificate the session was
 opened with (null for a session without one, the development login). Warn the person when `not_after` is near.
@@ -294,7 +295,8 @@ revoking the old one.
 | `certificate_not_exportable` | 409 | Export of a certificate this server did not issue (`has_package` false) |
 | `certificate_files_missing` | 410 | Export after the package was removed on the server |
 | `certificate_taken` | 400 | Upload or `POST /users/` of a certificate already registered for any user |
-| `certificate_invalid`, `certificate_file_empty`, `certificate_file_too_large` | 400 | Upload or `POST /users/` of an unusable file |
+| `certificate_invalid`, `certificate_file_empty` | 400 | Upload or `POST /users/` of an unusable file |
+| `certificate_file_too_large` | 413 | Upload or `POST /users/` of a file above `max_bytes` |
 | `certificate_revoked` | 401 | Login with a revoked certificate |
 
 Field codes inside `validation_error`: `certificate_label_invalid` (the label), `validity_days_too_long` (param

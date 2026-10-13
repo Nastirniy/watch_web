@@ -13,7 +13,7 @@ Services return rows and raise CodedError; the routes convert (ApiError.from_cod
 """
 import asyncio
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Awaitable, Callable, List, Optional
@@ -56,8 +56,8 @@ WriteAudit = Callable[[UserCertificate, dict], Awaitable[None]]
 class CertificatePackage:
     """An issued certificate and its package: what issuing and re-downloading answer"""
     certificate: UserCertificate
-    p12: bytes
-    password: str
+    p12: bytes = field(repr=False)      # secrets: never in a repr, so never in a log line or an exception text
+    password: str = field(repr=False)
     filename: str
 
 # The client CA certificate of settings.pki.ca_cert_path, read again when the path or the file's mtime changes
@@ -164,15 +164,30 @@ async def active_certificate(session: AsyncSession, user_id: int, fingerprint_ha
     return result.first()
 
 
-def certificate_audit_details(row: UserCertificate, certificate: x509.Certificate) -> dict:
+def certificate_audit_details(row: UserCertificate, certificate: Optional[x509.Certificate]) -> dict:
     """What an audit row of a certificate holds: label, serial, SHA-256 fingerprint and expiry; never a key, a .p12
-    or a password"""
-    return {
-        "label": row.label,
-        "serial": row.serial,
-        "sha256_fingerprint": sha256_fingerprint(certificate),
-        "not_after": as_utc(row.not_after),
-    }
+    or a password. The fingerprint needs the certificate itself (a column holds only its hash) and not_after is the
+    row's: without them (a legacy or configured row, an uploaded file that was not stored) they are left out, never
+    made up."""
+    details = {"label": row.label, "serial": row.serial}
+    if certificate is not None:
+        details["sha256_fingerprint"] = sha256_fingerprint(certificate)
+    if row.not_after is not None:
+        details["not_after"] = as_utc(row.not_after)
+    return details
+
+
+def _stored_certificate(row: UserCertificate) -> Optional[x509.Certificate]:
+    """The certificate kept in the folder of an issued row; None for any other row, without a store_dir, or when the
+    file is gone or damaged (logged: the audit row then has no fingerprint, the change still goes on)"""
+    if not row.files_dir or not settings.pki.store_dir:
+        return None
+    try:
+        return x509.load_pem_x509_certificate(read_certificate(Path(settings.pki.store_dir), row.files_dir))
+    except (OSError, ValueError) as exc:
+        _logger.warning(f"Certificate id={row.id}: its stored certificate {row.files_dir} is not readable "
+                        f"({type(exc).__name__})")
+        return None
 
 
 async def get_user_certificate(session: AsyncSession, user_id: int, certificate_id: int,
@@ -381,7 +396,7 @@ async def revoke_certificate(
     ended = await AuthService.invalidate_certificate_sessions(
         session, row.user_id, row.fingerprint_hash, SessionRevokeCause.CERTIFICATE_REVOKED,
         actor_user_id=revoked_by, commit=False)
-    await write_audit(row, {"label": row.label, "serial": row.serial, "reason": reason.value,
+    await write_audit(row, {**certificate_audit_details(row, _stored_certificate(row)), "reason": reason.value,
                             "sessions_ended": ended})
     await session.commit()
     _logger.info(f"Certificate revoked: id={row.id}, user_id={row.user_id}, serial={row.serial}, "

@@ -50,6 +50,16 @@ async def test_health_degraded_when_the_signer_is_down(client, db, pki):
     assert body["status"] == "degraded"
 
 
+async def test_health_degraded_when_the_published_crl_is_unusable(client, db, pki):
+    """A published file that does not parse is no usable CRL: degraded, never unhealthy"""
+    await publish_crl(db)
+    pki.crl_path.write_bytes(b"-----BEGIN X509 CRL-----\nbm90IGEgY3Js\n-----END X509 CRL-----\n")
+    body = (await client.get(SystemRoutes.HEALTH.value)).json()
+    assert body["pki"]["crl_next_update_in_days"] is None
+    assert body["pki"]["status"] == "degraded"
+    assert body["status"] == "degraded"
+
+
 async def test_health_reports_the_earliest_next_update_of_an_extra_crl(client, db, pki, tmp_path, monkeypatch):
     root = legacy_root()
     now = datetime.now(timezone.utc)

@@ -1,5 +1,6 @@
 """settings.pki: the start-up checks and GET /certificates/authority"""
 import pytest
+from pydantic import ValidationError
 
 from app.backend.api.v1 import V1
 from app.backend.bootstrap.pki import PkiSettingsError, check_pki_settings
@@ -60,6 +61,22 @@ def test_a_configured_pki_passes(tmp_path):
 
 def test_not_configured_is_fine():
     check_pki_settings(PkiConfig())
+
+
+@pytest.mark.parametrize("values", [
+    dict(key_size=1024), dict(key_size=8192), dict(crl_days=0), dict(validity_days=0),
+    dict(validity_days=731), dict(max_validity_days=100),   # above max_validity_days (730, then 100)
+])
+def test_out_of_range_values_refuse_to_start(values):
+    with pytest.raises(ValidationError):
+        PkiConfig(**values)
+
+
+def test_values_in_range_are_kept():
+    pki = PkiConfig(key_size=4096, crl_days=1, validity_days=30, max_validity_days=30)
+    assert (pki.key_size, pki.crl_days, pki.validity_days, pki.max_validity_days) == (4096, 1, 30, 30)
+    assert PkiConfig(key_size=3072).key_size == 3072
+    assert PkiConfig().key_size == 2048
 
 
 async def test_authority_route(client, db, headers, pki):
