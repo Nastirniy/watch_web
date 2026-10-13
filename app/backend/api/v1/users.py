@@ -27,7 +27,7 @@ from app.backend.enums.general import (
     CertificateSource, PermissionLevel, Permissions, SessionEndReason, SessionRevokeCause, SessionStatus, UserType,
 )
 from app.backend.errors.coded import CodedError
-from app.backend.services.certificates import register_certificate
+from app.backend.services.certificates import MAX_CERTIFICATE_BYTES, register_certificate
 from app.backend.auth import sessions as session_lifetimes
 from app.backend.api.v1.models.response.auth import SessionsEndedResponse, UserSessionResponse, build_session_response
 from app.backend.enums.routes import UserRoutes
@@ -68,7 +68,6 @@ def taken_error_code(exc: IntegrityError) -> ErrorCode | None:
 
 # PATCH /users/{id} reads form fields only; a JSON body would reach the route with every field unset
 FORM_CONTENT_TYPES = ("multipart/form-data", "application/x-www-form-urlencoded")
-MAX_CERTIFICATE_BYTES = 5 * 1024 * 1024
 
 
 async def _default_assignment(

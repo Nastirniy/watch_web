@@ -83,6 +83,13 @@ class Permissions(Enum):
     # Storage and worker monitoring
     MEDIA_MONITOR = "media.monitor"
 
+    # Client certificates of users: issue / upload (create), revoke, and re-download a stored package (export,
+    # a system permission)
+    CERTIFICATE_VIEW = "certificate.view"
+    CERTIFICATE_CREATE = "certificate.create"
+    CERTIFICATE_REVOKE = "certificate.revoke"
+    CERTIFICATE_EXPORT = "certificate.export"
+
 
 class PermissionLevel(str, Enum):
     """Where a permission can be assigned: system only at the root of the scope tree, scoped at any node"""

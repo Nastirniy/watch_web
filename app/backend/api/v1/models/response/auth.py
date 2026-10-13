@@ -4,7 +4,10 @@ from pydantic import BaseModel, Field
 from app.backend.enums.errors import RequiredPermissions
 from app.backend.enums.general import SessionEndReason, SessionRevokeCause, SessionStatus, UserType
 from app.backend.models.user import UserSession
+from app.backend.models.user_certificate import UserCertificate
+from app.backend.services.certificates import certificate_state
 from app.backend.api.v1.models.response.assignments import AssignmentResponse
+from app.backend.api.v1.models.response.certificates import SessionCertificate
 from app.backend.auth.assignments import AssignmentView
 from app.backend.auth.context import AuthContext
 from app.backend.auth.presence import online_threshold_seconds
@@ -50,6 +53,9 @@ class UserInfoResponse(AuthorizationInfo):
     last_login_at: Optional[ResponseDatetime] = None
     last_activity_at: Optional[ResponseDatetime] = None
     online_threshold_seconds: int = Field(description="Seconds of inactivity after which a user counts as offline")
+    certificate: Optional[SessionCertificate] = Field(
+        default=None, description="The client certificate the current session was opened with (warn before it "
+                                  "expires); null for a session bound to none (development login)")
 
 
 class SessionInfoResponse(BaseModel):
@@ -111,8 +117,10 @@ def _authorization_fields(auth: AuthContext, assignments: Iterable[AssignmentVie
     }
 
 
-def build_user_info(auth: AuthContext, assignments: Iterable[AssignmentView]) -> UserInfoResponse:
-    """assignments: auth/assignments.py assignment_views of the user"""
+def build_user_info(auth: AuthContext, assignments: Iterable[AssignmentView],
+                    certificate: Optional[UserCertificate] = None) -> UserInfoResponse:
+    """assignments: auth/assignments.py assignment_views of the user; certificate: the one the session is bound to
+    (services/certificates.py session_certificate)"""
     user = auth.user
     return UserInfoResponse(
         id=user.id,
@@ -122,6 +130,9 @@ def build_user_info(auth: AuthContext, assignments: Iterable[AssignmentView]) ->
         last_login_at=user.last_login_at,
         last_activity_at=getattr(user, "last_activity_at", None),
         online_threshold_seconds=online_threshold_seconds(),
+        certificate=None if certificate is None else SessionCertificate(
+            id=certificate.id, label=certificate.label, not_after=certificate.not_after,
+            state=certificate_state(certificate)),
         **_authorization_fields(auth, assignments),
     )
 

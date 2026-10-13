@@ -32,8 +32,10 @@ def test_levels():
     assert permission_level("observation.view") == PermissionLevel.SCOPED
     assert permission_level("role.view") == PermissionLevel.SCOPED
     for name in ("role.create", "tag.archive", "media_format.update", "scope_group.create", "media.monitor",
-                 "audit.view"):
+                 "audit.view", "certificate.export"):
         assert permission_level(name) == PermissionLevel.SYSTEM, name
+    for name in ("certificate.view", "certificate.create", "certificate.revoke"):
+        assert permission_level(name) == PermissionLevel.SCOPED, name
 
 
 def test_role_level():
@@ -82,7 +84,8 @@ def test_other_types_match_spec():
     post_admin = USER_TYPES[UserType.POST_ADMIN]
     assert post_admin.base_permissions == senior.base_permissions | {
         "media.update", "post.create", "post.update", "post.archive", "user.view", "user.create", "user.update",
-        "user.archive", "role.view", "scope_group.view"}
+        "user.archive", "role.view", "scope_group.view", "certificate.view", "certificate.create",
+        "certificate.revoke"}
     assert post_admin.allowed_permissions == post_admin.base_permissions | {
         "tag.create", "tag.update", "category.create", "category.update", "signal_type.create", "signal_type.update"}
 

@@ -404,18 +404,21 @@ def test_differences_are_sorted_and_unique():
 # ----------------------------------------------------------------------- frozen copies
 
 def test_frozen_sets_equal_the_live_definitions():
-    """The copies were taken from the live code when the module froze. If a later change of the live sets makes
-    this fail after migration 023 shipped, delete this test: never edit the frozen copies."""
+    """The copies were taken from the live code when the module froze. Permissions added to the live code later
+    (certificate.*, PKI) are unknown to them and left out of the comparison. If a later change of a permission the
+    copies know makes this fail, delete this test: never edit the frozen copies."""
     from app.backend.auth.user_types import USER_TYPES
     from app.backend.bootstrap.permissions import PERMISSION_LEVELS
     from app.backend.enums.general import PermissionLevel, UserType
 
-    # admin.true and post.access_all leave the live code with migration 023: compare without them
+    # Every permission of the frozen catalog (the admin ceiling); admin.true and post.access_all leave the live code
+    # with migration 023: compare without them
+    known = conv.TYPE_CEILINGS["admin"]
     live_system = {name for name, level in PERMISSION_LEVELS.items() if level is PermissionLevel.SYSTEM}
-    assert conv.SYSTEM - conv.REMOVED == live_system - conv.REMOVED and conv.ADMIN_TRUE in conv.SYSTEM
+    assert conv.SYSTEM - conv.REMOVED == (live_system & known) - conv.REMOVED and conv.ADMIN_TRUE in conv.SYSTEM
     assert conv.TYPE_ORDER == tuple(t.value for t in UserType)
     assert {key: ceiling - conv.REMOVED for key, ceiling in conv.TYPE_CEILINGS.items()} == {
-        t.value: spec.allowed_permissions - conv.REMOVED for t, spec in USER_TYPES.items()
+        t.value: (spec.allowed_permissions & known) - conv.REMOVED for t, spec in USER_TYPES.items()
     }
     assert conv.REMOVED == {"admin.true", "post.access_all"}
     assert conv.DEAD_WITHOUT_ADMIN <= set(PERMISSION_LEVELS) and conv.GLOBAL_VIEW <= set(PERMISSION_LEVELS)

@@ -78,6 +78,7 @@ async def test_route_gate(client, db, headers, entry, persona):
         "group_id": 1,
         "upload_id": "0" * 32,
         "session_id": "0" * 32,
+        "certificate_id": 1,
     })
 
     path = entry.path.format(**ids)

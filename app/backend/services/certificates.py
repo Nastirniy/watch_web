@@ -1,16 +1,25 @@
-"""Client certificates of users (table user_certificates): state, registration of a certificate file, lookups.
+"""Client certificates of users (table user_certificates): state, registration of a certificate file, issuing and
+re-downloading a package, lookups.
 
 The state of a certificate is computed when it is read, never stored (spec section 4): revoked when revoked_at is
 set, else expired when not_after is in the past, else active. Rows without not_after (legacy, configured) stay active
 until revoked. certificate_state() computes it for a row, state_clause() is the same rule in SQL.
 
+Issue, upload and export write their audit row through a callback (WriteAudit) inside their transaction: the route
+adds who asked (client_info), the CLI "via: cli". What the row holds comes from certificate_audit_details: never a
+key, a .p12 or a password.
+
 Services return rows and raise CodedError; the routes convert (ApiError.from_coded).
 """
+import asyncio
 import os
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
+from pathlib import Path
+from typing import Awaitable, Callable, List, Optional
 
 from cryptography import x509
+from cryptography.hazmat.primitives import serialization
 from sqlalchemy import bindparam
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -20,15 +29,36 @@ from app.backend.config import settings
 from app.backend.enums.errors import ErrorCode
 from app.backend.enums.general import CertificateSource, CertificateState
 from app.backend.errors.coded import CodedError
-from app.backend.models.user import User
+from app.backend.models.user import User, UserSession
 from app.backend.models.user_certificate import UserCertificate
-from app.backend.pki.authority import is_signed_by, load_ca_certificate
+from app.backend.pki.authority import is_signed_by, load_ca_certificate, sha256_fingerprint
+from app.backend.pki.package import build_p12, generate_key, new_password, p12_filename
 from app.backend.pki.profile import LABEL_MAX_LENGTH
+from app.backend.pki.store import (
+    CertificateFiles, read_certificate, read_package, remove_certificate_dir, write_certificate_dir,
+)
+from app.backend.services.signer_client import SignerUnavailable, signer_client
 from app.backend.utils.datetime_utils import as_utc, assume_utc
 from app.backend.utils.logging_config import get_security_logger
 from app.backend.utils.text import fit_column
 
 _logger = get_security_logger()
+
+# A certificate file larger than this is refused before it is parsed (POST /users/, the upload route)
+MAX_CERTIFICATE_BYTES = 5 * 1024 * 1024
+
+# Writes the audit row of a certificate inside the transaction of the change: the row and its
+# certificate_audit_details
+WriteAudit = Callable[[UserCertificate, dict], Awaitable[None]]
+
+
+@dataclass(frozen=True)
+class CertificatePackage:
+    """An issued certificate and its package: what issuing and re-downloading answer"""
+    certificate: UserCertificate
+    p12: bytes
+    password: str
+    filename: str
 
 # The client CA certificate of settings.pki.ca_cert_path, read again when the path or the file's mtime changes
 _ca_cache: Optional[tuple[str, float, x509.Certificate]] = None
@@ -132,3 +162,196 @@ async def active_certificate(session: AsyncSession, user_id: int, fingerprint_ha
         state_clause(CertificateState.ACTIVE),
     ))
     return result.first()
+
+
+def certificate_audit_details(row: UserCertificate, certificate: x509.Certificate) -> dict:
+    """What an audit row of a certificate holds: label, serial, SHA-256 fingerprint and expiry; never a key, a .p12
+    or a password"""
+    return {
+        "label": row.label,
+        "serial": row.serial,
+        "sha256_fingerprint": sha256_fingerprint(certificate),
+        "not_after": as_utc(row.not_after),
+    }
+
+
+async def get_user_certificate(session: AsyncSession, user_id: int, certificate_id: int,
+                               lock: bool = False) -> UserCertificate:
+    """The certificate of the user; CodedError certificate_not_found when there is none, also for the id of another
+    user's certificate. lock: the row is locked (FOR UPDATE) and read again"""
+    query = select(UserCertificate).where(UserCertificate.id == certificate_id, UserCertificate.user_id == user_id)
+    if lock:
+        query = query.with_for_update().execution_options(populate_existing=True)
+    row = (await session.exec(query)).first()
+    if row is None:
+        raise CodedError(ErrorCode.CERTIFICATE_NOT_FOUND)
+    return row
+
+
+async def user_certificates(session: AsyncSession, user_id: int,
+                            state: Optional[CertificateState] = None) -> List[UserCertificate]:
+    """Every certificate of the user (in `state` when given), oldest first"""
+    query = select(UserCertificate).where(UserCertificate.user_id == user_id)
+    if state is not None:
+        query = query.where(state_clause(state))
+    return list((await session.exec(query.order_by(UserCertificate.id))).all())
+
+
+async def session_certificate(session: AsyncSession, user_id: int,
+                              session_id: Optional[str]) -> Optional[UserCertificate]:
+    """The certificate a login session is bound to (production login); None for a session bound to none
+    (development login) or without a session id"""
+    if not session_id:
+        return None
+    result = await session.exec(
+        select(UserCertificate)
+        .join(UserSession, UserSession.certificate_fingerprint_hash == UserCertificate.fingerprint_hash)
+        .where(UserSession.id == session_id, UserSession.user_id == user_id, UserCertificate.user_id == user_id)
+    )
+    return result.first()
+
+
+async def _lock_live_user(session: AsyncSession, user: User) -> User:
+    """The user row locked (FOR UPDATE) and read again; CodedError user_not_found when it is archived. An inactive
+    user may receive a certificate."""
+    locked = (await session.exec(
+        select(User).where(User.id == user.id).with_for_update().execution_options(populate_existing=True)
+    )).first()
+    if locked is None or locked.is_deleted:
+        raise CodedError(ErrorCode.USER_NOT_FOUND)
+    return locked
+
+
+def _utc_text(value: Optional[datetime]) -> str:
+    return "-" if value is None else as_utc(value).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+async def _issuer(session: AsyncSession, created_by: Optional[int]) -> str:
+    if created_by is None:
+        return "command line (pki issue)"
+    issuer = await session.get(User, created_by)
+    return f"{issuer.username} (user id {created_by})" if issuer is not None else f"user id {created_by}"
+
+
+def _info_text(row: UserCertificate, user: User, issued_by: str) -> str:
+    """info.txt of the folder, for browsing by hand (usernames change, the folder names are ids)"""
+    return "".join(f"{name}: {value}\n" for name, value in (
+        ("label", row.label),
+        ("username", user.username),
+        ("user id", user.id),
+        ("certificate id", row.id),
+        ("issued at", _utc_text(row.created_at)),
+        ("issued by", issued_by),
+        ("serial", row.serial),
+        ("expires", _utc_text(row.not_after)),
+    ))
+
+
+async def issue_certificate(
+        session: AsyncSession,
+        user: User,
+        label: str,
+        validity_days: int,
+        created_by: Optional[int],
+        write_audit: WriteAudit,
+) -> CertificatePackage:
+    """Issue a certificate for the user in one transaction (spec section 5): lock the user row (archived: CodedError
+    user_not_found), generate the key, have the signer sign it, insert the row (source issued, ca_issued), write
+    the folder <store_dir>/<user_id>/<id>/, write the audit row (write_audit), commit.
+
+    label is already checked (pki.profile.normalize_label), validity_days too (1..settings.pki.max_validity_days).
+    CodedError certificate_authority_not_configured without PKI settings, certificate_authority_unavailable when
+    the signer does not answer (nothing is written). On any failure after the signer answered, the session is
+    rolled back, the folder removed and the error raised again."""
+    user = await _lock_live_user(session, user)
+    if not settings.pki.is_configured():
+        raise CodedError(ErrorCode.CERTIFICATE_AUTHORITY_NOT_CONFIGURED)
+
+    key = await asyncio.to_thread(generate_key, settings.pki.key_size)
+    public_key_pem = key.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo).decode("ascii")
+    try:
+        signed = await signer_client().sign_client(public_key_pem, label, validity_days)
+    except SignerUnavailable as exc:
+        _logger.warning(f"Certificate for user_id={user.id} not issued: the signer does not answer ({exc})")
+        raise CodedError(ErrorCode.CERTIFICATE_AUTHORITY_UNAVAILABLE) from None
+    certificate_pem = signed.certificate_pem.encode("ascii")
+    certificate = x509.load_pem_x509_certificate(certificate_pem)
+    password = new_password()
+    p12 = await asyncio.to_thread(build_p12, key, certificate, label, password, settings.pki.p12_encryption)
+
+    store_dir = Path(settings.pki.store_dir)
+    files_dir: Optional[str] = None
+    try:
+        row = await register_certificate(session, user, certificate_pem, label, CertificateSource.ISSUED, created_by)
+        row.ca_issued = True
+        info = _info_text(row, user, await _issuer(session, created_by))
+        files_dir = write_certificate_dir(store_dir, user.id, row.id, CertificateFiles(
+            certificate_pem=certificate_pem, p12=p12, password=password, info=info))
+        row.files_dir = files_dir
+        session.add(row)
+        await write_audit(row, certificate_audit_details(row, certificate))
+        await session.commit()
+    except BaseException:
+        # Cleanup on any failure, then the error goes on (a failed audit row is a 500, never a certificate)
+        try:
+            await session.rollback()
+        finally:
+            if files_dir is not None:
+                remove_certificate_dir(store_dir, files_dir)
+        raise
+    _logger.info(f"Certificate issued: id={row.id}, user_id={user.id}, serial={row.serial}, "
+                 f"not_after={row.not_after}, created_by={created_by}")
+    return CertificatePackage(certificate=row, p12=p12, password=password, filename=p12_filename(label, row.id))
+
+
+async def upload_certificate(
+        session: AsyncSession,
+        user: User,
+        cert_data: bytes,
+        label: str,
+        created_by: Optional[int],
+        write_audit: WriteAudit,
+) -> UserCertificate:
+    """Register a certificate file for the user (source uploaded) in one transaction: lock the user row (archived:
+    CodedError user_not_found), register_certificate (certificate_invalid, certificate_taken), the audit row,
+    commit. The caller checked the size of the file and the label."""
+    user = await _lock_live_user(session, user)
+    row = await register_certificate(session, user, cert_data, label, CertificateSource.UPLOADED, created_by)
+    await write_audit(row, certificate_audit_details(row, certificate_values(cert_data).certificate))
+    await session.commit()
+    return row
+
+
+async def export_package(session: AsyncSession, certificate: UserCertificate,
+                         write_audit: WriteAudit) -> CertificatePackage:
+    """The stored package of an issued certificate again, from its folder (the signer is not needed):
+    export_count + 1, last_exported_at, the audit row, commit. The caller locked the row
+    (get_user_certificate(lock=True)).
+
+    CodedError certificate_authority_not_configured without PKI settings, certificate_not_exportable for a
+    certificate the API did not issue, certificate_not_active for a revoked or expired one,
+    certificate_files_missing when its folder is gone."""
+    if not settings.pki.is_configured():
+        raise CodedError(ErrorCode.CERTIFICATE_AUTHORITY_NOT_CONFIGURED)
+    if certificate.source != CertificateSource.ISSUED.value or not certificate.files_dir:
+        raise CodedError(ErrorCode.CERTIFICATE_NOT_EXPORTABLE)
+    if certificate_state(certificate) is not CertificateState.ACTIVE:
+        raise CodedError(ErrorCode.CERTIFICATE_NOT_ACTIVE)
+    store_dir = Path(settings.pki.store_dir)
+    try:
+        p12, password = read_package(store_dir, certificate.files_dir)
+        certificate_pem = read_certificate(store_dir, certificate.files_dir)
+    except FileNotFoundError:
+        _logger.warning(f"Certificate id={certificate.id}: its folder {certificate.files_dir} is missing")
+        raise CodedError(ErrorCode.CERTIFICATE_FILES_MISSING) from None
+
+    certificate.export_count += 1
+    certificate.last_exported_at = _now()
+    session.add(certificate)
+    await write_audit(certificate, certificate_audit_details(certificate, x509.load_pem_x509_certificate(certificate_pem)))
+    await session.commit()
+    _logger.info(f"Certificate exported: id={certificate.id}, user_id={certificate.user_id}, "
+                 f"export_count={certificate.export_count}")
+    return CertificatePackage(certificate=certificate, p12=p12, password=password,
+                              filename=p12_filename(certificate.label, certificate.id))

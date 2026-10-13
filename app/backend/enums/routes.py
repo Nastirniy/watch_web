@@ -151,6 +151,11 @@ class UserRoutes(str, Enum):
     # Role assignments of a user: a role held at a node of the scope tree (root, scope group, post)
     USER_ASSIGNMENTS = "/{user_id}/assignments"
     USER_ASSIGNMENT_BY_ID = "/{user_id}/assignments/{assignment_id}"
+    # Client certificates of a user (api/v1/user_certificates.py): list and issue, upload a file, one, re-download
+    USER_CERTIFICATES = "/{user_id}/certificates"
+    USER_CERTIFICATE_UPLOAD = "/{user_id}/certificates/upload"  # registered before /{certificate_id}
+    USER_CERTIFICATE_BY_ID = "/{user_id}/certificates/{certificate_id}"
+    USER_CERTIFICATE_EXPORT = "/{user_id}/certificates/{certificate_id}/export"
 
     @staticmethod
     def tag() -> str:
@@ -272,6 +277,7 @@ class StatisticsRoutes(str, Enum):
 class CertificateRoutes(str, Enum):
     """Client certificates and the authority that signs them"""
     BASE = "/certificates"
+    ROOT = "/"  # collection: the certificates of every user in the caller's scope
     AUTHORITY = "/authority"
 
     @staticmethod

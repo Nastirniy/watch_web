@@ -23,6 +23,8 @@ class AccessControlService:
       learns nothing more than post_access_denied
     - check_covers: where a post is created or moved to (403 permission_required_for_action)
     - check_user_view: one user record (the caller, or user.view covering the user's home post)
+    - check_user_permission: what belongs to a user beyond the record (certificates): the permission covering the
+      user's home post, for the user themselves too
     - archived_scope: include_deleted needs X.archive held anywhere; archived rows only where it is in effect
     - ownership: the owner, or X.manage_any in effect at the post of the row
     Grants on an archived post stop applying, grants inherited from a group or the root keep applying; writes to the
@@ -104,6 +106,17 @@ class AccessControlService:
             return
         logger.warning(f"User {auth.user.username} tried to view user {target.id} outside of scope")
         raise access_denied(AccessErrorCode.USER_SELF_ONLY)
+
+    @staticmethod
+    def check_user_permission(auth: AuthContext, permission: Union[Permissions, str], target: User) -> None:
+        """The permission is in effect at the user's home post (at the root for a user without one), otherwise 403
+        permission_denied: what belongs to a user record beyond the record itself (the user's certificates follow
+        certificate.view), the user themselves included"""
+        if auth.covers_user(permission, target):
+            return
+        name = permission_name(permission)
+        logger.warning(f"User {auth.user.username} lacks {name} for user {target.id}")
+        raise access_denied(AccessErrorCode.PERMISSION_DENIED, required=Require.of(all=[name]), missing=[name])
 
     @staticmethod
     def archived_scope(auth: AuthContext, params, permission: Permissions) -> Optional[FrozenSet[int]]:

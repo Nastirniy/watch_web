@@ -1,20 +1,52 @@
+from typing import Annotated, List
+
 from cryptography.hazmat.primitives import serialization
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.backend.api.v1.models.response.certificates import CertificateAuthorityResponse, CrlInfo
+from app.backend.api.v1.models.query.certificates import CertificateFilterParams
+from app.backend.api.v1.models.response.certificates import (
+    CertificateAuthorityResponse, CertificateResponse, CrlInfo, certificate_to_response,
+)
+from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
 from app.backend.config import settings
 from app.backend.database import get_session
-from app.backend.enums.errors import ErrorCode
+from app.backend.enums.errors import AccessErrorCode, ErrorCode
+from app.backend.enums.general import Permissions
 from app.backend.enums.routes import CertificateRoutes
-from app.backend.errors.openapi import problems
+from app.backend.errors.openapi import GUARDED, problems
 from app.backend.errors.problems import ApiError
+from app.backend.filters.certificate_filter import CertificateFilterService
+from app.backend.models.user_certificate import UserCertificate
 from app.backend.pki.authority import load_ca_certificate, sha256_fingerprint
 from app.backend.services.crl_publisher import crl_status
 
 router = APIRouter(prefix=CertificateRoutes.BASE.value, tags=[CertificateRoutes.tag()])
+
+
+@router.get(
+    CertificateRoutes.ROOT.value,
+    response_model=List[CertificateResponse],
+    responses=problems(AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, *GUARDED),
+)
+async def list_certificates(
+        filters: Annotated[CertificateFilterParams, Query()],
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.CERTIFICATE_VIEW])),
+):
+    """The certificates of non-archived users whose home post is where both certificate.view and user.view are in
+    effect (users without a home post: with both at the root), revoked and expired ones included. post_id narrows
+    the list to one post, where both must be in effect (403 otherwise)."""
+    scope = AccessControlService.scope_for_all(auth, Permissions.CERTIFICATE_VIEW, Permissions.USER_VIEW)
+    if filters.post_id is not None:
+        for permission in (Permissions.CERTIFICATE_VIEW, Permissions.USER_VIEW):
+            AccessControlService.check_post(auth, permission, filters.post_id, resource_type="certificate")
+        scope = frozenset({filters.post_id})
+    query = CertificateFilterService.apply_filters(select(UserCertificate), filters, home_post_ids=scope)
+    return [certificate_to_response(row) for row in (await session.exec(query)).all()]
 
 
 @router.get(

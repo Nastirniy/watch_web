@@ -20,6 +20,7 @@ from app.backend.enums.general import AppEnvironment
 from app.backend.utils.logging_config import get_auth_logger
 from app.backend.config import settings
 from app.backend.auth.certificates import parse_cn
+from app.backend.services.certificates import session_certificate
 from app.backend.api.v1.models.request.auth import (
     LoginRequest,
     RefreshRequest,
@@ -250,8 +251,11 @@ async def get_current_user_info(
         session: AsyncSession = Depends(get_session)
 ):
     """The current user and what the web client builds its interface from: user_type (pages), permissions (menu),
-    assignments, root_permissions and post_permissions (buttons at a post: root_permissions plus its entry)"""
-    return build_user_info(auth, await assignment_views(session, auth.user.id))
+    assignments, root_permissions and post_permissions (buttons at a post: root_permissions plus its entry), and
+    certificate: the client certificate of this session (id, label, not_after, state; null for a session bound to
+    none, the development login), so the web client can warn before it expires"""
+    return build_user_info(auth, await assignment_views(session, auth.user.id),
+                           await session_certificate(session, auth.user.id, auth.session_id))
 
 
 @router.get(

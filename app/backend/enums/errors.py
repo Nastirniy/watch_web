@@ -224,6 +224,17 @@ class ErrorCode(ProblemType):
     CERTIFICATE_INVALID = ("certificate_invalid", problem(400, "Invalid certificate"))
     CERTIFICATE_AUTHORITY_NOT_CONFIGURED = ("certificate_authority_not_configured", problem(
         503, "Certificate authority not configured"))
+    # The signing service (pki-signer) did not answer: nothing was issued, the request may be repeated
+    CERTIFICATE_AUTHORITY_UNAVAILABLE = ("certificate_authority_unavailable", problem(
+        503, "Certificate authority unavailable"))
+    # No such certificate for the user of the path (also the id of another user's certificate)
+    CERTIFICATE_NOT_FOUND = ("certificate_not_found", problem(404, "Certificate not found"))
+    # Export of a revoked or expired certificate
+    CERTIFICATE_NOT_ACTIVE = ("certificate_not_active", problem(409, "Certificate is not active"))
+    # Export of a certificate the API did not issue (uploaded, legacy, configured): there is no package
+    CERTIFICATE_NOT_EXPORTABLE = ("certificate_not_exportable", problem(409, "Certificate has no stored package"))
+    # The folder of an issued certificate was removed by hand
+    CERTIFICATE_FILES_MISSING = ("certificate_files_missing", problem(410, "Certificate files missing"))
     CANNOT_DEACTIVATE_SELF = ("cannot_deactivate_self", problem(400, "You cannot deactivate your own account"))
     CANNOT_ARCHIVE_SELF = ("cannot_archive_self", problem(400, "You cannot archive your own account"))
 
@@ -473,6 +484,8 @@ class FieldErrorCode(FieldCode):
     CERTIFICATE_FINGERPRINT_INVALID = ("certificate_fingerprint_invalid", field("Invalid certificate fingerprint format"))
     CERTIFICATE_LABEL_INVALID = ("certificate_label_invalid", field(
         "Certificate label must be 1 to 64 characters without control characters"))
+    # The limit is a setting (settings.pki.max_validity_days), so a code of its own instead of pydantic's static le
+    VALIDITY_DAYS_TOO_LONG = ("validity_days_too_long", field("Validity is at most {max_days} days", max_days=int))
     SEARCH_LOGIC_INVALID = ("search_logic_invalid", field("logic must be 'and' or 'or'"))
     CONTENT_TYPE_INVALID = ("content_type_invalid", field("Not a valid Content-Type (expected type/subtype, lower case)"))
     EXTENSION_INVALID = ("extension_invalid", field("Not a valid extension (expected .ext, letters and digits, up to 10 characters)"))

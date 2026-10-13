@@ -10,6 +10,7 @@ from typing import get_args
 import pytest
 
 from app.backend.api.v1.models.query.categories import CategoryFilterParams, CategorySortField
+from app.backend.api.v1.models.query.certificates import CertificateFilterParams, CertificateSortField
 from app.backend.api.v1.models.query.media import MediaFilterParams, MediaSortField
 from app.backend.api.v1.models.query.media_formats import MediaFormatFilterParams, MediaFormatSortField
 from app.backend.api.v1.models.query.observations import ObservationFilterParams, ObservationSortField
@@ -21,6 +22,7 @@ from app.backend.api.v1.models.query.users import UserFilterParams, UserSortFiel
 from app.backend.api.v1.models.request.observations import ObservationReportParams
 from app.backend.enums.general import ObservationReportType
 from app.backend.filters.category_filter import CategoryFilterService
+from app.backend.filters.certificate_filter import CertificateFilterService
 from app.backend.filters.media_filter import MediaFilterService
 from app.backend.filters.media_format_filter import MediaFormatFilterService
 from app.backend.filters.observation_filter import ObservationFilterService
@@ -34,6 +36,7 @@ from app.backend.filters.user_filter import UserFilterService
 
 V1_LISTS = [
     (CategoryFilterParams, CategorySortField, CategoryFilterService),
+    (CertificateFilterParams, CertificateSortField, CertificateFilterService),
     (MediaFilterParams, MediaSortField, MediaFilterService),
     (MediaFormatFilterParams, MediaFormatSortField, MediaFormatFilterService),
     (ObservationFilterParams, ObservationSortField, ObservationFilterService),

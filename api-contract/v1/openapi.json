@@ -366,7 +366,7 @@
           "AUTHENTICATION"
         ],
         "summary": "Get Current User Info",
-        "description": "The current user and what the web client builds its interface from: user_type (pages), permissions (menu),\nassignments, root_permissions and post_permissions (buttons at a post: root_permissions plus its entry)",
+        "description": "The current user and what the web client builds its interface from: user_type (pages), permissions (menu),\nassignments, root_permissions and post_permissions (buttons at a post: root_permissions plus its entry), and\ncertificate: the client certificate of this session (id, label, not_after, state; null for a session bound to\nnone, the development login), so the web client can warn before it expires",
         "operationId": "get_current_user_info",
         "responses": {
           "200": {
@@ -3057,6 +3057,1195 @@
                       "cannot_remove_own_admin": "#/components/schemas/CannotRemoveOwnAdminProblem",
                       "last_admin_required": "#/components/schemas/LastAdminRequiredProblem",
                       "last_assignment_required": "#/components/schemas/LastAssignmentRequiredProblem"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/{user_id}/certificates": {
+      "get": {
+        "tags": [
+          "USERS"
+        ],
+        "summary": "List User Certificates",
+        "description": "The certificates of a user, oldest first, revoked and expired ones included (state is computed when read).\nA user sees their own only with certificate.view covering them; GET /auth/me shows the certificate of the\ncurrent session.",
+        "operationId": "list_user_certificates",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CertificateState"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only certificates in this state",
+              "title": "State"
+            },
+            "description": "Only certificates in this state"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CertificateResponse"
+                  },
+                  "title": "Response List User Certificates"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`: Insufficient permissions; `user_self_only`: You can only view your own account or users of your assigned posts",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UserSelfOnlyProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "user_self_only": "#/components/schemas/UserSelfOnlyProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`user_not_found`: User not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserNotFoundProblem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "USERS"
+        ],
+        "summary": "Issue User Certificate",
+        "description": "Issue a client certificate for the user: the server generates the key, the signing service signs the\ncertificate (CN = label, clientAuth, validity_days from now), and the answer carries the .p12 and its password\n(Cache-Control: no-store). The package is stored on the server; certificate.export can download it again.\n\nNeeds certificate.create covering the user and every assignment of the user grantable by the caller (403\ntarget_user_more_privileged). An archived user answers 404 user_not_found; an inactive user may receive one.\n503 certificate_authority_not_configured without PKI on the server, certificate_authority_unavailable when the\nsigning service does not answer (nothing is issued).",
+        "operationId": "issue_user_certificate",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CertificateIssueRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The certificate and its package",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificatePackageResponse"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store: the package and its password are never cached",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold; `user_self_only`: You can only view your own account or users of your assigned posts",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TargetUserMorePrivilegedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UserSelfOnlyProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "target_user_more_privileged": "#/components/schemas/TargetUserMorePrivilegedProblem",
+                      "user_self_only": "#/components/schemas/UserSelfOnlyProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`user_not_found`: User not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserNotFoundProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`certificate_authority_not_configured`: Certificate authority not configured; `certificate_authority_unavailable`: Certificate authority unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CertificateAuthorityNotConfiguredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CertificateAuthorityUnavailableProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "certificate_authority_not_configured": "#/components/schemas/CertificateAuthorityNotConfiguredProblem",
+                      "certificate_authority_unavailable": "#/components/schemas/CertificateAuthorityUnavailableProblem"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/{user_id}/certificates/upload": {
+      "post": {
+        "tags": [
+          "USERS"
+        ],
+        "summary": "Upload User Certificate",
+        "description": "Register a certificate file (PEM or DER) the user logs in with (source uploaded), with its plain values and\nthe hashes the login matches. ca_issued when it is signed by the client CA of this server. An expired file is\naccepted (listed as expired); the same certificate registered already, for any user, answers 400\ncertificate_taken. The same checks as issuing; an archived user answers 404 user_not_found.",
+        "operationId": "upload_user_certificate",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/CertificateUploadForm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`certificate_file_empty`: Certificate file is empty; `certificate_invalid`: Invalid certificate; `certificate_taken`: Certificate already registered",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CertificateFileEmptyProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CertificateInvalidProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CertificateTakenProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "certificate_file_empty": "#/components/schemas/CertificateFileEmptyProblem",
+                      "certificate_invalid": "#/components/schemas/CertificateInvalidProblem",
+                      "certificate_taken": "#/components/schemas/CertificateTakenProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold; `user_self_only`: You can only view your own account or users of your assigned posts",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TargetUserMorePrivilegedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UserSelfOnlyProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "target_user_more_privileged": "#/components/schemas/TargetUserMorePrivilegedProblem",
+                      "user_self_only": "#/components/schemas/UserSelfOnlyProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`user_not_found`: User not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserNotFoundProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`certificate_file_too_large`: Certificate file is too large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateFileTooLargeProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/{user_id}/certificates/{certificate_id}": {
+      "get": {
+        "tags": [
+          "USERS"
+        ],
+        "summary": "Get User Certificate By Id",
+        "description": "One certificate of the user; a certificate of another user answers 404 certificate_not_found",
+        "operationId": "get_user_certificate_by_id",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "certificate_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Certificate Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`: Insufficient permissions; `user_self_only`: You can only view your own account or users of your assigned posts",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UserSelfOnlyProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "user_self_only": "#/components/schemas/UserSelfOnlyProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`certificate_not_found`: Certificate not found; `user_not_found`: User not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CertificateNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UserNotFoundProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "certificate_not_found": "#/components/schemas/CertificateNotFoundProblem",
+                      "user_not_found": "#/components/schemas/UserNotFoundProblem"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/{user_id}/certificates/{certificate_id}/export": {
+      "post": {
+        "tags": [
+          "USERS"
+        ],
+        "summary": "Export User Certificate",
+        "description": "Download the stored package of an issued certificate again (the same .p12 and password as when it was\nissued; Cache-Control: no-store). POST because every download is counted (export_count, last_exported_at) and\naudited. certificate.export is a system permission (held at the root); the caller must also be able to grant\nevery assignment of the user (403 target_user_more_privileged).\n\n409 certificate_not_exportable for a certificate this server did not issue, certificate_not_active for a revoked\nor expired one; 410 certificate_files_missing when its folder was removed; 503\ncertificate_authority_not_configured without PKI on the server. The signing service is not needed.",
+        "operationId": "export_user_certificate",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "certificate_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Certificate Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The certificate and its stored package",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificatePackageResponse"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store: the package and its password are never cached",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold; `user_self_only`: You can only view your own account or users of your assigned posts",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TargetUserMorePrivilegedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UserSelfOnlyProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "target_user_more_privileged": "#/components/schemas/TargetUserMorePrivilegedProblem",
+                      "user_self_only": "#/components/schemas/UserSelfOnlyProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`certificate_not_found`: Certificate not found; `user_not_found`: User not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CertificateNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UserNotFoundProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "certificate_not_found": "#/components/schemas/CertificateNotFoundProblem",
+                      "user_not_found": "#/components/schemas/UserNotFoundProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`certificate_not_active`: Certificate is not active; `certificate_not_exportable`: Certificate has no stored package",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CertificateNotActiveProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CertificateNotExportableProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "certificate_not_active": "#/components/schemas/CertificateNotActiveProblem",
+                      "certificate_not_exportable": "#/components/schemas/CertificateNotExportableProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "`certificate_files_missing`: Certificate files missing",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateFilesMissingProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`certificate_authority_not_configured`: Certificate authority not configured",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateAuthorityNotConfiguredProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/certificates/": {
+      "get": {
+        "tags": [
+          "CERTIFICATES"
+        ],
+        "summary": "List Certificates",
+        "description": "The certificates of non-archived users whose home post is where both certificate.view and user.view are in\neffect (users without a home post: with both at the root), revoked and expired ones included. post_id narrows\nthe list to one post, where both must be in effect (403 otherwise).",
+        "operationId": "list_certificates",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000000,
+              "minimum": 1,
+              "description": "Page number",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "Page number"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "description": "Items per page",
+              "default": 50,
+              "title": "Page Size"
+            },
+            "description": "Items per page"
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "id",
+                    "label",
+                    "not_after",
+                    "created_at"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Field to sort by",
+              "title": "Sort By"
+            },
+            "description": "Field to sort by"
+          },
+          {
+            "name": "sort_order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SortOrder",
+              "description": "Sort order",
+              "default": "ascending"
+            },
+            "description": "Sort order"
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CertificateState"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "active, expired (not_after in the past) or revoked; computed when read",
+              "title": "State"
+            },
+            "description": "active, expired (not_after in the past) or revoked; computed when read"
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CertificateSource"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "issued (by this server), uploaded (a file), legacy (from before the upgrade) or configured (the development seed)",
+              "title": "Source"
+            },
+            "description": "issued (by this server), uploaded (a file), legacy (from before the upgrade) or configured (the development seed)"
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The certificates of this user",
+              "title": "User Id"
+            },
+            "description": "The certificates of this user"
+          },
+          {
+            "name": "post_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The certificates of the users whose home post this is (certificate.view and user.view must be in effect there, 403 otherwise)",
+              "title": "Post Id"
+            },
+            "description": "The certificates of the users whose home post this is (certificate.view and user.view must be in effect there, 403 otherwise)"
+          },
+          {
+            "name": "expires_within_days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 3650,
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Not yet expired and expiring within this many days (with state=active: revoked ones left out)",
+              "title": "Expires Within Days"
+            },
+            "description": "Not yet expired and expiring within this many days (with state=active: revoked ones left out)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CertificateResponse"
+                  },
+                  "title": "Response List Certificates"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`no_post_assigned`: You are not assigned to any post. Please contact an administrator.; `permission_denied`: Insufficient permissions; `post_access_denied`: No access to the data of this post",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/NoPostAssignedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PostAccessDeniedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "no_post_assigned": "#/components/schemas/NoPostAssignedProblem",
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "post_access_denied": "#/components/schemas/PostAccessDeniedProblem"
                     }
                   }
                 }
@@ -24929,6 +26118,69 @@
         ],
         "title": "CertificateAuthorityResponse"
       },
+      "CertificateAuthorityUnavailableProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Certificate authority unavailable",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 503,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Certificate authority unavailable"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "certificate_authority_unavailable",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "CertificateAuthorityUnavailableProblem",
+        "description": "Certificate authority unavailable (HTTP 503). Problem type certificate_authority_unavailable.",
+        "examples": [
+          {
+            "code": "certificate_authority_unavailable",
+            "detail": "Certificate authority unavailable",
+            "instance": "/api/v1/...",
+            "status": 503,
+            "title": "Certificate authority unavailable",
+            "type": "https://example.org/problems/certificate_authority_unavailable"
+          }
+        ]
+      },
       "CertificateDataMissingProblem": {
         "properties": {
           "type": {
@@ -25124,6 +26376,69 @@
           }
         ]
       },
+      "CertificateFilesMissingProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Certificate files missing",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 410,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Certificate files missing"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "certificate_files_missing",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "CertificateFilesMissingProblem",
+        "description": "Certificate files missing (HTTP 410). Problem type certificate_files_missing.",
+        "examples": [
+          {
+            "code": "certificate_files_missing",
+            "detail": "Certificate files missing",
+            "instance": "/api/v1/...",
+            "status": 410,
+            "title": "Certificate files missing",
+            "type": "https://example.org/problems/certificate_files_missing"
+          }
+        ]
+      },
       "CertificateInvalidProblem": {
         "properties": {
           "type": {
@@ -25184,6 +26499,224 @@
             "status": 400,
             "title": "Invalid certificate",
             "type": "https://example.org/problems/certificate_invalid"
+          }
+        ]
+      },
+      "CertificateIssueRequest": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "Readable name of the certificate, 1 to 64 characters after trimming, no control characters: the CN of the certificate and the name browsers show in the certificate picker (for example 'Petrenko I. - post 2 - laptop')"
+          },
+          "validity_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validity Days",
+            "description": "Days the certificate is valid (default settings.pki.validity_days, 365; at most settings.pki.max_validity_days, 730 by default: validity_days_too_long otherwise)"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "label"
+        ],
+        "title": "CertificateIssueRequest",
+        "description": "Body of POST /users/{user_id}/certificates"
+      },
+      "CertificateNotActiveProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Certificate is not active",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Certificate is not active"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "certificate_not_active",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "CertificateNotActiveProblem",
+        "description": "Certificate is not active (HTTP 409). Problem type certificate_not_active.",
+        "examples": [
+          {
+            "code": "certificate_not_active",
+            "detail": "Certificate is not active",
+            "instance": "/api/v1/...",
+            "status": 409,
+            "title": "Certificate is not active",
+            "type": "https://example.org/problems/certificate_not_active"
+          }
+        ]
+      },
+      "CertificateNotExportableProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Certificate has no stored package",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Certificate has no stored package"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "certificate_not_exportable",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "CertificateNotExportableProblem",
+        "description": "Certificate has no stored package (HTTP 409). Problem type certificate_not_exportable.",
+        "examples": [
+          {
+            "code": "certificate_not_exportable",
+            "detail": "Certificate has no stored package",
+            "instance": "/api/v1/...",
+            "status": 409,
+            "title": "Certificate has no stored package",
+            "type": "https://example.org/problems/certificate_not_exportable"
+          }
+        ]
+      },
+      "CertificateNotFoundProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Certificate not found",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 404,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Certificate not found"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "certificate_not_found",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "CertificateNotFoundProblem",
+        "description": "Certificate not found (HTTP 404). Problem type certificate_not_found.",
+        "examples": [
+          {
+            "code": "certificate_not_found",
+            "detail": "Certificate not found",
+            "instance": "/api/v1/...",
+            "status": 404,
+            "title": "Certificate not found",
+            "type": "https://example.org/problems/certificate_not_found"
           }
         ]
       },
@@ -25250,6 +26783,205 @@
           }
         ]
       },
+      "CertificatePackageResponse": {
+        "properties": {
+          "certificate": {
+            "$ref": "#/components/schemas/CertificateResponse"
+          },
+          "p12_base64": {
+            "type": "string",
+            "title": "P12 Base64",
+            "description": "The .p12 file (key and certificate under the label as friendly name, no CA certificate), base64"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password",
+            "description": "Password of the .p12: 20 characters in four groups of 5 joined by '-'"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename",
+            "description": "Suggested file name: the label's ASCII letters and digits, other characters as '-' (certificate-<id>.p12 when none are left)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "certificate",
+          "p12_base64",
+          "password",
+          "filename"
+        ],
+        "title": "CertificatePackageResponse",
+        "description": "An issued certificate with its package (answered with Cache-Control: no-store)"
+      },
+      "CertificateResponse": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "user_id": {
+            "type": "integer",
+            "title": "User Id"
+          },
+          "source": {
+            "$ref": "#/components/schemas/CertificateSource",
+            "description": "issued (by this server), uploaded (a file), legacy (from before the upgrade, hashes only) or configured (the development seed)"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "Readable name (CN and .p12 friendly name); empty for legacy and configured"
+          },
+          "subject_cn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Cn",
+            "description": "CN of the certificate; null for legacy and configured"
+          },
+          "serial": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Serial",
+            "description": "Serial number, lower-case hex; null for legacy and configured"
+          },
+          "not_before": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Not Before"
+          },
+          "not_after": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Not After",
+            "description": "When it expires; null for legacy and configured (active until revoked)"
+          },
+          "ca_issued": {
+            "type": "boolean",
+            "title": "Ca Issued",
+            "description": "Signed by the client CA of this server: listed on its CRL once revoked"
+          },
+          "state": {
+            "$ref": "#/components/schemas/CertificateState",
+            "description": "Computed when read: revoked when revoked_at is set, else expired when not_after has passed, else active"
+          },
+          "has_package": {
+            "type": "boolean",
+            "title": "Has Package",
+            "description": "Issued here with a stored package: certificate.export can download it again while it is active"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "revoked_by": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked By"
+          },
+          "revocation_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RevocationReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "export_count": {
+            "type": "integer",
+            "title": "Export Count",
+            "description": "How often the stored package was downloaded again"
+          },
+          "last_exported_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Exported At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By",
+            "description": "Who registered it; null for the migration, the seed and the CLI"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "source",
+          "label",
+          "subject_cn",
+          "serial",
+          "ca_issued",
+          "state",
+          "has_package",
+          "export_count",
+          "created_at",
+          "created_by"
+        ],
+        "title": "CertificateResponse",
+        "description": "A client certificate of a user: every column but the hashes and the folder, plus its state"
+      },
       "CertificateRevokedProblem": {
         "properties": {
           "type": {
@@ -25313,6 +27045,27 @@
           }
         ]
       },
+      "CertificateSource": {
+        "type": "string",
+        "enum": [
+          "issued",
+          "uploaded",
+          "legacy",
+          "configured"
+        ],
+        "title": "CertificateSource",
+        "description": "Where a row of user_certificates comes from (no DB CHECK: a new source is a new value)"
+      },
+      "CertificateState": {
+        "type": "string",
+        "enum": [
+          "active",
+          "expired",
+          "revoked"
+        ],
+        "title": "CertificateState",
+        "description": "State of a certificate, computed on read, never stored: revoked when revoked_at is set, else expired when\nnot_after is in the past, else active (a row without not_after stays active until revoked)"
+      },
       "CertificateTakenProblem": {
         "properties": {
           "type": {
@@ -25375,6 +27128,28 @@
             "type": "https://example.org/problems/certificate_taken"
           }
         ]
+      },
+      "CertificateUploadForm": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File",
+            "description": "The certificate file, PEM or DER"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "Readable name of the certificate, 1 to 64 characters after trimming, no control characters: the CN of the certificate and the name browsers show in the certificate picker (for example 'Petrenko I. - post 2 - laptop')"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file",
+          "label"
+        ],
+        "title": "CertificateUploadForm",
+        "description": "Form of POST /users/{user_id}/certificates/upload (multipart/form-data). Unknown form fields are ignored, as\nwith plain Form() params."
       },
       "CertificateVerificationFailedProblem": {
         "properties": {
@@ -25892,6 +27667,7 @@
           "certificate_serial_invalid",
           "certificate_fingerprint_invalid",
           "certificate_label_invalid",
+          "validity_days_too_long",
           "search_logic_invalid",
           "content_type_invalid",
           "extension_invalid",
@@ -32778,6 +34554,18 @@
         "title": "RequiredPermissions",
         "description": "Permission requirement of a route, mirrors auth.require.Require"
       },
+      "RevocationReason": {
+        "type": "string",
+        "enum": [
+          "unspecified",
+          "key_compromise",
+          "affiliation_changed",
+          "superseded",
+          "cessation_of_operation"
+        ],
+        "title": "RevocationReason",
+        "description": "Why a client certificate was revoked (the RFC 5280 reason written to the CRL)"
+      },
       "RoleClone": {
         "properties": {
           "name": {
@@ -34991,6 +36779,43 @@
             "type": "https://example.org/problems/session_already_invalidated"
           }
         ]
+      },
+      "SessionCertificate": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "not_after": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Not After",
+            "description": "When it expires; null for legacy and configured"
+          },
+          "state": {
+            "$ref": "#/components/schemas/CertificateState"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "not_after",
+          "state"
+        ],
+        "title": "SessionCertificate",
+        "description": "The certificate the current session was opened with (GET /auth/me)"
       },
       "SessionEndReason": {
         "type": "string",
@@ -38798,6 +40623,17 @@
             "type": "integer",
             "title": "Online Threshold Seconds",
             "description": "Seconds of inactivity after which a user counts as offline"
+          },
+          "certificate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionCertificate"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The client certificate the current session was opened with (warn before it expires); null for a session bound to none (development login)"
           }
         },
         "type": "object",

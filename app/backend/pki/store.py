@@ -56,6 +56,11 @@ def read_package(store_dir: Path, files_dir: str) -> tuple[bytes, str]:
     return (folder / "certificate.p12").read_bytes(), (folder / "password.txt").read_text(encoding="utf-8")
 
 
+def read_certificate(store_dir: Path, files_dir: str) -> bytes:
+    """The certificate (PEM) of the folder; FileNotFoundError when the folder is gone"""
+    return (store_dir / files_dir / "certificate.crt").read_bytes()
+
+
 def write_atomically(path: Path, data: bytes, mode: int = 0o644) -> None:
     """Write `<path>.tmp` in the same directory, then replace `path` with it"""
     temp = path.with_name(path.name + ".tmp")
