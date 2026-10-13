@@ -120,7 +120,7 @@ docker compose ps           # api and imgproxy report healthy; media-worker and 
 docker compose logs -f media-worker
 ```
 
-Client certificates add the `pki-signer` container and the api's PKI mounts through the override `docker-compose.pki.yml`, enabled in `.env` with `COMPOSE_FILE=docker-compose.yml:docker-compose.pki.yml`, `PKI_DIR` (a host directory outside the project directory, bind-mounted at the same path) and `PKI_SIGNER_UID` (the uid that owns `PKI_DIR/private` and runs the signer). Its own environment is `signer.env` (from `signer.env.example`, 0600). Without the override `docker-compose.yml` runs as it is and the API has no PKI. Setup: `PKI.md`; order of the upgrade: "Upgrading to PKI client certificates" below.
+Client certificates add the `pki-signer` container and the api's PKI mounts through the override `docker-compose.pki.yml`, enabled in `.env` with `COMPOSE_FILE=docker-compose.yml:docker-compose.pki.yml`, `PKI_DIR` (a host directory outside the project directory, bind-mounted at the same path) `PKI_SIGNER_UID` (the uid that owns `PKI_DIR/private` and runs the signer) and `PKI_SOCKET_GID` (a group of its own for the signer's socket, 0660 in `PKI_DIR/run/`: the signer runs with it and the api container joins it; not `MEDIA_GID`, which host accounts such as the nginx user may share, and they must never reach the signer). Its own environment is `signer.env` (from `signer.env.example`, 0600). Without the override `docker-compose.yml` runs as it is and the API has no PKI. Setup: `PKI.md`; order of the upgrade: "Upgrading to PKI client certificates" below.
 
 Key and salt: `python3 -c "import secrets; print(secrets.token_hex(32))"` twice. The same values go to `IMGPROXY_KEY` / `IMGPROXY_SALT` (imgproxy container) and `MYSETTINGS_STORAGE__IMGPROXY__KEY` / `SALT` (API). Rotating them invalidates every issued public thumbnail URL at once.
 
@@ -243,7 +243,8 @@ keeps logging in until it expires or is revoked. The steps, each explained in `P
    deploy (CHANGELOG.md, "PKI client certificates": `PATCH /users/{user_id}` no longer takes a certificate).
 3. `PKI_DIR` and the signer (PKI.md, section 3): create the folder with its owners and modes outside the project
    directory, `signer init`, `sign-crl` for the existing root with its key (PKI.md, section 4), then move that key
-   offline; fill `.env` (`COMPOSE_FILE`, `PKI_DIR`, `PKI_SIGNER_UID`, `MYSETTINGS_PKI__EXTRA_CRL_PATHS`) and
+   offline; fill `.env` (`COMPOSE_FILE`, `PKI_DIR`, `PKI_SIGNER_UID`, `PKI_SOCKET_GID`,
+   `MYSETTINGS_PKI__EXTRA_CRL_PATHS`) and
    `signer.env`; `docker compose up -d pki-signer`, `docker compose up -d api`: the first `PKI_DIR/crl/nginx.crl`
    appears (`docker compose exec api python -m app.backend.cli.pki status`).
 4. nginx (PKI.md, section 6): `ssl_client_certificate` the bundle, `ssl_crl` the published file,
@@ -258,8 +259,12 @@ keeps logging in until it expires or is revoked. The steps, each explained in `P
 
 Downgrade (with the new code, before the old one starts): `python -m alembic downgrade 023_authorization_v2`. The
 users get their certificate columns back: the values of their `legacy` row exactly (checked live on MySQL 8 and
-MariaDB 11), otherwise the hashes of their newest active certificate, otherwise a placeholder that matches no
-certificate (`unassigned:<user_id>`). Certificates issued or uploaded since the upgrade, revocations and exports
+MariaDB 11: the `users` data come back exactly), otherwise the hashes of their newest active certificate, otherwise a
+placeholder that matches no certificate (`unassigned:<user_id>`). The schema differs from the old one only in form:
+the unique indexes of the serial and fingerprint hashes come back as `uq_users_pki_certificate_serial_hash` and
+`uq_users_pki_certificate_fingerprint_hash` (a database made by the old code names them after the column), and the
+four columns come back at the end of the table; uniqueness, types and defaults are the same, and a later upgrade
+handles either name. Certificates issued or uploaded since the upgrade, revocations and exports
 are lost; the output counts them and names every user who got a placeholder. The old code knows no revocation: a
 `legacy` certificate revoked since the upgrade logs in again (the output names those users; deactivate them if they
 must stay out). Turn the PKI override off (`COMPOSE_FILE`) and put the old `ssl_client_certificate` / `ssl_crl` back

@@ -634,3 +634,32 @@ Changed:
   `models/user.py`
 - `docker-compose.yml`, `nginx.conf`, `.env.example`, `api-contract/v1/openapi.json`, API.md, DEPLOYMENT.md,
   CLAUDE.md, CHANGELOG.md
+
+## Implementation notes (2026-10-13)
+
+Decisions and findings of the implementation (branch `pki-certificates`, ledger
+`.superpowers/sdd/2026-10-13-pki-certificates/progress.md`); the approved text above is unchanged.
+
+- R3: the PKI part of compose is the override `docker-compose.pki.yml` (the `pki-signer` service, the api's
+  `MYSETTINGS_PKI__*` and `PKI_DIR` mounts), enabled with `COMPOSE_FILE=docker-compose.yml:docker-compose.pki.yml`
+  in `.env`, so `docker-compose.yml` runs without `PKI_DIR`; no `depends_on`; the signer has `pull_policy: never`
+  (it runs the `watch-web` image the api service builds, or `docker load` on air-gapped servers).
+- R8: a session ended by a revocation answers 401 `session_expired` on its next request (like every session the
+  server ends); `token_certificate_mismatch` remains for a bound session whose certificate stopped being active
+  another way (it expired).
+- R9: the signer binds its Unix socket itself at 0660 and hands uvicorn the descriptor (`uvicorn.run(app, fd=...)`):
+  uvicorn chmods a socket path it binds to 0666, which the live check found.
+- R10: the socket belongs to `PKI_SOCKET_GID`, a group of its own with no host account in it: the signer runs with
+  it as its group and the api container joins it (`group_add`); `run/` is 0770 `PKI_SIGNER_UID:PKI_SOCKET_GID`.
+  Not `MEDIA_GID` (sections 2 and 3 above): that group is often shared with host accounts such as the nginx user.
+- Live check (nginx 1.27.5, OpenSSL 3.0.16, `ssl_verify_depth 1`): nginx checks a certificate against the CRL of its
+  own issuer. A CRL past its `next_update`, or missing, refuses only that CA's certificates; the other CA's keep
+  working (sections 1 and 11 say every certificate).
+- `signer init` runs in a one-off `docker run` with `ca/` and `private/` mounted writable: the `pki-signer` service
+  mounts them read-only, and `docker compose run -v` does not override a mount of the same target (section 8 says
+  `docker compose run --rm pki-signer`).
+- R12: the 024 downgrade restores the `users` data exactly (checked on MySQL 8.0 and MariaDB 11.8); it recreates the
+  unique indexes of the serial and fingerprint hashes as `uq_users_pki_certificate_serial_hash` /
+  `uq_users_pki_certificate_fingerprint_hash` (a database made by the old code names them after the column) and the
+  four columns at the end of the table. Accepted: same uniqueness, types and defaults; a later upgrade handles both
+  names.

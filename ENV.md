@@ -218,9 +218,37 @@ Seek previews (sprite sheets) made by the media worker with ffmpeg, only while t
 |----------|---------|-------------|
 | `MYSETTINGS_ADMIN__USERNAME` | `admin` | Default admin username (created on first seed) |
 | `MYSETTINGS_ADMIN__USERNAME_ALIAS` | `System Administrator` | Display name for the admin account |
-| `MYSETTINGS_ADMIN__PKI_CERTIFICATE_CN` | *(default)* | PKI certificate Common Name for admin PKI login |
-| `MYSETTINGS_ADMIN__PKI_CERTIFICATE_SERIAL` | *(default)* | PKI certificate serial number |
-| `MYSETTINGS_ADMIN__PKI_CERTIFICATE_FINGERPRINT` | *(default)* | PKI certificate fingerprint |
+| `MYSETTINGS_ADMIN__PKI_CERTIFICATE_CN` | *(default)* | PKI certificate Common Name for admin PKI login (development seed only; on a server the first administrator gets a certificate from `python -m app.backend.cli.pki issue`, PKI.md) |
+| `MYSETTINGS_ADMIN__PKI_CERTIFICATE_SERIAL` | *(default)* | PKI certificate serial number (development seed only) |
+| `MYSETTINGS_ADMIN__PKI_CERTIFICATE_FINGERPRINT` | *(default)* | PKI certificate fingerprint (development seed only) |
+
+---
+
+## Client certificates (PKI)
+
+Optional: PKI is configured when the four paths are all set, and the API refuses to start with only some of them.
+With Docker, `docker-compose.pki.yml` sets the four paths from `PKI_DIR`; do not set them in `.env`. Setup: `PKI.md`.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MYSETTINGS_PKI__CA_CERT_PATH` | *(empty)* | The client CA certificate (PEM), read-only (`PKI_DIR/ca/client-ca.crt`) |
+| `MYSETTINGS_PKI__SIGNER_SOCKET` | *(empty)* | The Unix socket of the `pki-signer` container (`PKI_DIR/run/signer.sock`) |
+| `MYSETTINGS_PKI__STORE_DIR` | *(empty)* | Folder of every issued package, `<user_id>/<certificate_id>/` (`PKI_DIR/issued`, 0700) |
+| `MYSETTINGS_PKI__CRL_PATH` | *(empty)* | The CRL file nginx reads (`ssl_crl`), written by the API (`PKI_DIR/crl/nginx.crl`) |
+| `MYSETTINGS_PKI__EXTRA_CRL_PATHS` | `[]` | JSON list of CRL files appended to the published one: the existing root's CRL while its certificates live |
+| `MYSETTINGS_PKI__VALIDITY_DAYS` | `365` | Default validity of a new certificate |
+| `MYSETTINGS_PKI__MAX_VALIDITY_DAYS` | `730` | Longest validity a request may ask for (`validity_days_too_long` above) |
+| `MYSETTINGS_PKI__KEY_SIZE` | `2048` | RSA key size of user keys |
+| `MYSETTINGS_PKI__P12_ENCRYPTION` | `aes256` | `aes256` (AES-256 with SHA-256), or `legacy` (3DES with SHA-1) for old Windows and macOS |
+| `MYSETTINGS_PKI__CRL_DAYS` | `7` | How long a signed CRL stays valid (`next_update`); it is signed again daily |
+
+Compose variables of `.env` for the override: `COMPOSE_FILE=docker-compose.yml:docker-compose.pki.yml`, `PKI_DIR`
+(host directory outside the project directory), `PKI_SIGNER_UID` (owner of `PKI_DIR/private`, runs the signer),
+`PKI_SOCKET_GID` (a group of its own for the signer socket, which only the api container joins).
+
+The signer never reads `.env`. Its settings are `SIGNER_*` in `signer.env` (from `signer.env.example`, 0600):
+`SIGNER_CA_CERT_PATH`, `SIGNER_CA_KEY_PATH` (required), `SIGNER_CA_KEY_PASSWORD` (empty: unencrypted key),
+`SIGNER_SOCKET_PATH` (required), `SIGNER_MAX_VALIDITY_DAYS` (`730`), `SIGNER_MAX_CRL_DAYS` (`31`).
 
 ---
 

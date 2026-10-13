@@ -1,6 +1,7 @@
 """Commands of the signing service: serve, init, sign-crl"""
 import argparse
 import os
+import socket
 import sys
 from datetime import datetime, timezone
 from typing import Optional
@@ -15,6 +16,26 @@ from app.backend.pki.authority import CaCheckError
 from app.backend.pki.crl import CrlEntry, build_crl
 from app.backend.pki.profile import build_client_ca
 from app.backend.signer.settings import SignerSettings
+
+
+SOCKET_MODE = 0o660  # owner (the signer) and group (PKI_SOCKET_GID, which only the api container joins)
+
+
+def bind_unix_socket(path: str) -> socket.socket:
+    """The signer's listening socket at `path`, mode 0660. A stale socket of a previous run is replaced. The signer
+    binds it itself and hands uvicorn the descriptor: uvicorn chmods a socket path it binds to 0666."""
+    try:
+        os.unlink(path)  # a stale socket from a previous run
+    except FileNotFoundError:
+        pass
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        sock.bind(path)
+        os.chmod(path, SOCKET_MODE)
+    except BaseException:
+        sock.close()
+        raise
+    return sock
 
 
 def _serve() -> int:
@@ -33,12 +54,12 @@ def _serve() -> int:
     if not settings.socket_path:
         print("signer: SIGNER_SOCKET_PATH is not set", file=sys.stderr)
         return 1
+    os.umask(0o117)  # nothing the signer creates is readable by others; the socket gets SOCKET_MODE explicitly
+    sock = bind_unix_socket(settings.socket_path)
     try:
-        os.unlink(settings.socket_path)  # a stale socket from a previous run
-    except FileNotFoundError:
-        pass
-    os.umask(0o117)  # the socket is created 0660: owner and group only
-    uvicorn.run(app, uds=settings.socket_path)
+        uvicorn.run(app, fd=sock.fileno())
+    finally:
+        sock.close()
     return 0
 
 

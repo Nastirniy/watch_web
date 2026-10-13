@@ -95,13 +95,15 @@ the CA key and the issued packages into the build context.
 | `crl/nginx.crl` | `MEDIA_UID` | 0644 | published by the api (`crl_path`, nginx `ssl_crl`) |
 | `crl/legacy-root.crl` | root | 0644 | signed offline for the existing root (`extra_crl_paths`) |
 | `issued/` | `MEDIA_UID` | 0700 | `store_dir`: every issued package, 0700 directories, `.p12` and `password.txt` 0600 |
-| `run/` | `PKI_SIGNER_UID`, group `MEDIA_GID` | 0770 | the signer's socket |
+| `run/` | `PKI_SIGNER_UID`, group `PKI_SOCKET_GID` | 0770 | the signer's socket `signer.sock`, 0660, group `PKI_SOCKET_GID` |
 
 `MEDIA_UID` / `MEDIA_GID` are the uid and gid the api container runs as (`.env`, DEPLOYMENT.md "Media storage").
 `PKI_SIGNER_UID` is a uid of its own, so the api's uid cannot read the CA key, not even on the host. The socket has
-no token and no port: access to it is limited by `run/` (0770, group `MEDIA_GID`), and only the api container mounts
-`run/`. Every account on the host in the group `MEDIA_GID` can ask the signer for certificates, so keep that group to
-the application's own users.
+no token and no port: whoever can open it can have client certificates signed, so its permissions are the
+authentication. It is 0660 in `run/` (0770), both of the group `PKI_SOCKET_GID`: a group of its own with no host
+account in it. The signer runs with it as its group, and the api container joins it (`group_add` in
+`docker-compose.pki.yml`); only the api container mounts `run/`. It is not `MEDIA_GID`: that group is often shared
+with host accounts (the nginx worker user, when `MEDIA_UID` is `www-data`), which must never reach the signer.
 
 As root on the host:
 
@@ -109,14 +111,16 @@ As root on the host:
 PKI_DIR=/srv/watch_web/pki                       # outside the project directory
 MEDIA_UID=10001 MEDIA_GID=10001                   # the values of .env
 useradd --system --no-create-home --shell /usr/sbin/nologin watch-web-signer
+groupadd --system watch-web-pki                   # the socket's group: add no account to it
 PKI_SIGNER_UID=$(id -u watch-web-signer)
+PKI_SOCKET_GID=$(getent group watch-web-pki | cut -d: -f3)
 
 install -d -m 0755 "$PKI_DIR"
-install -d -m 0755 -o "$PKI_SIGNER_UID" -g "$MEDIA_GID" "$PKI_DIR/ca"
-install -d -m 0700 -o "$PKI_SIGNER_UID" -g "$MEDIA_GID" "$PKI_DIR/private"
+install -d -m 0755 -o "$PKI_SIGNER_UID" -g "$PKI_SOCKET_GID" "$PKI_DIR/ca"
+install -d -m 0700 -o "$PKI_SIGNER_UID" -g "$PKI_SOCKET_GID" "$PKI_DIR/private"
 install -d -m 0755 -o "$MEDIA_UID" -g "$MEDIA_GID" "$PKI_DIR/crl"
 install -d -m 0700 -o "$MEDIA_UID" -g "$MEDIA_GID" "$PKI_DIR/issued"
-install -d -m 0770 -o "$PKI_SIGNER_UID" -g "$MEDIA_GID" "$PKI_DIR/run"
+install -d -m 0770 -o "$PKI_SIGNER_UID" -g "$PKI_SOCKET_GID" "$PKI_DIR/run"
 ```
 
 ### `.env` and `signer.env`
@@ -129,6 +133,7 @@ it in `.env` (next to `docker-compose.yml`):
 COMPOSE_FILE=docker-compose.yml:docker-compose.pki.yml
 PKI_DIR=/srv/watch_web/pki
 PKI_SIGNER_UID=<id -u watch-web-signer>
+PKI_SOCKET_GID=<getent group watch-web-pki | cut -d: -f3>
 # the existing root's CRL, while its certificates live (section 4)
 MYSETTINGS_PKI__EXTRA_CRL_PATHS=["/srv/watch_web/pki/crl/legacy-root.crl"]
 ```
@@ -161,8 +166,8 @@ The compose mounts:
 
 | Container | Mounts of `PKI_DIR` |
 |-----------|---------------------|
-| `pki-signer` | `ca/` (read-only), `private/` (read-only), `run/`; `network_mode: none`, `env_file: signer.env`, user `PKI_SIGNER_UID:MEDIA_GID` |
-| `api` | `ca/` (read-only), `crl/`, `issued/`, `run/` |
+| `pki-signer` | `ca/` (read-only), `private/` (read-only), `run/`; `network_mode: none`, `env_file: signer.env`, user `PKI_SIGNER_UID:PKI_SOCKET_GID` |
+| `api` | `ca/` (read-only), `crl/`, `issued/`, `run/`; user `MEDIA_UID:MEDIA_GID` with `group_add: PKI_SOCKET_GID` |
 | `media-worker`, `imgproxy` | nothing |
 
 The `pki-signer` service uses the image `watch-web` built by the api service (`pull_policy: never`); on an
@@ -175,7 +180,7 @@ Once, from the directory with `docker-compose.yml`. The service itself mounts `c
 container that mounts them writable:
 
 ```bash
-docker run --rm --network none --user "$PKI_SIGNER_UID:$MEDIA_GID" --env-file signer.env \
+docker run --rm --network none --user "$PKI_SIGNER_UID:$PKI_SOCKET_GID" --env-file signer.env \
   -v "$PKI_DIR/ca:$PKI_DIR/ca" -v "$PKI_DIR/private:$PKI_DIR/private" \
   watch-web python -m app.backend.signer init --cn "watch_web client CA"
 # signer: client CA written to /srv/watch_web/pki/ca/client-ca.crt and /srv/watch_web/pki/private/client-ca.key
@@ -212,12 +217,19 @@ On a server with PKI the first administrator gets a certificate from the command
 ```bash
 docker compose exec api python -m app.backend.cli.init_user --username admin --alias "Administrator" --user-type admin
 docker compose exec api python -m app.backend.cli.pki issue --username admin --label "Admin - office PC" --out /tmp/admin-cert
-docker compose cp api:/tmp/admin-cert ./admin-cert && docker compose exec api rm -r /tmp/admin-cert
+install -d -m 0700 /root/watch-web-admin-cert                      # outside the project directory
+docker compose cp api:/tmp/admin-cert/. /root/watch-web-admin-cert/
+docker compose exec api rm -r /tmp/admin-cert
+# after the hand-over (section 5):
+shred -u /root/watch-web-admin-cert/*.p12 /root/watch-web-admin-cert/password.txt && rmdir /root/watch-web-admin-cert
 ```
 
 `pki issue` issues exactly as the API does (folder, audit row with `via: cli`, `created_by` null) and writes
-`<label>.p12` and `password.txt` (0600) into `--out`, a new or empty directory inside the container. Hand both over
-(section 5) and delete the copy. Everyone else gets their certificate from the web client.
+`<label>.p12` and `password.txt` (0600) into `--out`, a new or empty directory inside the container. Copy them out
+to a directory only root reads and outside the project directory: anything under the project directory lands in the
+image build context and may end up in git. Hand both over (section 5), then destroy that copy (`shred -u`, or `rm`
+when the directory is on a tmpfs such as `/run`); the server keeps its own copy in `PKI_DIR/issued/` for a
+re-download. Everyone else gets their certificate from the web client.
 
 ## 4. The existing root during the transition
 
@@ -415,7 +427,7 @@ show a start after the publication. If it does not, switch to watching the direc
 | The API answers 401 `certificate_revoked` at login | Revoked. A `legacy` certificate, or an uploaded one of another CA, is blocked in the API only (nginx lets it through); one this server issued means nginx still has the previous CRL | Issue a new certificate. For one issued here: the path unit did not reload nginx, `journalctl -u watch-web-crl.service`, `nginx -t` |
 | The API answers 401 `certificate_not_recognized` | The certificate is not registered for any user, or expired | Issue one, or upload the file for the user |
 | The web client is logged out after a revocation (401 `session_expired`) | Revoking ends the sessions of that certificate | Log in with another certificate |
-| 503 `certificate_authority_unavailable` on issue | The signer does not answer | `docker compose ps pki-signer`, `docker compose logs pki-signer`; `run/` owner and group (section 3) |
+| 503 `certificate_authority_unavailable` on issue | The signer does not answer, or the api cannot open its socket | `docker compose ps pki-signer`, `docker compose logs pki-signer`; `PKI_SOCKET_GID` in `.env`, owner and group of `run/` (section 3) |
 | 503 `certificate_authority_not_configured` | `settings.pki` is not set in the api | `COMPOSE_FILE` in `.env` (section 3), restart the api |
 | The api does not start: `PKI is partly configured`, `not a usable CA certificate`, `not a writable directory`, `extra_crl_paths ... is not a readable CRL file` | `settings.pki` points at something missing | Fix the path or the owner the message names |
 | The signer does not start: `signer: the CA is not usable: <reason>` | See section 3, "Creating the client CA" | `signer.env` paths, `SIGNER_CA_KEY_PASSWORD`, owner of `private/` |

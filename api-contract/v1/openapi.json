@@ -26357,7 +26357,7 @@
           "certificate_pem": {
             "type": "string",
             "title": "Certificate Pem",
-            "description": "The client CA certificate (PEM): what a browser or a phone installs to trust it"
+            "description": "The client CA certificate (PEM), to show or check its details. Only nginx trusts this CA: clients never install it, and the login does not need it on the client"
           },
           "crl": {
             "$ref": "#/components/schemas/CrlInfo"

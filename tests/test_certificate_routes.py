@@ -563,6 +563,12 @@ async def test_cli_issue(session_maker, db, pki, tmp_path, monkeypatch):
         return session_maker
 
     monkeypatch.setattr(pki_cli, "get_session_maker", test_session_maker)
+    closed = []
+
+    async def close_db():
+        closed.append(True)
+
+    monkeypatch.setattr(pki_cli, "close_db", close_db)
     user = await make_user(db)
     out = tmp_path / "out"
     assert await pki_cli.run(["issue", "--username", user.username, "--label", "Laptop", "--days", "30",
@@ -587,3 +593,5 @@ async def test_cli_issue(session_maker, db, pki, tmp_path, monkeypatch):
     assert await pki_cli.run(["issue", "--username", user.username, "--label", "Laptop", "--days", "731",
                               "--out", str(tmp_path / "other")]) == 1
     assert len(await rows_of(db, user.id)) == 1
+    # Every run closes the pool while the event loop still runs (no aiomysql "Event loop is closed" at exit)
+    assert len(closed) == 5

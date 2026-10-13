@@ -1,5 +1,8 @@
 """The signing service: fixed profile, refusals, CRLs, health, start-up checks, import boundary and commands"""
+import os
 import re
+import socket
+import stat
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -15,7 +18,7 @@ from loguru import logger
 from app.backend.enums.general import RevocationReason
 from app.backend.enums.routes import SignerRoutes
 from app.backend.pki.authority import CaCheckError, sha256_fingerprint
-from app.backend.signer.__main__ import main
+from app.backend.signer.__main__ import bind_unix_socket, main
 from app.backend.signer.app import create_app
 from app.backend.signer.settings import SignerSettings
 from tests.pki_helpers import client_ca, legacy_root, pem, write_ca_files
@@ -227,3 +230,28 @@ def test_cli_sign_crl_for_another_ca(tmp_path):
     assert [entry.serial_number for entry in crl] == [0x0A1B]
     assert crl.next_update_utc.strftime("%Y-%m-%d") == next_update
     assert crl.extensions.get_extension_for_class(x509.CRLNumber).value.crl_number == 1
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Unix sockets")
+def test_serve_socket_is_owner_and_group_only(tmp_path):
+    """serve binds the socket itself (uvicorn chmods a path it binds to 0666): 0660 whatever the umask, and the
+    stale socket a killed signer leaves behind is replaced"""
+    path = str(tmp_path / "signer.sock")
+    stale = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    stale.bind(path)
+    stale.close()
+    assert stat.S_ISSOCK(os.stat(path).st_mode)
+    old_umask = os.umask(0)
+    try:
+        sock = bind_unix_socket(path)
+    finally:
+        os.umask(old_umask)
+    try:
+        assert stat.S_ISSOCK(os.stat(path).st_mode)
+        assert stat.S_IMODE(os.stat(path).st_mode) == 0o660
+        sock.listen(1)
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.connect(path)
+        client.close()
+    finally:
+        sock.close()

@@ -23,7 +23,7 @@ from sqlalchemy import func
 from sqlmodel import select
 
 from app.backend.config import settings
-from app.backend.database import get_session_maker
+from app.backend.database import close_db, get_session_maker
 from app.backend.enums.general import CertificateState
 from app.backend.errors.coded import CodedError
 from app.backend.models.user import User
@@ -138,16 +138,21 @@ async def run(argv: list[str]) -> int:
         print("PKI is not configured (MYSETTINGS_PKI__*)", file=sys.stderr)
         return 1
     session_maker = await get_session_maker()
-    async with session_maker() as session:
-        if args.command == "crl":
-            if await publish_crl(session):
-                print("CRL published")
-                return 0
-            print("CRL not published: the signer does not answer", file=sys.stderr)
-            return 1
-        if args.command == "issue":
-            return await _issue(session, args)
-        return await _status(session)
+    try:
+        async with session_maker() as session:
+            if args.command == "crl":
+                if await publish_crl(session):
+                    print("CRL published")
+                    return 0
+                print("CRL not published: the signer does not answer", file=sys.stderr)
+                return 1
+            if args.command == "issue":
+                return await _issue(session, args)
+            return await _status(session)
+    finally:
+        # The pool's connections are closed while the event loop still runs (asyncio.run in main): left to the
+        # garbage collector, aiomysql closes them after the loop and prints "Event loop is closed" to the journal
+        await close_db()
 
 
 def main(argv: Optional[list[str]] = None) -> int:

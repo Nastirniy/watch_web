@@ -229,7 +229,7 @@ listed and revoked on its own, so a renewal can overlap the old one.
 | `POST /api/v1/users/{user_id}/certificates/{certificate_id}/revoke` | `certificate.view` + `certificate.revoke` | Revoke for good, body `{reason}` optional |
 | `POST /api/v1/users/{user_id}/certificates/{certificate_id}/export` | `certificate.view` + `certificate.export` | The stored package again (a system permission: only holders at the root); counted and audited |
 | `GET /api/v1/certificates/` | `certificate.view` | Across users (renewals): filters `state`, `source`, `user_id`, `post_id`, `expires_within_days`; sort `id`, `label`, `not_after`, `created_at`; `page`, `page_size` |
-| `GET /api/v1/certificates/authority` | any logged-in user | The client CA (`subject`, `not_after`, `fingerprint_sha256`, `certificate_pem`) and the published CRL (`crl.this_update`, `next_update`, `revoked_count`) |
+| `GET /api/v1/certificates/authority` | any logged-in user | The client CA (`subject`, `not_after`, `fingerprint_sha256`, `certificate_pem`) and the published CRL (`crl.this_update`, `next_update`, `revoked_count`). The PEM is for showing or checking the CA: never offer it for installing, only nginx trusts this CA and the login does not need it on the client |
 
 The routes of one user check, in this order: the user exists and is visible as `GET /users/{user_id}` shows it (404
 `user_not_found`, 403 `user_self_only`), `certificate.view` covers the user (403 `permission_denied`: a user does not

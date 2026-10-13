@@ -100,5 +100,7 @@ class CertificateAuthorityResponse(PlainTextModel):
     subject: str = Field(description="Subject of the client CA, RFC 4514")
     not_after: ResponseDatetime = Field(description="When the client CA certificate expires")
     fingerprint_sha256: str = Field(description="SHA-256 of the client CA certificate, hex pairs joined by ':'")
-    certificate_pem: str = Field(description="The client CA certificate (PEM): what a browser or a phone installs to trust it")
+    certificate_pem: str = Field(description="The client CA certificate (PEM), to show or check its details. Only "
+                                             "nginx trusts this CA: clients never install it, and the login does not "
+                                             "need it on the client")
     crl: CrlInfo

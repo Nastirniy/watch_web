@@ -37,8 +37,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - `python -m app.backend.cli.init_user`: the certificate path is optional; `--label` names the certificate (default
   its CN).
 - `GET /certificates/authority` (any authenticated user): the client CA (`subject`, `not_after`, `fingerprint_sha256`,
-  `certificate_pem`) and the published CRL (`crl.this_update`, `crl.next_update`, `crl.revoked_count`); 503
-  `certificate_authority_not_configured` without PKI settings.
+  `certificate_pem`, to show or check it: clients never install it, only nginx trusts the CA) and the published CRL
+  (`crl.this_update`, `crl.next_update`, `crl.revoked_count`); 503 `certificate_authority_not_configured` without PKI
+  settings.
 - `/health` has a `pki` part when `settings.pki` is configured (`status`, `ca_expires_in_days`,
   `crl_next_update_in_days` (the earliest of every CRL in the published file), `crl_stale`, `signer_available`);
   the overall status is `degraded` when it is (less than 2 days left, a CRL never published or stale, no signer).
@@ -99,8 +100,10 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - The signing service `pki-signer` (`python -m app.backend.signer serve`): the only holder of the client CA key,
   without any network, answering on a Unix socket; `init` creates the client CA, `sign-crl` signs a CRL for another
   CA (the existing root) offline. Deployment: the compose override `docker-compose.pki.yml` (enabled with
-  `COMPOSE_FILE` in `.env`, `PKI_DIR`, `PKI_SIGNER_UID`), `signer.env.example`, `deploy/systemd/watch-web-crl.*` (nginx
-  reloads when the CRL file changes) and `watch-web-crl-refresh.*` (daily CRL), `deploy/pki/remove-old-root.cmd`;
+  `COMPOSE_FILE` in `.env`, `PKI_DIR`, `PKI_SIGNER_UID`, `PKI_SOCKET_GID`: the socket, 0660, belongs to a group of
+  its own that only the api joins), `signer.env.example`, `deploy/systemd/watch-web-crl.*` (nginx reloads when the
+  CRL file changes; verified in a systemd container, to be confirmed once on the host, PKI.md section 7) and
+  `watch-web-crl-refresh.*` (daily CRL), `deploy/pki/remove-old-root.cmd`;
   `nginx.conf` trusts the bundle `PKI_DIR/ca/nginx-client-cas.pem`, reads `PKI_DIR/crl/nginx.crl` and verifies depth
   1. The guide is `PKI.md`; the order of the upgrade is in DEPLOYMENT.md.
 

@@ -29,6 +29,15 @@ def test_signer_has_no_network_and_its_own_env():
     assert signer["restart"] == "unless-stopped"
 
 
+def test_socket_group_is_its_own():
+    """The signer runs with the socket's own group and the api joins it; never MEDIA_GID, which host accounts
+    (the nginx user) may share"""
+    assert PKI["pki-signer"]["user"] == \
+        "${PKI_SIGNER_UID:?set PKI_SIGNER_UID in .env}:${PKI_SOCKET_GID:?set PKI_SOCKET_GID in .env}"
+    assert PKI["api"]["group_add"] == ["${PKI_SOCKET_GID:?set PKI_SOCKET_GID in .env}"]
+    assert "MEDIA_GID" not in PKI_TEXT.split("services:", 1)[1]
+
+
 def test_only_the_signer_mounts_the_private_key():
     private = [name for name, service in PKI.items() if any("/private" in v for v in service.get("volumes", []))]
     assert private == ["pki-signer"]
@@ -74,7 +83,8 @@ def test_signer_env_example_names_every_signer_setting():
 
 def test_env_example_documents_pki():
     text = (ROOT / ".env.example").read_text(encoding="utf-8")
-    for name in ("PKI_DIR=", "PKI_SIGNER_UID=", "COMPOSE_FILE=docker-compose.yml:docker-compose.pki.yml"):
+    for name in ("PKI_DIR=", "PKI_SIGNER_UID=", "PKI_SOCKET_GID=",
+                 "COMPOSE_FILE=docker-compose.yml:docker-compose.pki.yml"):
         assert name in text, name
 
 
