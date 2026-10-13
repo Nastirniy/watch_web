@@ -5,7 +5,7 @@ The state of a certificate is computed when it is read, never stored (spec secti
 set, else expired when not_after is in the past, else active. Rows without not_after (legacy, configured) stay active
 until revoked. certificate_state() computes it for a row, state_clause() is the same rule in SQL.
 
-Issue, upload and export write their audit row through a callback (WriteAudit) inside their transaction: the route
+Issue, upload, export and revoke write their audit row through a callback (WriteAudit) inside their transaction: the route
 adds who asked (client_info), the CLI "via: cli". What the row holds comes from certificate_audit_details: never a
 key, a .p12 or a password.
 
@@ -27,7 +27,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.auth.certificates import CN_SCHEME_CURRENT, certificate_values, hash_certificate_data
 from app.backend.config import settings
 from app.backend.enums.errors import ErrorCode
-from app.backend.enums.general import CertificateSource, CertificateState
+from app.backend.enums.general import CertificateSource, CertificateState, RevocationReason, SessionRevokeCause
 from app.backend.errors.coded import CodedError
 from app.backend.models.user import User, UserSession
 from app.backend.models.user_certificate import UserCertificate
@@ -355,3 +355,35 @@ async def export_package(session: AsyncSession, certificate: UserCertificate,
                  f"export_count={certificate.export_count}")
     return CertificatePackage(certificate=certificate, p12=p12, password=password,
                               filename=p12_filename(certificate.label, certificate.id))
+
+
+async def revoke_certificate(
+        session: AsyncSession,
+        certificate: UserCertificate,
+        reason: RevocationReason,
+        revoked_by: int,
+        write_audit: WriteAudit,
+) -> UserCertificate:
+    """Revoke a certificate (final): lock the row and read it again, CodedError certificate_already_revoked when it
+    is revoked; set revoked_at, revoked_by and revocation_reason, end the live sessions bound to it, write the audit
+    row (write_audit), commit. Everything lands in one transaction: a session of the revoked device never outlives
+    the revocation. The CRL is published by the caller after the commit (crl_publisher.publish_crl)."""
+    # auth.service imports this module (login looks certificates up): imported here to avoid the cycle
+    from app.backend.auth.service import AuthService
+
+    row = await get_user_certificate(session, certificate.user_id, certificate.id, lock=True)
+    if row.revoked_at is not None:
+        raise CodedError(ErrorCode.CERTIFICATE_ALREADY_REVOKED)
+    row.revoked_at = _now()
+    row.revoked_by = revoked_by
+    row.revocation_reason = reason.value
+    session.add(row)
+    ended = await AuthService.invalidate_certificate_sessions(
+        session, row.user_id, row.fingerprint_hash, SessionRevokeCause.CERTIFICATE_REVOKED,
+        actor_user_id=revoked_by, commit=False)
+    await write_audit(row, {"label": row.label, "serial": row.serial, "reason": reason.value,
+                            "sessions_ended": ended})
+    await session.commit()
+    _logger.info(f"Certificate revoked: id={row.id}, user_id={row.user_id}, serial={row.serial}, "
+                 f"reason={reason.value}, revoked_by={revoked_by}, sessions_ended={ended}")
+    return row

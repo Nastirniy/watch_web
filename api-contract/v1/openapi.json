@@ -3973,6 +3973,198 @@
         }
       }
     },
+    "/api/v1/users/{user_id}/certificates/{certificate_id}/revoke": {
+      "post": {
+        "tags": [
+          "USERS"
+        ],
+        "summary": "Revoke User Certificate",
+        "description": "Revoke a certificate for good: the login with it is refused (401 certificate_revoked) and the live sessions\nbound to it end in the same transaction (the user's other devices keep working). A certificate this server issued\ngoes on the CRL, published after the commit; when the signing service does not answer the revocation stands, the\nanswer is still 200 and the next publication (daily, at start-up) lists it (GET /health shows a stale CRL).\n\nNeeds certificate.revoke covering the user and every assignment of the user grantable by the caller (403\ntarget_user_more_privileged). 409 certificate_already_revoked for a revoked one. The body may be left out\n(reason unspecified).",
+        "operationId": "revoke_user_certificate",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "certificate_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Certificate Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/CertificateRevokeRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Data"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`: Insufficient permissions; `target_user_more_privileged`: This user holds permissions you do not hold; `user_self_only`: You can only view your own account or users of your assigned posts",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TargetUserMorePrivilegedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UserSelfOnlyProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "target_user_more_privileged": "#/components/schemas/TargetUserMorePrivilegedProblem",
+                      "user_self_only": "#/components/schemas/UserSelfOnlyProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`certificate_not_found`: Certificate not found; `user_not_found`: User not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CertificateNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UserNotFoundProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "certificate_not_found": "#/components/schemas/CertificateNotFoundProblem",
+                      "user_not_found": "#/components/schemas/UserNotFoundProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`certificate_already_revoked`: Certificate already revoked",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateAlreadyRevokedProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/certificates/": {
       "get": {
         "tags": [
@@ -26018,6 +26210,69 @@
         "type": "object",
         "title": "CategoryUpdate"
       },
+      "CertificateAlreadyRevokedProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Certificate already revoked",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Certificate already revoked"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "certificate_already_revoked",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "CertificateAlreadyRevokedProblem",
+        "description": "Certificate already revoked (HTTP 409). Problem type certificate_already_revoked.",
+        "examples": [
+          {
+            "code": "certificate_already_revoked",
+            "detail": "Certificate already revoked",
+            "instance": "/api/v1/...",
+            "status": 409,
+            "title": "Certificate already revoked",
+            "type": "https://example.org/problems/certificate_already_revoked"
+          }
+        ]
+      },
       "CertificateAuthorityNotConfiguredProblem": {
         "properties": {
           "type": {
@@ -26981,6 +27236,19 @@
         ],
         "title": "CertificateResponse",
         "description": "A client certificate of a user: every column but the hashes and the folder, plus its state"
+      },
+      "CertificateRevokeRequest": {
+        "properties": {
+          "reason": {
+            "$ref": "#/components/schemas/RevocationReason",
+            "description": "Why the certificate is revoked: the reason written to the CRL of a certificate this server issued",
+            "default": "unspecified"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "CertificateRevokeRequest",
+        "description": "Body of POST /users/{user_id}/certificates/{certificate_id}/revoke (may be left out)"
       },
       "CertificateRevokedProblem": {
         "properties": {

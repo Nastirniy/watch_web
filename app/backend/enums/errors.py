@@ -231,6 +231,8 @@ class ErrorCode(ProblemType):
     CERTIFICATE_NOT_FOUND = ("certificate_not_found", problem(404, "Certificate not found"))
     # Export of a revoked or expired certificate
     CERTIFICATE_NOT_ACTIVE = ("certificate_not_active", problem(409, "Certificate is not active"))
+    # Revoking a certificate that is revoked already (revoking is final)
+    CERTIFICATE_ALREADY_REVOKED = ("certificate_already_revoked", problem(409, "Certificate already revoked"))
     # Export of a certificate the API did not issue (uploaded, legacy, configured): there is no package
     CERTIFICATE_NOT_EXPORTABLE = ("certificate_not_exportable", problem(409, "Certificate has no stored package"))
     # The folder of an issued certificate was removed by hand

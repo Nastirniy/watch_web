@@ -5,6 +5,7 @@ from pydantic import ConfigDict, Field, field_validator
 
 from app.backend.config import settings
 from app.backend.enums.errors import FieldErrorCode
+from app.backend.enums.general import RevocationReason
 from app.backend.errors.coded import invalid
 from app.backend.pki.profile import LABEL_MAX_LENGTH, normalize_label
 from app.backend.utils.validators import SecureBaseModel
@@ -41,6 +42,13 @@ class CertificateIssueRequest(SecureBaseModel):
         if v is not None and v > settings.pki.max_validity_days:
             raise invalid(FieldErrorCode.VALIDITY_DAYS_TOO_LONG, max_days=settings.pki.max_validity_days)
         return v
+
+
+class CertificateRevokeRequest(SecureBaseModel):
+    """Body of POST /users/{user_id}/certificates/{certificate_id}/revoke (may be left out)"""
+    reason: RevocationReason = Field(
+        default=RevocationReason.UNSPECIFIED,
+        description="Why the certificate is revoked: the reason written to the CRL of a certificate this server issued")
 
 
 class CertificateUploadForm(SecureBaseModel):

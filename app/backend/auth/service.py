@@ -373,6 +373,61 @@ class AuthService:
         return count
 
     @staticmethod
+    async def invalidate_certificate_sessions(
+            session: AsyncSession,
+            user_id: int,
+            fingerprint_hash: str,
+            cause: SessionRevokeCause,
+            actor_user_id: Optional[int] = None,
+            ip_address: Optional[str] = None,
+            user_agent: Optional[str] = None,
+            commit: bool = True
+    ) -> int:
+        """Revoke the live sessions of a user bound to one certificate (certificate_fingerprint_hash); the user's
+        other sessions stay. Same rules as invalidate_all_user_sessions: a session already past its end is
+        recorded with that reason, commit=False leaves the changes in the caller's transaction.
+        Returns the number of sessions revoked."""
+        result = await session.exec(select(UserSession).where(
+            UserSession.user_id == user_id,
+            UserSession.certificate_fingerprint_hash == fingerprint_hash,
+            UserSession.ended_at.is_(None),
+        ))
+        not_ended = result.all()
+
+        count = 0
+        now = datetime.now(timezone.utc)
+        for user_session in not_ended:
+            state = session_lifetimes.session_state(user_session, now)
+            if state.status is SessionStatus.ENDED:
+                session_lifetimes.end(user_session, state.end_reason, at=state.ends_at)
+            else:
+                session_lifetimes.end(user_session, SessionEndReason.REVOKED, cause, at=now)
+                count += 1
+            session.add(user_session)
+
+        if count > 0:
+            await create_audit_log(
+                session=session,
+                user_id=actor_user_id or user_id,
+                action="force_logout",
+                resource_type="session",
+                resource_id=user_id,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                details={
+                    "message": f"{count} live sessions of one certificate revoked for user_id={user_id}",
+                    "cause": cause.value
+                },
+                success=True
+            )
+            _logger.info(f"Revoked {count} live sessions of one certificate for user_id={user_id}, "
+                         f"cause={cause.value}")
+        if commit and not_ended:
+            await session.commit()
+
+        return count
+
+    @staticmethod
     async def end_session_of_revoked_certificate(session: AsyncSession, user_session: UserSession, user: User) -> bool:
         """End a live session bound to a certificate that is no active row of the user (revoked, expired, or not
         the user's): revoked, certificate_revoked.

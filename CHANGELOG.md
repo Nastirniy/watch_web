@@ -72,6 +72,13 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
     stored package again (same `.p12` and password), `Cache-Control: no-store`; counts `export_count` and sets
     `last_exported_at`. 409 `certificate_not_exportable` (not issued here), 409 `certificate_not_active` (revoked
     or expired), 410 `certificate_files_missing` (folder removed), 503 `certificate_authority_not_configured`.
+  - `POST /users/{user_id}/certificates/{certificate_id}/revoke` (`certificate.view` + `certificate.revoke`; optional
+    body `{"reason": "unspecified" | "key_compromise" | "affiliation_changed" | "superseded" |
+    "cessation_of_operation"}`): revoking is final. Sets `revoked_at`, `revoked_by`, `revocation_reason` and ends the
+    live sessions bound to that certificate in the same transaction (revoke cause `certificate_revoked`; the user's
+    other devices keep working, a later login with it answers 401 `certificate_revoked`). A certificate this server
+    issued is then published on the CRL; when the signing service does not answer the answer is still 200 and the
+    next publication lists it (`GET /health` reports a stale CRL). 409 `certificate_already_revoked`.
 - `GET /certificates/` (`certificate.view`, tag `CERTIFICATES`): the certificates of non-archived users whose home
   post is where both `certificate.view` and `user.view` are in effect (users without a home post: both at the
   root); filters `state`, `source`, `user_id`, `post_id` (403 where the two are not in effect), `expires_within_days`
@@ -80,9 +87,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - A certificate record (`CertificateResponse`) carries every column of `user_certificates` but the hashes and
   `files_dir`, plus `state` and `has_package`.
 - Problems `certificate_not_found` (404), `certificate_authority_unavailable` (503), `certificate_not_active` (409),
-  `certificate_not_exportable` (409), `certificate_files_missing` (410); field code `validity_days_too_long`
+  `certificate_not_exportable` (409), `certificate_files_missing` (410), `certificate_already_revoked` (409); field code `validity_days_too_long`
   (param `max_days`: the limit is `settings.pki.max_validity_days`).
-- Audit rows `resource_type` `user_certificate`, actions `issue`, `upload`, `export`: label, serial,
+- Audit rows `resource_type` `user_certificate`, actions `issue`, `upload`, `export`, `revoke` (also `reason`, `sessions_ended`): label, serial,
   `sha256_fingerprint`, `not_after` (never a key, a `.p12` or a password; `export` also `export_count`).
 - `python -m app.backend.cli.pki issue --username U --label L [--days N] --out DIR`: issues for an existing user
   exactly like the API (folder, audit row with `via: cli`, `created_by` null) and writes `<label>.p12` and

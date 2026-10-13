@@ -156,6 +156,7 @@ class UserRoutes(str, Enum):
     USER_CERTIFICATE_UPLOAD = "/{user_id}/certificates/upload"  # registered before /{certificate_id}
     USER_CERTIFICATE_BY_ID = "/{user_id}/certificates/{certificate_id}"
     USER_CERTIFICATE_EXPORT = "/{user_id}/certificates/{certificate_id}/export"
+    USER_CERTIFICATE_REVOKE = "/{user_id}/certificates/{certificate_id}/revoke"
 
     @staticmethod
     def tag() -> str:

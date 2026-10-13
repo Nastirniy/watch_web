@@ -1,4 +1,5 @@
-"""Client certificates of one user: list, issue, upload a file, one certificate, re-download the stored package.
+"""Client certificates of one user: list, issue, upload a file, one certificate, re-download the stored package,
+revoke.
 
 Checked in this order (scope first, then existence, then state), so that an outsider learns nothing about the
 user's certificates: the user (404 user_not_found); user.view covering the user or the user themselves (403
@@ -16,7 +17,9 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.api.shared.helpers.db_errors import unique_violation_as
 from app.backend.api.shared.openapi_docs import with_headers
-from app.backend.api.v1.models.request.certificates import CertificateIssueRequest, CertificateUploadForm
+from app.backend.api.v1.models.request.certificates import (
+    CertificateIssueRequest, CertificateRevokeRequest, CertificateUploadForm,
+)
 from app.backend.api.v1.models.response.certificates import (
     PACKAGE_HEADERS, CertificatePackageResponse, CertificateResponse, certificate_to_response, package_to_response,
 )
@@ -36,16 +39,18 @@ from app.backend.models.user import User
 from app.backend.models.user_certificate import UserCertificate
 from app.backend.services.audit import create_audit_log
 from app.backend.services.certificates import (
-    MAX_CERTIFICATE_BYTES, WriteAudit, export_package, get_user_certificate, issue_certificate, upload_certificate,
-    user_certificates,
+    MAX_CERTIFICATE_BYTES, WriteAudit, export_package, get_user_certificate, issue_certificate, revoke_certificate,
+    upload_certificate, user_certificates,
 )
+from app.backend.services.crl_publisher import publish_crl
+from app.backend.services.signer_client import SignerRefused
 from app.backend.utils.logging_config import get_api_logger
 
 router = APIRouter(prefix=UserRoutes.BASE.value, tags=[UserRoutes.tag()])
 _logger = get_api_logger()
 
 AUDIT_RESOURCE = "user_certificate"
-_DONE = {"issue": "issued", "upload": "uploaded", "export": "downloaded again"}
+_DONE = {"issue": "issued", "upload": "uploaded", "export": "downloaded again", "revoke": "revoked"}
 # The checks of every route (module docstring): the user, user.view, the archive, certificate.view
 _OWNER_PROBLEMS = (ErrorCode.USER_NOT_FOUND, AccessErrorCode.USER_SELF_ONLY, *GUARDED)
 
@@ -237,3 +242,52 @@ async def export_user_certificate(
     _logger.info(f"User {auth.user.username} downloaded certificate {row.id} of user {user.username} again")
     response.headers["Cache-Control"] = "no-store"
     return package_to_response(package)
+
+
+@router.post(
+    UserRoutes.USER_CERTIFICATE_REVOKE.value,
+    response_model=CertificateResponse,
+    responses=problems(
+        ErrorCode.CERTIFICATE_NOT_FOUND, ErrorCode.CERTIFICATE_ALREADY_REVOKED,
+        AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *_OWNER_PROBLEMS,
+    ),
+)
+async def revoke_user_certificate(
+        request: Request,
+        user_id: Annotated[int, Path(ge=1)],
+        certificate_id: Annotated[int, Path(ge=1)],
+        data: Optional[CertificateRevokeRequest] = None,
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.CERTIFICATE_VIEW, Permissions.CERTIFICATE_REVOKE])),
+):
+    """Revoke a certificate for good: the login with it is refused (401 certificate_revoked) and the live sessions
+    bound to it end in the same transaction (the user's other devices keep working). A certificate this server issued
+    goes on the CRL, published after the commit; when the signing service does not answer the revocation stands, the
+    answer is still 200 and the next publication (daily, at start-up) lists it (GET /health shows a stale CRL).
+
+    Needs certificate.revoke covering the user and every assignment of the user grantable by the caller (403
+    target_user_more_privileged). 409 certificate_already_revoked for a revoked one. The body may be left out
+    (reason unspecified)."""
+    user = await _certificate_owner(session, auth, user_id)
+    await check_target_user(session, auth, user, Permissions.CERTIFICATE_REVOKE)
+    reason = (data or CertificateRevokeRequest()).reason
+    try:
+        row = await revoke_certificate(
+            session, await get_user_certificate(session, user.id, certificate_id), reason, auth.user.id,
+            _audit(session, request, auth, "revoke", user))
+    except CodedError as exc:
+        raise ApiError.from_coded(exc)
+    _logger.info(f"User {auth.user.username} revoked certificate {row.id} of user {user.username} ({reason.value})")
+    result = certificate_to_response(row)
+    # Read now: publish_crl rolls the session back on a signer that does not answer, which expires the row
+    revoked_id, publishes = row.id, row.ca_issued
+    if publishes and settings.pki.is_configured():
+        try:
+            published = await publish_crl(session)
+        except SignerRefused as exc:
+            # The revocation is committed: a refusal only leaves the CRL stale (GET /health), never an error answer
+            _logger.error(f"CRL not published after revoking certificate {revoked_id}: the signer refused ({exc})")
+        else:
+            if not published:
+                _logger.warning(f"CRL not published after revoking certificate {revoked_id}: it stays stale")
+    return result
