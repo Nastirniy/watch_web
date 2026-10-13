@@ -75,8 +75,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   - `POST /users/{user_id}/certificates/{certificate_id}/revoke` (`certificate.view` + `certificate.revoke`; optional
     body `{"reason": "unspecified" | "key_compromise" | "affiliation_changed" | "superseded" |
     "cessation_of_operation"}`): revoking is final. Sets `revoked_at`, `revoked_by`, `revocation_reason` and ends the
-    live sessions bound to that certificate in the same transaction (revoke cause `certificate_revoked`; the user's
-    other devices keep working, a later login with it answers 401 `certificate_revoked`). A certificate this server
+    live sessions bound to that certificate in the same transaction (revoke cause `certificate_revoked`: that device's
+    next request answers 401 `session_expired`; the user's other devices keep working, a later login with it answers
+    401 `certificate_revoked`). A certificate this server
     issued is then published on the CRL; when the signing service does not answer the answer is still 200 and the
     next publication lists it (`GET /health` reports a stale CRL). 409 `certificate_already_revoked`.
 - `GET /certificates/` (`certificate.view`, tag `CERTIFICATES`): the certificates of non-archived users whose home
@@ -86,7 +87,8 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `page_size`.
 - A certificate record (`CertificateResponse`) carries every column of `user_certificates` but the hashes and
   `files_dir`, plus `state` and `has_package`.
-- Problems `certificate_not_found` (404), `certificate_authority_unavailable` (503), `certificate_not_active` (409),
+- Problems `certificate_not_found` (404), `certificate_authority_not_configured` (503),
+  `certificate_authority_unavailable` (503), `certificate_not_active` (409),
   `certificate_not_exportable` (409), `certificate_files_missing` (410), `certificate_already_revoked` (409); field code `validity_days_too_long`
   (param `max_days`: the limit is `settings.pki.max_validity_days`).
 - Audit rows `resource_type` `user_certificate`, actions `issue`, `upload`, `export`, `revoke` (also `reason`, `sessions_ended`): label, serial,
@@ -94,12 +96,18 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - `python -m app.backend.cli.pki issue --username U --label L [--days N] --out DIR`: issues for an existing user
   exactly like the API (folder, audit row with `via: cli`, `created_by` null) and writes `<label>.p12` and
   `password.txt` into `DIR` (a new or empty directory).
+- The signing service `pki-signer` (`python -m app.backend.signer serve`): the only holder of the client CA key,
+  without any network, answering on a Unix socket; `init` creates the client CA, `sign-crl` signs a CRL for another
+  CA (the existing root) offline. Deployment: the compose override `docker-compose.pki.yml` (enabled with
+  `COMPOSE_FILE` in `.env`, `PKI_DIR`, `PKI_SIGNER_UID`), `signer.env.example`, `deploy/systemd/watch-web-crl.*` (nginx
+  reloads when the CRL file changes) and `watch-web-crl-refresh.*` (daily CRL), `deploy/pki/remove-old-root.cmd`;
+  `nginx.conf` trusts the bundle `PKI_DIR/ca/nginx-client-cas.pem`, reads `PKI_DIR/crl/nginx.crl` and verifies depth
+  1. The guide is `PKI.md`; the order of the upgrade is in DEPLOYMENT.md.
 
 ### Changed
 
 - `GET /auth/me` has `certificate`: `id`, `label`, `not_after`, `state` of the certificate the session was opened
   with; null for a session bound to none (development login).
-
 - The login matches the three hashes against `user_certificates` (`legacy` rows exactly as the `users` columns
   did). A revoked certificate answers `certificate_revoked`, an expired one `certificate_not_recognized`, then the
   account checks follow as before.
@@ -122,12 +130,40 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ### Migration guide for the web client
 
-Regenerate the types from `api-contract/v1/openapi.json`. The user edit form loses its certificate field; the
-create form keeps it, optional, next to `certificate_label`. New translations: `certificate_revoked`,
-`certificate_label_invalid` and the revoke cause `certificate_revoked`; the text of `certificate_taken` reads
-"Certificate already registered". The certificate pages add `certificate_not_found`,
-`certificate_authority_unavailable`, `certificate_not_active`, `certificate_not_exportable`,
-`certificate_files_missing` and `validity_days_too_long`, and the permission names `certificate.*`.
+Regenerate the types from `api-contract/v1/openapi.json`; API.md, "Client certificates", describes the flow.
+
+- `PATCH /users/{user_id}` no longer takes `certificate`: the user edit form loses its certificate field. Replacing a
+  certificate is issuing or uploading a new one and revoking the old one.
+- `POST /users/`: the certificate file is optional (the form stays multipart), next to the optional
+  `certificate_label`; a user created without one cannot log in until a certificate is issued or uploaded.
+- New pages or dialogs: the certificates of a user (`GET`, `POST /users/{user_id}/certificates`, `.../upload`,
+  `.../{certificate_id}`, `.../revoke`, `.../export`), the certificates across users with `expires_within_days` for
+  renewals (`GET /certificates/`), and the authority (`GET /certificates/authority`). Issue and export answer the
+  `.p12` as base64 with its password, once (`Cache-Control: no-store`): save the file, show the password, keep
+  neither.
+- `GET /auth/me` has `certificate` (`id`, `label`, `not_after`, `state`): warn before it expires.
+- After a revocation the revoked device's next request answers 401 `session_expired` (revoke cause
+  `certificate_revoked`): log in again with another certificate. `token_certificate_mismatch` now also means the
+  session's certificate stopped being active (it expired).
+- New translations: `certificate_revoked`, `certificate_label_invalid` and the revoke cause `certificate_revoked`; the
+  text of `certificate_taken` reads "Certificate already registered". The certificate pages add
+  `certificate_not_found`, `certificate_authority_not_configured`, `certificate_authority_unavailable`,
+  `certificate_already_revoked`, `certificate_not_active`, `certificate_not_exportable`, `certificate_files_missing`
+  and `validity_days_too_long` (param `max_days`), and the permission names `certificate.*`.
+
+### Migration guide for operators
+
+- Migration `024_user_certificates` runs at the first start: every user's certificate becomes a `legacy` row with the
+  same hashes, so every certificate from before the upgrade keeps logging in. Upgrade and downgrade were checked live
+  on MySQL 8.0 and MariaDB 11.8 (the legacy rows equal the old columns; after a downgrade the `users` rows equal the
+  snapshot taken before the upgrade). The downgrade and what it loses: DEPLOYMENT.md, "Upgrading to PKI client
+  certificates".
+- PKI is optional and off until configured: without `docker-compose.pki.yml` the API runs as before plus the
+  certificate list (issue and export answer 503 `certificate_authority_not_configured`; upload and revoke work).
+- The order of the steps (server certificate, deploy, `PKI_DIR` and the signer, nginx, systemd, the existing root on
+  the clients, new certificates): DEPLOYMENT.md, "Upgrading to PKI client certificates"; every step in `PKI.md`.
+- `MYSETTINGS_ADMIN__PKI_CERTIFICATE_*` only serve the development seed; the first administrator on a server gets a
+  certificate from `python -m app.backend.cli.pki issue` (PKI.md, section 3).
 
 ## Authorization v2
 

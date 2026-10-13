@@ -117,9 +117,10 @@ The localization package needs one entry per code:
 Send `Authorization: Bearer <access token>` from `POST /api/v1/auth/login`.
 
 - `invalid_token` (the access token expired): refresh with `POST /api/v1/auth/refresh`, then repeat the request.
-- `session_expired`: the session itself ended (logout, no request for `session_idle_timeout_minutes`, the optional hard limit `session_max_hours`, or revoked by the server); a refresh cannot bring it back: log in again. With a client certificate the login needs no user input, so the client can do it by itself.
-- `token_certificate_mismatch`: the token belongs to a session opened with another client certificate (the browser presented a different one, or the token was copied), or the certificate of the session is no longer the user's (it was replaced; the session ends); log in again with the current certificate.
+- `session_expired`: the session itself ended (logout, no request for `session_idle_timeout_minutes`, the optional hard limit `session_max_hours`, or revoked by the server, for example because its certificate was revoked: `revoke_cause` `certificate_revoked`); a refresh cannot bring it back: log in again. With a client certificate the login needs no user input, so the client can do it by itself.
+- `token_certificate_mismatch`: the token belongs to a session opened with another client certificate (the browser presented a different one, or the token was copied), or the certificate of the session stopped being an active certificate of the user without the session being ended for it (it expired; the session ends now); log in again with a current certificate.
 - `credentials_required`, `account_not_found`, `account_deactivated`, `account_deleted`, `invalid_refresh_token`: log in again.
+- At login: `certificate_revoked` (the certificate is registered but revoked: the person needs a new one), `certificate_not_recognized` (no user has this certificate, or it expired).
 
 Session lifetime: a session lives while it is used. It ends after `security.session_idle_timeout_minutes` (30) without a request; every request and every refresh moves that end (`expires_at` of the session). `security.session_max_hours` can add a hard limit since the login (0, the default: none). Every refresh issues a new access and refresh token; a refresh token stays usable for the access token lifetime plus the idle timeout, so a client that refreshes when its access token expires never loses an active session.
 
@@ -213,6 +214,91 @@ the user (`session_expired`, `revoke_cause` `user_type_changed`): the new pages 
 
 Field codes inside `validation_error`: `scope_id_required` (a group or post scope without `id`),
 `scope_id_not_allowed` (the root with an `id`).
+
+## Client certificates
+
+People log in with a client certificate the server issues (server side: `PKI.md`). A user may hold several, each
+listed and revoked on its own, so a renewal can overlap the old one.
+
+| Operation | Permissions | Purpose |
+|-----------|-------------|---------|
+| `GET /api/v1/users/{user_id}/certificates` | `certificate.view` | The user's certificates, oldest first; filter `state` |
+| `POST /api/v1/users/{user_id}/certificates` | `certificate.view` + `certificate.create` | Issue: `{label, validity_days?}`, 201 with the package |
+| `POST /api/v1/users/{user_id}/certificates/upload` | `certificate.view` + `certificate.create` | Register a certificate file (multipart `file` + `label`), 201 with the record |
+| `GET /api/v1/users/{user_id}/certificates/{certificate_id}` | `certificate.view` | One certificate |
+| `POST /api/v1/users/{user_id}/certificates/{certificate_id}/revoke` | `certificate.view` + `certificate.revoke` | Revoke for good, body `{reason}` optional |
+| `POST /api/v1/users/{user_id}/certificates/{certificate_id}/export` | `certificate.view` + `certificate.export` | The stored package again (a system permission: only holders at the root); counted and audited |
+| `GET /api/v1/certificates/` | `certificate.view` | Across users (renewals): filters `state`, `source`, `user_id`, `post_id`, `expires_within_days`; sort `id`, `label`, `not_after`, `created_at`; `page`, `page_size` |
+| `GET /api/v1/certificates/authority` | any logged-in user | The client CA (`subject`, `not_after`, `fingerprint_sha256`, `certificate_pem`) and the published CRL (`crl.this_update`, `next_update`, `revoked_count`) |
+
+The routes of one user check, in this order: the user exists and is visible as `GET /users/{user_id}` shows it (404
+`user_not_found`, 403 `user_self_only`), `certificate.view` covers the user (403 `permission_denied`: a user does not
+see their own certificates here without it), a change also needs its permission covering the user and every
+assignment of the user grantable by the caller (403 `target_user_more_privileged`), then the certificate (404
+`certificate_not_found`, also for another user's id) and its state. `GET /certificates/` lists users whose home post
+is where both `certificate.view` and `user.view` are in effect.
+
+**A record** (`CertificateResponse`): `label` (the readable name: the CN and the name browsers show in the
+certificate picker), `source` (`issued` here, `uploaded` file, `legacy` from before the upgrade, `configured` by the
+development seed; `legacy` and `configured` have only hashes, so `subject_cn`, `serial`, `not_before`, `not_after`
+are null), `state` (`active`, `expired`, `revoked`; computed when read), `ca_issued` (signed by this server's CA:
+listed on its CRL once revoked), `has_package` (issued here with a stored package: export can download it again while
+active), `revoked_at`, `revoked_by`, `revocation_reason`, `export_count`, `last_exported_at`, `created_at`,
+`created_by`.
+
+**Issuing and the `.p12`.** The label is 1 to 64 characters, no control characters; suggest one from the person's
+name, post and device (`Petrenko I. - post 2 - laptop`). `validity_days` defaults to the server's 365 and is at most
+its `max_validity_days` (730). The answer (201, `Cache-Control: no-store`) is `{certificate, p12_base64, password,
+filename}`: the key and the certificate under the label, protected by a password of four groups of five characters.
+Save the file and show the password once; never keep either in storage, state that outlives the dialog, or logs:
+
+```ts
+const { data, error } = await api.POST("/api/v1/users/{user_id}/certificates", {
+  params: { path: { user_id: 7 } },
+  body: { label: "Petrenko I. - post 2 - laptop" },
+});
+if (data) {
+  const bytes = Uint8Array.from(atob(data.p12_base64), (c) => c.charCodeAt(0));
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/x-pkcs12" }));
+  Object.assign(document.createElement("a"), { href: url, download: data.filename }).click();
+  URL.revokeObjectURL(url);
+  showPasswordOnce(data.password);   // the person installs the file with it (PKI.md, section 5)
+}
+```
+
+Export answers the same JSON from the stored package (same file, same password). Upload registers a certificate
+made elsewhere (PEM or DER); an already expired file is accepted and listed as `expired`.
+
+**Revoking** is final: a certificate is never archived, restored or deleted. `reason` is `unspecified` (default),
+`key_compromise`, `affiliation_changed`, `superseded` (replaced by a new one) or `cessation_of_operation`. The
+sessions opened with it end at once: that device's next request answers 401 `session_expired` (`revoke_cause`
+`certificate_revoked` in the session lists), the user's other devices stay logged in. A certificate this server
+issued then goes on the CRL, and nginx refuses it within seconds (an infrastructure 400, not a problem). Revoking a
+user's last certificate leaves the account in place: they log in again once a new one is issued.
+
+**`GET /auth/me`** carries `certificate`: `id`, `label`, `not_after`, `state` of the certificate the session was
+opened with (null for a session without one, the development login). Warn the person when `not_after` is near.
+
+**Users.** `POST /api/v1/users/` takes the certificate file as optional, with an optional `certificate_label`
+(default: its CN cut to 64 characters); without one the user exists but cannot log in until a certificate is issued
+or uploaded. `PATCH /api/v1/users/{user_id}` takes no certificate: replace one by issuing or uploading a new one and
+revoking the old one.
+
+| Code | Status | When |
+|------|--------|------|
+| `certificate_not_found` | 404 | No such certificate for that user |
+| `certificate_authority_not_configured` | 503 | Issue, export or the authority on a server without PKI |
+| `certificate_authority_unavailable` | 503 | The signing service did not answer: nothing was issued, try again later |
+| `certificate_already_revoked` | 409 | Revoking twice |
+| `certificate_not_active` | 409 | Export of a revoked or expired certificate |
+| `certificate_not_exportable` | 409 | Export of a certificate this server did not issue (`has_package` false) |
+| `certificate_files_missing` | 410 | Export after the package was removed on the server |
+| `certificate_taken` | 400 | Upload or `POST /users/` of a certificate already registered for any user |
+| `certificate_invalid`, `certificate_file_empty`, `certificate_file_too_large` | 400 | Upload or `POST /users/` of an unusable file |
+| `certificate_revoked` | 401 | Login with a revoked certificate |
+
+Field codes inside `validation_error`: `certificate_label_invalid` (the label), `validity_days_too_long` (param
+`max_days`).
 
 ## Responses that are not JSON
 

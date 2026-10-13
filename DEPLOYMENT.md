@@ -13,17 +13,19 @@ Docker runs the application only. Everything stateful stays outside the containe
                      |     v                              v                  |
                      |  [api container]            [imgproxy container]      |
                      |  [media-worker container]                             |
-                     |     |  127.0.0.1:3306                                 |
-                     |     v                                                 |
-                     |  MySQL (host service)                                 |
+                     |     |  127.0.0.1:3306    \  PKI_DIR/run/signer.sock   |
+                     |     v                     \-> [pki-signer container]  |
+                     |  MySQL (host service)         (no network)            |
                      |                                                       |
                      |  MEDIA_ROOT  (local disk, or NFS/SMB share mounted    |
                      |               on the host) bind-mounted at the same   |
                      |               path into api, media-worker, imgproxy   |
+                     |  PKI_DIR     (client CA, CRL, issued certificates)    |
+                     |               bind-mounted into api and pki-signer    |
                      +-------------------------------------------------------+
 ```
 
-- Containers use the host network, so the database, nginx and imgproxy are all reached on `127.0.0.1` and nothing on the host needs to be reconfigured. A bridge-network variant is described at the bottom of `docker-compose.yml`.
+- Containers use the host network, so the database, nginx and imgproxy are all reached on `127.0.0.1` and nothing on the host needs to be reconfigured. A bridge-network variant is described at the bottom of `docker-compose.yml`. The exception is `pki-signer` (client certificates, `docker-compose.pki.yml`): it has no network at all and answers only on a Unix socket; the guide is `PKI.md`.
 - The media directory is mounted at the same absolute path inside and outside the containers. The database stores paths relative to it, so the directory can move as long as `MEDIA_ROOT` and the nginx `alias` move with it.
 - The API applies migrations on start and seeds the admin user; the worker only needs the database and the media directory.
 
@@ -71,8 +73,8 @@ Edit before reloading:
 | nginx-app.conf | `alias /var/www/radio_monitoring/uploads/;` | `MEDIA_ROOT` with a trailing slash |
 | nginx-app.conf | `client_body_temp_path /var/www/nginx_uploads 1 2;` | `NGINX_UPLOAD_TEMP` |
 | nginx.conf | `server_name` (both servers) | your domain |
-| nginx.conf | `ssl_certificate` / `ssl_certificate_key` | the server certificate (with its chain) and key |
-| nginx.conf | `ssl_client_certificate` / `ssl_crl` | the CA that issues user certificates and its revocation list |
+| nginx.conf | `ssl_certificate` / `ssl_certificate_key` | the server certificate (with its chain) and key: Let's Encrypt's `fullchain.pem` / `privkey.pem` for your name (PKI.md, section 2) |
+| nginx.conf | `ssl_client_certificate` / `ssl_crl` | `PKI_DIR/ca/nginx-client-cas.pem` (the client CA, plus the existing root while old certificates live) and `PKI_DIR/crl/nginx.crl` (published by the API) (PKI.md, sections 3, 4 and 6) |
 | nginx.conf | `root /var/www/watch_web_client;` in `location /` | the web client build (`index.html` and assets) |
 | nginx-http.conf | `server 127.0.0.1:8000;` / `server 127.0.0.1:8080;` | `API_PORT` / `IMGPROXY_PORT` |
 | nginx-http.conf | `proxy_cache_path /var/cache/nginx/thumbs ... max_size=20g` | local disk, sized for the box |
@@ -97,12 +99,12 @@ nginx is the control point for user certificates. `ssl_verify_client on` makes e
 
 - The API binds `127.0.0.1` (`MYSETTINGS_SERVER__HOST`, set by `docker-compose.yml`). With host networking `0.0.0.0` would publish the port: a client reaching it directly could send `X-SSL-Client-*` headers nginx never checked and log in with public certificate data. uvicorn trusts `X-Forwarded-For` only from `FORWARDED_ALLOW_IPS` (default `127.0.0.1`, where host nginx connects from; the image no longer passes `*`), and `nginx-proxy.conf` sets `X-Forwarded-For $remote_addr` (replaces what the client sent), so `request.client.host` is the real peer and a forged header is not believed.
 - The API sees the certificate only through four headers nginx sets in `nginx-proxy.conf`: `X-SSL-Client-Verify`, `-DN`, `-Serial`, `-Fingerprint`. `POST /auth/login` maps them to a user. nginx replaces any header of these names the client sends, but only in locations that include the snippet: every location with `proxy_pass http://watch_web_api` must include it (`tests/test_nginx_conf.py` fails otherwise).
-- Revocation: a certificate added to the CRL is refused after `nginx -s reload`. Refresh the CRL before its `nextUpdate`: an expired CRL makes nginx refuse every certificate. A resumed TLS session is not checked again, for at most `ssl_session_timeout` (10 minutes). Sessions already logged in with the revoked certificate stay valid in the API until they end, but every request still needs the certificate here.
-- `ssl_verify_depth 2` accepts a user certificate issued by an intermediate CA under the root in `ssl_client_certificate`; raise it for longer chains.
+- Certificates are issued, listed and revoked in the application (PKI.md). Revoking one through the API ends its sessions at once and publishes a new CRL; `deploy/systemd/watch-web-crl.path` reloads nginx when the file changes, and nginx refuses the certificate from then on. A resumed TLS session is not checked again, for at most `ssl_session_timeout` (10 minutes). The CRL is signed again every day (`watch-web-crl-refresh.timer`) and is valid 7 days: a CRL past its `nextUpdate` makes nginx refuse every certificate of its CA (`/health` turns `degraded` 2 days before).
+- `ssl_verify_depth 1`: a user certificate is signed directly by a CA of the bundle; there are no intermediates.
 - Servers run with `MYSETTINGS_APP__ENVIRONMENT=production` (the Docker image sets it; `app/config.toml` says `development`, so a venv run must set it). The API refuses to start in production with an empty or placeholder `MYSETTINGS_SECURITY__SECRET_KEY`. In `development` the login takes the certificate fields from a JSON body without any check.
-- The admin user: set `MYSETTINGS_ADMIN__PKI_CERTIFICATE_CN` / `_SERIAL` / `_FINGERPRINT` from the real admin certificate (serial in hex, fingerprint SHA-1, as nginx reports them). Credentials generated on first start have no private key anyone can install; they only serve the development login.
-- `/health` is limited to loopback in production (`MYSETTINGS_HEALTH__ENABLE_HOST_CHECK` defaults to on there): run the check on the host (`curl --cert ... https://127.0.0.1/health`); from another machine it answers 403.
-- Check: `curl --cert user.crt --key user.key https://host/health` answers on the host; the same without `--cert` gets 400.
+- The first administrator on a server: `init_user` without a certificate, then `python -m app.backend.cli.pki issue` for them (PKI.md, "The first administrator"). `MYSETTINGS_ADMIN__PKI_CERTIFICATE_CN` / `_SERIAL` / `_FINGERPRINT` only serve the development seed; credentials generated on first start have no private key anyone can install.
+- `/health` is limited to loopback in production (`MYSETTINGS_HEALTH__ENABLE_HOST_CHECK` defaults to on there): run the check on the host (`curl --resolve <name>:443:127.0.0.1 --cert-type P12 --cert user.p12:'<password>' https://<name>/health`); from another machine it answers 403.
+- Check: the same `curl` answers on the host; without `--cert` it gets 400 (PKI.md, section 7).
 
 ## MySQL on the host
 
@@ -111,18 +113,20 @@ The containers connect to `MYSETTINGS_DATABASE__HOST=127.0.0.1` over the host ne
 ## Application containers
 
 ```bash
-cp .env.example .env        # fill: database password, secret key, admin PKI, IMGPROXY_KEY/SALT, MEDIA_ROOT, MEDIA_UID/GID
+cp .env.example .env        # fill: database password, secret key, IMGPROXY_KEY/SALT, MEDIA_ROOT, MEDIA_UID/GID; PKI (below)
 docker compose build
 docker compose up -d
-docker compose ps           # api and imgproxy report healthy; media-worker has no health endpoint
+docker compose ps           # api and imgproxy report healthy; media-worker and pki-signer have no health endpoint
 docker compose logs -f media-worker
 ```
 
+Client certificates add the `pki-signer` container and the api's PKI mounts through the override `docker-compose.pki.yml`, enabled in `.env` with `COMPOSE_FILE=docker-compose.yml:docker-compose.pki.yml`, `PKI_DIR` (a host directory outside the project directory, bind-mounted at the same path) and `PKI_SIGNER_UID` (the uid that owns `PKI_DIR/private` and runs the signer). Its own environment is `signer.env` (from `signer.env.example`, 0600). Without the override `docker-compose.yml` runs as it is and the API has no PKI. Setup: `PKI.md`; order of the upgrade: "Upgrading to PKI client certificates" below.
+
 Key and salt: `python3 -c "import secrets; print(secrets.token_hex(32))"` twice. The same values go to `IMGPROXY_KEY` / `IMGPROXY_SALT` (imgproxy container) and `MYSETTINGS_STORAGE__IMGPROXY__KEY` / `SALT` (API). Rotating them invalidates every issued public thumbnail URL at once.
 
-Air-gapped hosts: build on a connected machine, `docker save watch-web ghcr.io/imgproxy/imgproxy:v3 | gzip > images.tgz`, copy, `docker load`. Nothing is downloaded at runtime.
+Air-gapped hosts: build on a connected machine, `docker save watch-web ghcr.io/imgproxy/imgproxy:v3 | gzip > images.tgz`, copy, `docker load`. Nothing is downloaded at runtime. `pki-signer` runs the same `watch-web` image and is never pulled (`pull_policy: never`).
 
-Upgrades: `docker compose build api && docker compose up -d api media-worker`. The API runs migrations on start; start the worker after the API has finished the first start. Upgrading to authorization v2: run the report on a copy first (see "Upgrading to authorization v2" below). Upgrading to storyboards with `MYSETTINGS_STORAGE__POSTER__CONCURRENCY=1`: see the upgrade note under "Storyboards" (the worker refuses to start until the concurrency is 2 or storyboards are off).
+Upgrades: `docker compose build api && docker compose up -d api media-worker`. The API runs migrations on start; start the worker after the API has finished the first start. Upgrading to authorization v2: run the report on a copy first (see "Upgrading to authorization v2" below). Upgrading to PKI client certificates: the order of steps is in "Upgrading to PKI client certificates" below. Upgrading to storyboards with `MYSETTINGS_STORAGE__POSTER__CONCURRENCY=1`: see the upgrade note under "Storyboards" (the worker refuses to start until the concurrency is 2 or storyboards are off).
 
 Upgrading to sizes as displayed (vertical phone videos, EXIF-rotated photos): rows stored before keep the stored frame size until probed again. `docker compose exec media-worker python -m app.backend.cli.media_tools probe-missing --all` probes every video and audio file again and re-reads every image size (headers only; `--limit N` per run, default 1000). Video uploads that failed only because they have no video stream become `unsupported` after `media_tools reconcile-posters --retry-failed`: the worker sees the probed metadata and stops trying.
 
@@ -224,6 +228,42 @@ What was done through the API since the upgrade is not undone, it stays as it is
 - roles created through the API stay, as roles without holders;
 - what lived only in the new model is lost with it: assignments, type changes, scope groups. Users created after the
   upgrade have no legacy roles and lose access on a downgrade.
+
+### Upgrading to PKI client certificates
+
+The application issues the client certificates from now on, from a client CA of its own that only nginx trusts;
+the server gets a public certificate (Let's Encrypt). Every certificate made by the scripts from the existing root
+keeps logging in until it expires or is revoked. The steps, each explained in `PKI.md`:
+
+1. Server certificate (PKI.md, section 2): a name under your domain in the internal DNS, certbot with DNS-01, nginx
+   `ssl_certificate` / `ssl_certificate_key` switched, `nginx -t`, reload. Independent of the application; can go
+   first.
+2. Deploy the new version as usual. Migration `024_user_certificates` turns every user's certificate into a `legacy`
+   row of `user_certificates` with the same hashes: everyone keeps logging in. The web client moves at the same
+   deploy (CHANGELOG.md, "PKI client certificates": `PATCH /users/{user_id}` no longer takes a certificate).
+3. `PKI_DIR` and the signer (PKI.md, section 3): create the folder with its owners and modes outside the project
+   directory, `signer init`, `sign-crl` for the existing root with its key (PKI.md, section 4), then move that key
+   offline; fill `.env` (`COMPOSE_FILE`, `PKI_DIR`, `PKI_SIGNER_UID`, `MYSETTINGS_PKI__EXTRA_CRL_PATHS`) and
+   `signer.env`; `docker compose up -d pki-signer`, `docker compose up -d api`: the first `PKI_DIR/crl/nginx.crl`
+   appears (`docker compose exec api python -m app.backend.cli.pki status`).
+4. nginx (PKI.md, section 6): `ssl_client_certificate` the bundle, `ssl_crl` the published file,
+   `ssl_verify_depth 1`; `nginx -t`; reload.
+5. systemd: install and enable `watch-web-crl.path` and `watch-web-crl-refresh.timer` (PKI.md, section 6); run the
+   revocation test of PKI.md, section 7.
+6. Remove the existing root from every client (`deploy/pki/remove-old-root.cmd`, PKI.md, section 4): login does not
+   need it, and no client trusts it for websites any more.
+7. Issue new certificates in the web client. Old ones keep working until they expire or are revoked; until then sign
+   the existing root's CRL again before its `next_update` (`/health` warns). Then the existing root leaves the bundle
+   and `MYSETTINGS_PKI__EXTRA_CRL_PATHS` (PKI.md, section 4, step 5).
+
+Downgrade (with the new code, before the old one starts): `python -m alembic downgrade 023_authorization_v2`. The
+users get their certificate columns back: the values of their `legacy` row exactly (checked live on MySQL 8 and
+MariaDB 11), otherwise the hashes of their newest active certificate, otherwise a placeholder that matches no
+certificate (`unassigned:<user_id>`). Certificates issued or uploaded since the upgrade, revocations and exports
+are lost; the output counts them and names every user who got a placeholder. The old code knows no revocation: a
+`legacy` certificate revoked since the upgrade logs in again (the output names those users; deactivate them if they
+must stay out). Turn the PKI override off (`COMPOSE_FILE`) and put the old `ssl_client_certificate` / `ssl_crl` back
+in nginx.
 
 ### Scheduled cleanup (cron)
 
@@ -336,6 +376,7 @@ docker compose exec media-worker python -m app.backend.cli.media_tools storyboar
 | Uploads through nginx fail with "temp file not found" | `NGINX_UPLOAD_TEMP` differs from `client_body_temp_path`, or the directory is not mounted into the api container |
 | API cannot connect to MySQL | MySQL not listening on TCP 127.0.0.1, or grants only for the socket user |
 | Files written by containers unreadable by nginx | `MEDIA_UID`/`MEDIA_GID` do not match the owner of `MEDIA_ROOT`, or the share was mounted with restrictive `file_mode` |
+| nginx 400 for a client certificate, browser certificate errors, 503 on issuing a certificate | see `PKI.md`, section 9 |
 
 ## Without Docker
 
