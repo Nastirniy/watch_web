@@ -5,6 +5,25 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Concurrent writes (2026-10-19)
+
+### Fixed
+
+- Two requests changing the same row at once: the one that lost answered 500 `internal_error` on MariaDB 11.6+
+  (error 1020 "Record has changed since last read", `innodb_snapshot_isolation`, the server default): archive,
+  restore and update of posts, scope groups, tags, categories, signal types, roles, users, media files, media formats
+  and observations, mark disappeared, frequency bands, assignment removal, ending sessions, certificate revoke /
+  export, role permission changes, the permanent role delete, upload chunk / complete / abort. Measured on the test
+  server: 23 of 24 race scenarios answered 500 before, none after. Every write now locks its row as the first
+  statement of its own transaction (`app/backend/utils/row_locks.py`, `lock_first`): the losing request waits for
+  the winner and answers from its result like a request made after it (404 already archived, 409 not archived,
+  409 already revoked, ...). The data was never wrong; MySQL 8 answered correctly before and does now.
+- A user could be left with no assignment: two removals of a user's two assignments at once both succeeded (each
+  saw the other still there). Every change of a user's assignments now locks the user first; the second removal
+  answers 409 `last_assignment_required`. Writes that may take the admin role at the root from someone (assignment
+  removal, user update, archive) lock that role first (`lock_administrators`), so the last active administrator
+  stays when two administrators deactivate each other at once.
+
 ## Deployment fixes from the live test (2026-10-19)
 
 ### Changed
