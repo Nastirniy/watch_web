@@ -26,6 +26,8 @@ class PostCriteria(ListCriteria):
     description_contains: Optional[str] = None
     is_active: Optional[bool] = None
     has_online_users: Optional[bool] = None
+    corps_id: Optional[int] = None      # the route turns units into unit_post_ids (services/units.py units_filter)
+    brigade_id: Optional[int] = None
     created_at_from: Optional[datetime] = None
     created_at_to: Optional[datetime] = None
     last_user_activity_from: Optional[datetime] = None
@@ -54,9 +56,11 @@ class PostFilterService(SimpleFilterEngine):
         params: PostCriteria,
         access_post_ids: Optional[Iterable[int]] = None,
         archived_post_ids: Optional[FrozenSet[int]] = None,
+        unit_post_ids: Optional[FrozenSet[int]] = None,
     ) -> Select:
         """Apply all filters from PostCriteria. access_post_ids: the posts the caller sees (None: every post);
-        archived_post_ids: with include_deleted, the posts shown even when archived (None: every one)"""
+        archived_post_ids: with include_deleted, the posts shown even when archived (None: every one);
+        unit_post_ids: the posts of the units asked for (corps_id, brigade_id; None: no unit filter)"""
         params = cls.criteria(params)
 
         # Archived posts only on include_deleted, and only where post.archive is in effect
@@ -65,6 +69,8 @@ class PostFilterService(SimpleFilterEngine):
         # Access control (user can only see their post)
         if access_post_ids is not None:
             query = query.where(Post.id.in_(list(access_post_ids)))
+        if unit_post_ids is not None:
+            query = query.where(Post.id.in_(sorted(unit_post_ids)))
 
         # ID filter
         query = cls._apply_exact(query, Post.id, params.id)
@@ -109,12 +115,15 @@ class PostFilterService(SimpleFilterEngine):
         params: PostCriteria,
         access_post_ids: Optional[Iterable[int]] = None,
         archived_post_ids: Optional[FrozenSet[int]] = None,
+        unit_post_ids: Optional[FrozenSet[int]] = None,
     ) -> Select:
         """Apply filters without pagination"""
         params = cls.criteria(params)
         query = cls._apply_soft_delete(query, params, Post.id, archived_post_ids)
         if access_post_ids is not None:
             query = query.where(Post.id.in_(list(access_post_ids)))
+        if unit_post_ids is not None:
+            query = query.where(Post.id.in_(sorted(unit_post_ids)))
         query = cls._apply_exact(query, Post.id, params.id)
         query = cls._apply_exact(query, Post.name, params.name)
         query = cls._apply_contains(query, Post.name, params.name_contains)

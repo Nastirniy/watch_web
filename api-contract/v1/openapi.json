@@ -926,6 +926,42 @@
             "description": "Filter by post ID"
           },
           {
+            "name": "corps_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Users whose home post is in this corps now, its brigades included; an id of another kind gives nothing",
+              "title": "Corps Id"
+            },
+            "description": "Users whose home post is in this corps now, its brigades included; an id of another kind gives nothing"
+          },
+          {
+            "name": "brigade_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Users whose home post is in this brigade now; an id of another kind gives nothing",
+              "title": "Brigade Id"
+            },
+            "description": "Users whose home post is in this brigade now; an id of another kind gives nothing"
+          },
+          {
             "name": "user_type",
             "in": "query",
             "required": false,
@@ -12805,6 +12841,42 @@
             "description": "Filter by active status"
           },
           {
+            "name": "corps_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Posts in this corps now, its brigades included; an id of another kind gives nothing",
+              "title": "Corps Id"
+            },
+            "description": "Posts in this corps now, its brigades included; an id of another kind gives nothing"
+          },
+          {
+            "name": "brigade_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Posts in this brigade now; an id of another kind gives nothing",
+              "title": "Brigade Id"
+            },
+            "description": "Posts in this brigade now; an id of another kind gives nothing"
+          },
+          {
             "name": "has_online_users",
             "in": "query",
             "required": false,
@@ -21842,6 +21914,42 @@
             "description": "Filter by post ID"
           },
           {
+            "name": "corps_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Users whose home post is in this corps now, its brigades included; an id of another kind gives nothing",
+              "title": "Corps Id"
+            },
+            "description": "Users whose home post is in this corps now, its brigades included; an id of another kind gives nothing"
+          },
+          {
+            "name": "brigade_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Users whose home post is in this brigade now; an id of another kind gives nothing",
+              "title": "Brigade Id"
+            },
+            "description": "Users whose home post is in this brigade now; an id of another kind gives nothing"
+          },
+          {
             "name": "user_type",
             "in": "query",
             "required": false,
@@ -22379,6 +22487,42 @@
               "title": "Is Active"
             },
             "description": "Filter by active status"
+          },
+          {
+            "name": "corps_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Posts in this corps now, its brigades included; an id of another kind gives nothing",
+              "title": "Corps Id"
+            },
+            "description": "Posts in this corps now, its brigades included; an id of another kind gives nothing"
+          },
+          {
+            "name": "brigade_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Posts in this brigade now; an id of another kind gives nothing",
+              "title": "Brigade Id"
+            },
+            "description": "Posts in this brigade now; an id of another kind gives nothing"
           },
           {
             "name": "has_online_users",
@@ -34345,6 +34489,28 @@
             "title": "Group Id",
             "description": "Scope group the post sits in; null: directly under the root"
           },
+          "corps": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnitRefResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Corps the post sits in now (directly or through a brigade); null: outside any corps"
+          },
+          "brigade": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnitRefResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Brigade the post sits in now; null: outside any brigade"
+          },
           "is_deleted": {
             "type": "boolean",
             "title": "Is Deleted",
@@ -39433,6 +39599,25 @@
             "type": "https://example.org/problems/token_certificate_mismatch"
           }
         ]
+      },
+      "UnitRefResponse": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "UnitRefResponse",
+        "description": "A corps or brigade: its id and today's name"
       },
       "UnknownTimeZoneProblem": {
         "properties": {

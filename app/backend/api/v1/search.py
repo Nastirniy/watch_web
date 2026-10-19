@@ -23,6 +23,7 @@ from app.backend.models.media_format import MediaFormat
 from app.backend.models.media import MediaFile
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.services.audit import create_audit_log
+from app.backend.services.units import unit_filter_of
 
 # Filter params
 from app.backend.api.v1.models.query.observations import ObservationFilterParams
@@ -47,7 +48,7 @@ from app.backend.filters.tag_filter import TagFilterService
 from app.backend.filters.media_filter import MediaFilterService
 
 from app.backend.api.v1.models.response.observations import ObservationWithMedia
-from app.backend.api.v1.models.response.posts import PostResponse, post_to_response
+from app.backend.api.v1.models.response.posts import PostResponse, posts_to_response
 from app.backend.api.v1.models.response.users import UserResponse
 from app.backend.api.shared.helpers.roles_helper import permission_names_by_role
 from app.backend.api.v1.models.response.roles import RoleResponse, role_to_response
@@ -148,13 +149,15 @@ async def search_users(
     access_post_ids = AccessControlService.resolve_scope(auth, Permissions.USER_VIEW, params.post_id)
     archived = AccessControlService.archived_scope(auth, params, Permissions.USER_ARCHIVE)
     query = select(User)
-    query = UserFilterService.apply_filters(query, params, access_post_ids, archived_post_ids=archived, caller_id=auth.user.id)
+    units = unit_filter_of(auth.tree, params)
+    query = UserFilterService.apply_filters(query, params, access_post_ids, archived_post_ids=archived,
+                                            caller_id=auth.user.id, unit_post_ids=units)
     result = await session.exec(query)
     items = result.all()
 
     count_query = select(func.count()).select_from(User)
     count_query = UserFilterService.apply_filters_for_count(
-        count_query, params, access_post_ids, archived_post_ids=archived, caller_id=auth.user.id,
+        count_query, params, access_post_ids, archived_post_ids=archived, caller_id=auth.user.id, unit_post_ids=units,
     )
     total = (await session.exec(count_query)).one()
 
@@ -185,17 +188,20 @@ async def search_posts(
     access_post_ids = AccessControlService.scope_for(auth, Permissions.POST_VIEW)
 
     query = select(Post)
-    query = PostFilterService.apply_filters(query, params, access_post_ids, archived_post_ids=archived)
+    units = unit_filter_of(auth.tree, params)
+    query = PostFilterService.apply_filters(query, params, access_post_ids, archived_post_ids=archived,
+                                            unit_post_ids=units)
     result = await session.exec(query)
     items = result.all()
 
     count_query = select(func.count()).select_from(Post)
-    count_query = PostFilterService.apply_filters_for_count(count_query, params, access_post_ids, archived_post_ids=archived)
+    count_query = PostFilterService.apply_filters_for_count(count_query, params, access_post_ids, archived_post_ids=archived,
+                                                            unit_post_ids=units)
     total = (await session.exec(count_query)).one()
 
     await log_search(request, session, auth, "posts", params.model_dump(exclude_none=True), len(items))
 
-    return SearchResponse[PostResponse].create("posts", [post_to_response(post) for post in items], total, params.page, params.page_size)
+    return SearchResponse[PostResponse].create("posts", await posts_to_response(session, auth.tree, list(items)), total, params.page, params.page_size)
 
 
 # =============================================================================

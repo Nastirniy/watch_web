@@ -35,6 +35,7 @@ from app.backend.api.v1.models.response.auth import SessionsEndedResponse, UserS
 from app.backend.enums.routes import UserRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.services.audit import create_audit_log
+from app.backend.services.units import unit_filter_of
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.api.v1.models.request.assignments import AssignmentCreate
 from app.backend.api.v1.models.request.users import UserCreateForm, UserUpdateForm
@@ -120,7 +121,8 @@ async def list_users(
     scope = AccessControlService.resolve_scope(auth, Permissions.USER_VIEW, filters.post_id)
 
     query = select(User)
-    query = UserFilterService.apply_filters(query, filters, scope, archived_post_ids=archived, caller_id=current_user.id)
+    query = UserFilterService.apply_filters(query, filters, scope, archived_post_ids=archived, caller_id=current_user.id,
+                                            unit_post_ids=unit_filter_of(auth.tree, filters))
     result = await session.exec(query)
     users = result.all()
 

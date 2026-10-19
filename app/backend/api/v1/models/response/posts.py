@@ -1,8 +1,18 @@
-from typing import List, Optional
+from typing import Dict, List, Mapping, Optional
 from pydantic import BaseModel, ConfigDict, Field
+from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.backend.auth.scope import ScopeTree
+from app.backend.enums.general import ScopeGroupKind
 from app.backend.models.post import Post
+from app.backend.services.units import post_unit_names, post_units
 from app.backend.utils.validators import PlainTextModel, ResponseDatetime
+
+
+class UnitRefResponse(PlainTextModel):
+    """A corps or brigade: its id and today's name"""
+    id: int
+    name: str
 
 
 class PostResponse(PlainTextModel):
@@ -17,6 +27,8 @@ class PostResponse(PlainTextModel):
     city: Optional[str] = None
     is_active: bool
     group_id: Optional[int] = Field(default=None, description="Scope group the post sits in; null: directly under the root")
+    corps: Optional[UnitRefResponse] = Field(default=None, description="Corps the post sits in now (directly or through a brigade); null: outside any corps")
+    brigade: Optional[UnitRefResponse] = Field(default=None, description="Brigade the post sits in now; null: outside any brigade")
     is_deleted: bool = Field(default=False, description="Archived (POST /posts/{post_id}/archive): its data is read-only")
     online_user_count: int = Field(default=0, description="Home users with an authenticated request within security.online_threshold_seconds")
     last_user_activity_at: Optional[ResponseDatetime] = Field(default=None, description="Latest activity of any home user; null when none has an active session")
@@ -25,7 +37,16 @@ class PostResponse(PlainTextModel):
     updated_at: ResponseDatetime
 
 
-def post_to_response(post: Post) -> PostResponse:
+def _unit(units: Dict[str, int], kind: ScopeGroupKind, names: Mapping[int, str]) -> Optional[UnitRefResponse]:
+    unit_id = units.get(kind.value)
+    if unit_id is None or unit_id not in names:
+        return None
+    return UnitRefResponse(id=unit_id, name=names[unit_id])
+
+
+def post_to_response(post: Post, tree: ScopeTree, names: Mapping[int, str]) -> PostResponse:
+    """tree: the request's scope tree; names: the unit names of the page (services/units.py post_unit_names)"""
+    units = post_units(tree, post.group_id)
     return PostResponse(
         id=post.id,
         name=post.name,
@@ -35,6 +56,8 @@ def post_to_response(post: Post) -> PostResponse:
         city=post.city,
         is_active=post.is_active,
         group_id=post.group_id,
+        corps=_unit(units, ScopeGroupKind.CORPS, names),
+        brigade=_unit(units, ScopeGroupKind.BRIGADE, names),
         is_deleted=post.is_deleted,
         online_user_count=post.online_user_count or 0,
         last_user_activity_at=post.last_user_activity_at,
@@ -42,6 +65,12 @@ def post_to_response(post: Post) -> PostResponse:
         created_at=post.created_at,
         updated_at=post.updated_at,
     )
+
+
+async def posts_to_response(session: AsyncSession, tree: ScopeTree, posts: List[Post]) -> List[PostResponse]:
+    """Post answers with their units (one query for the unit names of the page)"""
+    names = await post_unit_names(session, tree, [post.group_id for post in posts])
+    return [post_to_response(post, tree, names) for post in posts]
 
 
 

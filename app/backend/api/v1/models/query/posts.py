@@ -28,6 +28,8 @@ class PostFilterParams(BaseFilterParams):
     city_contains: Optional[str] = Field(default=None, max_length=50, description="City contains text")
     description_contains: Optional[str] = Field(default=None, max_length=100, description="Description contains text")
     is_active: Optional[bool] = Field(default=None, description="Filter by active status")
+    corps_id: Optional[int] = Field(default=None, description="Posts in this corps now, its brigades included; an id of another kind gives nothing")
+    brigade_id: Optional[int] = Field(default=None, description="Posts in this brigade now; an id of another kind gives nothing")
     has_online_users: Optional[bool] = Field(default=None, description="true: posts with at least one home user online now; false: posts without")
     created_at_from: Optional[UtcDatetime] = Field(default=None, description="Created after")
     created_at_to: Optional[UtcDatetime] = Field(default=None, description="Created before")

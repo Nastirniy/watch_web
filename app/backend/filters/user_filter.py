@@ -23,6 +23,8 @@ class UserCriteria(ListCriteria):
     username_alias: Optional[str] = None
     username_alias_contains: Optional[str] = None
     post_id: Optional[int] = None
+    corps_id: Optional[int] = None      # the route turns units into unit_post_ids (services/units.py units_filter)
+    brigade_id: Optional[int] = None
     user_type: Optional[UserType] = None
     is_active: Optional[bool] = None
     is_online: Optional[bool] = None
@@ -71,8 +73,10 @@ class UserFilterService(SimpleFilterEngine):
         access_post_ids: Optional[Iterable[int]] = None,
         archived_post_ids: Optional[FrozenSet[int]] = None,
         caller_id: Optional[int] = None,
+        unit_post_ids: Optional[FrozenSet[int]] = None,
     ) -> Select:
-        """Apply all filters from UserCriteria (scope: _apply_scope)"""
+        """Apply all filters from UserCriteria (scope: _apply_scope); unit_post_ids: the posts of the units asked
+        for (corps_id, brigade_id; None: no unit filter), matched against the home post"""
         params = cls.criteria(params)
 
         # Archive state and access control
@@ -81,6 +85,8 @@ class UserFilterService(SimpleFilterEngine):
         # ID filters
         query = cls._apply_exact(query, User.id, params.id)
         query = cls._apply_exact(query, User.post_id, params.post_id)
+        if unit_post_ids is not None:   # home post in the units asked for: the caller is not listed outside them
+            query = query.where(User.post_id.in_(sorted(unit_post_ids)))
 
         # Username filters
         query = cls._apply_exact(query, User.username, params.username)
@@ -113,12 +119,15 @@ class UserFilterService(SimpleFilterEngine):
         access_post_ids: Optional[Iterable[int]] = None,
         archived_post_ids: Optional[FrozenSet[int]] = None,
         caller_id: Optional[int] = None,
+        unit_post_ids: Optional[FrozenSet[int]] = None,
     ) -> Select:
         """Apply filters without pagination"""
         params = cls.criteria(params)
         query = cls._apply_scope(query, params, access_post_ids, archived_post_ids, caller_id)
         query = cls._apply_exact(query, User.id, params.id)
         query = cls._apply_exact(query, User.post_id, params.post_id)
+        if unit_post_ids is not None:   # home post in the units asked for: the caller is not listed outside them
+            query = query.where(User.post_id.in_(sorted(unit_post_ids)))
         query = cls._apply_exact(query, User.username, params.username)
         query = cls._apply_contains(query, User.username, params.username_contains)
         query = cls._apply_exact(query, User.username_alias, params.username_alias)
