@@ -5,6 +5,26 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Deployment fixes from the live test (2026-10-19)
+
+### Fixed
+
+- `deploy/systemd/watch-web-crl.service`: `StartLimitIntervalSec=0`. Every revocation publishes the CRL and the path
+  unit starts the reload once per publish; more than 5 publishes in 10 s (a burst of revocations) hit systemd's
+  default start limit, the service failed with `start-limit-hit` and `watch-web-crl.path` failed with it and stopped
+  watching for good. nginx never re-read the CRL again, so every certificate revoked afterwards kept passing nginx
+  (the API still refused it: `certificate_revoked`, sessions ended). Upgrade: copy the unit to
+  `/etc/systemd/system/`, `systemctl daemon-reload`, and `systemctl reset-failed watch-web-crl.service
+  watch-web-crl.path && systemctl restart watch-web-crl.path` on a server where it already failed.
+- `docker-compose.yml`: the api no longer pre-warms thumbnails (`MYSETTINGS_STORAGE__THUMBNAIL__PREWARM=false`,
+  `PREWARM_BASE_URL` removed). It asked `http://127.0.0.1:80`, which `nginx.conf` only redirects to https, where a
+  client certificate is required: every upload made a request that could only answer 301 and logged a warning.
+  The first viewer of a thumbnail now waits for one render. `NGINX_HTTP_PORT` is gone from `.env.example` (it
+  served only that URL).
+- `docker-compose.yml`: `media-worker` starts once the api is healthy (`depends_on`, `service_healthy`). On a fresh
+  database it started next to the api, before the migrations, and crashed on the missing `media_files` table until
+  its restart policy caught up.
+
 ## PKI client certificates
 
 ### Added

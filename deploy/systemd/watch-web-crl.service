@@ -1,6 +1,10 @@
 # Started by watch-web-crl.path: reload nginx so it reads the new CRL (only when the configuration is valid)
 [Unit]
 Description=Reload nginx after watch_web published a new CRL
+# Every revocation publishes the CRL and starts this once. Under the default start limit (5 starts in 10 s) a burst
+# of revocations failed it with start-limit-hit, and the path unit failed with it and stopped watching for good:
+# nginx never re-read the CRL again. A reload is cheap and nginx -t guards it, so there is no limit.
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot

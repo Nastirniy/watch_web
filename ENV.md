@@ -112,7 +112,7 @@ Thumbnails and previews are rendered on demand by [imgproxy](https://imgproxy.ne
 | `MYSETTINGS_STORAGE__IMGPROXY__NGINX_INTERNAL_PREFIX` | `/_thumb` | Internal nginx location used through X-Accel-Redirect. Must match nginx.conf |
 | `MYSETTINGS_STORAGE__IMGPROXY__PUBLIC_PREFIX` | `/media-images` | Public nginx location for signed, expiring images made from media (thumbnails, previews). Must match the location in nginx-app.conf |
 | `MYSETTINGS_STORAGE__IMGPROXY__PUBLIC_BASE_URL` | *(empty)* | Origin prepended to public URLs, e.g. `https://monitoring.example`. Empty keeps them relative to the API host, except the storyboard sheet URLs, which are always absolute: they then take the request origin as nginx passes it (`Host $host`, without a port), so set this when the site is not on the default port |
-| `MYSETTINGS_STORAGE__IMGPROXY__PREWARM_BASE_URL` | *(empty)* | Origin the API uses to pre-warm the nginx cache after an upload, e.g. `http://nginx` in compose. Falls back to `PUBLIC_BASE_URL`; empty disables pre-warming |
+| `MYSETTINGS_STORAGE__IMGPROXY__PREWARM_BASE_URL` | *(empty)* | Origin the API uses to pre-warm the nginx cache after an upload: an nginx that serves `/media-images/` without a client certificate, e.g. `http://nginx` in the e2e stack. Falls back to `PUBLIC_BASE_URL`; both empty disables pre-warming |
 | `MYSETTINGS_STORAGE__IMGPROXY__MAX_SRC_RESOLUTION_MP` | `250` | imgproxy's `IMGPROXY_MAX_SRC_RESOLUTION` (megapixels; 250 covers 200 MP phone cameras). A larger image is stored, but imgproxy refuses every render of it, so the API reports `thumbnail_status: unsupported` (`image_too_large_for_thumbnails`). docker-compose.yml sets both from `IMGPROXY_MAX_SRC_RESOLUTION` in `.env`; keep them equal anywhere else |
 
 ### Thumbnails
@@ -126,7 +126,7 @@ Thumbnails and previews are rendered on demand by [imgproxy](https://imgproxy.ne
 | `MYSETTINGS_STORAGE__THUMBNAIL__QUALITY` | `85` | Output quality (1-100) |
 | `MYSETTINGS_STORAGE__THUMBNAIL__URL_TTL_SECONDS` | `3600` | Lifetime of the signed `thumbnail_urls` in list responses |
 | `MYSETTINGS_STORAGE__THUMBNAIL__SHARE_MAX_TTL_SECONDS` | `604800` | Upper bound for `POST /media/{id}/share` |
-| `MYSETTINGS_STORAGE__THUMBNAIL__PREWARM` | `true` | Request the medium thumbnail once after an image upload |
+| `MYSETTINGS_STORAGE__THUMBNAIL__PREWARM` | `true` | Request the medium thumbnail once after an image upload. `docker-compose.yml` sets `false`: behind `nginx.conf` every request needs a client certificate, so the API cannot reach the cache |
 
 ### Resumable uploads
 

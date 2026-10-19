@@ -23,6 +23,15 @@ def test_the_api_knows_the_resolution_limit_of_imgproxy():
     assert float(ImgproxySettings(max_src_resolution_mp="0.5").max_src_resolution_mp) == 0.5
 
 
+def test_the_worker_starts_after_the_api_migrated_the_database():
+    """The API applies the migrations at its start; on a fresh database the worker started next to it crashed on the
+    missing media_files table until its restart policy caught up (found on the test server, 2026-10-19). The API is
+    healthy only once its startup, migrations included, is done"""
+    services = yaml.safe_load((PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8"))["services"]
+    assert services["media-worker"]["depends_on"] == {"api": {"condition": "service_healthy"}}
+    assert "healthcheck" in services["api"]
+
+
 def test_sizes_and_backoff_parse_from_json_strings():
     thumbs = ThumbnailSettings(small_size="[100, 120]", preview_size=[2000, 2000])
     assert thumbs.small_size == (100, 120) and thumbs.preview_size == (2000, 2000)

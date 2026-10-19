@@ -1,5 +1,6 @@
 """Deployment files of the PKI: the signer container, the API mounts, the env examples and the systemd units"""
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -75,6 +76,16 @@ def test_systemd_units():
     assert "OnCalendar=daily" in timer and "Persistent=true" in timer
     refresh = (SYSTEMD / "watch-web-crl-refresh.service").read_text(encoding="utf-8")
     assert "app.backend.cli.pki crl" in refresh and "exec -T api" in refresh
+
+
+def test_crl_reload_survives_a_burst_of_revocations():
+    """Every revocation publishes the CRL and the path unit starts the reload once per publish. Under systemd's
+    default start limit (5 starts in 10 s) a burst of revocations failed the service with start-limit-hit, and the
+    path unit failed with it and stopped watching for good: nginx never re-read the CRL again, so every certificate
+    revoked afterwards kept passing nginx (found on the test server, 2026-10-19)"""
+    service = (SYSTEMD / "watch-web-crl.service").read_text(encoding="utf-8")
+    unit_section = service.split("[Service]")[0]
+    assert "[Unit]" in unit_section and re.search(r"^StartLimitIntervalSec=0$", unit_section, re.MULTILINE)
 
 
 def test_signer_env_example_names_every_signer_setting():
