@@ -24,6 +24,11 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - `docker-compose.yml`: `media-worker` starts once the api is healthy (`depends_on`, `service_healthy`). On a fresh
   database it started next to the api, before the migrations, and crashed on the missing `media_files` table until
   its restart policy caught up.
+- `MYSETTINGS_HEALTH__ALLOWED_HOSTS` is read as a JSON list. `HealthConfig.allowed_hosts` had no parser for the
+  string form, so the line `.env.example` ships stopped the api and the worker at startup (`list_type`). Every list
+  setting now has a test that it reads its JSON form (`tests/test_env_list_settings.py`).
+- `python -m app.backend.cli.init_user` and `migrations_manager seed` close the database pool before the event loop
+  ends: they finished their work, then printed a traceback `RuntimeError: Event loop is closed`.
 
 ## PKI client certificates
 

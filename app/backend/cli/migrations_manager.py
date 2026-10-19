@@ -20,7 +20,7 @@ from pathlib import Path
 from alembic.config import Config
 from alembic import command
 from app.backend.bootstrap.seed import seed_database
-from app.backend.database import create_database_if_not_exists
+from app.backend.database import close_db, create_database_if_not_exists
 from app.backend.utils.logging_config import get_logger
 
 _logger = get_logger("migrations")
@@ -139,6 +139,9 @@ async def run_seed():
     except Exception as e:
         _logger.error(f"Failed to seed database: {e}")
         raise
+    finally:
+        # Close the pool while the event loop still runs (asyncio.run in main), not after it in the garbage collector
+        await close_db()
 
 
 def main():

@@ -357,6 +357,12 @@ class HealthConfig(BaseModel):
     # None: on in production, off elsewhere (resolved in Settings); set it to decide explicitly
     enable_host_check: Optional[bool] = None
 
+    @field_validator('allowed_hosts', mode='before')
+    @classmethod
+    def parse_allowed_hosts(cls, v):
+        # Environment overrides arrive as strings: MYSETTINGS_HEALTH__ALLOWED_HOSTS=["127.0.0.1", "localhost", "::1"]
+        return _parse_json_sequence(v)
+
     @field_validator('rate_limit_requests')
     @classmethod
     def validate_rate_limit_requests(cls, v):
