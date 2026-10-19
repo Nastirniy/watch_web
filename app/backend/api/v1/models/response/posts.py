@@ -93,8 +93,8 @@ class ObservationStatsPeriod(ObservationCount):
     buckets: List[ObservationStatsBucket] = Field(description="Every bucket of the period in order, empty ones included")
 
 
-class PostObservationStatsResponse(BaseModel):
-    post_id: int
+class ObservationStatsFigures(BaseModel):
+    """The counters of a set of observations (a post, a corps, a brigade)"""
     generated_at: ResponseDatetime
     last_observation_at: Optional[ResponseDatetime] = Field(default=None, description="created_at of the latest not archived observation; null when there is none")
     days_without_observations: Optional[int] = Field(
@@ -104,3 +104,7 @@ class PostObservationStatsResponse(BaseModel):
     all_time: ObservationCount
     last_24h: ObservationCount = Field(description="Created within the 24 hours before generated_at")
     period: ObservationStatsPeriod
+
+
+class PostObservationStatsResponse(ObservationStatsFigures):
+    post_id: int

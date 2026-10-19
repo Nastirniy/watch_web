@@ -12,6 +12,8 @@ locks in the same order.
 from datetime import datetime, timezone
 from typing import Iterable, Optional
 
+from sqlalchemy import and_
+
 from fastapi import Request
 from sqlalchemy import func
 from sqlmodel import select
@@ -22,12 +24,15 @@ from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.context import AuthContext
 from app.backend.auth.scope import Node, ROOT, ScopeTree
 from app.backend.enums.errors import ErrorCode
-from app.backend.enums.general import Permissions, ScopeGroupKind
+from app.backend.enums.general import Permissions, ScopeGroupKind, StatsGroupBy, UnitPlacement
 from app.backend.errors.coded import CodedError
 from app.backend.errors.problems import ApiError
+from app.backend.models.observation import Observation
 from app.backend.models.scope_group import ScopeGroup
 from app.backend.services import scope_groups as groups_service
 from app.backend.services.audit import create_audit_log
+from app.backend.services.observation_counts import ObservationStats, observation_stats
+from app.backend.services.units import observation_unit_condition
 from app.backend.utils.row_locks import lock, lock_first
 
 
@@ -178,3 +183,27 @@ async def restore_unit(request: Request, session: AsyncSession, auth: AuthContex
     await session.commit()
     await session.refresh(unit)
     return unit
+
+
+async def unit_observation_stats(session: AsyncSession, auth: AuthContext, kind: ScopeGroupKind, unit_id: int,
+                                 placement: UnitPlacement, date_from: Optional[datetime], date_to: Optional[datetime],
+                                 group_by: StatsGroupBy, tz: str, include_archived: bool) -> ObservationStats:
+    """GET /corps/{id}/observation-stats, /brigades/{id}/observation-stats. Scope before existence: the unit must lie
+    where the caller holds scope_group.view or observation.view, otherwise 404 like an unknown id or one of another
+    kind; an archived unit keeps its history. Counted: the unit's observations (placement) at the posts where
+    observation.view is in effect."""
+    node = Node.group(unit_id)
+    if not (auth.covers(Permissions.SCOPE_GROUP_VIEW, node) or auth.covers(Permissions.OBSERVATION_VIEW, node)):
+        raise ApiError(ErrorCode.SCOPE_GROUP_NOT_FOUND)
+    found = (await session.exec(select(ScopeGroup.id).where(
+        ScopeGroup.id == unit_id, ScopeGroup.kind == ScopeGroupKind(kind).value))).first()
+    if found is None:
+        raise ApiError(ErrorCode.SCOPE_GROUP_NOT_FOUND)
+    condition = observation_unit_condition(auth.tree, kind, unit_id, placement)
+    visible = auth.posts_with(Permissions.OBSERVATION_VIEW)
+    if visible is not None:
+        condition = and_(condition, Observation.post_id.in_(sorted(visible)))
+    try:
+        return await observation_stats(session, condition, date_from, date_to, group_by, tz, include_archived)
+    except CodedError as exc:
+        raise ApiError.from_coded(exc)

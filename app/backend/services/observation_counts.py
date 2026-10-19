@@ -1,18 +1,20 @@
-"""Observation counters of one post by created_at (GET /posts/{post_id}/observation-stats).
+"""Observation counters by created_at of one post (GET /posts/{post_id}/observation-stats) or of a corps or brigade
+(GET /corps/{id}/observation-stats, /brigades/{id}/observation-stats): observation_stats over a condition.
 
-The route counts a post where observation.view is in effect (a holder at the
+The routes count the posts where observation.view is in effect (a holder at the
 root counts any post).
 Archived observations are never mixed into not_archived; they are counted
 separately on explicit request only. That request needs no observation.archive:
 it returns counts, never archived rows.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import case, func, String
 from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.functions import FunctionElement
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -51,14 +53,19 @@ class StatsPeriod(ObservationCounts):
 
 
 @dataclass(frozen=True, kw_only=True)
-class PostObservationStats:
-    post_id: int
+class ObservationStats:
+    """The counters of a set of observations"""
     generated_at: datetime
     last_observation_at: Optional[datetime]
     days_without_observations: Optional[int]
     all_time: ObservationCounts
     last_24h: ObservationCounts
     period: StatsPeriod
+
+
+@dataclass(frozen=True, kw_only=True)
+class PostObservationStats(ObservationStats):
+    post_id: int
 
 
 class utc_hour_key(FunctionElement):
@@ -130,7 +137,26 @@ async def post_observation_stats(
         include_archived: bool,
         now: Optional[datetime] = None,
 ) -> PostObservationStats:
-    """All-time and last-24-hours figures in one query, then the period series.
+    """The counters of one post"""
+    stats = await observation_stats(
+        session, Observation.post_id == post_id, date_from, date_to, group_by, tz, include_archived, now=now,
+    )
+    return PostObservationStats(post_id=post_id, **{f.name: getattr(stats, f.name) for f in fields(stats)})
+
+
+async def observation_stats(
+        session: AsyncSession,
+        condition: ColumnElement,
+        date_from: Optional[datetime],
+        date_to: Optional[datetime],
+        group_by: StatsGroupBy,
+        tz: str,
+        include_archived: bool,
+        now: Optional[datetime] = None,
+) -> ObservationStats:
+    """The counters of the observations matching condition (a post: Observation.post_id == id; a unit: its
+    observations limited to the posts the caller may count).
+    All-time and last-24-hours figures in one query, then the period series.
     The database groups the period by UTC hour (at most 24 * 366 rows); the hours are
     then summed into buckets of the zone. Exact for zones with whole-hour offsets."""
     zone = _zone(tz)
@@ -142,7 +168,7 @@ async def post_observation_stats(
         raise CodedError(
             ErrorCode.PERIOD_TOO_LONG, max_days=MAX_STATS_PERIOD[group_by].days, group_by=group_by.value,
         )
-    of_post = [Observation.post_id == post_id]
+    of_post = [condition]
     if not include_archived:
         of_post.append(Observation.is_deleted == False)
 
@@ -181,8 +207,7 @@ async def post_observation_stats(
     def figures(values: dict) -> dict:
         return {"not_archived": values[False], "archived": values[True] if include_archived else None}
 
-    return PostObservationStats(
-        post_id=post_id,
+    return ObservationStats(
         generated_at=now,
         last_observation_at=last_observation_at,
         days_without_observations=_calendar_days_between(last_observation_at, now, zone) if last_observation_at else None,

@@ -4,7 +4,7 @@ A thin facade over the scope group rules (services/scope_groups.py) and the unit
 brigade sits directly in a corps (ALLOWED_PARENT); moving it to another corps takes its posts along, like a group
 move.
 """
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from typing import Annotated, List, Optional
 
@@ -14,20 +14,22 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.api.shared.helpers.db_errors import unique_violation_as
 from app.backend.api.shared.helpers.scope_group_helper import (
-    archive_unit, audit_group, check_visible, get_unit, lock_unit, name_taken, restore_unit,
+    unit_observation_stats, archive_unit, audit_group, check_visible, get_unit, lock_unit, name_taken, restore_unit,
 )
 from app.backend.api.v1.models.query.brigades import BrigadeFilterParams
 from app.backend.api.v1.models.query.posts import PostFilterParams
 from app.backend.api.v1.models.request.brigades import BrigadeCreate, BrigadeUpdate
 from app.backend.api.v1.models.response.brigades import BrigadeResponse, brigade_to_response
+from app.backend.api.v1.models.response.corps import UnitObservationStatsResponse
 from app.backend.api.v1.models.response.posts import PostResponse, posts_to_response
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.context import AuthContext, load_scope_tree
 from app.backend.auth.require import require
 from app.backend.auth.scope import Node
+from app.backend.config import settings
 from app.backend.database import get_session
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
-from app.backend.enums.general import Permissions, ScopeGroupKind
+from app.backend.enums.general import Permissions, ScopeGroupKind, StatsGroupBy, UnitPlacement
 from app.backend.enums.routes import BrigadeRoutes
 from app.backend.errors.coded import CodedError
 from app.backend.errors.openapi import GUARDED, problems
@@ -39,6 +41,7 @@ from app.backend.models.scope_group import ScopeGroup
 from app.backend.services import scope_groups as groups_service
 from app.backend.services.units import posts_within
 from app.backend.utils.row_locks import lock_first
+from app.backend.utils.validators import UtcDatetime
 
 router = APIRouter(prefix=BrigadeRoutes.BASE.value, tags=[BrigadeRoutes.tag()])
 
@@ -252,3 +255,36 @@ async def list_brigade_posts(
         unit_post_ids=posts_within(auth.tree, BRIGADE, brigade.id, filters),
     )
     return await posts_to_response(session, auth.tree, list((await session.exec(query)).all()))
+
+
+@router.get(
+    BrigadeRoutes.BRIGADE_OBSERVATION_STATS.value,
+    response_model=UnitObservationStatsResponse,
+    responses=problems(
+        ErrorCode.PERIOD_REVERSED, ErrorCode.PERIOD_TOO_LONG, ErrorCode.UNKNOWN_TIME_ZONE, ErrorCode.SCOPE_GROUP_NOT_FOUND,
+        *GUARDED,
+    ),
+)
+async def get_brigade_observation_stats(
+        brigade_id: Annotated[int, Path(ge=1)],
+        placement: UnitPlacement = Query(UnitPlacement.RECORDED, description="recorded: the observations created while their post was in the brigade; current: the observations of the posts in it now (archived posts left out)"),
+        date_from: Optional[UtcDatetime] = Query(None, description="Period start, created_at (default: date_to minus 30 days; naive values are UTC)"),
+        date_to: Optional[UtcDatetime] = Query(None, description="Period end, created_at (default: now)"),
+        group_by: StatsGroupBy = Query(StatsGroupBy.DAY, description="Bucket size: hour (period up to 31 days) or day (up to 366 days)"),
+        tz: Optional[str] = Query(None, max_length=64, description="IANA time zone of the buckets (default: server time zone setting)"),
+        include_archived: bool = Query(False, description="Count archived observations separately; counts only, so observation.view is enough"),
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.OBSERVATION_VIEW]))
+):
+    """Observation counters of a brigade by created_at, as for a post: all time, last 24 hours, and the period per
+    hour or per day with every bucket included; not_archived and archived never overlap. Only the posts where
+    observation.view is in effect are counted. The brigade must lie where the caller holds scope_group.view or
+    observation.view, otherwise 404 like an unknown id or a group of another kind; an archived brigade keeps its
+    history."""
+    stats = await unit_observation_stats(
+        session, auth, BRIGADE, brigade_id, placement, date_from, date_to, group_by, tz or settings.timezone.timezone,
+        include_archived,
+    )
+    return UnitObservationStatsResponse(
+        unit_id=brigade_id, placement=placement, **asdict(stats),
+    )

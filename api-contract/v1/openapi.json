@@ -17018,6 +17018,248 @@
         }
       }
     },
+    "/api/v1/corps/{corps_id}/observation-stats": {
+      "get": {
+        "tags": [
+          "CORPS"
+        ],
+        "summary": "Get Corps Observation Stats",
+        "description": "Observation counters of a corps by created_at, as for a post: all time, last 24 hours, and the period per\nhour or per day with every bucket included; not_archived and archived never overlap. Only the posts where\nobservation.view is in effect are counted. The corps must lie where the caller holds scope_group.view or\nobservation.view, otherwise 404 like an unknown id or a group of another kind; an archived corps keeps its\nhistory.",
+        "operationId": "get_corps_observation_stats",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "corps_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Corps Id"
+            }
+          },
+          {
+            "name": "placement",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/UnitPlacement",
+              "description": "recorded: the observations created while their post was in the corps; current: the observations of the posts in it now (archived posts left out)",
+              "default": "recorded"
+            },
+            "description": "recorded: the observations created while their post was in the corps; current: the observations of the posts in it now (archived posts left out)"
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Period start, created_at (default: date_to minus 30 days; naive values are UTC)",
+              "title": "Date From"
+            },
+            "description": "Period start, created_at (default: date_to minus 30 days; naive values are UTC)"
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Period end, created_at (default: now)",
+              "title": "Date To"
+            },
+            "description": "Period end, created_at (default: now)"
+          },
+          {
+            "name": "group_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/StatsGroupBy",
+              "description": "Bucket size: hour (period up to 31 days) or day (up to 366 days)",
+              "default": "day"
+            },
+            "description": "Bucket size: hour (period up to 31 days) or day (up to 366 days)"
+          },
+          {
+            "name": "tz",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "IANA time zone of the buckets (default: server time zone setting)",
+              "title": "Tz"
+            },
+            "description": "IANA time zone of the buckets (default: server time zone setting)"
+          },
+          {
+            "name": "include_archived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Count archived observations separately; counts only, so observation.view is enough",
+              "default": false,
+              "title": "Include Archived"
+            },
+            "description": "Count archived observations separately; counts only, so observation.view is enough"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnitObservationStatsResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`period_reversed`: Period start is after its end; `period_too_long`: Period too long; `unknown_time_zone`: Unknown time zone",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PeriodReversedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PeriodTooLongProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UnknownTimeZoneProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "period_reversed": "#/components/schemas/PeriodReversedProblem",
+                      "period_too_long": "#/components/schemas/PeriodTooLongProblem",
+                      "unknown_time_zone": "#/components/schemas/UnknownTimeZoneProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`: Insufficient permissions",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`scope_group_not_found`: Scope group not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopeGroupNotFoundProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/brigades/": {
       "get": {
         "tags": [
@@ -18552,6 +18794,248 @@
                       "permission_required_for_action": "#/components/schemas/PermissionRequiredForActionProblem"
                     }
                   }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`scope_group_not_found`: Scope group not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopeGroupNotFoundProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/brigades/{brigade_id}/observation-stats": {
+      "get": {
+        "tags": [
+          "BRIGADES"
+        ],
+        "summary": "Get Brigade Observation Stats",
+        "description": "Observation counters of a brigade by created_at, as for a post: all time, last 24 hours, and the period per\nhour or per day with every bucket included; not_archived and archived never overlap. Only the posts where\nobservation.view is in effect are counted. The brigade must lie where the caller holds scope_group.view or\nobservation.view, otherwise 404 like an unknown id or a group of another kind; an archived brigade keeps its\nhistory.",
+        "operationId": "get_brigade_observation_stats",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "brigade_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Brigade Id"
+            }
+          },
+          {
+            "name": "placement",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/UnitPlacement",
+              "description": "recorded: the observations created while their post was in the brigade; current: the observations of the posts in it now (archived posts left out)",
+              "default": "recorded"
+            },
+            "description": "recorded: the observations created while their post was in the brigade; current: the observations of the posts in it now (archived posts left out)"
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Period start, created_at (default: date_to minus 30 days; naive values are UTC)",
+              "title": "Date From"
+            },
+            "description": "Period start, created_at (default: date_to minus 30 days; naive values are UTC)"
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Period end, created_at (default: now)",
+              "title": "Date To"
+            },
+            "description": "Period end, created_at (default: now)"
+          },
+          {
+            "name": "group_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/StatsGroupBy",
+              "description": "Bucket size: hour (period up to 31 days) or day (up to 366 days)",
+              "default": "day"
+            },
+            "description": "Bucket size: hour (period up to 31 days) or day (up to 366 days)"
+          },
+          {
+            "name": "tz",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "IANA time zone of the buckets (default: server time zone setting)",
+              "title": "Tz"
+            },
+            "description": "IANA time zone of the buckets (default: server time zone setting)"
+          },
+          {
+            "name": "include_archived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Count archived observations separately; counts only, so observation.view is enough",
+              "default": false,
+              "title": "Include Archived"
+            },
+            "description": "Count archived observations separately; counts only, so observation.view is enough"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnitObservationStatsResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`period_reversed`: Period start is after its end; `period_too_long`: Period too long; `unknown_time_zone`: Unknown time zone",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PeriodReversedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PeriodTooLongProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UnknownTimeZoneProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "period_reversed": "#/components/schemas/PeriodReversedProblem",
+                      "period_too_long": "#/components/schemas/PeriodTooLongProblem",
+                      "unknown_time_zone": "#/components/schemas/UnknownTimeZoneProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`: Insufficient permissions",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
                 }
               }
             }
@@ -38236,10 +38720,6 @@
       },
       "PostObservationStatsResponse": {
         "properties": {
-          "post_id": {
-            "type": "integer",
-            "title": "Post Id"
-          },
           "generated_at": {
             "type": "string",
             "format": "date-time",
@@ -38279,15 +38759,19 @@
           },
           "period": {
             "$ref": "#/components/schemas/ObservationStatsPeriod"
+          },
+          "post_id": {
+            "type": "integer",
+            "title": "Post Id"
           }
         },
         "type": "object",
         "required": [
-          "post_id",
           "generated_at",
           "all_time",
           "last_24h",
-          "period"
+          "period",
+          "post_id"
         ],
         "title": "PostObservationStatsResponse"
       },
@@ -43464,6 +43948,69 @@
             "type": "https://example.org/problems/token_certificate_mismatch"
           }
         ]
+      },
+      "UnitObservationStatsResponse": {
+        "properties": {
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "last_observation_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Observation At",
+            "description": "created_at of the latest not archived observation; null when there is none"
+          },
+          "days_without_observations": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Days Without Observations",
+            "description": "Calendar days in tz from the date of last_observation_at to the date of generated_at: 0 today, 1 yesterday; null when there is no observation"
+          },
+          "all_time": {
+            "$ref": "#/components/schemas/ObservationCount"
+          },
+          "last_24h": {
+            "$ref": "#/components/schemas/ObservationCount",
+            "description": "Created within the 24 hours before generated_at"
+          },
+          "period": {
+            "$ref": "#/components/schemas/ObservationStatsPeriod"
+          },
+          "unit_id": {
+            "type": "integer",
+            "title": "Unit Id"
+          },
+          "placement": {
+            "$ref": "#/components/schemas/UnitPlacement",
+            "description": "Which observations belong to the unit: recorded (the unit stored when the observation was created) or current (its post is in the unit now)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "generated_at",
+          "all_time",
+          "last_24h",
+          "period",
+          "unit_id",
+          "placement"
+        ],
+        "title": "UnitObservationStatsResponse",
+        "description": "Observation counters of a corps or brigade (GET /corps/{id}/observation-stats, /brigades/{id}/...)"
       },
       "UnitPlacement": {
         "type": "string",

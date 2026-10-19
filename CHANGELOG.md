@@ -5,6 +5,27 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Corps and brigades, stage 2: reporting (2026-10-20)
+
+The contract changes: rewrite the generated types (`openapi-typescript`). API.md, "Corps and brigades".
+
+### Added
+
+- Observations and media (lists and search) filter by `corps_id` / `brigade_id` with `placement`: `recorded` (the
+  default: the unit stored when the observation was created) or `current` (the unit its post is in now; archived
+  posts left out). Both read today's data: `placement` is not a time filter, the period stays `observed_at_*` /
+  `created_at_*`. New enum `UnitPlacement`.
+- `POST /observations/report`: `corps_ids`, `brigade_ids` (any of the ids of a kind, every kind given) and
+  `placement`; `all_fields` gets the columns "Корпус" and "Бригада" after "Пост" (as the placement says); the filter
+  rows name the units and the placement. A unit archived today is marked " (архівовано)" in the report.
+- `GET /corps/{corps_id}/observation-stats`, `GET /brigades/{brigade_id}/observation-stats`: the post counters
+  (`UnitObservationStatsResponse`: `unit_id`, `placement` and the figures of `PostObservationStatsResponse`) over the
+  posts where `observation.view` is in effect; an archived unit keeps its history.
+
+### Changed
+
+- `PostObservationStatsResponse` lists `post_id` after the figures in the schema (the same fields; key order only).
+
 ## Corps and brigades, stage 1 (2026-10-20)
 
 An organisational level above posts: corps > brigade > post, the brigade optional, posts outside any corps allowed.

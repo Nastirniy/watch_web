@@ -95,6 +95,7 @@ class CorpsRoutes(str, Enum):
     CORPS_RESTORE = "/{corps_id}/restore"
     CORPS_BRIGADES = "/{corps_id}/brigades"
     CORPS_POSTS = "/{corps_id}/posts"
+    CORPS_OBSERVATION_STATS = "/{corps_id}/observation-stats"
 
     @staticmethod
     def tag() -> str:
@@ -109,6 +110,7 @@ class BrigadeRoutes(str, Enum):
     BRIGADE_ARCHIVE = "/{brigade_id}/archive"
     BRIGADE_RESTORE = "/{brigade_id}/restore"
     BRIGADE_POSTS = "/{brigade_id}/posts"
+    BRIGADE_OBSERVATION_STATS = "/{brigade_id}/observation-stats"
 
     @staticmethod
     def tag() -> str:
