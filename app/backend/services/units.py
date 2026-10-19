@@ -3,14 +3,15 @@
 The units of a post come from the scope tree every request loads (ScopeTree.units_of_post); the units of an
 observation are the observation_units rows written at its create.
 """
-from typing import Dict, FrozenSet, Iterable, Mapping, Optional
+from typing import Dict, FrozenSet, Iterable, Mapping, Optional, Tuple
 
 from sqlalchemy import delete
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.backend.auth.context import AuthContext
 from app.backend.auth.scope import Node, ScopeTree
-from app.backend.enums.general import ScopeGroupKind
+from app.backend.enums.general import Permissions, ScopeGroupKind
 from app.backend.models.observation_unit import ObservationUnit
 from app.backend.models.scope_group import ScopeGroup
 from app.backend.services.scope_groups import UNIT_KINDS
@@ -71,3 +72,28 @@ def units_filter(tree: ScopeTree, units: Mapping[ScopeGroupKind, Optional[int]])
 def unit_filter_of(tree: ScopeTree, params) -> Optional[FrozenSet[int]]:
     """units_filter of the <kind>_id fields of a query model (corps_id, brigade_id: one per UNIT_KINDS)"""
     return units_filter(tree, {kind: getattr(params, f"{kind.value}_id", None) for kind in UNIT_KINDS})
+
+
+def unit_counts(auth: AuthContext, unit_id: int) -> Tuple[int, int]:
+    """(active units directly inside it the caller sees (scope_group.view), active posts at any depth below it with
+    post.view in effect): the brigade_count and post_count of a unit answer, from the request's tree"""
+    tree = auth.tree
+    children = sum(
+        1 for group_id, parent_id in tree.group_parent.items()
+        if parent_id == unit_id and tree.group_kind.get(group_id) not in (None, ScopeGroupKind.GROUP.value)
+        and group_id not in tree.archived_groups and auth.covers(Permissions.SCOPE_GROUP_VIEW, Node.group(group_id))
+    )
+    viewable = auth.posts_with(Permissions.POST_VIEW)
+    posts = sum(
+        1 for post_id in tree.posts_under(Node.group(unit_id))
+        if post_id not in tree.archived_posts and (viewable is None or post_id in viewable)
+    )
+    return children, posts
+
+
+def posts_within(tree: ScopeTree, kind: ScopeGroupKind, unit_id: int, params) -> FrozenSet[int]:
+    """The posts of a unit's posts list (GET /corps/{id}/posts): under the unit, narrowed by the unit fields of the
+    query model (a corps_id or brigade_id elsewhere gives nothing)"""
+    under = unit_post_ids(tree, kind, unit_id)
+    asked = unit_filter_of(tree, params)
+    return under if asked is None else under & asked
