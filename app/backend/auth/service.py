@@ -166,11 +166,9 @@ class AuthService:
         )
         session_lifetimes.touch(user_session, now)
         await session_lifetimes.bind_certificate(user_session, certificate_fingerprint)
+        # No write to the users row: last_login_at is derived from the sessions (presence_properties.py), so two logins
+        # of one user, or a login next to the user's other requests, never collide on it
         session.add(user_session)
-
-        # Update last login
-        user.last_login_at = datetime.now(timezone.utc)
-        session.add(user)
 
         # Create audit log using helper
         await create_audit_log(

@@ -194,9 +194,6 @@ async def test_list_put_and_me_answer_with_an_offset(client, db, headers):
     post = await make_post(db)
     ids = await make_dictionary(db)
     user = await make_user(db, perms=WRITE, post_id=post.id)
-    user.last_login_at = datetime(2026, 9, 20, 7, 0)
-    db.add(user)
-    await db.commit()
     observation = await make_observation(db, user, post, ids["signal_type_id"])
 
     listed = await client.get(LIST_ALL, headers=headers(user))
@@ -215,7 +212,7 @@ async def test_list_put_and_me_answer_with_an_offset(client, db, headers):
 
     me = await client.get(ME, headers=headers(user))
     assert me.status_code == 200, me.text
-    assert me.json()["last_login_at"] == "2026-09-20T07:00:00Z"
+    assert me.json()["last_login_at"].endswith("Z"), "derived from the login sessions, stored naive UTC"
     assert me.json()["last_activity_at"] is not None
     assert datetimes_without_offset(me.json()) == []
 

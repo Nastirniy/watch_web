@@ -25,6 +25,7 @@ from app.backend.api.shared.helpers.post_helper import ensure_post_not_archived
 from app.backend.enums.errors import ErrorCode
 from app.backend.errors.problems import ApiError
 from app.backend.errors.coded import CodedError
+from app.backend.utils.row_locks import lock_first
 
 _logger = get_api_logger()
 
@@ -103,9 +104,14 @@ async def record_upload(
 ) -> MediaFile:
     """Probe video/audio headers, audit, commit and pre-warm the medium thumbnail of a stored file"""
     media_file = (await session.exec(select(MediaFile).where(MediaFile.id == media_file_id))).one()
-
+    metadata = None
     if media_file.media_type in (MediaType.VIDEO.value, MediaType.AUDIO.value):
         metadata = await _probe_headers(media_file)
+
+    # The worker may claim the poster of the row as soon as the file is in storage, during the probe: the write
+    # begins with the row lock, on the committed copy (a row read before the claim is refused on MariaDB, 1020)
+    media_file = await lock_first(session, select(MediaFile).where(MediaFile.id == media_file_id))
+    if metadata is not None:
         for field_name, value in metadata.items():
             setattr(media_file, field_name, value)
         if media_file.is_video and has_no_video_stream(metadata):

@@ -231,3 +231,25 @@ def test_sweep_skips_and_counts_a_file_it_may_not_delete(tmp_path, monkeypatch, 
     assert media_tools.main(["sweep-nginx-temp"]) == 0
     out = capsys.readouterr().out
     assert "removed 0 file(s)" in out and "skipped 1 file(s)" in out
+
+
+@pytest.mark.asyncio
+async def test_same_file_name_in_the_same_second_as_an_upload_in_flight(client, db, headers, storage):
+    """An upload's row holds a temporary stored_filename (unique) until its file is moved; the name came from the file
+    name and the second, so two uploads of photo.png in one second collided (1062, 500 in the live test of 2026-10-19).
+    Rows with the names the old scheme gave this second and the next stand for the upload in flight."""
+    import hashlib
+    from datetime import datetime, timedelta, timezone
+    post, user, observation = await _scene(db)
+    now = datetime.now(timezone.utc)
+    for moment in (now, now + timedelta(seconds=1)):
+        name = f"temp_{hashlib.md5(f'photo.png_{moment:%Y%m%d_%H%M%S}'.encode()).hexdigest()[:16]}.png"
+        db.add(MediaFile(observation_id=observation.id, user_id=user.id, original_filename="photo.png",
+                         stored_filename=name, file_path=f"in-flight/{name}", file_size=1, mime_type="image/png",
+                         file_extension=".png", media_type="image", file_hash=name))
+    await db.commit()
+    response = await client.post(
+        UPLOAD, data={"observation_id": observation.id, "media_type": "image"},
+        files={"file": ("photo.png", make_png(), "image/png")}, headers=headers(user),
+    )
+    assert response.status_code in (200, 201), response.text

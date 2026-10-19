@@ -5,6 +5,52 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Stream authorization cache (2026-10-19)
+
+### Changed
+
+- `GET /media/{id}/stream`: nginx asks the API once per 30 seconds for each token, client certificate and media
+  (`auth_request`, cached) and serves every `Range` request in between itself; a refusal is still the API's
+  problem. Seeking no longer waits for the API (under the video stress test every Range request did). Access taken
+  away (logout, revoked session or certificate, removed permission, archived media) stops a stream within about 30 s
+  instead of at the next request, and `If-None-Match` on `/stream` answers `200`, never `304`. `/download` is
+  unchanged. API.md, "Video and audio in a player".
+
+### Added
+
+- `api-contract/web-kit`: a starter service worker (`public/stream-sw.js`) and its page side
+  (`src/api/streamWorker.ts`) that give `<video>` / `<audio>` elements the Bearer token (WEB_TOOLING.md, section 10).
+
+### Deployment
+
+- Create `/var/cache/nginx/stream_auth` owned by the nginx user (DEPLOYMENT.md) before installing the new
+  `nginx-http.conf` and `nginx-app.conf`; an nginx reload is enough, the API does not change.
+
+## Hot rows and crash behaviour (2026-10-19)
+
+### Fixed
+
+- Parallel requests of one user answered 500 on MariaDB 11.6+ (error 1020) and two logins of one user at once could
+  deadlock (1213): every login wrote `users.last_login_at` and every observation create wrote
+  `users.last_record_created_at`, so the user's other requests met a changed users row. Measured under the video
+  stress test: 7 of 8 parallel observation creates of one user answered 500. No request writes the users row on a
+  hot path any more.
+- Two uploads with the same file name in the same second: the second answered 500 (the temporary `stored_filename`
+  came from the name and the clock). It is random now.
+- Upload complete answered 500 (1 of 8 under the video stress test) when the media worker claimed the poster of the
+  new video while the request probed it: the request locks the media row after probing and writes the committed
+  copy.
+- While the API was down (restart, crash) nginx answered 404 instead of 502 / 504: `error_page` pointed at a
+  `50x.html` the Ubuntu package does not have. The block is gone; nginx's own errors keep their status, which is
+  all a client reads from them (API.md, "Errors").
+
+### Changed (database, API)
+
+- Migration 026 drops `users.last_login_at` and `users.last_record_created_at`. `last_login_at` in user responses,
+  its sort and its `last_login_from` / `last_login_to` filters stay: the value is now the start of the user's latest
+  login session (ended ones included). A user whose sessions were removed shows no last login. The downgrade adds
+  both columns back and fills `last_login_at` from the sessions.
+
 ## Concurrent writes (2026-10-19)
 
 ### Fixed

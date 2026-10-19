@@ -587,9 +587,9 @@ class MediaManager:
 
             # -- Prepare storage path --
             organized_dir = await self._get_organized_path(session, observation_id)
-            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-            temp_hash = hashlib.md5(f"{safe_filename}_{timestamp}".encode()).hexdigest()[:16]
-            temp_stored_filename = f"temp_{temp_hash}{file_ext}"
+            # stored_filename is unique and the row holds this name until the file is moved: random, never derived
+            # from the file name and the clock (two uploads of one name in one second collided)
+            temp_stored_filename = f"temp_{uuid.uuid4().hex}{file_ext}"
 
             # -- Create DB record with temp filename --
             media_file = MediaFile(
