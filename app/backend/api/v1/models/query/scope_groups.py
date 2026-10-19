@@ -6,6 +6,7 @@ from typing import Optional, Literal
 from pydantic import Field
 
 from app.backend.api.v1.models.query.base import BaseFilterParams
+from app.backend.enums.general import ScopeGroupKind
 
 # Fields the results can be sorted by; sort_by accepts exactly these (another value answers 422)
 ScopeGroupSortField = Literal["id", "name", "created_at", "updated_at"]
@@ -18,6 +19,7 @@ class ScopeGroupFilterParams(BaseFilterParams):
 
     id: Optional[int] = Field(default=None, description="Exact group ID")
     parent_id: Optional[int] = Field(default=None, description="Direct children of this group")
+    kind: Optional[ScopeGroupKind] = Field(default=None, description="Only groups of this kind")
     name_contains: Optional[str] = Field(default=None, max_length=255, description="Name contains text")
 
     # --- Soft Delete ---

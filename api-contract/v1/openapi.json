@@ -14142,6 +14142,24 @@
             "description": "Direct children of this group"
           },
           {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ScopeGroupKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only groups of this kind",
+              "title": "Kind"
+            },
+            "description": "Only groups of this kind"
+          },
+          {
             "name": "name_contains",
             "in": "query",
             "required": false,
@@ -36019,6 +36037,16 @@
           }
         ]
       },
+      "ScopeGroupKind": {
+        "type": "string",
+        "enum": [
+          "group",
+          "corps",
+          "brigade"
+        ],
+        "title": "ScopeGroupKind",
+        "description": "Kind of a scope group: a plain group, or a unit of the organisation (corps > brigade). Fixed at create."
+      },
       "ScopeGroupNameTakenProblem": {
         "properties": {
           "type": {
@@ -36356,6 +36384,10 @@
             "type": "string",
             "title": "Name"
           },
+          "kind": {
+            "$ref": "#/components/schemas/ScopeGroupKind",
+            "description": "A plain group, or a unit: corps, brigade (fixed at create)"
+          },
           "parent_id": {
             "anyOf": [
               {
@@ -36399,6 +36431,7 @@
         "required": [
           "id",
           "name",
+          "kind",
           "is_deleted",
           "created_at",
           "updated_at"
@@ -36534,6 +36567,9 @@
             "type": "string",
             "title": "Name"
           },
+          "kind": {
+            "$ref": "#/components/schemas/ScopeGroupKind"
+          },
           "description": {
             "anyOf": [
               {
@@ -36567,6 +36603,7 @@
         "required": [
           "id",
           "name",
+          "kind",
           "groups",
           "posts"
         ],

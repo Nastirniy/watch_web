@@ -97,3 +97,40 @@ async def test_delete_observation_units_removes_only_the_given_observations(db):
     rows = (await db.exec(select(ObservationUnit.observation_id))).all()
     assert rows == [2]
     assert await delete_observation_units(db, []) == 0
+
+
+async def test_scope_groups_show_their_kind(client, db, headers):
+    h = headers(await make_admin(db))
+    corps = await make_group(db, kind="corps")
+    brigade = await make_group(db, parent_id=corps.id, kind="brigade")
+    plain = await make_group(db)
+
+    listed = (await client.get(V1.path(ScopeGroupRoutes.ROOT), headers=h)).json()
+    assert {g["id"]: g["kind"] for g in listed} == {corps.id: "corps", brigade.id: "brigade", plain.id: "group"}
+    one = (await client.get(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=brigade.id), headers=h)).json()
+    assert one["kind"] == "brigade"
+
+    tree = (await client.get(V1.path(ScopeGroupRoutes.TREE), headers=h)).json()
+    top = {g["id"]: g for g in tree["groups"]}
+    assert top[corps.id]["kind"] == "corps" and top[plain.id]["kind"] == "group"
+    assert top[corps.id]["groups"][0]["kind"] == "brigade"
+
+
+async def test_scope_groups_filter_by_kind(client, db, headers):
+    h = headers(await make_admin(db))
+    corps = await make_group(db, kind="corps")
+    await make_group(db, parent_id=corps.id, kind="brigade")
+    await make_group(db)
+    r = await client.get(V1.path(ScopeGroupRoutes.ROOT), params={"kind": "corps"}, headers=h)
+    assert r.status_code == 200 and [g["id"] for g in r.json()] == [corps.id]
+    r = await client.get(V1.path(ScopeGroupRoutes.ROOT), params={"kind": "battalion"}, headers=h)
+    assert r.status_code == 422
+
+
+async def test_kind_is_not_accepted_in_a_scope_group_body(client, db, headers):
+    h = headers(await make_admin(db))
+    r = await client.post(V1.path(ScopeGroupRoutes.ROOT), json={"name": "Corps 1", "kind": "corps"}, headers=h)
+    assert r.status_code == 422 and r.json()["errors"][0]["code"] == "extra_forbidden"
+    plain = await make_group(db)
+    r = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=plain.id), json={"kind": "corps"}, headers=h)
+    assert r.status_code == 422 and r.json()["errors"][0]["code"] == "extra_forbidden"

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Optional, Iterable
 from sqlalchemy.sql.selectable import Select
 
+from app.backend.enums.general import ScopeGroupKind
 from app.backend.models.scope_group import ScopeGroup
 from app.backend.filters.simple_engine import ListCriteria, SimpleFilterEngine
 
@@ -15,6 +16,7 @@ class ScopeGroupCriteria(ListCriteria):
     """What ScopeGroupFilterService filters by; each API version converts its query model into it"""
     id: Optional[int] = None
     parent_id: Optional[int] = None
+    kind: Optional[ScopeGroupKind] = None
     name_contains: Optional[str] = None
     include_deleted: bool = False
 
@@ -53,4 +55,5 @@ class ScopeGroupFilterService(SimpleFilterEngine):
         query = cls._apply_soft_delete(query, params)
         query = cls._apply_exact(query, ScopeGroup.id, params.id)
         query = cls._apply_exact(query, ScopeGroup.parent_id, params.parent_id)
+        query = cls._apply_exact(query, ScopeGroup.kind, params.kind)
         return cls._apply_contains(query, ScopeGroup.name, params.name_contains)

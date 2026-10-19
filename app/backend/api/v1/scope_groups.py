@@ -195,7 +195,8 @@ async def get_scope_tree(
     )).all() if (viewable_posts is None or p.id in viewable_posts) and shown(Node.post(p.id))]
 
     nodes: Dict[int, ScopeTreeGroup] = {
-        g.id: ScopeTreeGroup(id=g.id, name=g.name, description=g.description, groups=[], posts=[]) for g in groups
+        g.id: ScopeTreeGroup(id=g.id, name=g.name, kind=g.kind, description=g.description, groups=[], posts=[])
+        for g in groups
     }
     top = ScopeTreeResponse(groups=[], posts=[])
     for g in groups:
