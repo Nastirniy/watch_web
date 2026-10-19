@@ -54,10 +54,11 @@ PLACEMENT_PROBLEMS = (ErrorCode.SCOPE_GROUP_NOT_FOUND, ErrorCode.SCOPE_GROUP_PAR
 
 
 async def _check_corps(session: AsyncSession, brigade_id: Optional[int], corps_id: int) -> None:
-    """The destination is a live corps (404 otherwise) and a brigade may sit in it (409 otherwise)"""
+    """The destination is a corps (404 unknown, 409 another kind: checked first, so a brigade or a deep plain group
+    never reaches the cycle and depth rules) and live (404 archived)"""
     try:
-        await groups_service.check_new_parent(session, brigade_id, corps_id)
         await groups_service.check_placement(session, BRIGADE, corps_id)
+        await groups_service.check_new_parent(session, brigade_id, corps_id)
     except CodedError as exc:
         raise ApiError.from_coded(exc)
 

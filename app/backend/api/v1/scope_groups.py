@@ -6,7 +6,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.api.shared.helpers.db_errors import unique_violation_as
-from app.backend.api.shared.helpers.scope_group_helper import audit_group, check_visible, name_taken
+from app.backend.api.shared.helpers.scope_group_helper import audit_group, check_visible, lock_unit, name_taken
 from app.backend.api.v1.models.query.scope_groups import ScopeGroupFilterParams
 from app.backend.api.v1.models.request.scope_groups import ScopeGroupCreate, ScopeGroupUpdate
 from app.backend.api.v1.models.response.scope_groups import (
@@ -208,8 +208,9 @@ async def update_scope_group(
     the existence of the new parent and the tree rules; nothing changes on a refusal. The group keeps its kind and
     the parent must suit it (a plain group never moves into a corps or brigade, a corps stays under the root, a
     brigade in a corps): 409 scope_group_parent_not_allowed."""
-    group = await _group_or_404(session, auth, group_id, lock=True)
     update_data = data.model_dump(exclude_unset=True)
+    # Groups top down: the old and the new parent, then the group (a unit archive takes the same order)
+    group = await lock_unit(session, auth, None, group_id, also=[update_data.get("parent_id")])
     old_values = group.model_dump()
 
     new_parent = update_data.get("parent_id", group.parent_id)
@@ -280,7 +281,7 @@ async def restore_scope_group(
 ):
     """Restore an archived group (is_deleted=false) under its former parent. Unknown: 404, and 404 when the
     parent is archived (restore the parent first); outside the caller's scope_group.view: 404. Not archived: 409."""
-    group = await _group_or_404(session, auth, group_id, include_deleted=True, lock=True)
+    group = await lock_unit(session, auth, None, group_id, include_deleted=True)   # its parent first
     if not group.is_deleted:
         raise ApiError(ErrorCode.SCOPE_GROUP_NOT_ARCHIVED)
     await _check_parent(session, group.id, group.parent_id, ScopeGroupKind(group.kind))

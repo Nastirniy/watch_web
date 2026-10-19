@@ -85,21 +85,26 @@ def _top_down(tree: ScopeTree, group_id: int) -> tuple:
 
 
 async def lock_groups(session: AsyncSession, tree: ScopeTree, group_ids: Iterable[Optional[int]]) -> bool:
-    """Lock these groups top down (the first with lock_first); False when there is none (the write has not begun)"""
-    ordered = sorted({group_id for group_id in group_ids if group_id is not None}, key=lambda g: _top_down(tree, g))
+    """Lock these groups top down (the first with lock_first); False when there is none (the write has not begun).
+    Only groups the request's tree knows: a lock on a row that may not exist would take a gap lock that holds up
+    concurrent creates (the caller's own existence check answers 404 for an unknown id)."""
+    ordered = sorted({group_id for group_id in group_ids if group_id in tree.group_parent},
+                     key=lambda g: _top_down(tree, g))
     for position, group_id in enumerate(ordered):
         await (lock if position else lock_first)(session, select(ScopeGroup).where(ScopeGroup.id == group_id))
     return bool(ordered)
 
 
-async def lock_unit(session: AsyncSession, auth: AuthContext, kind: ScopeGroupKind, unit_id: int,
+async def lock_unit(session: AsyncSession, auth: AuthContext, kind: Optional[ScopeGroupKind], unit_id: int,
                     include_deleted: bool = False, also: Iterable[Optional[int]] = ()) -> ScopeGroup:
-    """get_unit for a write that may change what sits in the unit: its parent (from the request's tree) and the
-    groups in also (the destination of a move) are locked first, then the unit (groups top down). A unit moved since
-    the tree was read gets its new parent locked too."""
+    """get_unit for a write that may change what sits in the group or where it sits: its parent (from the request's
+    tree) and the groups in also (the destination of a move) are locked first, then the group (groups top down). A
+    group moved since the tree was read gets its new parent locked too. kind None: a group of any kind."""
     check_visible(auth, unit_id)
     parent_id = auth.tree.group_parent.get(unit_id)
-    query = select(ScopeGroup).where(ScopeGroup.id == unit_id, ScopeGroup.kind == ScopeGroupKind(kind).value)
+    query = select(ScopeGroup).where(ScopeGroup.id == unit_id)
+    if kind is not None:
+        query = query.where(ScopeGroup.kind == ScopeGroupKind(kind).value)
     if not include_deleted:
         query = query.where(ScopeGroup.is_deleted == False)  # noqa: E712
     started = await lock_groups(session, auth.tree, [parent_id, *also])
