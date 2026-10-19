@@ -38,6 +38,7 @@ TABLES_OWNED_BY_LATER_REVISIONS = {
     "role_assignments",  # 023_authorization_v2
     "user_certificates",  # 024_user_certificates
     "certificate_authority_state",  # 024_user_certificates
+    "observation_units",  # 027_scope_group_kinds
 }
 down_revision = "001_relativize_media_paths"
 branch_labels = None

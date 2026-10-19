@@ -14,6 +14,7 @@ from .worker import WorkerHeartbeat
 from .media_format import MediaFormat
 from .upload_session import UploadSession
 from .storyboard import VideoStoryboard
+from .observation_unit import ObservationUnit
 
 __all__ = [
     'User', 'UserSession', 'UserCertificate', 'CertificateAuthorityState',
@@ -21,7 +22,8 @@ __all__ = [
     'Post', 'ScopeGroup',
     'SignalType', 'Category',
     'Observation', 'ObservationFrequency', 'Tag', 'ObservationTag', 'MediaFile',
-    'AuditLog', 'ExportJob', 'WorkerHeartbeat', 'MediaFormat', 'UploadSession', 'VideoStoryboard'
+    'AuditLog', 'ExportJob', 'WorkerHeartbeat', 'MediaFormat', 'UploadSession', 'VideoStoryboard',
+    'ObservationUnit'
 ]
 
 from .presence_properties import configure_presence_properties

@@ -128,6 +128,15 @@ class FrequencyKind(Enum):
     VIDEO = "video"
 
 
+class ScopeGroupKind(str, Enum):
+    """Kind of a scope group (scope_groups.kind): a plain group, or a unit of the organisation (corps > brigade).
+    Fixed at create; where each kind may sit is ALLOWED_PARENT in services/scope_groups.py. A new level is a new
+    value here plus its entry there; the database column has no CHECK on it."""
+    GROUP = "group"
+    CORPS = "corps"
+    BRIGADE = "brigade"
+
+
 class ServiceHealthStatus(Enum):
     HEALTHY = "healthy"
     UNHEALTHY = "unhealthy"

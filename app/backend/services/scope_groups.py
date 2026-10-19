@@ -1,5 +1,6 @@
-"""Scope groups: rules of the tree (existence, cycles, depth, emptiness). Raises CodedError; the route answers."""
-from typing import Dict, Optional
+"""Scope groups: rules of the tree (existence, cycles, depth, emptiness, where each kind may sit). Raises CodedError;
+the route answers."""
+from typing import Dict, FrozenSet, Optional, Tuple
 
 from sqlalchemy import func
 from sqlmodel import select
@@ -8,12 +9,24 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.utils.row_locks import lock_first
 
 from app.backend.enums.errors import ErrorCode
+from app.backend.enums.general import ScopeGroupKind
 from app.backend.errors.coded import CodedError
 from app.backend.models.post import Post
 from app.backend.models.scope_group import ScopeGroup
 
 # Levels of nested groups between the root and a post: a root group is level 1
 MAX_GROUP_DEPTH = 6
+
+# Where each kind of group may sit: the kinds of parent it accepts, None for directly under the root. A new level (a
+# battalion) is a ScopeGroupKind member, its entry here and its place in UNIT_KINDS; no query knows the levels.
+ALLOWED_PARENT: Dict[ScopeGroupKind, FrozenSet[Optional[ScopeGroupKind]]] = {
+    ScopeGroupKind.GROUP: frozenset({None, ScopeGroupKind.GROUP}),
+    ScopeGroupKind.CORPS: frozenset({None}),
+    ScopeGroupKind.BRIGADE: frozenset({ScopeGroupKind.CORPS}),
+}
+
+# The kinds that are units of the organisation, top down (fields of posts and observations, report columns)
+UNIT_KINDS: Tuple[ScopeGroupKind, ...] = (ScopeGroupKind.CORPS, ScopeGroupKind.BRIGADE)
 
 
 async def get_group(session: AsyncSession, group_id: int, include_deleted: bool = False, lock: bool = False) -> ScopeGroup:
@@ -79,3 +92,18 @@ async def check_empty(session: AsyncSession, group_id: int) -> None:
     )).one()
     if groups or posts:
         raise CodedError(ErrorCode.SCOPE_GROUP_NOT_EMPTY)
+
+
+async def check_placement(session: AsyncSession, kind: ScopeGroupKind, parent_id: Optional[int]) -> None:
+    """A group of this kind may sit under parent_id (None: the root): ALLOWED_PARENT, the parent's kind read from its
+    row (archived ones included: existence is check_new_parent's). 409 scope_group_parent_not_allowed otherwise."""
+    parent_kind: Optional[ScopeGroupKind] = None
+    if parent_id is not None:
+        stored = (await session.exec(select(ScopeGroup.kind).where(ScopeGroup.id == parent_id))).first()
+        if stored is None:
+            raise CodedError(ErrorCode.SCOPE_GROUP_NOT_FOUND)
+        parent_kind = ScopeGroupKind(stored)
+    kind = ScopeGroupKind(kind)
+    if parent_kind not in ALLOWED_PARENT[kind]:
+        raise CodedError(ErrorCode.SCOPE_GROUP_PARENT_NOT_ALLOWED, group_kind=kind.value,
+                         parent_kind=parent_kind.value if parent_kind is not None else "root")

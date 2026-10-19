@@ -14283,7 +14283,7 @@
           "SCOPE_GROUPS"
         ],
         "summary": "Create Scope Group",
-        "description": "Create a group under parent_id (null: directly under the root). Names are unique within a parent; groups\nnest at most 6 levels deep. A parent outside the caller's scope_group.view answers 404 like an unknown one.",
+        "description": "Create a group under parent_id (null: directly under the root). Names are unique within a parent; groups\nnest at most 6 levels deep. A parent outside the caller's scope_group.view answers 404 like an unknown one.\nCreates a plain group: it sits under the root or a plain group, never in a corps or brigade (409\nscope_group_parent_not_allowed).",
         "operationId": "create_scope_group",
         "security": [
           {
@@ -14396,7 +14396,7 @@
             }
           },
           "409": {
-            "description": "`scope_group_cycle`: Scope group cannot move into its own subtree; `scope_group_depth_exceeded`: Scope group tree is too deep; `scope_group_name_taken`: Scope group name already exists",
+            "description": "`scope_group_cycle`: Scope group cannot move into its own subtree; `scope_group_depth_exceeded`: Scope group tree is too deep; `scope_group_name_taken`: Scope group name already exists; `scope_group_parent_not_allowed`: Scope group cannot sit there",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -14409,6 +14409,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/ScopeGroupNameTakenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ScopeGroupParentNotAllowedProblem"
                     }
                   ],
                   "discriminator": {
@@ -14416,7 +14419,8 @@
                     "mapping": {
                       "scope_group_cycle": "#/components/schemas/ScopeGroupCycleProblem",
                       "scope_group_depth_exceeded": "#/components/schemas/ScopeGroupDepthExceededProblem",
-                      "scope_group_name_taken": "#/components/schemas/ScopeGroupNameTakenProblem"
+                      "scope_group_name_taken": "#/components/schemas/ScopeGroupNameTakenProblem",
+                      "scope_group_parent_not_allowed": "#/components/schemas/ScopeGroupParentNotAllowedProblem"
                     }
                   }
                 }
@@ -14668,7 +14672,7 @@
           "SCOPE_GROUPS"
         ],
         "summary": "Update Scope Group",
-        "description": "Rename, describe or move a group (parent_id null: directly under the root). Only the fields sent change.\nA group cannot move into its own subtree, and the moved subtree must still fit 6 levels. Archived, or outside\nthe caller's scope_group.view (the group or the new parent): 404. A move takes every post below the group along:\nit also needs post.update covering the old and the new parent location (the group or above it; the root for a\ngroup directly under it), otherwise 403 permission_required_for_action (action move_scope_group), answered before\nthe existence of the new parent and the tree rules; nothing changes on a refusal.",
+        "description": "Rename, describe or move a group (parent_id null: directly under the root). Only the fields sent change.\nA group cannot move into its own subtree, and the moved subtree must still fit 6 levels. Archived, or outside\nthe caller's scope_group.view (the group or the new parent): 404. A move takes every post below the group along:\nit also needs post.update covering the old and the new parent location (the group or above it; the root for a\ngroup directly under it), otherwise 403 permission_required_for_action (action move_scope_group), answered before\nthe existence of the new parent and the tree rules; nothing changes on a refusal. The group keeps its kind and\nthe parent must suit it (a plain group never moves into a corps or brigade, a corps stays under the root, a\nbrigade in a corps): 409 scope_group_parent_not_allowed.",
         "operationId": "update_scope_group",
         "security": [
           {
@@ -14807,7 +14811,7 @@
             }
           },
           "409": {
-            "description": "`scope_group_cycle`: Scope group cannot move into its own subtree; `scope_group_depth_exceeded`: Scope group tree is too deep; `scope_group_name_taken`: Scope group name already exists",
+            "description": "`scope_group_cycle`: Scope group cannot move into its own subtree; `scope_group_depth_exceeded`: Scope group tree is too deep; `scope_group_name_taken`: Scope group name already exists; `scope_group_parent_not_allowed`: Scope group cannot sit there",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -14820,6 +14824,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/ScopeGroupNameTakenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ScopeGroupParentNotAllowedProblem"
                     }
                   ],
                   "discriminator": {
@@ -14827,7 +14834,8 @@
                     "mapping": {
                       "scope_group_cycle": "#/components/schemas/ScopeGroupCycleProblem",
                       "scope_group_depth_exceeded": "#/components/schemas/ScopeGroupDepthExceededProblem",
-                      "scope_group_name_taken": "#/components/schemas/ScopeGroupNameTakenProblem"
+                      "scope_group_name_taken": "#/components/schemas/ScopeGroupNameTakenProblem",
+                      "scope_group_parent_not_allowed": "#/components/schemas/ScopeGroupParentNotAllowedProblem"
                     }
                   }
                 }
@@ -15091,7 +15099,7 @@
             }
           },
           "409": {
-            "description": "`scope_group_cycle`: Scope group cannot move into its own subtree; `scope_group_depth_exceeded`: Scope group tree is too deep; `scope_group_name_taken`: Scope group name already exists; `scope_group_not_archived`: Scope group is not archived",
+            "description": "`scope_group_cycle`: Scope group cannot move into its own subtree; `scope_group_depth_exceeded`: Scope group tree is too deep; `scope_group_name_taken`: Scope group name already exists; `scope_group_not_archived`: Scope group is not archived; `scope_group_parent_not_allowed`: Scope group cannot sit there",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -15107,6 +15115,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/ScopeGroupNotArchivedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ScopeGroupParentNotAllowedProblem"
                     }
                   ],
                   "discriminator": {
@@ -15115,7 +15126,8 @@
                       "scope_group_cycle": "#/components/schemas/ScopeGroupCycleProblem",
                       "scope_group_depth_exceeded": "#/components/schemas/ScopeGroupDepthExceededProblem",
                       "scope_group_name_taken": "#/components/schemas/ScopeGroupNameTakenProblem",
-                      "scope_group_not_archived": "#/components/schemas/ScopeGroupNotArchivedProblem"
+                      "scope_group_not_archived": "#/components/schemas/ScopeGroupNotArchivedProblem",
+                      "scope_group_parent_not_allowed": "#/components/schemas/ScopeGroupParentNotAllowedProblem"
                     }
                   }
                 }
@@ -36256,6 +36268,81 @@
             "status": 404,
             "title": "Scope group not found",
             "type": "https://example.org/problems/scope_group_not_found"
+          }
+        ]
+      },
+      "ScopeGroupParentNotAllowedProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Scope group cannot sit there",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "A {group_kind} cannot sit in a {parent_kind}"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "scope_group_parent_not_allowed",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          },
+          "group_kind": {
+            "type": "string",
+            "title": "Group Kind"
+          },
+          "parent_kind": {
+            "type": "string",
+            "title": "Parent Kind"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code",
+          "group_kind",
+          "parent_kind"
+        ],
+        "title": "ScopeGroupParentNotAllowedProblem",
+        "description": "Scope group cannot sit there (HTTP 409). Problem type scope_group_parent_not_allowed.",
+        "examples": [
+          {
+            "code": "scope_group_parent_not_allowed",
+            "detail": "A <group_kind> cannot sit in a <parent_kind>",
+            "group_kind": "<group_kind>",
+            "instance": "/api/v1/...",
+            "parent_kind": "<parent_kind>",
+            "status": 409,
+            "title": "Scope group cannot sit there",
+            "type": "https://example.org/problems/scope_group_parent_not_allowed"
           }
         ]
       },

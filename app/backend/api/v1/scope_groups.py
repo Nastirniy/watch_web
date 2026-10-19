@@ -20,7 +20,7 @@ from app.backend.auth.scope import Node, ROOT
 from app.backend.database import get_session
 from app.backend.utils.row_locks import lock_first
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
-from app.backend.enums.general import Permissions
+from app.backend.enums.general import Permissions, ScopeGroupKind
 from app.backend.enums.routes import ScopeGroupRoutes
 from app.backend.errors.coded import CodedError
 from app.backend.errors.openapi import GUARDED, problems
@@ -36,7 +36,7 @@ router = APIRouter(prefix=ScopeGroupRoutes.BASE.value, tags=[ScopeGroupRoutes.ta
 # Every route of this module answers these: the tree rules raise them
 TREE_PROBLEMS = (
     ErrorCode.SCOPE_GROUP_NOT_FOUND, ErrorCode.SCOPE_GROUP_CYCLE, ErrorCode.SCOPE_GROUP_DEPTH_EXCEEDED,
-    ErrorCode.SCOPE_GROUP_NAME_TAKEN,
+    ErrorCode.SCOPE_GROUP_NAME_TAKEN, ErrorCode.SCOPE_GROUP_PARENT_NOT_ALLOWED,
 )
 
 
@@ -66,9 +66,12 @@ async def _group_or_404(session: AsyncSession, auth: AuthContext, group_id: int,
         raise ApiError.from_coded(exc)
 
 
-async def _check_parent(session: AsyncSession, group_id: Optional[int], parent_id: Optional[int]) -> None:
+async def _check_parent(session: AsyncSession, group_id: Optional[int], parent_id: Optional[int],
+                        kind: ScopeGroupKind) -> None:
+    """The tree rules, then where a group of this kind may sit (409 scope_group_parent_not_allowed)"""
     try:
         await groups_service.check_new_parent(session, group_id, parent_id)
+        await groups_service.check_placement(session, kind, parent_id)
     except CodedError as exc:
         raise ApiError.from_coded(exc)
 
@@ -79,17 +82,18 @@ def _location(parent_id: Optional[int]) -> Node:
 
 
 async def _check_chosen_parent(session: AsyncSession, auth: AuthContext, group_id: Optional[int],
-                               parent_id: Optional[int], old_parent_id: Optional[int] = None) -> None:
+                               parent_id: Optional[int], kind: ScopeGroupKind,
+                               old_parent_id: Optional[int] = None) -> None:
     """A parent the caller names (create, move): outside the caller's scope_group.view it answers 404 like an
     unknown one. A move (group_id) takes every post below the group along: it needs post.update covering the old and
     the new parent location, as a post move (403 permission_required_for_action, move_scope_group). Both before the
-    tree rules (the parent exists and is live, no cycle, the depth)."""
+    tree rules (the parent exists and is live, no cycle, the depth) and the placement rules of the kind."""
     if parent_id is not None:
         _check_visible(auth, parent_id)
     if group_id is not None:
         for location in (_location(old_parent_id), _location(parent_id)):
             AccessControlService.check_covers(auth, Permissions.POST_UPDATE, location, "move_scope_group")
-    await _check_parent(session, group_id, parent_id)
+    await _check_parent(session, group_id, parent_id, kind)
 
 
 async def _audit(request: Request, session: AsyncSession, auth: AuthContext, action: str, group: ScopeGroup,
@@ -140,8 +144,10 @@ async def create_scope_group(
             all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_CREATE]))
 ):
     """Create a group under parent_id (null: directly under the root). Names are unique within a parent; groups
-    nest at most 6 levels deep. A parent outside the caller's scope_group.view answers 404 like an unknown one."""
-    await _check_chosen_parent(session, auth, None, data.parent_id)
+    nest at most 6 levels deep. A parent outside the caller's scope_group.view answers 404 like an unknown one.
+    Creates a plain group: it sits under the root or a plain group, never in a corps or brigade (409
+    scope_group_parent_not_allowed)."""
+    await _check_chosen_parent(session, auth, None, data.parent_id, ScopeGroupKind.GROUP)
     if await _name_taken(session, data.name, data.parent_id):
         raise ApiError(ErrorCode.SCOPE_GROUP_NAME_TAKEN)
 
@@ -233,7 +239,9 @@ async def update_scope_group(
     the caller's scope_group.view (the group or the new parent): 404. A move takes every post below the group along:
     it also needs post.update covering the old and the new parent location (the group or above it; the root for a
     group directly under it), otherwise 403 permission_required_for_action (action move_scope_group), answered before
-    the existence of the new parent and the tree rules; nothing changes on a refusal."""
+    the existence of the new parent and the tree rules; nothing changes on a refusal. The group keeps its kind and
+    the parent must suit it (a plain group never moves into a corps or brigade, a corps stays under the root, a
+    brigade in a corps): 409 scope_group_parent_not_allowed."""
     group = await _group_or_404(session, auth, group_id, lock=True)
     update_data = data.model_dump(exclude_unset=True)
     old_values = group.model_dump()
@@ -241,7 +249,8 @@ async def update_scope_group(
     new_parent = update_data.get("parent_id", group.parent_id)
     new_name = update_data.get("name", group.name)
     if "parent_id" in update_data and new_parent != group.parent_id:
-        await _check_chosen_parent(session, auth, group.id, new_parent, old_parent_id=group.parent_id)
+        await _check_chosen_parent(session, auth, group.id, new_parent, ScopeGroupKind(group.kind),
+                                   old_parent_id=group.parent_id)
     if ("parent_id" in update_data or "name" in update_data) and await _name_taken(
             session, new_name, new_parent, exclude_id=group.id):
         raise ApiError(ErrorCode.SCOPE_GROUP_NAME_TAKEN)
@@ -308,7 +317,7 @@ async def restore_scope_group(
     group = await _group_or_404(session, auth, group_id, include_deleted=True, lock=True)
     if not group.is_deleted:
         raise ApiError(ErrorCode.SCOPE_GROUP_NOT_ARCHIVED)
-    await _check_parent(session, group.id, group.parent_id)
+    await _check_parent(session, group.id, group.parent_id, ScopeGroupKind(group.kind))
     old_values = group.model_dump()
     group.is_deleted = False
     group.updated_at = datetime.now(timezone.utc)

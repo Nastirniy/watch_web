@@ -7,7 +7,7 @@ import sqlite3
 from pathlib import Path
 
 from tests.test_column_bounds import _run_downgrade
-from tests.test_migrations import HEAD, run_migrate
+from tests.test_migrations import run_migrate
 
 REVISION = "026_users_no_hot_columns"
 PREVIOUS = "025_session_refresh_jti"
@@ -18,10 +18,6 @@ def user_columns(db_file: Path) -> set:
     names = {row[1] for row in conn.execute("pragma table_info(users)")}
     conn.close()
     return names
-
-
-def test_head_is_026():
-    assert HEAD == REVISION
 
 
 def test_down_fills_last_login_and_up_drops_both(tmp_path):
