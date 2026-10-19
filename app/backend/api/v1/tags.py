@@ -2,6 +2,7 @@ from typing import List, Annotated
 from fastapi import APIRouter, Depends, Request, Query
 from sqlalchemy import func
 from sqlmodel import select
+from app.backend.utils.row_locks import lock_first
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.api.shared.helpers.db_errors import unique_violation_as
@@ -133,13 +134,10 @@ async def update_tag(
         auth: AuthContext = Depends(require(all=[Permissions.TAG_VIEW, Permissions.TAG_UPDATE]))
 ):
     current_user = auth.user
-    result = await session.exec(
-        select(Tag).where(
-            Tag.id == tag_id,
-            Tag.is_deleted == False
-        )
-    )
-    tag = result.first()
+    tag = await lock_first(session, select(Tag).where(
+        Tag.id == tag_id,
+        Tag.is_deleted == False
+    ))
 
     if not tag:
         raise ApiError(ErrorCode.TAG_NOT_FOUND)
@@ -204,8 +202,7 @@ async def archive_tag(
     """Archive a tag (is_deleted=true). Nothing is removed: the row is hidden from lists unless
     include_deleted=true and cannot be used for new data. Undo with POST /{tag_id}/restore. Already archived or unknown: 404."""
     current_user = auth.user
-    result = await session.exec(select(Tag).where(Tag.id == tag_id, Tag.is_deleted == False))
-    row = result.first()
+    row = await lock_first(session, select(Tag).where(Tag.id == tag_id, Tag.is_deleted == False))
     if not row:
         raise ApiError(ErrorCode.TAG_NOT_FOUND)
 
@@ -241,8 +238,7 @@ async def restore_tag(
 ):
     """Restore an archived tag (is_deleted=false). Not archived: 409."""
     current_user = auth.user
-    result = await session.exec(select(Tag).where(Tag.id == tag_id))
-    row = result.first()
+    row = await lock_first(session, select(Tag).where(Tag.id == tag_id))
     if not row:
         raise ApiError(ErrorCode.TAG_NOT_FOUND)
     if not row.is_deleted:

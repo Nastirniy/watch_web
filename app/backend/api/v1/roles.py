@@ -194,7 +194,7 @@ async def update_role(
     changed on any refusal.
     """
     current_user = auth.user
-    role = await get_role_or_404(session, role_id, lock=role_update.permission_ids is not None)
+    role = await get_role_or_404(session, role_id, lock=True)
     if role.builtin_key is not None and role_update.name is not None and role_update.name != role.name:
         raise ApiError(ErrorCode.BUILTIN_ROLE_NOT_RENAMABLE)
 
@@ -292,7 +292,7 @@ async def archive_role(
     administrator is the built-in admin role at the root) are never archived (409).
     """
     current_user = auth.user
-    role = await get_role_or_404(session, role_id)
+    role = await get_role_or_404(session, role_id, lock=True)
     if role.builtin_key is not None:
         raise ApiError(ErrorCode.BUILTIN_ROLE_NOT_ARCHIVABLE)
     granted = await role_permission_names(session, [role_id])
@@ -635,7 +635,7 @@ async def remove_role_permission(
     """Revoke one permission from a role. Returns the role's remaining permissions.
     Only a permission the caller holds can be revoked (403); a built-in role keeps its permissions (409)."""
     current_user = auth.user
-    role = await get_role_or_404(session, role_id)
+    role = await get_role_or_404(session, role_id, lock=True)
     permission = await get_permission_or_404(session, permission_id)
 
     existing = await session.exec(

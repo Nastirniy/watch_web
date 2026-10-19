@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Request, Query
 from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
+from app.backend.utils.row_locks import lock_first
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.api.shared.helpers.db_errors import unique_violation_as
@@ -159,13 +160,10 @@ async def update_signal_type(
         auth: AuthContext = Depends(require(all=[Permissions.SIGNAL_TYPE_VIEW, Permissions.SIGNAL_TYPE_UPDATE]))
 ):
     current_user = auth.user
-    result = await session.exec(
-        select(SignalType).where(
-            SignalType.id == signal_type_id,
-            SignalType.is_deleted == False
-        )
-    )
-    signal_type = result.first()
+    signal_type = await lock_first(session, select(SignalType).where(
+        SignalType.id == signal_type_id,
+        SignalType.is_deleted == False
+    ))
 
     if not signal_type:
         raise ApiError(ErrorCode.SIGNAL_TYPE_NOT_FOUND)
@@ -244,8 +242,7 @@ async def archive_signal_type(
     """Archive a signal type (is_deleted=true). Nothing is removed: the row is hidden from lists unless
     include_deleted=true and cannot be used for new data. Undo with POST /{signal_type_id}/restore. Already archived or unknown: 404."""
     current_user = auth.user
-    result = await session.exec(select(SignalType).where(SignalType.id == signal_type_id, SignalType.is_deleted == False))
-    row = result.first()
+    row = await lock_first(session, select(SignalType).where(SignalType.id == signal_type_id, SignalType.is_deleted == False))
     if not row:
         raise ApiError(ErrorCode.SIGNAL_TYPE_NOT_FOUND)
 
@@ -290,8 +287,7 @@ async def restore_signal_type(
 ):
     """Restore an archived signal type (is_deleted=false). Not archived: 409."""
     current_user = auth.user
-    result = await session.exec(select(SignalType).where(SignalType.id == signal_type_id))
-    row = result.first()
+    row = await lock_first(session, select(SignalType).where(SignalType.id == signal_type_id))
     if not row:
         raise ApiError(ErrorCode.SIGNAL_TYPE_NOT_FOUND)
     if not row.is_deleted:

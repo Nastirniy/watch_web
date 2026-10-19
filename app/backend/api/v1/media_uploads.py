@@ -89,10 +89,10 @@ def _to_response(row: UploadSession, version: PublishedVersion) -> UploadSession
     )
 
 
-async def _owned_session(session: AsyncSession, auth: AuthContext, upload_id: str) -> UploadSession:
+async def _owned_session(session: AsyncSession, auth: AuthContext, upload_id: str, lock: bool = False) -> UploadSession:
     """The session, visible to its creator or to media.manage_any in effect at its post, while media.view and
-    media.create are still in effect there"""
-    row = await uploads.get_session_row(session, upload_id)
+    media.create are still in effect there; lock=True for the routes that change it (uploads.get_session_row)"""
+    row = await uploads.get_session_row(session, upload_id, lock=lock)
     if row is None:
         raise ApiError(ErrorCode.UPLOAD_SESSION_NOT_FOUND)
     if row.user_id != auth.user.id and not auth.has_at_post(Permissions.MEDIA_MANAGE_ANY, row.post_id):
@@ -286,7 +286,7 @@ async def append_upload_chunk(
     413 when the chunk is larger than max_chunk_bytes or overruns the declared size; 410 when the session is not open
     (or the stored bytes are gone: the session is aborted); 409 while a complete stores the file.
     """
-    row = await _require_open(session, await _owned_session(session, auth, upload_id))
+    row = await _require_open(session, await _owned_session(session, auth, upload_id, lock=True))
 
     raw_offset = upload_offset
     if raw_offset is None or not raw_offset.isdigit():
@@ -376,7 +376,7 @@ async def complete_upload_session(
     file; 422 on hash mismatch (session aborted); 415 / 413 as for other uploads (session aborted). The post of the
     session archived: 409 post_archived, the session stays open and completes after a restore.
     """
-    row = await _expire_if_due(session, await _owned_session(session, auth, upload_id))
+    row = await _expire_if_due(session, await _owned_session(session, auth, upload_id, lock=True))
     if row.status == uploads.STATUS_COMPLETED and row.media_file_id:
         return await _completed_result(session, row)
     if row.status not in (uploads.STATUS_OPEN, uploads.STATUS_COMPLETING):
@@ -502,7 +502,7 @@ async def abort_upload_session(
 ):
     """Give up on an open session and delete the received bytes. Completed sessions cannot be aborted (409), nor a
     session while a complete stores its file (409)."""
-    row = await _owned_session(session, auth, upload_id)
+    row = await _owned_session(session, auth, upload_id, lock=True)
     if row.status in (uploads.STATUS_OPEN, uploads.STATUS_COMPLETING):
         if await uploads.abort_session(session, row, storage_root()):
             await create_audit_log(

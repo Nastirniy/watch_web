@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.backend.api.shared.helpers.db_errors import is_unique_violation
 from app.backend.database import get_session
+from app.backend.utils.row_locks import lock_first
 from app.backend.models.post import Post
 from app.backend.auth.context import AuthContext
 from app.backend.api.v1.models.request.posts import PostCreate, PostUpdate
@@ -230,10 +231,7 @@ async def update_post(
     """
     current_user = auth.user
     AccessControlService.check_post(auth, Permissions.POST_UPDATE, post_id)
-    result = await session.exec(
-        select(Post).where(Post.id == post_id)
-    )
-    post = result.first()
+    post = await lock_first(session, select(Post).where(Post.id == post_id))
 
     if not post or post.is_deleted:
         raise ApiError(ErrorCode.POST_NOT_FOUND)
@@ -290,7 +288,7 @@ async def _set_post_archived(
     applying while it is archived)."""
     current_user = auth.user
     AccessControlService.check_post(auth, Permissions.POST_ARCHIVE, post_id)
-    post = (await session.exec(select(Post).where(Post.id == post_id))).first()
+    post = await lock_first(session, select(Post).where(Post.id == post_id))
     if not post or (archived and post.is_deleted):
         raise ApiError(ErrorCode.POST_NOT_FOUND)
     if not archived and not post.is_deleted:

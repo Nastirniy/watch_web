@@ -255,7 +255,7 @@ async def _set_media_archived(request: Request, session: AsyncSession, auth: Aut
     (media.manage_any in effect there overrides), flag flip, audit row. Media of an archived post: 409 post_archived
     (after the 403 checks)."""
     current_user = auth.user
-    media_file = await get_media_or_404(session, media_id, include_deleted=True)
+    media_file = await get_media_or_404(session, media_id, include_deleted=True, lock=True)
 
     observation = None
     if media_file.observation_id:
@@ -744,7 +744,7 @@ async def regenerate_thumbnail(
     """Video: delete the poster and queue extraction again. Images are rendered on demand, nothing to regenerate.
     Needs media.view and media.update in effect at the post of the media (media.update at the root for media
     without an observation). Media of an archived post: 409 post_archived."""
-    media_file = await get_media_or_404(session, media_id, include_deleted=True)
+    media_file = await get_media_or_404(session, media_id, include_deleted=True, lock=True)
     if media_file.observation_id:
         observation = await get_observation_from_media(session, media_file)
         AccessControlService.check_post(auth, Permissions.MEDIA_VIEW, observation.post_id, "media")

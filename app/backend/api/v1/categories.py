@@ -2,6 +2,7 @@ from typing import List, Annotated
 from fastapi import APIRouter, Depends, Request, Query
 from sqlalchemy import func
 from sqlmodel import select
+from app.backend.utils.row_locks import lock_first
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.api.shared.helpers.db_errors import unique_violation_as
@@ -138,13 +139,10 @@ async def update_category(
         auth: AuthContext = Depends(require(all=[Permissions.CATEGORY_VIEW, Permissions.CATEGORY_UPDATE]))
 ):
     current_user = auth.user
-    result = await session.exec(
-        select(Category).where(
-            Category.id == category_id,
-            Category.is_deleted == False
-        )
-    )
-    category = result.first()
+    category = await lock_first(session, select(Category).where(
+        Category.id == category_id,
+        Category.is_deleted == False
+    ))
 
     if not category:
         raise ApiError(ErrorCode.CATEGORY_NOT_FOUND)
@@ -209,8 +207,7 @@ async def archive_category(
     """Archive a category (is_deleted=true). Nothing is removed: the row is hidden from lists unless
     include_deleted=true and cannot be used for new data. Undo with POST /{category_id}/restore. Already archived or unknown: 404."""
     current_user = auth.user
-    result = await session.exec(select(Category).where(Category.id == category_id, Category.is_deleted == False))
-    row = result.first()
+    row = await lock_first(session, select(Category).where(Category.id == category_id, Category.is_deleted == False))
     if not row:
         raise ApiError(ErrorCode.CATEGORY_NOT_FOUND)
 
@@ -252,8 +249,7 @@ async def restore_category(
 ):
     """Restore an archived category (is_deleted=false). Not archived: 409."""
     current_user = auth.user
-    result = await session.exec(select(Category).where(Category.id == category_id))
-    row = result.first()
+    row = await lock_first(session, select(Category).where(Category.id == category_id))
     if not row:
         raise ApiError(ErrorCode.CATEGORY_NOT_FOUND)
     if not row.is_deleted:

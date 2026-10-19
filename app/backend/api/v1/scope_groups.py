@@ -18,6 +18,7 @@ from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
 from app.backend.auth.scope import Node, ROOT
 from app.backend.database import get_session
+from app.backend.utils.row_locks import lock_first
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import ScopeGroupRoutes
@@ -56,10 +57,11 @@ def _check_visible(auth: AuthContext, group_id: int) -> None:
         raise ApiError(ErrorCode.SCOPE_GROUP_NOT_FOUND)
 
 
-async def _group_or_404(session: AsyncSession, auth: AuthContext, group_id: int, include_deleted: bool = False) -> ScopeGroup:
+async def _group_or_404(session: AsyncSession, auth: AuthContext, group_id: int, include_deleted: bool = False,
+                        lock: bool = False) -> ScopeGroup:
     _check_visible(auth, group_id)
     try:
-        return await groups_service.get_group(session, group_id, include_deleted)
+        return await groups_service.get_group(session, group_id, include_deleted, lock=lock)
     except CodedError as exc:
         raise ApiError.from_coded(exc)
 
@@ -232,7 +234,7 @@ async def update_scope_group(
     it also needs post.update covering the old and the new parent location (the group or above it; the root for a
     group directly under it), otherwise 403 permission_required_for_action (action move_scope_group), answered before
     the existence of the new parent and the tree rules; nothing changes on a refusal."""
-    group = await _group_or_404(session, auth, group_id)
+    group = await _group_or_404(session, auth, group_id, lock=True)
     update_data = data.model_dump(exclude_unset=True)
     old_values = group.model_dump()
 
@@ -273,7 +275,7 @@ async def archive_scope_group(
     """Archive a group (is_deleted=true). Only an empty group: no active subgroup and no active post (409
     scope_group_not_empty). Already archived, unknown or outside the caller's scope_group.view: 404. Undo with
     POST /{group_id}/restore."""
-    group = await _group_or_404(session, auth, group_id)
+    group = await _group_or_404(session, auth, group_id, lock=True)
     try:
         await groups_service.check_empty(session, group.id)
     except CodedError as exc:
@@ -303,7 +305,7 @@ async def restore_scope_group(
 ):
     """Restore an archived group (is_deleted=false) under its former parent. Unknown: 404, and 404 when the
     parent is archived (restore the parent first); outside the caller's scope_group.view: 404. Not archived: 409."""
-    group = await _group_or_404(session, auth, group_id, include_deleted=True)
+    group = await _group_or_404(session, auth, group_id, include_deleted=True, lock=True)
     if not group.is_deleted:
         raise ApiError(ErrorCode.SCOPE_GROUP_NOT_ARCHIVED)
     await _check_parent(session, group.id, group.parent_id)

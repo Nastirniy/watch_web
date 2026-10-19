@@ -5,6 +5,8 @@ from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.backend.utils.row_locks import lock_first
+
 from app.backend.enums.errors import ErrorCode
 from app.backend.errors.coded import CodedError
 from app.backend.models.post import Post
@@ -14,11 +16,12 @@ from app.backend.models.scope_group import ScopeGroup
 MAX_GROUP_DEPTH = 6
 
 
-async def get_group(session: AsyncSession, group_id: int, include_deleted: bool = False) -> ScopeGroup:
+async def get_group(session: AsyncSession, group_id: int, include_deleted: bool = False, lock: bool = False) -> ScopeGroup:
+    """The group; lock=True locks it as the first statement of the write (utils/row_locks.py)"""
     query = select(ScopeGroup).where(ScopeGroup.id == group_id)
     if not include_deleted:
         query = query.where(ScopeGroup.is_deleted == False)  # noqa: E712
-    group = (await session.exec(query)).first()
+    group = await lock_first(session, query) if lock else (await session.exec(query)).first()
     if group is None:
         raise CodedError(ErrorCode.SCOPE_GROUP_NOT_FOUND)
     return group
