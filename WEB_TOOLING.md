@@ -231,3 +231,30 @@ player.vttThumbnails({ src: vtt });
 // Vidstack
 <media-player><media-provider /><media-video-layout thumbnails={vtt ?? undefined} /></media-player>
 ```
+
+## 10. Video in a player
+
+A `<video>` or `<audio>` element cannot send the Bearer token. The starter service worker does it for the stream
+route: it sends the element's own `Range` requests to `GET /api/v1/media/{media_id}/stream` again with the token,
+so the plain URL works as `src` and seeking works.
+
+1. Copy `api-contract/web-kit/public/stream-sw.js` into the static root of the web project (Vite: `public/`); it
+   must be served from the origin root, so its scope covers `/api/`.
+2. Copy `src/api/streamWorker.ts`, call `registerStreamWorker` once at start-up with a function that returns the
+   current access token (refreshed first when `expired` is true), and `sendStreamToken` after every login and
+   refresh (`null` at logout).
+
+```ts
+await registerStreamWorker(async (expired) => (expired ? await refreshAccessToken() : currentAccessToken()));
+// after login / refresh:
+sendStreamToken(accessToken);
+
+<video controls preload="metadata" src={`/api/v1/media/${media.id}/stream`} />
+```
+
+On the first visit the worker controls the page only after a reload (`navigator.serviceWorker.controller` is
+`null` until then); where workers are unavailable (`registerStreamWorker` returns `null`), fetch the media with
+the token and play a blob URL instead, without seeking before it is loaded.
+
+nginx keeps the API's permission for a stream 30 seconds (API.md, "Video and audio in a player"): access taken
+away stops a stream within 30 s, and `/stream` never answers `304`.

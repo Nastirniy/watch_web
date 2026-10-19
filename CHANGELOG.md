@@ -5,6 +5,27 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Stream authorization cache (2026-10-19)
+
+### Changed
+
+- `GET /media/{id}/stream`: nginx asks the API once per 30 seconds for each token, client certificate and media
+  (`auth_request`, cached) and serves every `Range` request in between itself; a refusal is still the API's
+  problem. Seeking no longer waits for the API (under the video stress test every Range request did). Access taken
+  away (logout, revoked session or certificate, removed permission, archived media) stops a stream within 30 s
+  instead of at the next request, and `If-None-Match` on `/stream` answers `200`, never `304`. `/download` is
+  unchanged. API.md, "Video and audio in a player".
+
+### Added
+
+- `api-contract/web-kit`: a starter service worker (`public/stream-sw.js`) and its page side
+  (`src/api/streamWorker.ts`) that give `<video>` / `<audio>` elements the Bearer token (WEB_TOOLING.md, section 10).
+
+### Deployment
+
+- Create `/var/cache/nginx/stream_auth` owned by the nginx user (DEPLOYMENT.md) before installing the new
+  `nginx-http.conf` and `nginx-app.conf`; an nginx reload is enough, the API does not change.
+
 ## Hot rows and crash behaviour (2026-10-19)
 
 ### Fixed

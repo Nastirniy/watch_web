@@ -61,9 +61,9 @@ sudo cp nginx-app.conf /etc/nginx/snippets/watch-web-app.conf         # location
 sudo cp nginx-proxy.conf /etc/nginx/snippets/watch-web-proxy.conf     # API proxy headers, certificate headers
 sudo cp nginx.conf /etc/nginx/sites-available/watch_web               # server blocks: 80 -> 443, TLS + client certificates
 sudo ln -s /etc/nginx/sites-available/watch_web /etc/nginx/sites-enabled/
-sudo mkdir -p /var/www/nginx_uploads /var/cache/nginx/thumbs
-sudo chown www-data:www-data /var/www/nginx_uploads /var/cache/nginx/thumbs
-sudo chmod 755 /var/cache/nginx      # the workers (www-data) reach thumbs/ through it; at 0700 every thumbnail answers 200 with 0 bytes
+sudo mkdir -p /var/www/nginx_uploads /var/cache/nginx/thumbs /var/cache/nginx/stream_auth
+sudo chown www-data:www-data /var/www/nginx_uploads /var/cache/nginx/thumbs /var/cache/nginx/stream_auth
+sudo chmod 755 /var/cache/nginx      # the workers (www-data) reach thumbs/ and stream_auth/ through it; at 0700 every thumbnail answers 200 with 0 bytes
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
@@ -79,6 +79,7 @@ Edit before reloading:
 | nginx.conf | `root /var/www/watch_web_client;` in `location /` | the web client build (`index.html` and assets) |
 | nginx-http.conf | `server 127.0.0.1:8000;` / `server 127.0.0.1:8080;` | `API_PORT` / `IMGPROXY_PORT` |
 | nginx-http.conf | `proxy_cache_path /var/cache/nginx/thumbs ... max_size=20g` | local disk, sized for the box |
+| nginx-http.conf | `proxy_cache_path /var/cache/nginx/stream_auth ... max_size=100m` | small as it is: one entry per token and video, kept 30 s (API.md, "Video and audio in a player") |
 | nginx-app.conf | `client_max_body_size 65m;` in the `/api/v1/media/uploads` location | above `storage.upload.max_chunk_bytes`, never equal: the API answers an oversized chunk itself (`upload_chunk_too_large`) |
 | nginx-app.conf | `client_max_body_size 11G;` (server level) | above `storage.max_file_size_gb`, never equal: the API answers an oversized file itself (`media_file_too_large`) |
 
