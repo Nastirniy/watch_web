@@ -20257,7 +20257,7 @@
           "MEDIA_FORMATS"
         ],
         "summary": "Create Media Format",
-        "description": "Add an accepted format. Creating an archived content_type again restores it with the new values.",
+        "description": "Add an accepted format. Creating an archived content_type again restores it with the new values, which needs\nmedia_format.archive as well (as POST /{format_id}/restore does): 403 permission_denied without it.",
         "operationId": "create_media_format",
         "requestBody": {
           "content": {

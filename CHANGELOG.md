@@ -19,6 +19,12 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   refresh token that may refresh the session, replaced by every refresh with a conditional UPDATE, the first
   statement of the refresh transaction (`auth/sessions.py`, `claim_refresh`). Sessions from before the upgrade
   have none: their first refresh sets it, so nobody is logged out. The downgrade drops the column.
+- `POST /media-formats/create` of an archived `content_type` restores it only with `media_format.archive` as well,
+  as `POST /media-formats/{id}/restore` requires; without it 403 `permission_denied` (`missing`:
+  `media_format.archive`) and the row stays archived. Before, `media_format.create` alone restored it. Only the
+  description of the operation changed in `api-contract/v1/openapi.json`.
+- DEPLOYMENT.md: `chmod 755 /var/cache/nginx`. Created as `root 0700`, it kept the nginx workers out of
+  `thumbs/`: every thumbnail answered 200 with an empty body (found on the test server).
 - UPLOADS.md: a chunk may also be sent as `application/octet-stream` or without a `Content-Type` (as the API always
   accepted); the same bytes are stored once per observation (the existing `media_file_id` answers, with its first
   `original_filename`).
