@@ -14,7 +14,9 @@ Videos (MP4 H.264 / H.265 8 and 10 bit / MPEG-4, M4V, WebM VP8 / VP9 / AV1, MOV 
 VP9, no audio, a 90 degree display rotation, a really odd size, 4K, one keyframe in 30 s, 230 s with two sheets,
 0.5 s): probe, poster, storyboard (WebVTT, sheets through /media-images/ without a token, sheet size = the #xywh
 grid, one cue per step, no cue on a black tile), statuses. A video file with only audio is unsupported at once
-(no_video_stream), a truncated one fails after its attempts (poster_failed). Exit code 0 when every check passes.
+(no_video_stream), a truncated one fails after its attempts (poster_failed). /stream through nginx's auth cache:
+bytes, the API's headers on a miss and a hit, refusals as the API's problems, logout and archive stop a stream within
+the 30 s of the cache. Exit code 0 when every check passes.
 Needs ffmpeg on the host (imageio-ffmpeg) and Pillow; the stack's worker runs with a short retry backoff.
 """
 from __future__ import annotations
@@ -28,12 +30,15 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Optional
 from urllib.parse import urlsplit
 
 import requests
 from PIL import Image, ImageDraw, ImageStat
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from app.backend.enums.routes import AuthRoutes, MediaRoutes  # noqa: E402
+
 Image.MAX_IMAGE_PIXELS = None     # this script builds and opens images above Pillow's decompression bomb limit
 
 NGINX = os.environ.get("E2E_NGINX", f"http://127.0.0.1:{os.environ.get('E2E_NGINX_PORT', '18089')}")
@@ -408,6 +413,91 @@ def run_videos(headers: dict, observation_id: int, videos: list[dict]) -> None:
               "statuses ready", f"{info.get('thumbnail_status')} / {info.get('storyboard_status')}")
 
 
+def stream_url(media_id: int) -> str:
+    return f"{API}{MediaRoutes.BASE.value}{MediaRoutes.MEDIA_STREAM.value.format(media_id=media_id)}"
+
+
+def media_url(route: MediaRoutes, media_id: int) -> str:
+    return f"{API}{MediaRoutes.BASE.value}{route.value.format(media_id=media_id)}"
+
+
+def file_headers(response: requests.Response) -> tuple:
+    return tuple(response.headers.get(name) for name in ("Content-Type", "Content-Disposition", "ETag", "X-File-Hash"))
+
+
+def check_stream(headers: dict, video: dict) -> None:
+    """/stream through the auth cache: the bytes, the API's headers on a miss and on a hit, HEAD, a bad range"""
+    media_id, source = video["id"], video["path"].read_bytes()
+    info = requests.get(media_url(MediaRoutes.MEDIA_INFO, media_id), headers=headers, timeout=10).json()
+    full = requests.get(stream_url(media_id), headers=headers, timeout=60)
+    if not check("stream", full.status_code == 200 and full.content == source, "full answer: the source bytes",
+                 f"{full.status_code} {len(full.content)} of {len(source)}"):
+        return
+    content_type, disposition, etag, file_hash = file_headers(full)
+    check("stream", content_type == info["mime_type"], "Content-Type is the stored type", f"{content_type} / {info['mime_type']}")
+    check("stream", bool(file_hash) and etag == f'"{file_hash}"', "ETag is the API's file hash", f"{etag} / {file_hash}")
+    check("stream", (disposition or "").startswith("inline"), "Content-Disposition inline", str(disposition))
+    check("stream", bool(full.headers.get("X-Request-ID")), "X-Request-ID", "")
+    for attempt in ("miss or hit", "hit"):
+        part = requests.get(stream_url(media_id), headers={**headers, "Range": "bytes=1000-1999"}, timeout=30)
+        check("stream", part.status_code == 206 and part.content == source[1000:2000]
+              and part.headers.get("Content-Range") == f"bytes 1000-1999/{len(source)}",
+              f"Range 1000-1999 ({attempt}): the source bytes", f"{part.status_code} {part.headers.get('Content-Range')}")
+        check("stream", file_headers(part) == file_headers(full), f"Range ({attempt}): the API's headers", str(file_headers(part)))
+    head = requests.head(stream_url(media_id), headers=headers, timeout=30)
+    check("stream", head.status_code == 200 and head.headers.get("Content-Length") == str(len(source)), "HEAD: the size",
+          f"{head.status_code} {head.headers.get('Content-Length')}")
+    beyond = requests.get(stream_url(media_id), headers={**headers, "Range": f"bytes={len(source) + 10}-"}, timeout=30)
+    check("stream", beyond.status_code == 416, "unsatisfiable Range: 416", str(beyond.status_code))
+
+
+# nginx keeps an allowed stream 30 s and counts whole seconds: refused at most ~31 s after the access went away
+REVOKED_WITHIN = 32
+
+
+def refused_within(url: str, headers: dict, status: int, seconds: float = 40) -> Optional[float]:
+    """Seconds until url answers status (polled every second), None if it never did within `seconds`"""
+    start = time.monotonic()
+    while time.monotonic() - start <= seconds:
+        if requests.get(url, headers={**headers, "Range": "bytes=0-99"}, timeout=30).status_code == status:
+            return round(time.monotonic() - start, 1)
+        time.sleep(1)
+    return None
+
+
+def check_stream_refusals(headers: dict, video: dict) -> None:
+    """Refusals are the API's problems, and taking access away stops a stream within the 30 s of the cache"""
+    media_id = video["id"]
+    anonymous = requests.get(stream_url(media_id), timeout=30)
+    check("stream", anonymous.status_code == 401 and problem_code(anonymous) == "credentials_required",
+          "no token: 401 credentials_required", f"{anonymous.status_code} {problem_code(anonymous)}")
+    challenges = anonymous.raw.headers.getlist("WWW-Authenticate")
+    check("stream", len(challenges) == 1, "no token: one WWW-Authenticate", str(challenges))
+    missing = requests.get(stream_url(10 ** 9), headers=headers, timeout=30)
+    check("stream", missing.status_code == 404 and problem_code(missing) == "media_not_found", "unknown media: 404 media_not_found",
+          f"{missing.status_code} {problem_code(missing)}")
+
+    login = requests.post(f"{API}{AuthRoutes.BASE.value}{AuthRoutes.LOGIN.value}", json=LOGIN, timeout=10)
+    second = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    allowed = requests.get(stream_url(media_id), headers={**second, "Range": "bytes=0-99"}, timeout=30)
+    check("stream", allowed.status_code == 206, "second session streams", str(allowed.status_code))
+    out = requests.post(f"{API}{AuthRoutes.BASE.value}{AuthRoutes.LOGOUT.value}", headers=second, timeout=10)
+    check("stream", out.status_code == 200, "second session logs out", str(out.status_code))
+    took = refused_within(stream_url(media_id), second, 401)
+    check("stream", took is not None and took <= REVOKED_WITHIN, "logout stops the stream within ~30 s", f"after {took} s")
+    note("stream", f"logout -> 401 after {took} s")
+
+    allowed = requests.get(stream_url(media_id), headers={**headers, "Range": "bytes=0-99"}, timeout=30)
+    archived = requests.post(media_url(MediaRoutes.MEDIA_ARCHIVE, media_id), headers=headers, timeout=10)
+    check("stream", allowed.status_code == 206 and archived.status_code == 200, "stream, then archive",
+          f"{allowed.status_code} {archived.status_code}")
+    took = refused_within(stream_url(media_id), headers, 404)
+    check("stream", took is not None and took <= REVOKED_WITHIN, "archive stops the stream within ~30 s", f"after {took} s")
+    note("stream", f"archive -> 404 after {took} s")
+    restored = requests.post(media_url(MediaRoutes.MEDIA_RESTORE, media_id), headers=headers, timeout=10)
+    check("stream", restored.status_code == 200, "restore", str(restored.status_code))
+
+
 def main() -> int:
     ffmpeg = ffmpeg_binary()
     token = requests.post(f"{API}/auth/login", json=LOGIN, timeout=10)
@@ -430,6 +520,10 @@ def main() -> int:
         for name, content_type, data, display, renderable in build_images():
             run_image(headers, observation["id"], name, content_type, data, display, renderable)
         run_videos(headers, observation["id"], videos)
+        streamed = next((video for video in videos if video["expect"] == "ok" and video.get("id")), None)
+        if check("stream", streamed is not None, "a stored video to stream", ""):
+            check_stream(headers, streamed)
+            check_stream_refusals(headers, streamed)
 
     print("\n==== summary")
     for name, lines in summary.items():

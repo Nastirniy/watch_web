@@ -12,7 +12,7 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - `GET /media/{id}/stream`: nginx asks the API once per 30 seconds for each token, client certificate and media
   (`auth_request`, cached) and serves every `Range` request in between itself; a refusal is still the API's
   problem. Seeking no longer waits for the API (under the video stress test every Range request did). Access taken
-  away (logout, revoked session or certificate, removed permission, archived media) stops a stream within 30 s
+  away (logout, revoked session or certificate, removed permission, archived media) stops a stream within about 30 s
   instead of at the next request, and `If-None-Match` on `/stream` answers `200`, never `304`. `/download` is
   unchanged. API.md, "Video and audio in a player".
 

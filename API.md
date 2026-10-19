@@ -321,7 +321,7 @@ and media, keeps the API's yes for 30 seconds and serves the bytes itself until 
 own problem (`401`, `403`, `404 media_not_found`, ...). What follows for the client:
 
 - Access taken away (logout, a revoked session or certificate, a removed permission, archived media) stops a stream
-  within 30 seconds, not at once.
+  within about 30 seconds, not at once (nginx counts whole seconds; measured 30.4 to 31.4 s).
 - `If-None-Match` on `/stream` answers `200` with the file, never `304`; `ETag` and `X-File-Hash` are the file hash.
 - An unsatisfiable `Range` on `/stream` or `/download` is answered by nginx (`416`, by status, like any
   infrastructure error); the `range_not_satisfiable` problem comes only from an API without nginx in front.
