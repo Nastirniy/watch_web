@@ -118,6 +118,17 @@ export type FieldErrorCode = Schemas["FieldErrorCode"];
 Write the handling of important statuses as exhaustive `switch` statements with a declared return type,
 the way `onUnauthorized` does, and the compiler tells you about every new code.
 
+Lists and searches answer 422 `validation_error` (item code `extra_forbidden`) for a query parameter they do not
+know (API.md, "Lists and filters"): send only parameters of the contract, and no cache-busting `_=` or tracking
+parameters. Build the query through the typed client, never by hand, and keep its type, so a removed or misspelt
+filter is a build error in `npm run api:check` (excess property) instead of a 422 in production:
+
+```ts
+type ObservationQuery = NonNullable<paths["/api/v1/search/observations"]["get"]["parameters"]["query"]>;
+const query: ObservationQuery = { status_in: ["active"], last_n_days: 7 };   // a typo here fails tsc
+await api.GET("/api/v1/search/observations", { params: { query } });
+```
+
 ## 5. Translations
 
 Write the locale as a TypeScript module checked against `Messages` (`src/i18n/messages.ts`):

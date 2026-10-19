@@ -13,7 +13,7 @@ from sqlalchemy.sql.selectable import Select
 from app.backend.models.observation import Observation
 from app.backend.filters.observation_frequency_filter import ObservationFrequencyFilter
 from app.backend.filters.observation_tag_filter import ObservationTagFilter
-from app.backend.enums.general import FrequencyKind, TagMatch
+from app.backend.enums.general import ConfidenceLevel, FrequencyKind, ObservationStatus, TagMatch
 from app.backend.filters.simple_engine import ListCriteria, SimpleFilterEngine
 
 
@@ -24,9 +24,9 @@ class ObservationCriteria(ListCriteria):
     user_id: Optional[int] = None
     post_id: Optional[int] = None
     signal_type_id: Optional[int] = None
-    status: Optional[str] = None
-    status_in: Optional[List[str]] = None
-    confidence_level: Optional[str] = None
+    status: Optional[ObservationStatus] = None
+    status_in: Optional[List[ObservationStatus]] = None
+    confidence_level: Optional[ConfidenceLevel] = None
     frequency_kind: Optional[FrequencyKind] = None
     frequency_center_from: Optional[Decimal] = None
     frequency_center_to: Optional[Decimal] = None

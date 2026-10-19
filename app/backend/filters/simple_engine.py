@@ -4,6 +4,7 @@ Every service declares its criteria as a frozen dataclass extending ListCriteria
 """
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import FrozenSet, Optional, Type, TypeVar, List, Set
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.sql.selectable import Select
@@ -39,6 +40,11 @@ def as_criteria(criteria_class: Type[C], params) -> C:
     if isinstance(params, criteria_class):
         return params
     return criteria_class(**params.model_dump())
+
+
+def stored_value(value):
+    """The value a column holds for a criteria value: enums are stored as their value"""
+    return value.value if isinstance(value, Enum) else value
 
 
 def _get_model_columns(model: Type) -> Set[str]:
@@ -98,9 +104,9 @@ class SimpleFilterEngine:
 
     @classmethod
     def _apply_exact(cls, query: Select, column, value) -> Select:
-        """Apply exact match filter"""
+        """Apply exact match filter; an enum member matches its stored value"""
         if value is not None:
-            return query.where(column == value)
+            return query.where(column == stored_value(value))
         return query
 
     @classmethod
@@ -113,9 +119,9 @@ class SimpleFilterEngine:
 
     @classmethod
     def _apply_in_list(cls, query: Select, column, values: Optional[List]) -> Select:
-        """Apply IN list filter"""
+        """Apply IN list filter; enum members match their stored values"""
         if values:
-            return query.where(column.in_(values))
+            return query.where(column.in_([stored_value(value) for value in values]))
         return query
 
     @classmethod

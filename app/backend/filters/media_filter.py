@@ -22,7 +22,7 @@ class MediaCriteria(ListCriteria):
     id: Optional[int] = None
     observation_id: Optional[int] = None
     original_filename_contains: Optional[str] = None
-    media_type: Optional[str] = None
+    media_type: Optional[MediaType] = None
     mime_type: Optional[str] = None
     file_extension: Optional[str] = None
     file_size_from: Optional[int] = None

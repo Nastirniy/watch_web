@@ -9961,16 +9961,16 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/ObservationStatus"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Exact status (active, disappeared, confirmed, false_positive, under_review)",
+              "description": "Exact status",
               "title": "Status"
             },
-            "description": "Exact status (active, disappeared, confirmed, false_positive, under_review)"
+            "description": "Exact status"
           },
           {
             "name": "status_in",
@@ -9981,7 +9981,7 @@
                 {
                   "type": "array",
                   "items": {
-                    "type": "string"
+                    "$ref": "#/components/schemas/ObservationStatus"
                   }
                 },
                 {
@@ -10000,16 +10000,16 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/ConfidenceLevel"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Confidence level (low, medium, high)",
+              "description": "Confidence level",
               "title": "Confidence Level"
             },
-            "description": "Confidence level (low, medium, high)"
+            "description": "Confidence level"
           },
           {
             "name": "frequency_kind",
@@ -10166,10 +10166,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Last N days from today",
+              "description": "Observed in the last N days (today in UTC counts as one); not together with observed_at_from / observed_at_to",
               "title": "Last N Days"
             },
-            "description": "Last N days from today"
+            "description": "Observed in the last N days (today in UTC counts as one); not together with observed_at_from / observed_at_to"
           },
           {
             "name": "created_at_from",
@@ -15367,16 +15367,16 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/MediaType"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Media type (image, video, audio, document)",
+              "description": "Media type",
               "title": "Media Type"
             },
-            "description": "Media type (image, video, audio, document)"
+            "description": "Media type"
           },
           {
             "name": "mime_type",
@@ -15403,16 +15403,17 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 11
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "File extension (jpg, mp4, etc)",
+              "description": "File extension, with or without the dot, any case: png, .png, PNG",
               "title": "File Extension"
             },
-            "description": "File extension (jpg, mp4, etc)"
+            "description": "File extension, with or without the dot, any case: png, .png, PNG"
           },
           {
             "name": "file_size_from",
@@ -20047,16 +20048,16 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/MediaType"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "image, video or audio",
+              "description": "Media type (formats exist for image, video and audio)",
               "title": "Media Type"
             },
-            "description": "image, video or audio"
+            "description": "Media type (formats exist for image, video and audio)"
           },
           {
             "name": "content_type",
@@ -21123,16 +21124,16 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/ObservationStatus"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Exact status (active, disappeared, confirmed, false_positive, under_review)",
+              "description": "Exact status",
               "title": "Status"
             },
-            "description": "Exact status (active, disappeared, confirmed, false_positive, under_review)"
+            "description": "Exact status"
           },
           {
             "name": "status_in",
@@ -21143,7 +21144,7 @@
                 {
                   "type": "array",
                   "items": {
-                    "type": "string"
+                    "$ref": "#/components/schemas/ObservationStatus"
                   }
                 },
                 {
@@ -21162,16 +21163,16 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/ConfidenceLevel"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Confidence level (low, medium, high)",
+              "description": "Confidence level",
               "title": "Confidence Level"
             },
-            "description": "Confidence level (low, medium, high)"
+            "description": "Confidence level"
           },
           {
             "name": "frequency_kind",
@@ -21328,10 +21329,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Last N days from today",
+              "description": "Observed in the last N days (today in UTC counts as one); not together with observed_at_from / observed_at_to",
               "title": "Last N Days"
             },
-            "description": "Last N days from today"
+            "description": "Observed in the last N days (today in UTC counts as one); not together with observed_at_from / observed_at_to"
           },
           {
             "name": "created_at_from",
@@ -24043,16 +24044,16 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/MediaType"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Media type (image, video, audio, document)",
+              "description": "Media type",
               "title": "Media Type"
             },
-            "description": "Media type (image, video, audio, document)"
+            "description": "Media type"
           },
           {
             "name": "mime_type",
@@ -24079,16 +24080,17 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 11
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "File extension (jpg, mp4, etc)",
+              "description": "File extension, with or without the dot, any case: png, .png, PNG",
               "title": "File Extension"
             },
-            "description": "File extension (jpg, mp4, etc)"
+            "description": "File extension, with or without the dot, any case: png, .png, PNG"
           },
           {
             "name": "file_size_from",
@@ -24480,16 +24482,16 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/MediaType"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "image, video or audio",
+              "description": "Media type (formats exist for image, video and audio)",
               "title": "Media Type"
             },
-            "description": "image, video or audio"
+            "description": "Media type (formats exist for image, video and audio)"
           },
           {
             "name": "content_type",
@@ -27481,6 +27483,15 @@
             "type": "https://example.org/problems/certificate_verification_failed"
           }
         ]
+      },
+      "ConfidenceLevel": {
+        "type": "string",
+        "enum": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "title": "ConfidenceLevel"
       },
       "CredentialsRequiredProblem": {
         "properties": {
@@ -31293,6 +31304,16 @@
           }
         ]
       },
+      "MediaType": {
+        "type": "string",
+        "enum": [
+          "image",
+          "video",
+          "audio",
+          "document"
+        ],
+        "title": "MediaType"
+      },
       "MediaTypeUnknownProblem": {
         "properties": {
           "type": {
@@ -32564,7 +32585,7 @@
             "anyOf": [
               {
                 "items": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/ObservationStatus"
                 },
                 "type": "array"
               },
@@ -32573,19 +32594,18 @@
               }
             ],
             "title": "Statuses",
-            "description": "Filter by statuses: active, disappeared, confirmed, false_positive, under_review"
+            "description": "Filter by statuses"
           },
           "confidence_level": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/ConfidenceLevel"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Confidence Level",
-            "description": "Filter by confidence level: low, medium, high"
+            "description": "Filter by confidence level"
           },
           "frequency_center_from": {
             "anyOf": [
@@ -32756,6 +32776,7 @@
             "default": false
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "report_type"
@@ -32966,6 +32987,17 @@
           "buckets"
         ],
         "title": "ObservationStatsPeriod"
+      },
+      "ObservationStatus": {
+        "type": "string",
+        "enum": [
+          "active",
+          "disappeared",
+          "confirmed",
+          "false_positive",
+          "under_review"
+        ],
+        "title": "ObservationStatus"
       },
       "ObservationUpdate": {
         "properties": {

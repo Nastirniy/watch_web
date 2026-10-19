@@ -13,11 +13,11 @@ from typing import Iterable, List, Optional
 from sqlalchemy.orm import contains_eager
 from sqlalchemy.sql.selectable import Select
 
-from app.backend.enums.general import FrequencyKind, ObservationReportType, TagMatch
+from app.backend.enums.general import ConfidenceLevel, FrequencyKind, ObservationReportType, ObservationStatus, TagMatch
 from app.backend.models.observation import Observation, ObservationFrequency
 from app.backend.filters.observation_frequency_filter import ObservationFrequencyFilter
 from app.backend.filters.observation_tag_filter import ObservationTagFilter
-from app.backend.filters.simple_engine import as_criteria
+from app.backend.filters.simple_engine import as_criteria, stored_value
 from app.backend.utils.datetime_utils import as_utc
 
 REPORT_TYPE_KIND = {
@@ -34,8 +34,8 @@ class ObservationReportCriteria:
     user_ids: Optional[List[int]] = None
     post_ids: Optional[List[int]] = None
     signal_type_ids: Optional[List[int]] = None
-    statuses: Optional[List[str]] = None
-    confidence_level: Optional[str] = None
+    statuses: Optional[List[ObservationStatus]] = None
+    confidence_level: Optional[ConfidenceLevel] = None
     frequency_center_from: Optional[Decimal] = None
     frequency_center_to: Optional[Decimal] = None
     bandwidth_from: Optional[Decimal] = None
@@ -102,11 +102,11 @@ class ObservationReportFilter:
 
         # Status filter
         if params.statuses:
-            query = query.where(Observation.status.in_(params.statuses))
+            query = query.where(Observation.status.in_([stored_value(status) for status in params.statuses]))
 
         # Confidence level filter
         if params.confidence_level:
-            query = query.where(Observation.confidence_level == params.confidence_level)
+            query = query.where(Observation.confidence_level == stored_value(params.confidence_level))
 
         # Duration range
         if params.duration_from is not None:
