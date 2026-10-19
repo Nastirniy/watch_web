@@ -236,7 +236,10 @@ player.vttThumbnails({ src: vtt });
 
 A `<video>` or `<audio>` element cannot send the Bearer token. The starter service worker does it for the stream
 route: it sends the element's own `Range` requests to `GET /api/v1/media/{media_id}/stream` again with the token,
-so the plain URL works as `src` and seeking works.
+so the plain URL works as `src` and seeking works. It touches only the requests of media elements (never a page
+load or an iframe of the URL, never `fetch()` calls), and when the token expired it asks only the page that plays
+the media, once for every stream refused at that moment. Its tests: `node --test
+api-contract/web-kit/tests/stream-sw.test.mjs`.
 
 1. Copy `api-contract/web-kit/public/stream-sw.js` into the static root of the web project (Vite: `public/`); it
    must be served from the origin root, so its scope covers `/api/`.
@@ -251,6 +254,10 @@ sendStreamToken(accessToken);
 
 <video controls preload="metadata" src={`/api/v1/media/${media.id}/stream`} />
 ```
+
+Refresh tokens work once: `refreshAccessToken` must be single-flight across the app's tabs as well (one refresh at a
+time, the others wait for its tokens, e.g. with `navigator.locks.request`), or a second tab's refresh fails with
+`invalid_refresh_token`.
 
 On the first visit the worker controls the page only after a reload (`navigator.serviceWorker.controller` is
 `null` until then); where workers are unavailable (`registerStreamWorker` returns `null`), fetch the media with

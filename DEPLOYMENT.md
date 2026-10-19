@@ -72,6 +72,7 @@ Edit before reloading:
 | In file | Line | Set to |
 |---------|------|--------|
 | nginx-app.conf | `alias /var/www/radio_monitoring/uploads/;` | `MEDIA_ROOT` with a trailing slash |
+| nginx-app.conf | `root /var/www/radio_monitoring/uploads;` (stream location) | `MEDIA_ROOT` without a trailing slash: the same directory as the alias, or every seek of a player asks the API twice |
 | nginx-app.conf | `client_body_temp_path /var/www/nginx_uploads 1 2;` | `NGINX_UPLOAD_TEMP` |
 | nginx.conf | `server_name` (both servers) | your domain |
 | nginx.conf | `ssl_certificate` / `ssl_certificate_key` | the server certificate (with its chain) and key: Let's Encrypt's `fullchain.pem` / `privkey.pem` for your name (PKI.md, section 2) |

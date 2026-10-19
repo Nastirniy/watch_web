@@ -319,3 +319,18 @@ def test_no_prefix_location_takes_the_stream_path_from_the_regex():
 
 def test_download_is_not_cached():
     assert "/download" not in _directives(APP)
+
+
+def test_deployment_lists_every_media_root_line_to_edit():
+    """DEPLOYMENT.md "Edit before reloading" names each line of nginx-app.conf that holds the media root: an operator
+    who edits only some of them gets /stream asking the API twice per Range request, silently (final review)"""
+    deployment = (ROOT / "DEPLOYMENT.md").read_text(encoding="utf-8")
+    lines = re.findall(r"^\s*((?:root|alias) /var/www/radio_monitoring/uploads/?;)", APP, re.M)
+    assert len(lines) == 2, lines
+    for line in lines:
+        assert f"`{line}`" in deployment, line
+
+
+def test_stream_answers_cannot_be_framed_by_another_site():
+    """/protected_uploads/ answered X-Frame-Options SAMEORIGIN; the stream location serves the same files"""
+    assert "add_header X-Frame-Options SAMEORIGIN;" in _location(APP, STREAM)
