@@ -15,6 +15,9 @@ the accepted values.
 
 - Every list and search answers 422 `validation_error` (item code `extra_forbidden`, `parameter` = the name) for a
   query parameter it does not know. A misspelt filter (`comment_contain=`) used to return the unfiltered list.
+  Web client: regenerate the types and run `npm run api:check` before deploying this version; a list request that
+  still sends an old filter name or an extra parameter (`_=` cache busting) fails there or answers 422
+  (WEB_TOOLING.md, section 4).
 - `status`, `status_in`, `confidence_level` (observations) and `media_type` (media, media formats) accept only their
   values (item code `enum`); `status=bogus` used to return an empty page. The same holds for `statuses` and
   `confidence_level` of `POST /observations/report`, whose body now also refuses unknown fields.
