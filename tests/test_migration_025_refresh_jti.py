@@ -27,15 +27,11 @@ def version(db_file: Path) -> str:
     return value
 
 
-def test_head_is_025():
-    assert HEAD == REVISION
-
-
 def test_fresh_install_down_and_up_again(tmp_path):
     db_file = tmp_path / "sessions.db"
     first = run_migrate(db_file)
     assert first.returncode == 0, first.stdout + first.stderr
-    assert version(db_file) == REVISION and "refresh_jti" in session_columns(db_file)
+    assert version(db_file) == HEAD and "refresh_jti" in session_columns(db_file)
 
     down = _run_downgrade(db_file, PREVIOUS)
     assert down.returncode == 0, down.stdout + down.stderr
@@ -53,7 +49,7 @@ def test_fresh_install_down_and_up_again(tmp_path):
 
     again = run_migrate(db_file)
     assert again.returncode == 0, again.stdout + again.stderr
-    assert version(db_file) == REVISION
+    assert version(db_file) == HEAD
     conn = sqlite3.connect(db_file)
     assert conn.execute("select refresh_jti from user_sessions where id = 's-before'").fetchone() == (None,)
     conn.close()

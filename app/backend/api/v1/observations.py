@@ -196,11 +196,6 @@ async def create_observation(
     )
 
     session.add(observation)
-
-    # Update user's last record created
-    current_user.last_record_created_at = datetime.now(timezone.utc)
-    session.add(current_user)
-
     await session.commit()
     observation = await _load_observation(session, observation.id)
 

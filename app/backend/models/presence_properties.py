@@ -33,6 +33,19 @@ def configure_presence_properties() -> None:
         ),
     )
 
+    # User.last_login_at: the latest login session, ended or not (every login opens one). Derived instead of stored so
+    # that a login never writes the users row: a write there collided with the user's concurrent requests on MariaDB
+    # (error 1020 on their foreign key checks, a deadlock between two logins); migration 026 dropped the column
+    inspect(User).add_property(
+        "last_login_at",
+        column_property(
+            sa_select(func.max(UserSession.created_at))
+            .where(UserSession.user_id == User.id)
+            .correlate_except(UserSession)
+            .scalar_subquery()
+        ),
+    )
+
     # Post.online_user_count: home users of the post with a session touched within the threshold
     inspect(Post).add_property(
         "online_user_count",

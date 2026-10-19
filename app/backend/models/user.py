@@ -16,13 +16,13 @@ class User(SQLModel, table=True):
     username: str = Field(unique=True, index=True, max_length=255)
     username_alias: str = Field(max_length=255)
     is_active: bool = Field(default=True, index=True)
-    last_login_at: Optional[datetime] = Field(default=None, index=True)
+    # last_login_at is derived from the login sessions (presence_properties.py): a request never writes this row on a
+    # hot path, or two requests of one user collide on it (migration 026)
     # Home post: membership only (which delegated administrators manage the user), grants nothing by itself
     post_id: Optional[int] = Field(default=None, foreign_key="posts.id")
     # UserType: the pages of the web client and the ceiling of the roles the user may hold; no DB CHECK, a new type
     # is a new enum value
     user_type: str = Field(max_length=32)
-    last_record_created_at: Optional[datetime] = Field(default=None)
     is_deleted: bool = Field(default=False)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

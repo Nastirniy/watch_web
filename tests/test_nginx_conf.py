@@ -232,3 +232,10 @@ def test_nginx_replaces_the_client_forwarded_for_with_the_peer_address():
     proxy = _directives(PROXY)
     assert "proxy_set_header X-Forwarded-For $remote_addr;" in proxy
     assert "$proxy_add_x_forwarded_for" not in proxy
+
+
+def test_nginx_errors_keep_their_status():
+    """error_page to /50x.html answered 404 on the host whenever the API was down (live crash test of 2026-10-19): the
+    Ubuntu package has no 50x.html. The client reads only the status of an infrastructure error (API.md, "Errors")."""
+    for name, text in (("nginx-app.conf", APP), ("nginx.conf", SERVERS)):
+        assert "error_page" not in _directives(text), name
