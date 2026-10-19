@@ -222,10 +222,52 @@ the user (`session_expired`, `revoke_cause` `user_type_changed`): the new pages 
 | `scope_group_cycle` | 409 | A group moved into its own subtree |
 | `scope_group_depth_exceeded` | 409 | Groups nested deeper than `max_depth` (6) |
 | `scope_group_name_taken` | 409 | The name is used under the same parent |
+| `scope_group_parent_not_allowed` | 409 | A group of this kind cannot sit there (`group_kind`, `parent_kind`; `root` for none) |
+| `corps_has_brigades` | 409 | Archive without cascade of a corps that still has active brigades |
 | `last_admin_required`, `cannot_remove_own_admin` | 409 | The built-in `admin` role at the root must stay with an active user and cannot be taken from oneself |
 
 Field codes inside `validation_error`: `scope_id_required` (a group or post scope without `id`),
 `scope_id_not_allowed` (the root with an `id`).
+
+### Corps and brigades
+
+Corps > brigade > post. A brigade is optional: a post sits in a brigade, directly in a corps, or outside any corps
+(in a plain scope group or under the root). Corps and brigades are scope groups with a `kind` (`corps`, `brigade`;
+plain groups are `group`): a role assigned at a corps or brigade (`{"kind": "group", "id": ...}`) covers everything
+below it, and `GET /scope-groups/tree` shows them with their `kind`. No new permissions: `scope_group.*` for the
+units, `post.*` for what happens to their posts.
+
+- Where each kind sits: a corps directly under the root, a brigade directly in a corps, a plain group under the root
+  or another plain group. The kind is fixed at create (`POST /corps/`, `POST /brigades/`; `POST /scope-groups/`
+  makes plain groups). Anything else answers 409 `scope_group_parent_not_allowed` on every route.
+- `GET/POST /api/v1/corps/`, `GET/PATCH /api/v1/corps/{corps_id}`, `GET /corps/{corps_id}/brigades`,
+  `GET /corps/{corps_id}/posts` (posts at any depth); the same for `/api/v1/brigades/` with `corps_id` in the body
+  and as a list filter, and `GET /brigades/{brigade_id}/posts`. Answers: `CorpsResponse` (`brigade_count`,
+  `post_count`: active ones the caller sees), `BrigadeResponse` (`corps_id`, `post_count`). An id of another kind,
+  an archived or invisible one: 404 `scope_group_not_found`. Names are unique within a parent (corps share the root
+  with root plain groups), case-insensitive.
+- Moving a brigade (`PATCH /brigades/{id}` with `corps_id`) takes its posts along and needs `post.update` covering
+  the old and the new corps.
+- `POST /corps/{id}/archive` and `POST /brigades/{id}/archive` take `?cascade=true|false` (default false):
+
+  | | cascade=false | cascade=true |
+  |---|---|---|
+  | brigade | its active posts move into its corps (`post.update` at the brigade and the corps) | the brigade and its active posts are archived (`post.archive` at the brigade) |
+  | corps | 409 `corps_has_brigades` while it has an active brigade; its active posts leave it, directly under the root (`post.update` at the corps and the root) | the corps, its active brigades and every active post below are archived (`post.archive` at the corps) |
+
+  `scope_group.archive` must cover the node too. A missing permission answers 403 `permission_required_for_action`
+  and nothing changes. Moving posts out changes access: holders of a role at the archived unit lose those posts.
+  Restore (`POST /{id}/restore`) brings back the node only; list the archived brigades and posts below with
+  `include_deleted=true` and restore them one by one. A brigade whose corps is archived: restore the corps first
+  (404 `scope_group_not_found`).
+- `PostResponse.corps` and `.brigade` (`{id, name}` or null) are where the post sits now. Posts and users (lists
+  and search) filter by `corps_id` / `brigade_id` (users by their home post); `corps_id` includes the posts of its
+  brigades; an id of another kind gives an empty list. A unit filter narrows what the caller sees, never widens it.
+- `ObservationWithMedia.corps` and `.brigade` are where the post was when the observation was created, recorded at
+  create and never changed (a later move of the post or the brigade does not change them); the names are today's.
+  An observation created while its post moves may record the place from just before the move.
+- Unit names on posts and observations are shown to anyone who sees the post or observation, without
+  `scope_group.view`.
 
 ## Client certificates
 

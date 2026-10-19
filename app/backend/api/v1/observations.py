@@ -18,6 +18,7 @@ from app.backend.auth.access_control import AccessControlService
 from app.backend.enums.general import Permissions, ObservationStatus, ObservationReportType
 from app.backend.enums.routes import ObservationRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
+from app.backend.services.units import observation_unit_rows
 from app.backend.services.audit import create_audit_log
 from app.backend.api.v1.models.request.observations import (
     ObservationCreate,
@@ -31,7 +32,7 @@ from app.backend.api.v1.models.request.observations import (
 from app.backend.api.v1.models.response.observations import (
     MessageResponse,
     ReportTypeChoice,
-    ObservationWithMedia,
+    ObservationWithMedia, observations_to_response,
     ObservationFrequencyResponse,
 )
 from app.backend.api.shared.helpers.post_helper import ensure_post_not_archived, refuse_archived_post
@@ -75,7 +76,7 @@ async def _load_observation(session: AsyncSession, observation_id: int) -> Obser
 
 
 async def _load_observation_response(session: AsyncSession, observation_id: int) -> ObservationWithMedia:
-    return ObservationWithMedia.model_validate(await _load_observation(session, observation_id))
+    return (await observations_to_response(session, [await _load_observation(session, observation_id)]))[0]
 
 
 async def _validate_and_get_tags(session: AsyncSession, tag_ids: List[int], keep_ids: Optional[List[int]] = None) -> List[Tag]:
@@ -130,8 +131,7 @@ async def list_observations(
     result = await session.exec(query)
     observations = result.all()
 
-    # Build response using Pydantic validation from attributes
-    return [ObservationWithMedia.model_validate(obs) for obs in observations]
+    return await observations_to_response(session, observations)
 
 
 @router.post(
@@ -196,6 +196,9 @@ async def create_observation(
     )
 
     session.add(observation)
+    await session.flush()
+    # The units the post sits in now, recorded once with the observation (services/units.py)
+    session.add_all(observation_unit_rows(auth.tree, post.group_id, observation.id, observation.created_at))
     await session.commit()
     observation = await _load_observation(session, observation.id)
 

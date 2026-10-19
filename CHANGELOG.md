@@ -5,6 +5,37 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Corps and brigades, stage 1 (2026-10-20)
+
+An organisational level above posts: corps > brigade > post, the brigade optional, posts outside any corps allowed.
+Corps and brigades are scope groups with a kind, so roles given at them cover everything below (no new
+permissions). Migration 027. The contract changes: rewrite the generated types (`openapi-typescript`). API.md,
+"Corps and brigades".
+
+### Added
+
+- `/corps` and `/brigades`: list (filters, paging, sort), create (201), get, update, archive (`?cascade=`), restore,
+  `GET /corps/{id}/brigades`, `GET /corps/{id}/posts`, `GET /brigades/{id}/posts`. A brigade moves to another corps
+  with `PATCH /brigades/{id}` (`corps_id`), its posts along.
+- Archive of a corps or brigade: without cascade its posts move one level up (a brigade's into its corps, a corps'
+  under the root) and a corps with an active brigade answers 409 `corps_has_brigades`; with `cascade=true` the
+  brigades and posts below are archived too. Restore brings back the node only.
+- `PostResponse.corps`, `.brigade` (`{id, name}` or null): where the post sits now. Posts and users (list and search)
+  filter by `corps_id` / `brigade_id` (users by their home post).
+- `ObservationWithMedia.corps`, `.brigade`: where the post was when the observation was created (recorded at every
+  create from now on in the new table `observation_units`), with today's names.
+- `ScopeGroupResponse.kind`, `ScopeTreeGroup.kind` (`group`, `corps`, `brigade`); `GET /scope-groups/?kind=`.
+- Problem codes `scope_group_parent_not_allowed` (409, params `group_kind`, `parent_kind`) and `corps_has_brigades`
+  (409).
+
+### Changed
+
+- Where a group may sit depends on its kind on every route: a plain group never goes into a corps or brigade, a
+  corps stays under the root, a brigade in a corps (`POST`/`PATCH /scope-groups/...` and restore answer 409
+  `scope_group_parent_not_allowed`).
+- Post create, move and restore lock the group(s) before the post (groups top down, then posts), so an archive of a
+  unit and a post write never leave an active post inside an archived unit.
+
 ## Filter values (2026-10-19)
 
 Found by the live filter test (388 checks over every list and search). The contract changes: rewrite the

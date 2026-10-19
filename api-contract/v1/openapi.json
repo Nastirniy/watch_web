@@ -37015,6 +37015,28 @@
                 "type": "null"
               }
             ]
+          },
+          "corps": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnitRefResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Corps of the post when the observation was created; null: outside any corps"
+          },
+          "brigade": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnitRefResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Brigade of the post when the observation was created; null: outside any brigade"
           }
         },
         "type": "object",

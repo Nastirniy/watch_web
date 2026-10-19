@@ -3,7 +3,8 @@
 The units of a post come from the scope tree every request loads (ScopeTree.units_of_post); the units of an
 observation are the observation_units rows written at its create.
 """
-from typing import Dict, FrozenSet, Iterable, Mapping, Optional, Tuple
+from datetime import datetime
+from typing import Dict, FrozenSet, Iterable, List, Mapping, Optional, Tuple
 
 from sqlalchemy import delete
 from sqlmodel import select
@@ -97,3 +98,26 @@ def posts_within(tree: ScopeTree, kind: ScopeGroupKind, unit_id: int, params) ->
     under = unit_post_ids(tree, kind, unit_id)
     asked = unit_filter_of(tree, params)
     return under if asked is None else under & asked
+
+
+def observation_unit_rows(tree: ScopeTree, group_id: Optional[int], observation_id: int,
+                          created_at: datetime) -> List[ObservationUnit]:
+    """The observation_units rows of a new observation at a post in this group: every unit above the post now"""
+    return [ObservationUnit(observation_id=observation_id, group_id=unit_id, created_at=created_at)
+            for unit_id in post_units(tree, group_id).values()]
+
+
+async def recorded_units(session: AsyncSession, observation_ids: Iterable[int]) -> Dict[int, Dict[str, Tuple[int, str]]]:
+    """observation id -> unit kind -> (group id, today's name) of the units recorded at its create (one query)"""
+    ids = sorted(set(observation_ids))
+    if not ids:
+        return {}
+    rows = await session.exec(
+        select(ObservationUnit.observation_id, ScopeGroup.kind, ScopeGroup.id, ScopeGroup.name)
+        .join(ScopeGroup, ScopeGroup.id == ObservationUnit.group_id)
+        .where(ObservationUnit.observation_id.in_(ids))
+    )
+    units: Dict[int, Dict[str, Tuple[int, str]]] = {}
+    for observation_id, kind, group_id, name in rows.all():
+        units.setdefault(observation_id, {})[kind] = (group_id, name)
+    return units

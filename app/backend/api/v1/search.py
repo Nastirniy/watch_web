@@ -47,7 +47,7 @@ from app.backend.filters.signal_type_filter import SignalTypeFilterService
 from app.backend.filters.tag_filter import TagFilterService
 from app.backend.filters.media_filter import MediaFilterService
 
-from app.backend.api.v1.models.response.observations import ObservationWithMedia
+from app.backend.api.v1.models.response.observations import ObservationWithMedia, observations_to_response
 from app.backend.api.v1.models.response.posts import PostResponse, posts_to_response
 from app.backend.api.v1.models.response.users import UserResponse
 from app.backend.api.shared.helpers.roles_helper import permission_names_by_role
@@ -115,7 +115,7 @@ async def search_observations(
     items = result.all()
 
     # Convert database objects to response models automatically
-    processed_items = [ObservationWithMedia.model_validate(obs) for obs in items]
+    processed_items = await observations_to_response(session, items)
 
     count_query = select(func.count()).select_from(Observation)
     count_query = ObservationFilterService.apply_filters_for_count(count_query, params, access_post_ids, archived_post_ids=archived)
