@@ -246,7 +246,10 @@ def test_nginx_errors_keep_their_status():
     named = {header: body for header, body in _blocks(APP, "location") if header.startswith("@")}
     for name, text in (("nginx-app.conf", APP), ("nginx.conf", SERVERS)):
         for target in re.findall(r"error_page [^;]*?(\S+);", _directives(text)):
-            # the only error_page allowed hands the request to the API, which answers with its own status
+            # the only error_page allowed hands the request to the API, which answers with its own status; inside
+            # /_stream_auth a refusal becomes the 403 that sends the stream request to the API
+            if target == "@stream_auth_refused":
+                continue
             assert target in named and "proxy_pass http://watch_web_api" in named[target], f"{name}: error_page {target}"
 
 
@@ -285,7 +288,11 @@ def test_stream_authorisation_is_cached_30_s_per_token_certificate_and_uri():
         assert f'proxy_set_header {header} "";' in body
     assert "proxy_pass_request_body off;" in body
     assert "proxy_ignore_headers X-Accel-Redirect Cache-Control Expires Set-Cookie;" in body
-    assert "proxy_hide_header WWW-Authenticate;" in body
+    # auth_request copies the challenge of a 401 from the upstream answer itself (proxy_hide_header does not reach
+    # it), then the fallback adds the API's: two WWW-Authenticate. A 401 is a plain 403 for auth_request instead,
+    # and @stream_api answers the API's 401 with its one challenge.
+    assert "proxy_intercept_errors on;" in body and "error_page 401 = @stream_auth_refused;" in body
+    assert _location(APP, "@stream_auth_refused").strip() == "return 403;"
 
 
 def test_stream_refusals_are_answered_by_the_api():
