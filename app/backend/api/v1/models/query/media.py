@@ -6,7 +6,7 @@ from typing import Optional, Literal
 from pydantic import Field, field_validator
 
 from app.backend.api.v1.models.query.base import BaseFilterParams
-from app.backend.enums.general import MediaType
+from app.backend.enums.general import MediaType, UnitPlacement
 from app.backend.utils.validators import UtcDatetime
 
 # Fields the results can be sorted by; sort_by accepts exactly these (another value answers 422)
@@ -20,6 +20,9 @@ class MediaFilterParams(BaseFilterParams):
 
     id: Optional[int] = Field(default=None, description="Exact media ID")
     observation_id: Optional[int] = Field(default=None, description="Filter by observation ID")
+    corps_id: Optional[int] = Field(default=None, description="Media of observations of this corps, its brigades included (see placement); an id of another kind gives nothing")
+    brigade_id: Optional[int] = Field(default=None, description="Media of observations of this brigade (see placement); an id of another kind gives nothing")
+    placement: UnitPlacement = Field(default=UnitPlacement.RECORDED, description="Which unit corps_id / brigade_id match: recorded (where the post was when the observation was created) or current (where the post is now, archived posts left out). Not a time filter")
     original_filename_contains: Optional[str] = Field(default=None, max_length=100, description="Filename contains text")
     media_type: Optional[MediaType] = Field(default=None, description="Media type")
     mime_type: Optional[str] = Field(default=None, description="Exact MIME type")

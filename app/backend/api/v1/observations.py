@@ -18,7 +18,7 @@ from app.backend.auth.access_control import AccessControlService
 from app.backend.enums.general import Permissions, ObservationStatus, ObservationReportType
 from app.backend.enums.routes import ObservationRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
-from app.backend.services.units import observation_unit_rows
+from app.backend.services.units import observation_unit_rows, observation_units_filter
 from app.backend.services.audit import create_audit_log
 from app.backend.api.v1.models.request.observations import (
     ObservationCreate,
@@ -125,7 +125,8 @@ async def list_observations(
 
     # Build base query and apply filters
     query = select(Observation).options(*OBSERVATION_LOAD_OPTIONS)
-    query = ObservationFilterService.apply_filters(query, filters, filtered_post_ids, archived_post_ids=archived)
+    query = ObservationFilterService.apply_filters(query, filters, filtered_post_ids, archived_post_ids=archived,
+                                                   unit_condition=observation_units_filter(auth.tree, filters))
 
     # Execute query
     result = await session.exec(query)

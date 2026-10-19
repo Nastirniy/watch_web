@@ -23,7 +23,7 @@ from app.backend.models.media_format import MediaFormat
 from app.backend.models.media import MediaFile
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.services.audit import create_audit_log
-from app.backend.services.units import unit_filter_of
+from app.backend.services.units import observation_units_filter, unit_filter_of
 
 # Filter params
 from app.backend.api.v1.models.query.observations import ObservationFilterParams
@@ -110,7 +110,9 @@ async def search_observations(
     archived = AccessControlService.archived_scope(auth, params, Permissions.OBSERVATION_ARCHIVE)
     access_post_ids = AccessControlService.resolve_scope(auth, Permissions.OBSERVATION_VIEW, params.post_id)
     query = select(Observation)
-    query = ObservationFilterService.apply_filters(query, params, access_post_ids, archived_post_ids=archived)
+    units = observation_units_filter(auth.tree, params)
+    query = ObservationFilterService.apply_filters(query, params, access_post_ids, archived_post_ids=archived,
+                                                   unit_condition=units)
     result = await session.exec(query)
     items = result.all()
 
@@ -118,7 +120,8 @@ async def search_observations(
     processed_items = await observations_to_response(session, items)
 
     count_query = select(func.count()).select_from(Observation)
-    count_query = ObservationFilterService.apply_filters_for_count(count_query, params, access_post_ids, archived_post_ids=archived)
+    count_query = ObservationFilterService.apply_filters_for_count(count_query, params, access_post_ids, archived_post_ids=archived,
+                                                                   unit_condition=units)
     total = (await session.exec(count_query)).one()
 
     await log_search(request, session, auth, "observations", params.model_dump(exclude_none=True), len(items))
@@ -350,12 +353,15 @@ async def search_media(
     access_post_ids = AccessControlService.scope_for(auth, Permissions.MEDIA_VIEW)
 
     query = select(MediaFile)
-    query = MediaFilterService.apply_filters(query, params, access_post_ids, archived_post_ids=archived)
+    units = observation_units_filter(auth.tree, params)
+    query = MediaFilterService.apply_filters(query, params, access_post_ids, archived_post_ids=archived,
+                                             unit_condition=units)
     result = await session.exec(query)
     items = result.all()
 
     count_query = select(func.count()).select_from(MediaFile)
-    count_query = MediaFilterService.apply_filters_for_count(count_query, params, access_post_ids, archived_post_ids=archived)
+    count_query = MediaFilterService.apply_filters_for_count(count_query, params, access_post_ids, archived_post_ids=archived,
+                                                             unit_condition=units)
     total = (await session.exec(count_query)).one()
 
     await log_search(request, session, auth, "media", params.model_dump(exclude_none=True), len(items))

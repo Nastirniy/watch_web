@@ -8,7 +8,7 @@ from decimal import Decimal
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 from app.backend.enums.errors import FieldErrorCode
-from app.backend.enums.general import ConfidenceLevel, FrequencyKind, ObservationStatus, TagMatch
+from app.backend.enums.general import ConfidenceLevel, FrequencyKind, ObservationStatus, TagMatch, UnitPlacement
 from app.backend.errors.coded import invalid
 from app.backend.api.v1.models.query.base import BaseFilterParams
 from app.backend.utils.validators import UtcDatetime
@@ -27,6 +27,9 @@ class ObservationFilterParams(BaseFilterParams):
     user_id: Optional[int] = Field(default=None, description="Filter by user ID")
     post_id: Optional[int] = Field(default=None, description="Filter by post ID")
     signal_type_id: Optional[int] = Field(default=None, description="Filter by signal type ID")
+    corps_id: Optional[int] = Field(default=None, description="Observations of this corps, its brigades included (see placement); an id of another kind gives nothing")
+    brigade_id: Optional[int] = Field(default=None, description="Observations of this brigade (see placement); an id of another kind gives nothing")
+    placement: UnitPlacement = Field(default=UnitPlacement.RECORDED, description="Which unit corps_id / brigade_id match: recorded (where the post was when the observation was created) or current (where the post is now, archived posts left out). Not a time filter")
 
     # --- Status ---
     status: Optional[ObservationStatus] = Field(default=None, description="Exact status")

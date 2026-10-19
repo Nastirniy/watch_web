@@ -22,6 +22,7 @@ from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.scope import ROOT
+from app.backend.services.units import observation_units_filter
 from app.backend.services.media.manager import get_media_manager
 from app.backend.services.media import formats, jobs, renderer, uploads, urls as thumb_urls
 from app.backend.services.media.storyboards import build_vtt, layout_usable, status_for
@@ -111,6 +112,7 @@ async def list_media_files(
     query = select(MediaFile)
     query = MediaFilterService.apply_filters(
         query, filters, AccessControlService.scope_for(auth, Permissions.MEDIA_VIEW), archived_post_ids=archived,
+        unit_condition=observation_units_filter(auth.tree, filters),
     )
     result = await session.exec(query)
     return [MediaFileInfo.model_validate(mf) for mf in result.all()]

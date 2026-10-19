@@ -137,6 +137,13 @@ class ScopeGroupKind(str, Enum):
     BRIGADE = "brigade"
 
 
+class UnitPlacement(str, Enum):
+    """Which unit an observation belongs to for a corps or brigade filter: the one recorded when it was created, or
+    the one its post is in now. Not a time filter: both read today's data; the period is its own filter."""
+    RECORDED = "recorded"
+    CURRENT = "current"
+
+
 class ServiceHealthStatus(Enum):
     HEALTHY = "healthy"
     UNHEALTHY = "unhealthy"

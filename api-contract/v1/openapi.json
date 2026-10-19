@@ -9991,6 +9991,53 @@
             "description": "Filter by signal type ID"
           },
           {
+            "name": "corps_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Observations of this corps, its brigades included (see placement); an id of another kind gives nothing",
+              "title": "Corps Id"
+            },
+            "description": "Observations of this corps, its brigades included (see placement); an id of another kind gives nothing"
+          },
+          {
+            "name": "brigade_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Observations of this brigade (see placement); an id of another kind gives nothing",
+              "title": "Brigade Id"
+            },
+            "description": "Observations of this brigade (see placement); an id of another kind gives nothing"
+          },
+          {
+            "name": "placement",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/UnitPlacement",
+              "description": "Which unit corps_id / brigade_id match: recorded (where the post was when the observation was created) or current (where the post is now, archived posts left out). Not a time filter",
+              "default": "recorded"
+            },
+            "description": "Which unit corps_id / brigade_id match: recorded (where the post was when the observation was created) or current (where the post is now, archived posts left out). Not a time filter"
+          },
+          {
             "name": "status",
             "in": "query",
             "required": false,
@@ -18739,6 +18786,53 @@
             "description": "Filter by observation ID"
           },
           {
+            "name": "corps_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Media of observations of this corps, its brigades included (see placement); an id of another kind gives nothing",
+              "title": "Corps Id"
+            },
+            "description": "Media of observations of this corps, its brigades included (see placement); an id of another kind gives nothing"
+          },
+          {
+            "name": "brigade_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Media of observations of this brigade (see placement); an id of another kind gives nothing",
+              "title": "Brigade Id"
+            },
+            "description": "Media of observations of this brigade (see placement); an id of another kind gives nothing"
+          },
+          {
+            "name": "placement",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/UnitPlacement",
+              "description": "Which unit corps_id / brigade_id match: recorded (where the post was when the observation was created) or current (where the post is now, archived posts left out). Not a time filter",
+              "default": "recorded"
+            },
+            "description": "Which unit corps_id / brigade_id match: recorded (where the post was when the observation was created) or current (where the post is now, archived posts left out). Not a time filter"
+          },
+          {
             "name": "original_filename_contains",
             "in": "query",
             "required": false,
@@ -24515,6 +24609,53 @@
             "description": "Filter by signal type ID"
           },
           {
+            "name": "corps_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Observations of this corps, its brigades included (see placement); an id of another kind gives nothing",
+              "title": "Corps Id"
+            },
+            "description": "Observations of this corps, its brigades included (see placement); an id of another kind gives nothing"
+          },
+          {
+            "name": "brigade_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Observations of this brigade (see placement); an id of another kind gives nothing",
+              "title": "Brigade Id"
+            },
+            "description": "Observations of this brigade (see placement); an id of another kind gives nothing"
+          },
+          {
+            "name": "placement",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/UnitPlacement",
+              "description": "Which unit corps_id / brigade_id match: recorded (where the post was when the observation was created) or current (where the post is now, archived posts left out). Not a time filter",
+              "default": "recorded"
+            },
+            "description": "Which unit corps_id / brigade_id match: recorded (where the post was when the observation was created) or current (where the post is now, archived posts left out). Not a time filter"
+          },
+          {
             "name": "status",
             "in": "query",
             "required": false,
@@ -27486,6 +27627,53 @@
               "title": "Observation Id"
             },
             "description": "Filter by observation ID"
+          },
+          {
+            "name": "corps_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Media of observations of this corps, its brigades included (see placement); an id of another kind gives nothing",
+              "title": "Corps Id"
+            },
+            "description": "Media of observations of this corps, its brigades included (see placement); an id of another kind gives nothing"
+          },
+          {
+            "name": "brigade_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Media of observations of this brigade (see placement); an id of another kind gives nothing",
+              "title": "Brigade Id"
+            },
+            "description": "Media of observations of this brigade (see placement); an id of another kind gives nothing"
+          },
+          {
+            "name": "placement",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/UnitPlacement",
+              "description": "Which unit corps_id / brigade_id match: recorded (where the post was when the observation was created) or current (where the post is now, archived posts left out). Not a time filter",
+              "default": "recorded"
+            },
+            "description": "Which unit corps_id / brigade_id match: recorded (where the post was when the observation was created) or current (where the post is now, archived posts left out). Not a time filter"
           },
           {
             "name": "original_filename_contains",
@@ -43241,6 +43429,15 @@
             "type": "https://example.org/problems/token_certificate_mismatch"
           }
         ]
+      },
+      "UnitPlacement": {
+        "type": "string",
+        "enum": [
+          "recorded",
+          "current"
+        ],
+        "title": "UnitPlacement",
+        "description": "Which unit an observation belongs to for a corps or brigade filter: the one recorded when it was created, or\nthe one its post is in now. Not a time filter: both read today's data; the period is its own filter."
       },
       "UnitRefResponse": {
         "properties": {

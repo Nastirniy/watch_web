@@ -6,13 +6,15 @@ observation are the observation_units rows written at its create.
 from datetime import datetime
 from typing import Dict, FrozenSet, Iterable, List, Mapping, Optional, Tuple
 
-from sqlalchemy import delete
+from sqlalchemy import and_, delete, false
+from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.auth.context import AuthContext
 from app.backend.auth.scope import Node, ScopeTree
-from app.backend.enums.general import Permissions, ScopeGroupKind
+from app.backend.enums.general import Permissions, ScopeGroupKind, UnitPlacement
+from app.backend.models.observation import Observation
 from app.backend.models.observation_unit import ObservationUnit
 from app.backend.models.scope_group import ScopeGroup
 from app.backend.services.scope_groups import UNIT_KINDS
@@ -121,3 +123,27 @@ async def recorded_units(session: AsyncSession, observation_ids: Iterable[int]) 
     for observation_id, kind, group_id, name in rows.all():
         units.setdefault(observation_id, {})[kind] = (group_id, name)
     return units
+
+
+def observation_unit_condition(tree: ScopeTree, kind: ScopeGroupKind, unit_id: Optional[int],
+                               placement: UnitPlacement) -> Optional[ColumnElement]:
+    """Observations of a unit (None without a unit). recorded: the unit stored at the observation's create
+    (observation_units); current: its post is under the unit now and not archived (a post that left the unit, or was
+    archived, no longer counts there). An id of another kind or unknown: no observation. The caller's access is a
+    separate condition: this one narrows, never widens."""
+    if unit_id is None:
+        return None
+    if tree.group_kind.get(unit_id) != ScopeGroupKind(kind).value:
+        return false()
+    if UnitPlacement(placement) is UnitPlacement.RECORDED:
+        return Observation.id.in_(select(ObservationUnit.observation_id).where(ObservationUnit.group_id == unit_id))
+    return Observation.post_id.in_(sorted(unit_post_ids(tree, kind, unit_id) - tree.archived_posts))
+
+
+def observation_units_filter(tree: ScopeTree, params) -> Optional[ColumnElement]:
+    """observation_unit_condition of the <kind>_id fields and placement of a query model (all must hold)"""
+    placement = getattr(params, "placement", UnitPlacement.RECORDED)
+    conditions = [condition for kind in UNIT_KINDS
+                  if (condition := observation_unit_condition(
+                      tree, kind, getattr(params, f"{kind.value}_id", None), placement)) is not None]
+    return and_(*conditions) if conditions else None
