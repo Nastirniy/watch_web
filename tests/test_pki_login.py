@@ -174,9 +174,12 @@ async def test_session_is_bound_to_its_certificate(client, db, headers, producti
 
     refresh = await client.post(REFRESH, json={"refresh_token": tokens["refresh_token"]}, headers=nginx_headers(other))
     assert refresh.status_code == 401 and refresh.json()["code"] == "token_certificate_mismatch"
+    # the refused attempt retired nothing: the refresh token still works once, with its own certificate
     refresh = await client.post(REFRESH, json={"refresh_token": tokens["refresh_token"]}, headers=nginx_headers(own))
     assert refresh.status_code == 200, refresh.text
-    # a refused attempt does not end the session: the owner keeps working
+    replay = await client.post(REFRESH, json={"refresh_token": tokens["refresh_token"]}, headers=nginx_headers(own))
+    assert replay.status_code == 401 and replay.json()["code"] == "invalid_refresh_token"
+    # neither a refused attempt nor a replay ends the session: the owner keeps working
     assert (await client.get(ME, headers={**nginx_headers(own), **bearer})).status_code == 200
 
 

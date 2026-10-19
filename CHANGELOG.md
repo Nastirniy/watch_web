@@ -7,6 +7,22 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## Deployment fixes from the live test (2026-10-19)
 
+### Changed
+
+- `POST /auth/refresh`: a refresh token works once. The refresh that uses it retires it; the same token again answers
+  401 `invalid_refresh_token` and the session goes on with the newest token (nothing is ended). Before, every
+  refresh token of a live session worked until its own expiry, so a copy kept refreshing after the client had
+  moved on. Two refreshes with the same token at once: one answers 200, the other `invalid_refresh_token`. Clients
+  keep only the latest refresh token (API.md, "Session lifetime"); a client that lost the answer of a refresh logs
+  in again. Only the description of the operation changed in `api-contract/v1/openapi.json`.
+- Migration `025_session_refresh_jti`: column `user_sessions.refresh_jti` (VARCHAR 64, null), the jti of the one
+  refresh token that may refresh the session, replaced by every refresh with a conditional UPDATE, the first
+  statement of the refresh transaction (`auth/sessions.py`, `claim_refresh`). Sessions from before the upgrade
+  have none: their first refresh sets it, so nobody is logged out. The downgrade drops the column.
+- UPLOADS.md: a chunk may also be sent as `application/octet-stream` or without a `Content-Type` (as the API always
+  accepted); the same bytes are stored once per observation (the existing `media_file_id` answers, with its first
+  `original_filename`).
+
 ### Fixed
 
 - `deploy/systemd/watch-web-crl.service`: `StartLimitIntervalSec=0`. Every revocation publishes the CRL and the path

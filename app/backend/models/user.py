@@ -60,6 +60,9 @@ class UserSession(SQLModel, table=True):
     # SHA-256 of the client certificate fingerprint the session was opened with (production login through nginx);
     # every request must present the same certificate. Empty for development logins.
     certificate_fingerprint_hash: Optional[str] = Field(default=None, max_length=64)
+    # jti of the one refresh token that may refresh the session; every refresh replaces it (auth/sessions.py,
+    # claim_refresh). Empty only for sessions opened before migration 025: their first refresh sets it.
+    refresh_jti: Optional[str] = Field(default=None, max_length=64)
     # Set when the server knows the session ended. The state (online / idle / ended) is computed when the row is
     # read (auth/sessions.py): a session past expires_at or its idle timeout is ended even before these are set.
     ended_at: Optional[datetime] = Field(default=None, index=True)

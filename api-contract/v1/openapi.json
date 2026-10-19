@@ -173,7 +173,7 @@
           "AUTHENTICATION"
         ],
         "summary": "Refresh Token",
-        "description": "Refresh access token using refresh token",
+        "description": "Refresh access token using refresh token. A refresh token works once: the answer carries the next one, and\nthe one presented is refused from then on (invalid_refresh_token; the session goes on with the newest).",
         "operationId": "refresh_token",
         "requestBody": {
           "content": {

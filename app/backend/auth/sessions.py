@@ -11,12 +11,16 @@ A session opened with a client certificate (production login through nginx) is b
 every request must present the same certificate (certificate_matches), so a token is useless without it, and
 that certificate must still be an active certificate of the user
 (AuthService.end_session_of_revoked_certificate).
+
+A refresh token works once: the session stores the jti of the current one (refresh_jti) and every refresh
+replaces it (claim_refresh), so a copy of an older token refreshes nothing.
 """
+import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import bindparam
+from sqlalchemy import bindparam, or_, update
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -132,6 +136,35 @@ async def record_end(session: AsyncSession, row: UserSession, state: SessionStat
         end(row, state.end_reason, at=state.ends_at)
         session.add(row)
         await session.commit()
+
+
+def new_refresh_jti() -> str:
+    """The id of a refresh token (its jti claim), stored on the session as the one that may refresh it"""
+    return secrets.token_urlsafe(32)
+
+
+async def claim_refresh(session: AsyncSession, session_id: str, user_id: int, presented_jti: str) -> Optional[str]:
+    """Retire the refresh token presented and record the id of the next one: that id, or None when the presented
+    token is not the session's current one (used already, or the session is not the user's).
+
+    One conditional UPDATE, issued as the first statement of the refresh transaction: of two refreshes with the
+    same token exactly one wins, and no row read earlier in the transaction can change under it (MariaDB's snapshot
+    isolation answers a write to such a row with error 1020). A session opened before migration 025 has no
+    refresh_jti and takes any of its tokens once. The caller's transaction decides: a refresh refused after the
+    claim rolls it back, and the token stays usable.
+    """
+    next_jti = new_refresh_jti()
+    result = await session.execute(
+        update(UserSession)
+        .execution_options(synchronize_session=False)
+        .where(
+            UserSession.id == session_id,
+            UserSession.user_id == user_id,
+            or_(UserSession.refresh_jti == presented_jti, UserSession.refresh_jti.is_(None)),
+        )
+        .values(refresh_jti=next_jti)
+    )
+    return next_jti if result.rowcount == 1 else None
 
 
 async def live_session(session: AsyncSession, session_id: str, user_id: int) -> Optional[UserSession]:

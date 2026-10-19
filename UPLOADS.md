@@ -10,6 +10,8 @@ Three ways to get a file into the system. Pick by connection quality and file si
 
 All three need `media.view` + `media.create` and write access to the observation's post, apply the same format registry (`GET /media/formats`) and the same per-format size limit, and end with the same response (`media_file_id`, `thumbnail_status`, `thumbnail_urls`, metadata).
 
+The same bytes are stored once per observation: uploading a file whose content is already attached to that observation answers the existing `media_file_id`, and the file keeps its first `original_filename`. In another observation the same content is a new file.
+
 Every error is an RFC 9457 problem (`application/problem+json`, see `API.md`). Decide by `code` (it names exactly one message, use it as the translation key); `detail` is English fallback text; the other members are the values below (`offset`, `session_status`, `accepted_extensions`, ...), at the top level of the body. The tables list the codes.
 
 ## Resumable upload, step by step
@@ -67,7 +69,7 @@ Content-Length: 8388608
 | 410 | `upload_session_closed`: session is `completed`, `aborted` or `expired` (`session_status`). `upload_bytes_missing`: the bytes the server had stored are gone; the session is aborted (`session_status`). | Completed: you are done, `media_file_id` is the file. Otherwise open a new session. |
 | 400 | `upload_offset_required` (header missing), `upload_chunk_empty`, or `upload_chunk_not_stored` (the transfer broke mid-chunk or the disk refused the bytes, and the file was truncated back to the session's offset; or the request stalled so long that another request took the session over, see below). `offset` and the `Upload-Offset` header are the session's offset. | Ask `GET` for the offset and resend. |
 | 500 | `internal_error`: an unexpected failure (its `error_id` is in the server log); the file was truncated back to `offset`. | Ask `GET` for the offset and resend; stop after a few tries. |
-| 415 | `upload_chunk_content_type`: the body is not `application/offset+octet-stream`. | Fix the request. |
+| 415 | `upload_chunk_content_type`: the `Content-Type` is neither `application/offset+octet-stream` nor `application/octet-stream` (a chunk without a `Content-Type` is accepted). | Fix the request. |
 | 401 | Token expired during a long upload. | Refresh the token and resend the same chunk. The session is not affected. |
 
 **On any network error** (timeout, reset, no response): do not assume anything about the chunk. Ask the server:
