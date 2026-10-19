@@ -169,6 +169,42 @@ async def test_refresh_token_without_session_is_refused(client, db):
 
 
 @pytest.mark.asyncio
+async def test_a_refresh_token_works_once(client, db):
+    """Every refresh retires the refresh token it was given: a copy (replayed, intercepted, or a lost answer's
+    retry) is refused, while the session goes on with the newest token. The live test of 2026-10-19 found the old
+    token accepted until its own expiry."""
+    user = await make_user(db)
+    session_row = await AuthService.create_session(db, user)          # as POST /auth/login opens it
+    first = AuthService.session_tokens(user.id, session_row)[1]
+    assert jwt.get_unverified_claims(first)["jti"] == session_row.refresh_jti
+
+    response = await client.post(REFRESH, json={"refresh_token": first})
+    assert response.status_code == 200, response.text
+    second = response.json()["refresh_token"]
+    replay = await client.post(REFRESH, json={"refresh_token": first})
+    assert replay.status_code == 401 and replay.json()["code"] == "invalid_refresh_token"
+    response = await client.post(REFRESH, json={"refresh_token": second})
+    assert response.status_code == 200, "the replay did not end the session"
+    await db.refresh(session_row)
+    assert session_row.ended_at is None
+    assert session_row.refresh_jti == jwt.get_unverified_claims(response.json()["refresh_token"])["jti"]
+
+
+@pytest.mark.asyncio
+async def test_the_first_refresh_pins_a_session_from_before_single_use_tokens(client, db):
+    """A session opened before migration 025 has no refresh_jti: any of its refresh tokens refreshes once, and
+    from then on only the newest one does (nobody is logged out by the upgrade)"""
+    user = await make_user(db)
+    session_row = await make_session(db, user)
+    assert session_row.refresh_jti is None
+    one = AuthService.create_refresh_token(user.id, session_id=session_row.id)
+    other = AuthService.create_refresh_token(user.id, session_id=session_row.id)
+    assert (await client.post(REFRESH, json={"refresh_token": one})).status_code == 200
+    response = await client.post(REFRESH, json={"refresh_token": other})
+    assert response.status_code == 401 and response.json()["code"] == "invalid_refresh_token"
+
+
+@pytest.mark.asyncio
 async def test_logout_records_the_reason(client, db):
     user = await make_user(db)
     session_row = await make_session(db, user)

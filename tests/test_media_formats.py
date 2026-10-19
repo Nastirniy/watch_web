@@ -7,7 +7,8 @@ from app.backend.enums.routes import MediaRoutes, MediaFormatRoutes
 from app.backend.api.v1 import V1
 from app.backend.models.media_format import MediaFormat
 from app.backend.services.media import formats
-from tests.helpers import make_post, make_user, make_admin, make_dictionary, make_observation
+from app.backend.auth.scope import ROOT
+from tests.helpers import assign, make_admin, make_dictionary, make_observation, make_post, make_role, make_user
 
 UPLOAD = V1.path(MediaRoutes.UPLOAD)
 NGINX_UPLOAD = V1.path(MediaRoutes.NGINX_UPLOAD)
@@ -220,6 +221,36 @@ async def test_media_format_crud(client, db, headers):
     from app.backend.models.audit import AuditLog
     actions = (await db.exec(select(AuditLog.action).where(AuditLog.resource_type == "media_format"))).all()
     assert {"create", "update", "archive", "restore"} <= set(actions)
+
+
+@pytest.mark.asyncio
+async def test_restoring_through_create_needs_the_archive_permission(client, db, headers):
+    """Creating an archived content_type again restores it, and a restore needs media_format.archive (as POST
+    /restore does): with view and create alone it answered 200 and restored the row (live test, 2026-10-19)"""
+    admin = await make_admin(db)
+    # type admin (its ceiling allows every permission); the role at the root is all each user holds
+    creator = await make_user(db, user_type="admin")
+    await assign(db, creator, await make_role(db, ["media_format.view", "media_format.create"]), ROOT)
+    archiver = await make_user(db, user_type="admin")
+    await assign(db, archiver, await make_role(db, ["media_format.view", "media_format.create", "media_format.archive"]),
+                 ROOT)
+    payload = {"media_type": "image", "content_type": "image/avif", "label": "AVIF", "extensions": [".avif"],
+               "max_file_size_bytes": 20 * formats.MB}
+    created = await client.post(CREATE, json=payload, headers=headers(creator))
+    assert created.status_code == 200, "a new content type needs only create"
+    format_id = created.json()["id"]
+    assert (await client.post(ARCHIVE.format(format_id=format_id), headers=headers(admin))).status_code == 200
+
+    refused = await client.post(CREATE, json=dict(payload, label="AVIF again"), headers=headers(creator))
+    assert refused.status_code == 403 and refused.json()["code"] == "permission_denied"
+    assert refused.json()["missing"] == ["media_format.archive"]
+    assert "media_format.archive" in refused.json()["required"]["all"]
+    row = (await db.exec(select(MediaFormat).where(MediaFormat.id == format_id))).one()
+    await db.refresh(row)
+    assert row.is_deleted is True and row.label == "AVIF", "nothing was restored"
+
+    restored = await client.post(CREATE, json=dict(payload, label="AVIF again"), headers=headers(archiver))
+    assert restored.status_code == 200 and restored.json()["id"] == format_id and restored.json()["is_deleted"] is False
 
 
 @pytest.mark.asyncio

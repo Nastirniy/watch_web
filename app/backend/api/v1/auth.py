@@ -4,7 +4,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.database import get_session
 from app.backend.auth.service import AuthService
-from app.backend.auth.sessions import certificate_matches, live_clause, live_session, session_state, touch
+from app.backend.auth.sessions import certificate_matches, claim_refresh, live_clause, live_session, session_state, touch
 from datetime import datetime, timezone
 from sqlmodel import select
 from app.backend.auth.require import require
@@ -164,13 +164,22 @@ async def refresh_token(
         # Set by nginx from the verified client certificate (nginx-proxy.conf), never by the client
         x_ssl_client_fingerprint: Optional[str] = Header(None, include_in_schema=False),
 ):
-    """Refresh access token using refresh token"""
+    """Refresh access token using refresh token. A refresh token works once: the answer carries the next one, and
+    the one presented is refused from then on (invalid_refresh_token; the session goes on with the newest)."""
     payload = AuthService.verify_token(refresh_request.refresh_token, "refresh")
     if not payload:
         raise ApiError(AuthErrorCode.INVALID_REFRESH_TOKEN)
 
     user_id = int(payload.get("sub"))
     session_id = payload.get("sid", None)
+    presented_jti = payload.get("jti", None)
+
+    # A refresh token always belongs to a session (POST /auth/login), which must still be live
+    if not session_id or not presented_jti:
+        raise ApiError(AuthErrorCode.INVALID_REFRESH_TOKEN)
+    # The first statement of the transaction retires the token presented (sessions.claim_refresh); every check
+    # below that refuses the refresh rolls it back
+    next_jti = await claim_refresh(session, session_id, user_id, presented_jti)
 
     # Verify user still exists
     user_result = await session.exec(
@@ -189,9 +198,6 @@ async def refresh_token(
             raise ApiError(AuthErrorCode.ACCOUNT_DELETED)
         raise ApiError(AuthErrorCode.ACCOUNT_DEACTIVATED)
 
-    # A refresh token always belongs to a session (POST /auth/login), which must still be live
-    if not session_id:
-        raise ApiError(AuthErrorCode.INVALID_REFRESH_TOKEN)
     refresh_session = await live_session(session, session_id, user_id)
     if refresh_session is None:
         raise ApiError(AuthErrorCode.SESSION_EXPIRED)
@@ -203,6 +209,10 @@ async def refresh_token(
     if not await certificate_matches(refresh_session, x_ssl_client_fingerprint):
         _logger.warning(f"Refresh token presented with another client certificate: session_id={session_id}, user_id={user_id}")
         raise ApiError(AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH)
+    if next_jti is None:
+        # A copy of a refresh token that refreshed already (or lost a concurrent refresh): the session stays live
+        _logger.warning(f"Refresh token used again: session_id={session_id}, user_id={user_id}")
+        raise ApiError(AuthErrorCode.INVALID_REFRESH_TOKEN)
     # A refresh is activity: it moves the end of the session (never past the hard end, when one is set)
     touch(refresh_session)
     session.add(refresh_session)

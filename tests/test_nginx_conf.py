@@ -9,6 +9,8 @@ import inspect
 import re
 from pathlib import Path
 
+import yaml
+
 from app.backend.api.v1.auth import login
 from app.backend.config import settings
 from app.backend.services.media.formats import hard_limit_bytes
@@ -109,6 +111,19 @@ def test_production_server_requires_a_verified_client_certificate():
     for _, body in servers:
         if "listen 443 ssl" not in body:
             assert "return 301 https://" in body and "include" not in body and "location" not in body
+
+
+def test_production_compose_does_not_prewarm_through_nginx():
+    """Pre-warming asks nginx for a thumbnail without a client certificate, and nginx.conf serves nothing without
+    one: port 80 only redirects, 443 refuses the request. docker-compose.yml pointed it at http://127.0.0.1:80, so
+    every upload made a request that could only answer 301 (found on the test server, 2026-10-19)"""
+    api = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))["services"]["api"]["environment"]
+    assert api.get("MYSETTINGS_STORAGE__THUMBNAIL__PREWARM") == "false"
+    assert "MYSETTINGS_STORAGE__IMGPROXY__PREWARM_BASE_URL" not in api
+    # the plain http e2e stack has a server pre-warming can reach, and keeps it on
+    e2e = yaml.safe_load(E2E_COMPOSE)["services"]["api"]["environment"]
+    assert e2e.get("MYSETTINGS_STORAGE__IMGPROXY__PREWARM_BASE_URL") == "http://nginx"
+    assert e2e.get("MYSETTINGS_STORAGE__THUMBNAIL__PREWARM", "true") != "false"
 
 
 def test_e2e_stack_runs_the_production_locations():

@@ -22,7 +22,7 @@ from typing import Optional
 
 from loguru import logger
 
-from app.backend.database import get_session_maker, create_database_if_not_exists
+from app.backend.database import close_db, get_session_maker, create_database_if_not_exists
 from app.backend.auth.scope import ROOT
 from app.backend.auth.user_types import USER_TYPES
 from app.backend.enums.general import CertificateSource, UserType
@@ -187,6 +187,15 @@ async def interactive_create(cert_path: str = None, label: Optional[str] = None)
     await create_user(username, username_alias, cert_path, user_type, label)
 
 
+async def _closing_pool(command):
+    try:
+        await command
+    finally:
+        # The pool's connections are closed while the event loop still runs (asyncio.run in main): left to the
+        # garbage collector they were closed after it, and the command ended with "Event loop is closed"
+        await close_db()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Create initial user, optionally with the certificate file it logs in with"
@@ -216,11 +225,11 @@ def main():
             logger.error("Username must be 3-50 characters")
             sys.exit(1)
 
-        asyncio.run(create_user(args.username, args.alias, args.cert, user_type, args.label))
+        asyncio.run(_closing_pool(create_user(args.username, args.alias, args.cert, user_type, args.label)))
         return
 
     # Otherwise -- interactive, with cert pre-filled if given positionally
-    asyncio.run(interactive_create(cert_path=args.cert, label=args.label))
+    asyncio.run(_closing_pool(interactive_create(cert_path=args.cert, label=args.label)))
 
 
 if __name__ == "__main__":

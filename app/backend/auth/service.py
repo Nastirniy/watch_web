@@ -78,18 +78,20 @@ class AuthService:
         return jwt.encode(payload, settings.security.secret_key, algorithm=settings.security.algorithm)
 
     @staticmethod
-    def create_refresh_token(user_id: int, session_id: Optional[str] = None, expires_at: Optional[datetime] = None) -> str:
-        """Create JWT refresh token (session_tokens sets expires_at; the session is checked at every refresh anyway)"""
+    def create_refresh_token(user_id: int, session_id: Optional[str] = None, expires_at: Optional[datetime] = None,
+                             jti: Optional[str] = None) -> str:
+        """Create JWT refresh token (session_tokens sets expires_at and the jti the session stores; the session is
+        checked at every refresh anyway)"""
         now = datetime.now(timezone.utc)
         expire = session_lifetimes.utc(expires_at) if expires_at is not None else now + AuthService.refresh_window()
-        
+
         payload = {
             "sub": str(user_id),
             "exp": expire,
             "iat": now,
             "nbf": now,
             "type": "refresh",
-            "jti": secrets.token_urlsafe(32)
+            "jti": jti or session_lifetimes.new_refresh_jti()
         }
         
         if session_id:
@@ -106,7 +108,9 @@ class AuthService:
     @staticmethod
     def session_tokens(user_id: int, user_session: UserSession) -> tuple[str, str, int]:
         """(access token, refresh token, access lifetime in seconds) of a live session. Neither outlives the hard
-        end of the session (security.session_max_hours, when set); every refresh issues both again."""
+        end of the session (security.session_max_hours, when set); every refresh issues both again. The refresh
+        token carries the jti the session stores (create_session, sessions.claim_refresh): it is the only one that
+        refreshes the session."""
         now = datetime.now(timezone.utc)
         hard_end = session_lifetimes.hard_end(user_session)
         access_expires = now + timedelta(minutes=settings.security.access_token_expire_minutes)
@@ -114,7 +118,8 @@ class AuthService:
         if hard_end is not None:
             access_expires, refresh_expires = min(access_expires, hard_end), min(refresh_expires, hard_end)
         access = AuthService.create_access_token(user_id, session_id=user_session.id, not_after=access_expires)
-        refresh = AuthService.create_refresh_token(user_id, session_id=user_session.id, expires_at=refresh_expires)
+        refresh = AuthService.create_refresh_token(user_id, session_id=user_session.id, expires_at=refresh_expires,
+                                                   jti=user_session.refresh_jti)
         return access, refresh, max(0, int((access_expires - now).total_seconds()))
 
     @staticmethod
@@ -157,6 +162,7 @@ class AuthService:
             user_agent=fit_column(UserSession.user_agent, user_agent),
             created_at=now,
             expires_at=now,
+            refresh_jti=session_lifetimes.new_refresh_jti(),   # of the refresh token the login answers
         )
         session_lifetimes.touch(user_session, now)
         await session_lifetimes.bind_certificate(user_session, certificate_fingerprint)

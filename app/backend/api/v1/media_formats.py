@@ -21,7 +21,8 @@ from app.backend.database import get_session
 from app.backend.auth.access_control import AccessControlService
 from app.backend.models.media_format import MediaFormat
 from app.backend.auth.context import AuthContext
-from app.backend.auth.require import require
+from app.backend.auth.access_errors import access_denied
+from app.backend.auth.require import Require, require
 from app.backend.services.media.formats import find_conflict, hard_limit_bytes, invalidate_registry_cache
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import MediaFormatRoutes
@@ -112,13 +113,21 @@ async def create_media_format(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.MEDIA_FORMAT_VIEW, Permissions.MEDIA_FORMAT_CREATE]))
 ):
-    """Add an accepted format. Creating an archived content_type again restores it with the new values."""
+    """Add an accepted format. Creating an archived content_type again restores it with the new values, which needs
+    media_format.archive as well (as POST /{format_id}/restore does): 403 permission_denied without it."""
     current_user = auth.user
     _check_size(data.max_file_size_bytes)
 
     existing = (await session.exec(select(MediaFormat).where(MediaFormat.content_type == data.content_type))).first()
     if existing and not existing.is_deleted:
         raise ApiError(ErrorCode.MEDIA_FORMAT_EXISTS, content_type=data.content_type, format_id=existing.id)
+    if existing and not auth.has_anywhere(Permissions.MEDIA_FORMAT_ARCHIVE):
+        archive = Permissions.MEDIA_FORMAT_ARCHIVE.value
+        raise access_denied(
+            AccessErrorCode.PERMISSION_DENIED,
+            required=Require.of(all=[Permissions.MEDIA_FORMAT_VIEW, Permissions.MEDIA_FORMAT_CREATE, archive]),
+            missing=[archive],
+        )
     await _check_conflicts(session, data.media_type, data.extensions, data.aliases, data.content_type,
                            exclude_id=existing.id if existing else None)
 

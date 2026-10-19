@@ -42,7 +42,9 @@ services:
       MYSETTINGS_STORAGE__ENABLE_NGINX: "true"
       MYSETTINGS_STORAGE__NGINX_UPLOAD_TEMP_PATH: ${NGINX_UPLOAD_TEMP:?set NGINX_UPLOAD_TEMP in .env}
       MYSETTINGS_STORAGE__IMGPROXY__URL: http://127.0.0.1:${IMGPROXY_PORT:-8080}
-      MYSETTINGS_STORAGE__IMGPROXY__PREWARM_BASE_URL: http://127.0.0.1:${NGINX_HTTP_PORT:-80}
+      # No pre-warming: nginx.conf serves nothing without a client certificate (port 80 only redirects), so the
+      # API has no way into the thumbnail cache; the first viewer of a thumbnail waits for one render instead
+      MYSETTINGS_STORAGE__THUMBNAIL__PREWARM: "false"
       # imgproxy's limit: larger images are stored with thumbnail_status unsupported (same variable as imgproxy below)
       MYSETTINGS_STORAGE__IMGPROXY__MAX_SRC_RESOLUTION_MP: ${IMGPROXY_MAX_SRC_RESOLUTION:-250}
     volumes:
@@ -58,6 +60,10 @@ services:
   media-worker:
     <<: *app
     command: ["python", "-m", "app.backend.workers.media_worker"]
+    depends_on:
+      # the API migrates the database at its start: on a fresh one the worker found no media_files table
+      api:
+        condition: service_healthy
     environment:
       MYSETTINGS_STORAGE__UPLOAD_PATH: ${MEDIA_ROOT:?set MEDIA_ROOT in .env}
       MYSETTINGS_STORAGE__TEMP_PATH: ${MEDIA_ROOT}/_tmp
@@ -114,5 +120,5 @@ services:
 # and in .env set MYSETTINGS_DATABASE__HOST=host.docker.internal. MySQL must then listen on the
 # docker bridge address (bind-address = 0.0.0.0 or the docker0 IP) and grant the application user
 # from the bridge subnet ('radio_user'@'172.%'). Inside the api service use
-#   MYSETTINGS_STORAGE__IMGPROXY__URL=http://imgproxy:8080 and PREWARM_BASE_URL=http://host.docker.internal
+#   MYSETTINGS_STORAGE__IMGPROXY__URL=http://imgproxy:8080
 # with IMGPROXY_BIND=":8080".

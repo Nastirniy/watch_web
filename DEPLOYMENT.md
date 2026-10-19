@@ -63,6 +63,7 @@ sudo cp nginx.conf /etc/nginx/sites-available/watch_web               # server b
 sudo ln -s /etc/nginx/sites-available/watch_web /etc/nginx/sites-enabled/
 sudo mkdir -p /var/www/nginx_uploads /var/cache/nginx/thumbs
 sudo chown www-data:www-data /var/www/nginx_uploads /var/cache/nginx/thumbs
+sudo chmod 755 /var/cache/nginx      # the workers (www-data) reach thumbs/ through it; at 0700 every thumbnail answers 200 with 0 bytes
 sudo nginx -t && sudo systemctl reload nginx
 ```
 

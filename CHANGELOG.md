@@ -5,6 +5,53 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Deployment fixes from the live test (2026-10-19)
+
+### Changed
+
+- `POST /auth/refresh`: a refresh token works once. The refresh that uses it retires it; the same token again answers
+  401 `invalid_refresh_token` and the session goes on with the newest token (nothing is ended). Before, every
+  refresh token of a live session worked until its own expiry, so a copy kept refreshing after the client had
+  moved on. Two refreshes with the same token at once: one answers 200, the other `invalid_refresh_token`. Clients
+  keep only the latest refresh token (API.md, "Session lifetime"); a client that lost the answer of a refresh logs
+  in again. Only the description of the operation changed in `api-contract/v1/openapi.json`.
+- Migration `025_session_refresh_jti`: column `user_sessions.refresh_jti` (VARCHAR 64, null), the jti of the one
+  refresh token that may refresh the session, replaced by every refresh with a conditional UPDATE, the first
+  statement of the refresh transaction (`auth/sessions.py`, `claim_refresh`). Sessions from before the upgrade
+  have none: their first refresh sets it, so nobody is logged out. The downgrade drops the column.
+- `POST /media-formats/create` of an archived `content_type` restores it only with `media_format.archive` as well,
+  as `POST /media-formats/{id}/restore` requires; without it 403 `permission_denied` (`missing`:
+  `media_format.archive`) and the row stays archived. Before, `media_format.create` alone restored it. Only the
+  description of the operation changed in `api-contract/v1/openapi.json`.
+- DEPLOYMENT.md: `chmod 755 /var/cache/nginx`. Created as `root 0700`, it kept the nginx workers out of
+  `thumbs/`: every thumbnail answered 200 with an empty body (found on the test server).
+- UPLOADS.md: a chunk may also be sent as `application/octet-stream` or without a `Content-Type` (as the API always
+  accepted); the same bytes are stored once per observation (the existing `media_file_id` answers, with its first
+  `original_filename`).
+
+### Fixed
+
+- `deploy/systemd/watch-web-crl.service`: `StartLimitIntervalSec=0`. Every revocation publishes the CRL and the path
+  unit starts the reload once per publish; more than 5 publishes in 10 s (a burst of revocations) hit systemd's
+  default start limit, the service failed with `start-limit-hit` and `watch-web-crl.path` failed with it and stopped
+  watching for good. nginx never re-read the CRL again, so every certificate revoked afterwards kept passing nginx
+  (the API still refused it: `certificate_revoked`, sessions ended). Upgrade: copy the unit to
+  `/etc/systemd/system/`, `systemctl daemon-reload`, and `systemctl reset-failed watch-web-crl.service
+  watch-web-crl.path && systemctl restart watch-web-crl.path` on a server where it already failed.
+- `docker-compose.yml`: the api no longer pre-warms thumbnails (`MYSETTINGS_STORAGE__THUMBNAIL__PREWARM=false`,
+  `PREWARM_BASE_URL` removed). It asked `http://127.0.0.1:80`, which `nginx.conf` only redirects to https, where a
+  client certificate is required: every upload made a request that could only answer 301 and logged a warning.
+  The first viewer of a thumbnail now waits for one render. `NGINX_HTTP_PORT` is gone from `.env.example` (it
+  served only that URL).
+- `docker-compose.yml`: `media-worker` starts once the api is healthy (`depends_on`, `service_healthy`). On a fresh
+  database it started next to the api, before the migrations, and crashed on the missing `media_files` table until
+  its restart policy caught up.
+- `MYSETTINGS_HEALTH__ALLOWED_HOSTS` is read as a JSON list. `HealthConfig.allowed_hosts` had no parser for the
+  string form, so the line `.env.example` ships stopped the api and the worker at startup (`list_type`). Every list
+  setting now has a test that it reads its JSON form (`tests/test_env_list_settings.py`).
+- `python -m app.backend.cli.init_user` and `migrations_manager seed` close the database pool before the event loop
+  ends: they finished their work, then printed a traceback `RuntimeError: Event loop is closed`.
+
 ## PKI client certificates
 
 ### Added
