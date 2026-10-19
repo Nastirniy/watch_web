@@ -139,7 +139,7 @@ Thumbnails and previews are rendered on demand by [imgproxy](https://imgproxy.ne
 
 ### Video posters (media worker)
 
-Run the worker as its own process: `python -m app.backend.workers.media_worker` (compose service `media-worker`, or `systemd/watch-web-media-worker.service`).
+Run the worker as its own process: `python -m app.backend.workers.media_worker` (compose service `media-worker`, or `deploy/systemd/watch-web-media-worker.service`).
 
 | Variable | Default | Description |
 |----------|---------|-------------|

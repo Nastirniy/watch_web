@@ -351,4 +351,3 @@ def get_main_logger():
     """Get logger for main point"""
     return get_logger("main")
 
-# TODO: make fully implemented clearly logging
