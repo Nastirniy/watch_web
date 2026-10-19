@@ -99,6 +99,18 @@ class CorpsRoutes(str, Enum):
         return "CORPS"
 
 
+class BrigadeRoutes(str, Enum):
+    """Brigades: units inside a corps (scope groups of kind brigade)"""
+    BASE = "/brigades"
+    ROOT = "/"  # collection: list and create
+    BRIGADE_BY_ID = "/{brigade_id}"
+    BRIGADE_POSTS = "/{brigade_id}/posts"
+
+    @staticmethod
+    def tag() -> str:
+        return "BRIGADES"
+
+
 class ObservationRoutes(str, Enum):
     """Observation management routes"""
     BASE = "/observations"
@@ -315,6 +327,7 @@ class Routes:
     POSTS = PostRoutes
     SCOPE_GROUPS = ScopeGroupRoutes
     CORPS = CorpsRoutes
+    BRIGADES = BrigadeRoutes
     USER_TYPES = UserTypeRoutes
     STATISTICS = StatisticsRoutes
     OBSERVATIONS = ObservationRoutes

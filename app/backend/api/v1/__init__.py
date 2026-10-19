@@ -8,7 +8,7 @@ from app.backend.api.versioning import PublishedVersion
 from app.backend.enums.routes import APIVersionRoutes
 from app.backend.api.v1 import (
     auth, users, user_certificates, certificates, roles, categories, signal_types, tags, observations, posts,
-    scope_groups, corps, media, media_uploads, media_formats, search, statistics, user_types,
+    scope_groups, corps, brigades, media, media_uploads, media_formats, search, statistics, user_types,
 )
 
 # Order matters only inside one prefix: users before user_certificates (both under /users), media before
@@ -16,5 +16,5 @@ from app.backend.api.v1 import (
 V1 = PublishedVersion(
     APIVersionRoutes.V1,
     auth, users, user_certificates, certificates, roles, categories, signal_types, tags, observations, posts,
-    scope_groups, corps, media, media_uploads, media_formats, search, statistics, user_types,
+    scope_groups, corps, brigades, media, media_uploads, media_formats, search, statistics, user_types,
 )
