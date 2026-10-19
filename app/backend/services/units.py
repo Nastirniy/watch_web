@@ -3,10 +3,11 @@
 The units of a post come from the scope tree every request loads (ScopeTree.units_of_post); the units of an
 observation are the observation_units rows written at its create.
 """
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, FrozenSet, Iterable, List, Mapping, Optional, Tuple
 
-from sqlalchemy import and_, delete, false
+from sqlalchemy import and_, delete, false, or_
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -147,3 +148,56 @@ def observation_units_filter(tree: ScopeTree, params) -> Optional[ColumnElement]
                   if (condition := observation_unit_condition(
                       tree, kind, getattr(params, f"{kind.value}_id", None), placement)) is not None]
     return and_(*conditions) if conditions else None
+
+
+def observation_units_any(tree: ScopeTree, unit_ids: Mapping[ScopeGroupKind, Optional[Iterable[int]]],
+                          placement: UnitPlacement) -> Optional[ColumnElement]:
+    """Observations of any of the units of a kind (corps_ids: one of these corps), every kind given holding (and
+    one of these brigades); None when no unit is asked for"""
+    per_kind = []
+    for kind, ids in unit_ids.items():
+        if ids:
+            per_kind.append(or_(*(observation_unit_condition(tree, kind, unit_id, placement) for unit_id in ids)))
+    return and_(*per_kind) if per_kind else None
+
+
+@dataclass(frozen=True)
+class UnitLabel:
+    """A unit as a report shows it: today's name, archived today or not"""
+    id: int
+    name: str
+    archived: bool
+
+
+async def unit_labels(session: AsyncSession, group_ids: Iterable[int]) -> Dict[int, UnitLabel]:
+    """group id -> its label (one query); an unknown id is left out"""
+    ids = sorted(set(group_ids))
+    if not ids:
+        return {}
+    rows = await session.exec(select(ScopeGroup.id, ScopeGroup.name, ScopeGroup.is_deleted).where(ScopeGroup.id.in_(ids)))
+    return {group_id: UnitLabel(group_id, name, bool(is_deleted)) for group_id, name, is_deleted in rows.all()}
+
+
+async def observation_unit_labels(session: AsyncSession, tree: ScopeTree, observations: Iterable[Observation],
+                                  placement: UnitPlacement) -> Dict[int, Dict[str, UnitLabel]]:
+    """observation id -> unit kind -> label: recorded, the units stored at its create; current, the units its post
+    is in now (the observations come with their post loaded)"""
+    observations = list(observations)
+    units: Dict[int, Dict[str, int]] = {}
+    if UnitPlacement(placement) is UnitPlacement.RECORDED:
+        ids = sorted({observation.id for observation in observations})
+        if ids:
+            rows = await session.exec(
+                select(ObservationUnit.observation_id, ScopeGroup.kind, ScopeGroup.id)
+                .join(ScopeGroup, ScopeGroup.id == ObservationUnit.group_id)
+                .where(ObservationUnit.observation_id.in_(ids))
+            )
+            for observation_id, kind, group_id in rows.all():
+                units.setdefault(observation_id, {})[kind] = group_id
+    else:
+        for observation in observations:
+            group_id = observation.post.group_id if observation.post is not None else None
+            units[observation.id] = post_units(tree, group_id)
+    labels = await unit_labels(session, (group_id for found in units.values() for group_id in found.values()))
+    return {observation_id: {kind: labels[group_id] for kind, group_id in found.items() if group_id in labels}
+            for observation_id, found in units.items()}

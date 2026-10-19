@@ -11200,7 +11200,7 @@
           "OBSERVATIONS"
         ],
         "summary": "Generate Observation Report",
-        "description": "Generate an Excel (.xlsx) report for observations (observation.view and export.create).\n\nThe report header contains the filter criteria used (in Ukrainian).\nOne row per frequency band (rc_freq_part: rc bands, video_freq_part: video bands, all_fields: every band);\nthe observation columns repeat for each of its bands. Bands of archived observations and archived bands\nappear only with include_deleted (requires observation.archive), and only for the posts where\nobservation.archive is in effect. Only the posts where both observation.view and export.create are in effect\nare included; a post_ids entry outside them answers 403.\nall_fields columns: user, post, signal type, band kind, emitter group, frequency min/max/center, bandwidth,\nobserved time, disappeared time, duration (minutes, one decimal), comment, creation date, tags.\nAll datetimes are displayed in Kyiv local time (EET/EEST).\n\nFilter combinations supported:\n- By specific observation IDs\n- By date range (observed_at or created_at)\n- By user IDs (one or many)\n- By post IDs (one or many)\n- By signal type IDs\n- By statuses\n- Any combination of the above",
+        "description": "Generate an Excel (.xlsx) report for observations (observation.view and export.create).\n\nThe report header contains the filter criteria used (in Ukrainian).\nOne row per frequency band (rc_freq_part: rc bands, video_freq_part: video bands, all_fields: every band);\nthe observation columns repeat for each of its bands. Bands of archived observations and archived bands\nappear only with include_deleted (requires observation.archive), and only for the posts where\nobservation.archive is in effect. Only the posts where both observation.view and export.create are in effect\nare included; a post_ids entry outside them answers 403.\ncorps_ids / brigade_ids narrow the report to observations of these units (placement: recorded, where the post\nwas when the observation was created, or current, where it is now); access always follows the current tree.\nall_fields columns: user, post, corps, brigade (as the placement says; an archived unit is marked), signal type,\nband kind, emitter group, frequency min/max/center, bandwidth,\nobserved time, disappeared time, duration (minutes, one decimal), comment, creation date, tags.\nAll datetimes are displayed in Kyiv local time (EET/EEST).\n\nFilter combinations supported:\n- By specific observation IDs\n- By date range (observed_at or created_at)\n- By user IDs (one or many)\n- By post IDs (one or many)\n- By signal type IDs\n- By statuses\n- Any combination of the above",
         "operationId": "generate_observation_report",
         "requestBody": {
           "content": {
@@ -36547,6 +36547,41 @@
             ],
             "title": "Post Ids",
             "description": "Include only observations from these post IDs"
+          },
+          "corps_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corps Ids",
+            "description": "Include only observations of these corps, their brigades included (see placement)"
+          },
+          "brigade_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brigade Ids",
+            "description": "Include only observations of these brigades (see placement)"
+          },
+          "placement": {
+            "$ref": "#/components/schemas/UnitPlacement",
+            "description": "Which unit corps_ids / brigade_ids match and the corps and brigade columns show: recorded (where the post was when the observation was created) or current (where the post is now, archived posts left out of the unit filters). Not a time filter",
+            "default": "recorded"
           },
           "signal_type_ids": {
             "anyOf": [

@@ -3,7 +3,8 @@ from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator, PositiveInt
 
-from app.backend.enums.general import ConfidenceLevel, FrequencyKind, ObservationReportType, ObservationStatus, TagMatch
+from app.backend.enums.general import (ConfidenceLevel, FrequencyKind, ObservationReportType, ObservationStatus, TagMatch,
+                                      UnitPlacement)
 from app.backend.errors.coded import invalid
 from app.backend.utils.validators import INT_MAX, UtcDatetime, not_null
 from app.backend.enums.errors import FieldErrorCode
@@ -197,6 +198,17 @@ class ObservationReportParams(BaseModel):
         default=None,
         description="Include only observations from these post IDs"
     )
+
+    # --- Corps and brigades (placement: which unit an observation belongs to) ---
+    corps_ids: Optional[List[int]] = Field(
+        default=None, description="Include only observations of these corps, their brigades included (see placement)")
+    brigade_ids: Optional[List[int]] = Field(
+        default=None, description="Include only observations of these brigades (see placement)")
+    placement: UnitPlacement = Field(
+        default=UnitPlacement.RECORDED,
+        description="Which unit corps_ids / brigade_ids match and the corps and brigade columns show: recorded (where "
+                    "the post was when the observation was created) or current (where the post is now, archived posts "
+                    "left out of the unit filters). Not a time filter")
 
     # --- Signal type filter ---
     signal_type_ids: Optional[List[int]] = Field(

@@ -18,7 +18,9 @@ from app.backend.auth.access_control import AccessControlService
 from app.backend.enums.general import Permissions, ObservationStatus, ObservationReportType
 from app.backend.enums.routes import ObservationRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
-from app.backend.services.units import observation_unit_rows, observation_units_filter
+from app.backend.services.scope_groups import UNIT_KINDS
+from app.backend.services.units import (observation_unit_labels, observation_unit_rows, observation_units_any,
+                                        observation_units_filter, unit_labels)
 from app.backend.services.audit import create_audit_log
 from app.backend.api.v1.models.request.observations import (
     ObservationCreate,
@@ -420,7 +422,10 @@ async def generate_observation_report(
     appear only with include_deleted (requires observation.archive), and only for the posts where
     observation.archive is in effect. Only the posts where both observation.view and export.create are in effect
     are included; a post_ids entry outside them answers 403.
-    all_fields columns: user, post, signal type, band kind, emitter group, frequency min/max/center, bandwidth,
+    corps_ids / brigade_ids narrow the report to observations of these units (placement: recorded, where the post
+    was when the observation was created, or current, where it is now); access always follows the current tree.
+    all_fields columns: user, post, corps, brigade (as the placement says; an archived unit is marked), signal type,
+    band kind, emitter group, frequency min/max/center, bandwidth,
     observed time, disappeared time, duration (minutes, one decimal), comment, creation date, tags.
     All datetimes are displayed in Kyiv local time (EET/EEST).
 
@@ -438,16 +443,24 @@ async def generate_observation_report(
         AccessControlService.check_post(auth, Permissions.OBSERVATION_VIEW, post_id)
         AccessControlService.check_post(auth, Permissions.EXPORT_CREATE, post_id)
     scope = AccessControlService.scope_for_all(auth, Permissions.OBSERVATION_VIEW, Permissions.EXPORT_CREATE)
-    query = ObservationReportFilter.build_query(params, scope, archived_post_ids=archived)
+    asked_units = {kind: getattr(params, f"{kind.value}_ids") for kind in UNIT_KINDS}
+    query = ObservationReportFilter.build_query(
+        params, scope, archived_post_ids=archived,
+        unit_condition=observation_units_any(auth.tree, asked_units, params.placement),
+    )
 
     result = await session.exec(query)
     frequencies = list(result.all())
+    units = await observation_unit_labels(
+        session, auth.tree, {band.observation.id: band.observation for band in frequencies}.values(), params.placement)
+    unit_filters = await unit_labels(session, (unit_id for ids in asked_units.values() for unit_id in ids or ()))
 
     tag_names = None
     if params.tag_ids:
         tag_rows = await session.exec(select(Tag.id, Tag.name).where(Tag.id.in_(params.tag_ids)))
         tag_names = {tag_id: name for tag_id, name in tag_rows.all()}
-    excel_bytes = ObservationReportService.generate_excel(frequencies, params, tag_names=tag_names)
+    excel_bytes = ObservationReportService.generate_excel(frequencies, params, tag_names=tag_names, units=units,
+                                                          unit_filters=unit_filters)
 
     filename = f"observations_report_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.xlsx"
     return Response(
