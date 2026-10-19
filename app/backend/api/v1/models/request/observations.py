@@ -1,9 +1,9 @@
 from typing import Optional, List
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
-from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator, PositiveInt
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator, PositiveInt
 
-from app.backend.enums.general import ConfidenceLevel, FrequencyKind, ObservationReportType, TagMatch
+from app.backend.enums.general import ConfidenceLevel, FrequencyKind, ObservationReportType, ObservationStatus, TagMatch
 from app.backend.errors.coded import invalid
 from app.backend.utils.validators import INT_MAX, UtcDatetime, not_null
 from app.backend.enums.errors import FieldErrorCode
@@ -177,6 +177,9 @@ class ObservationReportParams(BaseModel):
     - Any combination of the above
     """
 
+    # A misspelt filter answers 422 instead of widening the report unnoticed
+    model_config = ConfigDict(extra="forbid")
+
     # --- Observation ID filter ---
     observation_ids: Optional[List[int]] = Field(
         default=None,
@@ -202,16 +205,10 @@ class ObservationReportParams(BaseModel):
     )
 
     # --- Status filter ---
-    statuses: Optional[List[str]] = Field(
-        default=None,
-        description="Filter by statuses: active, disappeared, confirmed, false_positive, under_review"
-    )
+    statuses: Optional[List[ObservationStatus]] = Field(default=None, description="Filter by statuses")
 
     # --- Confidence level filter ---
-    confidence_level: Optional[str] = Field(
-        default=None,
-        description="Filter by confidence level: low, medium, high"
-    )
+    confidence_level: Optional[ConfidenceLevel] = Field(default=None, description="Filter by confidence level")
 
     # --- Band range (applies to the bands of the report's kind; every kind for all_fields) ---
     frequency_center_from: Optional[Decimal] = Field(default=None, description="Band center frequency >= (MHz)")

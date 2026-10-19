@@ -5,9 +5,11 @@ All fields visible and documented in FastAPI /docs
 
 from typing import Optional, List, Literal
 from decimal import Decimal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
-from app.backend.enums.general import FrequencyKind, TagMatch
+from app.backend.enums.errors import FieldErrorCode
+from app.backend.enums.general import ConfidenceLevel, FrequencyKind, ObservationStatus, TagMatch
+from app.backend.errors.coded import invalid
 from app.backend.api.v1.models.query.base import BaseFilterParams
 from app.backend.utils.validators import UtcDatetime
 
@@ -27,9 +29,9 @@ class ObservationFilterParams(BaseFilterParams):
     signal_type_id: Optional[int] = Field(default=None, description="Filter by signal type ID")
 
     # --- Status ---
-    status: Optional[str] = Field(default=None, description="Exact status (active, disappeared, confirmed, false_positive, under_review)")
-    status_in: Optional[List[str]] = Field(default=None, description="Any of these statuses: ?status_in=active&status_in=confirmed")
-    confidence_level: Optional[str] = Field(default=None, description="Confidence level (low, medium, high)")
+    status: Optional[ObservationStatus] = Field(default=None, description="Exact status")
+    status_in: Optional[List[ObservationStatus]] = Field(default=None, description="Any of these statuses: ?status_in=active&status_in=confirmed")
+    confidence_level: Optional[ConfidenceLevel] = Field(default=None, description="Confidence level")
 
     # --- Frequency bands (all conditions must hold for the same active band) ---
     frequency_kind: Optional[FrequencyKind] = Field(default=None, description="Band kind: rc or video")
@@ -43,7 +45,9 @@ class ObservationFilterParams(BaseFilterParams):
     observed_at_to: Optional[UtcDatetime] = Field(default=None, description="Observed before (ISO datetime)")
 
     # --- Relative Date (alternative to observed_at range) ---
-    last_n_days: Optional[int] = Field(default=None, ge=1, le=365, description="Last N days from today")
+    last_n_days: Optional[int] = Field(
+        default=None, ge=1, le=365,
+        description="Observed in the last N days (today in UTC counts as one); not together with observed_at_from / observed_at_to")
 
     # --- Created/Updated Range ---
     created_at_from: Optional[UtcDatetime] = Field(default=None, description="Created after")
@@ -66,6 +70,14 @@ class ObservationFilterParams(BaseFilterParams):
 
     # --- Soft Delete ---
     include_deleted: bool = Field(default=False, description="Include archived records (requires observation.archive held anywhere; archived rows only at the posts where it is in effect)")
+
+    @field_validator("last_n_days")
+    @classmethod
+    def last_n_days_alone(cls, value: Optional[int], info: ValidationInfo) -> Optional[int]:
+        """A relative period next to an absolute bound would drop one of them unnoticed"""
+        if value is not None and (info.data.get("observed_at_from") or info.data.get("observed_at_to")):
+            raise invalid(FieldErrorCode.DATE_FILTERS_CONFLICT)
+        return value
 
 
 class ObservationFrequencyListParams(BaseModel):

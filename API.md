@@ -112,6 +112,18 @@ The localization package needs one entry per code:
 - Query, path, header and cookie values come as `parameter` + `location` instead (`{"parameter": "page", "location": "query"}`).
 - The submitted value is never echoed back.
 
+### Lists and filters
+
+- Filters are query parameters, combined with AND. A parameter the list does not know answers 422 (item code
+  `extra_forbidden`, `parameter` = its name), so a misspelt filter never widens the result unnoticed. Statuses,
+  confidence levels and media types accept only the values of their enum in the OpenAPI document (item code `enum`).
+- Send a parameter that takes one value once: a repeated one keeps its last value. Lists (`status_in`, `tag_ids`)
+  are repeated: `?status_in=active&status_in=confirmed`.
+- Exact text filters (`name`, `code`, `username`, ...) and `*_contains` ignore case (the database collation):
+  `name=tag_b` finds `Tag_B`. `*_contains` matches `%`, `_` and `\` literally.
+- `last_n_days` (observations) is a period of its own: together with `observed_at_from` / `observed_at_to` it answers
+  422 `date_filters_conflict`.
+
 ### Authentication (401)
 
 Send `Authorization: Bearer <access token>` from `POST /api/v1/auth/login`.

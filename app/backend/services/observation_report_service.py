@@ -29,7 +29,7 @@ from openpyxl.utils import get_column_letter
 from app.backend.enums.general import FrequencyKind, ObservationReportType, TagMatch
 from app.backend.models.observation import ObservationFrequency
 from app.backend.filters.observation_report_filter import ObservationReportCriteria
-from app.backend.filters.simple_engine import as_criteria
+from app.backend.filters.simple_engine import as_criteria, stored_value
 
 _KYIV_TZ = ZoneInfo("Europe/Kyiv")
 
@@ -162,9 +162,9 @@ def _build_filter_rows(params: ObservationReportCriteria, tag_names: Optional[Di
     if params.signal_type_ids:
         rows.append(("ID типів сигналів:", ", ".join(str(i) for i in params.signal_type_ids)))
     if params.statuses:
-        rows.append(("Статуси:", ", ".join(params.statuses)))
+        rows.append(("Статуси:", ", ".join(stored_value(status) for status in params.statuses)))
     if params.confidence_level:
-        rows.append(("Рівень впевненості:", params.confidence_level))
+        rows.append(("Рівень впевненості:", stored_value(params.confidence_level)))
     if params.tag_ids:
         label = "Теги (усі):" if params.tag_match == TagMatch.ALL else "Теги (будь-який):"
         rows.append((label, ", ".join(_tag_filter_label(i, tag_names) for i in params.tag_ids)))

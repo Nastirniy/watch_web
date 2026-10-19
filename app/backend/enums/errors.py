@@ -498,7 +498,7 @@ class FieldErrorCode(FieldCode):
     CONFIDENCE_LEVEL_INVALID = ("confidence_level_invalid", field("confidence_level must be one of: {accepted}", accepted=List[str]))
     PAGINATION_NEGATIVE = ("pagination_negative", field("Pagination values must be non-negative"))
     DATE_FILTERS_CONFLICT = ("date_filters_conflict", field(
-        "Cannot use both absolute date filters (observed_at_from/to) and relative date filters (last_n_days/day_offset)"))
+        "Cannot use last_n_days together with observed_at_from or observed_at_to"))
     RELATIVE_DATE_FILTERS_CONFLICT = ("relative_date_filters_conflict", field("Cannot use both last_n_days and day_offset"))
     OBSERVED_AT_RANGE_REVERSED = ("observed_at_range_reversed", field("observed_at_from must be before or equal to observed_at_to"))
     FREQUENCY_RANGE_INVALID = ("frequency_range_invalid", field("frequency_max must be greater than frequency_min"))
