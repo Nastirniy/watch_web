@@ -12,7 +12,9 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.api.shared.helpers.db_errors import unique_violation_as
-from app.backend.api.shared.helpers.scope_group_helper import audit_group, get_unit, name_taken
+from app.backend.api.shared.helpers.scope_group_helper import (
+    archive_unit, audit_group, get_unit, name_taken, restore_unit,
+)
 from app.backend.api.v1.models.query.corps import UnitFilterParams
 from app.backend.api.v1.models.query.posts import PostFilterParams
 from app.backend.api.v1.models.request.corps import CorpsCreate, CorpsUpdate
@@ -20,7 +22,7 @@ from app.backend.api.v1.models.response.brigades import BrigadeResponse, brigade
 from app.backend.api.v1.models.response.corps import CorpsResponse, corps_to_response
 from app.backend.api.v1.models.response.posts import PostResponse, posts_to_response
 from app.backend.auth.access_control import AccessControlService
-from app.backend.auth.context import AuthContext
+from app.backend.auth.context import AuthContext, load_scope_tree
 from app.backend.auth.require import require
 from app.backend.auth.scope import ROOT
 from app.backend.database import get_session
@@ -38,6 +40,11 @@ from app.backend.services.units import posts_within
 router = APIRouter(prefix=CorpsRoutes.BASE.value, tags=[CorpsRoutes.tag()])
 
 CORPS = ScopeGroupKind.CORPS
+
+
+async def _fresh(session: AsyncSession, auth: AuthContext) -> AuthContext:
+    """The caller with the tree as committed (the counts of an answer after an archive or restore)"""
+    return replace(auth, tree=await load_scope_tree(session))
 
 
 @router.get(
@@ -134,6 +141,53 @@ async def update_corps(
     await audit_group(request, session, auth, "update", corps, old_values)
     await session.commit()
     return corps_to_response(corps, auth)
+
+
+@router.post(
+    CorpsRoutes.CORPS_ARCHIVE.value,
+    response_model=CorpsResponse,
+    responses=problems(
+        ErrorCode.SCOPE_GROUP_NOT_FOUND, ErrorCode.CORPS_HAS_BRIGADES, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED,
+    ),
+)
+async def archive_corps(
+        request: Request,
+        corps_id: Annotated[int, Path(ge=1)],
+        cascade: bool = Query(False, description="Archive the brigades and posts of the corps too; without it the corps must have no active brigade and its posts move under the root"),
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_ARCHIVE]))
+):
+    """Archive a corps (is_deleted=true); the answer is the corps. scope_group.archive must cover it. Without
+    cascade: a corps with an active brigade answers 409 corps_has_brigades (move or archive its brigades first), its
+    posts leave it (directly under the root), which needs post.update covering the corps and the root. With
+    cascade=true: its active brigades and every active post below are archived too, which needs post.archive covering
+    the corps. Missing permissions: 403 permission_required_for_action, nothing changes. Holders of a role at the
+    corps lose the posts that left it. Archived, unknown, another kind or outside scope_group.view: 404. Undo with
+    POST /{corps_id}/restore (the corps only)"""
+    corps = await archive_unit(request, session, auth, CORPS, corps_id, cascade)
+    return corps_to_response(corps, await _fresh(session, auth))
+
+
+@router.post(
+    CorpsRoutes.CORPS_RESTORE.value,
+    response_model=CorpsResponse,
+    responses=problems(
+        ErrorCode.SCOPE_GROUP_NOT_FOUND, ErrorCode.SCOPE_GROUP_NOT_ARCHIVED,
+        AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED,
+    ),
+)
+async def restore_corps(
+        request: Request,
+        corps_id: Annotated[int, Path(ge=1)],
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_ARCHIVE]))
+):
+    """Restore an archived corps (is_deleted=false): the corps only; its archived brigades and posts are
+    listed with include_deleted (GET /{corps_id}/brigades, /{corps_id}/posts) and restored one by one.
+    scope_group.archive must cover it (403). Not archived: 409; unknown, another kind or outside
+    scope_group.view: 404."""
+    corps = await restore_unit(request, session, auth, CORPS, corps_id)
+    return corps_to_response(corps, await _fresh(session, auth))
 
 
 @router.get(

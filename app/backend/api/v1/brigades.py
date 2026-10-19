@@ -4,6 +4,7 @@ A thin facade over the scope group rules (services/scope_groups.py) and the unit
 brigade sits directly in a corps (ALLOWED_PARENT); moving it to another corps takes its posts along, like a group
 move.
 """
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Annotated, List, Optional
 
@@ -12,14 +13,16 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.api.shared.helpers.db_errors import unique_violation_as
-from app.backend.api.shared.helpers.scope_group_helper import audit_group, check_visible, get_unit, name_taken
+from app.backend.api.shared.helpers.scope_group_helper import (
+    archive_unit, audit_group, check_visible, get_unit, lock_unit, name_taken, restore_unit,
+)
 from app.backend.api.v1.models.query.brigades import BrigadeFilterParams
 from app.backend.api.v1.models.query.posts import PostFilterParams
 from app.backend.api.v1.models.request.brigades import BrigadeCreate, BrigadeUpdate
 from app.backend.api.v1.models.response.brigades import BrigadeResponse, brigade_to_response
 from app.backend.api.v1.models.response.posts import PostResponse, posts_to_response
 from app.backend.auth.access_control import AccessControlService
-from app.backend.auth.context import AuthContext
+from app.backend.auth.context import AuthContext, load_scope_tree
 from app.backend.auth.require import require
 from app.backend.auth.scope import Node
 from app.backend.database import get_session
@@ -35,11 +38,16 @@ from app.backend.models.post import Post
 from app.backend.models.scope_group import ScopeGroup
 from app.backend.services import scope_groups as groups_service
 from app.backend.services.units import posts_within
-from app.backend.utils.row_locks import lock, lock_first
+from app.backend.utils.row_locks import lock_first
 
 router = APIRouter(prefix=BrigadeRoutes.BASE.value, tags=[BrigadeRoutes.tag()])
 
 BRIGADE = ScopeGroupKind.BRIGADE
+
+
+async def _fresh(session: AsyncSession, auth: AuthContext) -> AuthContext:
+    """The caller with the tree as committed (the counts of an answer after an archive or restore)"""
+    return replace(auth, tree=await load_scope_tree(session))
 
 # Where a brigade may go: the corps is unknown, archived or outside scope_group.view, or not a corps
 PLACEMENT_PROBLEMS = (ErrorCode.SCOPE_GROUP_NOT_FOUND, ErrorCode.SCOPE_GROUP_PARENT_NOT_ALLOWED)
@@ -145,18 +153,17 @@ async def update_brigade(
     post.update covering the old and the new corps (403 permission_required_for_action, action move_brigade),
     answered before the existence of the new corps; the new corps unknown, archived or outside scope_group.view: 404,
     not a corps: 409 scope_group_parent_not_allowed. Nothing changes on a refusal."""
-    brigade = await get_unit(session, auth, BRIGADE, brigade_id, lock=True)
     update_data = data.model_dump(exclude_unset=True)
+    if "corps_id" in update_data:
+        check_visible(auth, update_data["corps_id"])
+    # Groups top down: the old and the new corps, then the brigade
+    brigade = await lock_unit(session, auth, BRIGADE, brigade_id, also=[update_data.get("corps_id")])
     old_values = brigade.model_dump()
 
     new_corps = update_data.get("corps_id", brigade.parent_id)
     if new_corps != brigade.parent_id:
-        check_visible(auth, new_corps)
         for corps_id in (brigade.parent_id, new_corps):
             AccessControlService.check_covers(auth, Permissions.POST_UPDATE, Node.group(corps_id), "move_brigade")
-        # Groups before posts, the moved brigade first: the destination waits for nobody holding the brigade
-        if await lock(session, select(ScopeGroup).where(ScopeGroup.id == new_corps)) is None:
-            raise ApiError(ErrorCode.SCOPE_GROUP_NOT_FOUND)
         await _check_corps(session, brigade.id, new_corps)
     if ("corps_id" in update_data or "name" in update_data) and await name_taken(
             session, update_data.get("name", brigade.name), new_corps, exclude_id=brigade.id):
@@ -176,6 +183,51 @@ async def update_brigade(
     await audit_group(request, session, auth, "update", brigade, old_values)
     await session.commit()
     return brigade_to_response(brigade, auth)
+
+
+@router.post(
+    BrigadeRoutes.BRIGADE_ARCHIVE.value,
+    response_model=BrigadeResponse,
+    responses=problems(
+        ErrorCode.SCOPE_GROUP_NOT_FOUND, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED,
+    ),
+)
+async def archive_brigade(
+        request: Request,
+        brigade_id: Annotated[int, Path(ge=1)],
+        cascade: bool = Query(False, description="Archive the posts of the brigade too; without it they move into its corps"),
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_ARCHIVE]))
+):
+    """Archive a brigade (is_deleted=true); the answer is the brigade. scope_group.archive must cover it.
+    Without cascade its active posts move into its corps, which needs post.update covering the brigade and the corps;
+    with cascade=true they are archived, which needs post.archive covering the brigade. Missing permissions: 403
+    permission_required_for_action, nothing changes. Holders of a role at the brigade lose its posts. Archived,
+    unknown, another kind or outside scope_group.view: 404. Undo with POST /{brigade_id}/restore (the brigade only)"""
+    brigade = await archive_unit(request, session, auth, BRIGADE, brigade_id, cascade)
+    return brigade_to_response(brigade, await _fresh(session, auth))
+
+
+@router.post(
+    BrigadeRoutes.BRIGADE_RESTORE.value,
+    response_model=BrigadeResponse,
+    responses=problems(
+        ErrorCode.SCOPE_GROUP_NOT_FOUND, ErrorCode.SCOPE_GROUP_NOT_ARCHIVED,
+        AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED,
+    ),
+)
+async def restore_brigade(
+        request: Request,
+        brigade_id: Annotated[int, Path(ge=1)],
+        session: AsyncSession = Depends(get_session),
+        auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_ARCHIVE]))
+):
+    """Restore an archived brigade (is_deleted=false) in its corps: the brigade only; its archived posts are
+    listed with include_deleted (GET /{brigade_id}/posts) and restored one by one. scope_group.archive must cover it
+    (403). Not archived: 409; its corps archived (restore the corps first), unknown, another kind or outside
+    scope_group.view: 404."""
+    brigade = await restore_unit(request, session, auth, BRIGADE, brigade_id)
+    return brigade_to_response(brigade, await _fresh(session, auth))
 
 
 @router.get(

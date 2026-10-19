@@ -1,12 +1,14 @@
 """Scope groups: rules of the tree (existence, cycles, depth, emptiness, where each kind may sit). Raises CodedError;
 the route answers."""
-from typing import Dict, FrozenSet, Optional, Tuple
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
 from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.backend.utils.row_locks import lock_first
+from app.backend.utils.row_locks import lock_all, lock_first
 
 from app.backend.enums.errors import ErrorCode
 from app.backend.enums.general import ScopeGroupKind
@@ -107,3 +109,62 @@ async def check_placement(session: AsyncSession, kind: ScopeGroupKind, parent_id
     if parent_kind not in ALLOWED_PARENT[kind]:
         raise CodedError(ErrorCode.SCOPE_GROUP_PARENT_NOT_ALLOWED, group_kind=kind.value,
                          parent_kind=parent_kind.value if parent_kind is not None else "root")
+
+
+@dataclass(frozen=True)
+class RowChange:
+    """One row an archive changed, for its audit row"""
+    resource_type: str      # "post" or "scope_group"
+    resource_id: int
+    action: str             # "archive", or "update" for a post moved out of the unit
+    old_values: Dict[str, Any]
+    new_values: Dict[str, Any]
+
+
+@dataclass
+class ArchiveChanges:
+    """What archive_unit changed (the unit itself last in archived_group_ids and in rows)"""
+    archived_group_ids: List[int] = field(default_factory=list)
+    archived_post_ids: List[int] = field(default_factory=list)
+    moved_post_ids: List[int] = field(default_factory=list)
+    rows: List[RowChange] = field(default_factory=list)
+
+
+async def archive_unit(session: AsyncSession, unit: ScopeGroup, cascade: bool) -> ArchiveChanges:
+    """Archive a unit (corps, brigade) that the caller already locked (lock_first) and checked the permissions for.
+
+    Locks the active units inside it, then the active posts it holds directly or through them, each in id order
+    (groups before posts, as every writer does). cascade=True archives all of them; otherwise the posts move one level
+    up (a brigade's into its corps, a corps' under the root), and a corps with an active brigade raises
+    corps_has_brigades before anything changes. Posts archived before stay as they are. The caller writes the audit
+    rows (rows) and commits.
+    """
+    changes = ArchiveChanges()
+    now = datetime.now(timezone.utc)
+    children = await lock_all(session, select(ScopeGroup).where(
+        ScopeGroup.parent_id == unit.id, ScopeGroup.is_deleted == False).order_by(ScopeGroup.id))  # noqa: E712
+    if children and not cascade:
+        raise CodedError(ErrorCode.CORPS_HAS_BRIGADES)
+    holders = [unit.id, *(child.id for child in children)]
+    posts = await lock_all(session, select(Post).where(
+        Post.group_id.in_(holders), Post.is_deleted == False).order_by(Post.id))  # noqa: E712
+
+    for post in posts:
+        old_values = post.model_dump()
+        if cascade:
+            post.is_deleted = True
+            changes.archived_post_ids.append(post.id)
+        else:
+            post.group_id = unit.parent_id
+            changes.moved_post_ids.append(post.id)
+        post.updated_at = now
+        session.add(post)
+        changes.rows.append(RowChange("post", post.id, "archive" if cascade else "update", old_values, post.model_dump()))
+    for group in (*children, unit):
+        old_values = group.model_dump()
+        group.is_deleted = True
+        group.updated_at = now
+        session.add(group)
+        changes.archived_group_ids.append(group.id)
+        changes.rows.append(RowChange("scope_group", group.id, "archive", old_values, group.model_dump()))
+    return changes

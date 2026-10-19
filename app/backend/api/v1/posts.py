@@ -8,7 +8,8 @@ from sqlalchemy.exc import IntegrityError
 
 from app.backend.api.shared.helpers.db_errors import is_unique_violation
 from app.backend.database import get_session
-from app.backend.utils.row_locks import lock_first
+from app.backend.utils.row_locks import lock, lock_first
+from app.backend.api.shared.helpers.scope_group_helper import lock_groups
 from app.backend.models.post import Post
 from app.backend.auth.context import AuthContext
 from app.backend.api.v1.models.request.posts import PostCreate, PostUpdate
@@ -115,6 +116,8 @@ async def create_post(
     root needs post.create at the root."""
     current_user = auth.user
     AccessControlService.check_covers(auth, Permissions.POST_CREATE, _location(post_data.group_id), "create_post")
+    # The group is locked first: an archive of the group waits, so no post appears inside an archived group
+    await lock_groups(session, auth.tree, [post_data.group_id])
     await _check_group(session, post_data.group_id)
     # Check if post with code exists
     result = await session.exec(_code_taken(post_data.code))
@@ -237,7 +240,10 @@ async def update_post(
     """
     current_user = auth.user
     AccessControlService.check_post(auth, Permissions.POST_UPDATE, post_id)
-    post = await lock_first(session, select(Post).where(Post.id == post_id))
+    # A move locks the old and the new group first (groups top down, then the post), like an archive of either
+    groups = [auth.tree.post_group.get(post_id), post_data.group_id] if "group_id" in post_data.model_fields_set else []
+    started = await lock_groups(session, auth.tree, groups)
+    post = await (lock if started else lock_first)(session, select(Post).where(Post.id == post_id))
 
     if not post or post.is_deleted:
         raise ApiError(ErrorCode.POST_NOT_FOUND)
@@ -294,7 +300,9 @@ async def _set_post_archived(
     applying while it is archived)."""
     current_user = auth.user
     AccessControlService.check_post(auth, Permissions.POST_ARCHIVE, post_id)
-    post = await lock_first(session, select(Post).where(Post.id == post_id))
+    # A restore locks the group first (groups before posts): an archive of the group cannot slip in between
+    started = await lock_groups(session, auth.tree, [] if archived else [auth.tree.post_group.get(post_id)])
+    post = await (lock if started else lock_first)(session, select(Post).where(Post.id == post_id))
     if not post or (archived and post.is_deleted):
         raise ApiError(ErrorCode.POST_NOT_FOUND)
     if not archived and not post.is_deleted:

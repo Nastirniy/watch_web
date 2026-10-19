@@ -13,7 +13,7 @@ first: the plain reads that check it then start after the previous writer commit
 
 MySQL takes the same path (it never raises 1020, the locks serialise the writes there as well).
 """
-from typing import Optional, TypeVar
+from typing import List, Optional, TypeVar
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel.sql.expression import SelectOfScalar
@@ -34,6 +34,12 @@ async def lock(session: AsyncSession, query: SelectOfScalar[T]) -> Optional[T]:
     """The first row of query, locked (FOR UPDATE) and as committed: the copy the session holds from an earlier
     read is overwritten (populate_existing). Inside a write that began with lock_first."""
     return (await session.exec(query.with_for_update().execution_options(populate_existing=True))).first()
+
+
+async def lock_all(session: AsyncSession, query: SelectOfScalar[T]) -> List[T]:
+    """Every row of query, locked (FOR UPDATE) and as committed; give the query an ORDER BY id so that every writer
+    locks the rows in the same order. Inside a write that began with lock_first."""
+    return list((await session.exec(query.with_for_update().execution_options(populate_existing=True))).all())
 
 
 async def lock_first(session: AsyncSession, query: SelectOfScalar[T]) -> Optional[T]:

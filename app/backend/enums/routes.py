@@ -91,6 +91,8 @@ class CorpsRoutes(str, Enum):
     BASE = "/corps"
     ROOT = "/"  # collection: list and create
     CORPS_BY_ID = "/{corps_id}"
+    CORPS_ARCHIVE = "/{corps_id}/archive"
+    CORPS_RESTORE = "/{corps_id}/restore"
     CORPS_BRIGADES = "/{corps_id}/brigades"
     CORPS_POSTS = "/{corps_id}/posts"
 
@@ -104,6 +106,8 @@ class BrigadeRoutes(str, Enum):
     BASE = "/brigades"
     ROOT = "/"  # collection: list and create
     BRIGADE_BY_ID = "/{brigade_id}"
+    BRIGADE_ARCHIVE = "/{brigade_id}/archive"
+    BRIGADE_RESTORE = "/{brigade_id}/restore"
     BRIGADE_POSTS = "/{brigade_id}/posts"
 
     @staticmethod

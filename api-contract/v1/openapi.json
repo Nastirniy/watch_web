@@ -15857,6 +15857,312 @@
         }
       }
     },
+    "/api/v1/corps/{corps_id}/archive": {
+      "post": {
+        "tags": [
+          "CORPS"
+        ],
+        "summary": "Archive Corps",
+        "description": "Archive a corps (is_deleted=true); the answer is the corps. scope_group.archive must cover it. Without\ncascade: a corps with an active brigade answers 409 corps_has_brigades (move or archive its brigades first), its\nposts leave it (directly under the root), which needs post.update covering the corps and the root. With\ncascade=true: its active brigades and every active post below are archived too, which needs post.archive covering\nthe corps. Missing permissions: 403 permission_required_for_action, nothing changes. Holders of a role at the\ncorps lose the posts that left it. Archived, unknown, another kind or outside scope_group.view: 404. Undo with\nPOST /{corps_id}/restore (the corps only)",
+        "operationId": "archive_corps",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "corps_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Corps Id"
+            }
+          },
+          {
+            "name": "cascade",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Archive the brigades and posts of the corps too; without it the corps must have no active brigade and its posts move under the root",
+              "default": false,
+              "title": "Cascade"
+            },
+            "description": "Archive the brigades and posts of the corps too; without it the corps must have no active brigade and its posts move under the root"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorpsResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionRequiredForActionProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "permission_required_for_action": "#/components/schemas/PermissionRequiredForActionProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`scope_group_not_found`: Scope group not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopeGroupNotFoundProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`corps_has_brigades`: Corps has active brigades",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorpsHasBrigadesProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/corps/{corps_id}/restore": {
+      "post": {
+        "tags": [
+          "CORPS"
+        ],
+        "summary": "Restore Corps",
+        "description": "Restore an archived corps (is_deleted=false): the corps only; its archived brigades and posts are\nlisted with include_deleted (GET /{corps_id}/brigades, /{corps_id}/posts) and restored one by one.\nscope_group.archive must cover it (403). Not archived: 409; unknown, another kind or outside\nscope_group.view: 404.",
+        "operationId": "restore_corps",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "corps_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Corps Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorpsResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionRequiredForActionProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "permission_required_for_action": "#/components/schemas/PermissionRequiredForActionProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`scope_group_not_found`: Scope group not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopeGroupNotFoundProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`scope_group_not_archived`: Scope group is not archived",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopeGroupNotArchivedProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/corps/{corps_id}/brigades": {
       "get": {
         "tags": [
@@ -17358,6 +17664,302 @@
                       "scope_group_parent_not_allowed": "#/components/schemas/ScopeGroupParentNotAllowedProblem"
                     }
                   }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/brigades/{brigade_id}/archive": {
+      "post": {
+        "tags": [
+          "BRIGADES"
+        ],
+        "summary": "Archive Brigade",
+        "description": "Archive a brigade (is_deleted=true); the answer is the brigade. scope_group.archive must cover it.\nWithout cascade its active posts move into its corps, which needs post.update covering the brigade and the corps;\nwith cascade=true they are archived, which needs post.archive covering the brigade. Missing permissions: 403\npermission_required_for_action, nothing changes. Holders of a role at the brigade lose its posts. Archived,\nunknown, another kind or outside scope_group.view: 404. Undo with POST /{brigade_id}/restore (the brigade only)",
+        "operationId": "archive_brigade",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "brigade_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Brigade Id"
+            }
+          },
+          {
+            "name": "cascade",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Archive the posts of the brigade too; without it they move into its corps",
+              "default": false,
+              "title": "Cascade"
+            },
+            "description": "Archive the posts of the brigade too; without it they move into its corps"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrigadeResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionRequiredForActionProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "permission_required_for_action": "#/components/schemas/PermissionRequiredForActionProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`scope_group_not_found`: Scope group not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopeGroupNotFoundProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/brigades/{brigade_id}/restore": {
+      "post": {
+        "tags": [
+          "BRIGADES"
+        ],
+        "summary": "Restore Brigade",
+        "description": "Restore an archived brigade (is_deleted=false) in its corps: the brigade only; its archived posts are\nlisted with include_deleted (GET /{brigade_id}/posts) and restored one by one. scope_group.archive must cover it\n(403). Not archived: 409; its corps archived (restore the corps first), unknown, another kind or outside\nscope_group.view: 404.",
+        "operationId": "restore_brigade",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "brigade_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Brigade Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrigadeResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionRequiredForActionProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "permission_required_for_action": "#/components/schemas/PermissionRequiredForActionProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`scope_group_not_found`: Scope group not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopeGroupNotFoundProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`scope_group_not_archived`: Scope group is not archived",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopeGroupNotArchivedProblem"
                 }
               }
             }
@@ -30529,6 +31131,69 @@
         ],
         "title": "CorpsCreate",
         "description": "A corps sits directly under the root"
+      },
+      "CorpsHasBrigadesProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Corps has active brigades",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Move or archive its brigades first, or archive with cascade"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "corps_has_brigades",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "CorpsHasBrigadesProblem",
+        "description": "Corps has active brigades (HTTP 409). Problem type corps_has_brigades.",
+        "examples": [
+          {
+            "code": "corps_has_brigades",
+            "detail": "Move or archive its brigades first, or archive with cascade",
+            "instance": "/api/v1/...",
+            "status": 409,
+            "title": "Corps has active brigades",
+            "type": "https://example.org/problems/corps_has_brigades"
+          }
+        ]
       },
       "CorpsResponse": {
         "properties": {

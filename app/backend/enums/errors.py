@@ -309,6 +309,8 @@ class ErrorCode(ProblemType):
     SCOPE_GROUP_PARENT_NOT_ALLOWED = ("scope_group_parent_not_allowed", problem(
         409, "Scope group cannot sit there", "A {group_kind} cannot sit in a {parent_kind}",
         group_kind=str, parent_kind=str))
+    CORPS_HAS_BRIGADES = ("corps_has_brigades", problem(
+        409, "Corps has active brigades", "Move or archive its brigades first, or archive with cascade"))
 
     # ---------------------------------------------------------------- dictionaries
     CATEGORY_NOT_FOUND = ("category_not_found", problem(404, "Category not found", category_id=Optional[int]))
