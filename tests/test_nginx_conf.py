@@ -65,14 +65,19 @@ def test_proxy_snippet_sets_every_certificate_header_from_nginx_variables():
 
 
 def _api_locations() -> list[tuple[str, str]]:
-    return [(header, body) for header, body in _blocks(APP, "location") if "proxy_pass http://watch_web_api" in body]
+    """The locations a client reaches that proxy to the API (internal and named locations are reached only from
+    another location)"""
+    return [(header, body) for header, body in _blocks(APP, "location")
+            if "proxy_pass http://watch_web_api" in body and not header.startswith("@") and "internal;" not in body]
 
 
 def _matches(header: str, path: str) -> bool:
-    """nginx prefix and exact locations (the files use no regular expressions)"""
+    """nginx prefix, exact and regular expression locations"""
     parts = header.split()
     if parts[0] == "=":
         return path == parts[1]
+    if parts[0] in ("~", "~*"):
+        return re.search(parts[1], path, re.IGNORECASE if parts[0] == "~*" else 0) is not None
     return path.startswith(parts[-1])
 
 
@@ -88,13 +93,13 @@ def test_every_api_route_reaches_the_api():
     headers = [header for header, _ in _api_locations()]
     assert "/" not in headers, "/ belongs to the server block (the web client), not to the API"
     for route in fastapi_app.routes:
-        path = re.sub(r"\{[^}]+\}", "x", route.path)
+        path = re.sub(r"\{[^}]+\}", "1", route.path)
         assert any(_matches(header, path) for header in headers), f"no nginx location proxies {route.path} to the API"
 
 
 def test_every_api_location_serves_a_route():
     """A location for a path the API no longer answers would hide that path from the web client"""
-    paths = [re.sub(r"\{[^}]+\}", "x", route.path) for route in fastapi_app.routes]
+    paths = [re.sub(r"\{[^}]+\}", "1", route.path) for route in fastapi_app.routes]
     stale = [header for header, _ in _api_locations() if not any(_matches(header, path) for path in paths)]
     assert not stale, f"nginx locations without an API route: {stale}"
 
@@ -236,6 +241,74 @@ def test_nginx_replaces_the_client_forwarded_for_with_the_peer_address():
 
 def test_nginx_errors_keep_their_status():
     """error_page to /50x.html answered 404 on the host whenever the API was down (live crash test of 2026-10-19): the
-    Ubuntu package has no 50x.html. The client reads only the status of an infrastructure error (API.md, "Errors")."""
+    Ubuntu package has no 50x.html. The client reads only the status of an infrastructure error (API.md, "Errors").
+    A handoff to a named location that proxies to the API is allowed: the API answers with its status."""
+    named = {header: body for header, body in _blocks(APP, "location") if header.startswith("@")}
     for name, text in (("nginx-app.conf", APP), ("nginx.conf", SERVERS)):
-        assert "error_page" not in _directives(text), name
+        for target in re.findall(r"error_page [^;]*?(\S+);", _directives(text)):
+            # the only error_page allowed hands the request to the API, which answers with its own status
+            assert target in named and "proxy_pass http://watch_web_api" in named[target], f"{name}: error_page {target}"
+
+
+# ------------------------------------------------------------------ /stream: authorised by the API, served by nginx
+
+STREAM = r"~ ^/api/v1/media/\d+/stream$"
+
+
+def _location(text, header):
+    return next(body for h, body in _blocks(text, "location") if h == header)
+
+
+def test_stream_is_authorised_by_the_api_and_served_by_nginx():
+    body = _location(APP, STREAM)
+    assert "auth_request /_stream_auth;" in body
+    for header, var in (("x_accel_redirect", "stream_accel"), ("content_type", "stream_type"),
+                        ("content_disposition", "stream_disposition"), ("x_file_hash", "stream_hash")):
+        assert f"auth_request_set ${var} $upstream_http_{header};" in body
+    assert "error_page 401 403 500 = @stream_api;" in body
+    assert "try_files $stream_file @stream_api;" in body, "a missing file falls back to the API (media_file_missing)"
+    assert "types { } default_type \"\";" in body and "add_header Content-Type $stream_type;" in body
+    assert "etag off;" in body and "add_header X-Request-ID $request_id always;" in body
+    root = re.search(r"\broot (\S+);", body).group(1)
+    alias = re.search(r"\balias (\S+);", _location(APP, "^~ /protected_uploads/")).group(1)
+    assert root.rstrip("/") + "/" == alias
+
+
+def test_stream_authorisation_is_cached_30_s_per_token_certificate_and_uri():
+    body = _location(APP, "= /_stream_auth")
+    assert "internal;" in body and f"include {PROXY_SNIPPET};" in body
+    assert "proxy_pass http://watch_web_api$request_uri;" in body
+    assert 'proxy_cache_key "$http_authorization|$ssl_client_fingerprint|$request_uri";' in body
+    assert re.findall(r"proxy_cache_valid [^;]+;", body) == ["proxy_cache_valid 200 30s;"]
+    assert "proxy_cache stream_auth;" in body and "proxy_cache_lock on;" in body
+    for header in ("Range", "If-None-Match", "If-Range", "Content-Length"):
+        assert f'proxy_set_header {header} "";' in body
+    assert "proxy_pass_request_body off;" in body
+    assert "proxy_ignore_headers X-Accel-Redirect Cache-Control Expires Set-Cookie;" in body
+    assert "proxy_hide_header WWW-Authenticate;" in body
+
+
+def test_stream_refusals_are_answered_by_the_api():
+    body = _location(APP, "@stream_api")
+    assert f"include {PROXY_SNIPPET};" in body and "proxy_pass http://watch_web_api;" in body
+
+
+def test_stream_map_and_cache_zone_live_at_http_level_in_both_stacks():
+    for name, text in (("nginx-http.conf", HTTP), ("nginx-http.test.conf", E2E_HTTP)):
+        flat = _directives(text)
+        assert "keys_zone=stream_auth:" in flat, name
+        assert "map $stream_accel $stream_file { ~^/protected_uploads(?<stream_rest>/.+)$ $stream_rest; default \"\"; }" in flat, name
+
+
+def test_no_prefix_location_takes_the_stream_path_from_the_regex():
+    """A ^~ or = location matching the path would be chosen before any regex location"""
+    for header, _ in _blocks(APP, "location"):
+        parts = header.split()
+        if parts[0] == "^~":
+            assert not "/api/v1/media/1/stream".startswith(parts[1]), header
+        if parts[0] == "=":
+            assert parts[1] != "/api/v1/media/1/stream", header
+
+
+def test_download_is_not_cached():
+    assert "/download" not in _directives(APP)
