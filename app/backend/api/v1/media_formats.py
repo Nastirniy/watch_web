@@ -18,6 +18,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.api.shared.helpers.db_errors import is_unique_violation
 from app.backend.database import get_session
+from app.backend.utils.row_locks import lock_first
 from app.backend.auth.access_control import AccessControlService
 from app.backend.models.media_format import MediaFormat
 from app.backend.auth.context import AuthContext
@@ -71,11 +72,13 @@ def _check_size(max_file_size_bytes: int) -> None:
                        max_file_size_bytes=max_file_size_bytes, ceiling_bytes=ceiling)
 
 
-async def _get_format(session: AsyncSession, format_id: int, include_deleted: bool = False) -> MediaFormat:
+async def _get_format(session: AsyncSession, format_id: int, include_deleted: bool = False,
+                      lock: bool = False) -> MediaFormat:
+    """The format; lock=True locks it as the first statement of the write (utils/row_locks.py)"""
     query = select(MediaFormat).where(MediaFormat.id == format_id)
     if not include_deleted:
         query = query.where(MediaFormat.is_deleted == False)
-    row = (await session.exec(query)).first()
+    row = await lock_first(session, query) if lock else (await session.exec(query)).first()
     if not row:
         raise ApiError(ErrorCode.MEDIA_FORMAT_NOT_FOUND)
     return row
@@ -197,7 +200,7 @@ async def update_media_format(
     if not changes:
         raise ApiError(ErrorCode.MEDIA_FORMAT_NO_FIELDS)
 
-    row = await _get_format(session, format_id)
+    row = await _get_format(session, format_id, lock=True)
     old_values = row.model_dump()
 
     media_type = changes.get("media_type", row.media_type)
@@ -248,7 +251,7 @@ async def archive_media_format(
     """Archive a format (is_deleted=true): it stops being accepted immediately, uploaded files are untouched.
     Undo with POST /{format_id}/restore or by creating the same content_type again. Already archived or unknown: 404."""
     current_user = auth.user
-    row = await _get_format(session, format_id)
+    row = await _get_format(session, format_id, lock=True)
     old_values = row.model_dump()
     row.is_deleted = True
     row.updated_at = get_default_timezone_datetime()
@@ -282,7 +285,7 @@ async def restore_media_format(
     """Restore an archived format (is_deleted=false): it is accepted again. Its extensions and aliases must not
     collide with a live format (400). Not archived: 409."""
     current_user = auth.user
-    row = await _get_format(session, format_id, include_deleted=True)
+    row = await _get_format(session, format_id, include_deleted=True, lock=True)
     if not row.is_deleted:
         raise ApiError(ErrorCode.MEDIA_FORMAT_NOT_ARCHIVED)
     await _check_conflicts(session, row.media_type, row.extensions, row.aliases, row.content_type, exclude_id=row.id)

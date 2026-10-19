@@ -44,6 +44,7 @@ from app.backend.models.media import MediaFile
 from app.backend.models.upload_session import UploadSession
 from app.backend.errors.coded import CodedError
 from app.backend.utils.logging_config import get_logger
+from app.backend.utils.row_locks import lock_first
 
 _logger = get_logger("uploads")
 
@@ -124,10 +125,13 @@ def new_session(
     )
 
 
-async def get_session_row(session: AsyncSession, upload_id: str) -> Optional[UploadSession]:
-    return (await session.exec(
-        select(UploadSession).where(UploadSession.id == upload_id).execution_options(populate_existing=True)
-    )).first()
+async def get_session_row(session: AsyncSession, upload_id: str, lock: bool = False) -> Optional[UploadSession]:
+    """The upload session as committed; lock=True locks it as the first statement of the write (utils/row_locks.py),
+    so a chunk, a complete and an abort of one session claim it one after another"""
+    query = select(UploadSession).where(UploadSession.id == upload_id)
+    if lock:
+        return await lock_first(session, query)
+    return (await session.exec(query.execution_options(populate_existing=True))).first()
 
 
 async def list_sessions(

@@ -24,6 +24,10 @@ Nobody becomes able to do more than they could by changing access:
   cannot_remove_own_admin, check_admin_kept, answered first; whether they held it is read with holds_admin_at_root
   before the change), and an active, non-archived user still holds it (409 last_admin_required). The administrator
   is the built-in admin role at the root (_admin_at_root), nothing else.
+- lock_administrators: the first statement of every write that may take that role from someone (an assignment
+  removed, a user deactivated, archived or given another type). Such writes run one after another, so the count of
+  check_an_admin_remains sees the one before: two administrators deactivating each other at once can no longer
+  both succeed.
 
 What a user holds is context.grant_rows, the same definition as their AuthContext (check_target_user reads it with
 the archived roles too).
@@ -43,6 +47,7 @@ from app.backend.errors.problems import ApiError
 from app.backend.models.role import Permission, Role, RolePermission
 from app.backend.models.role_assignment import RoleAssignment
 from app.backend.models.user import User
+from app.backend.utils.row_locks import lock_first
 
 
 async def role_permission_names(session: AsyncSession, role_ids: Iterable[int]) -> FrozenSet[str]:
@@ -142,6 +147,12 @@ def _admin_at_root():
         .where(Role.builtin_key == UserType.ADMIN.value, Role.is_deleted == False,
                RoleAssignment.scope_key == ROOT.key)
     )
+
+
+async def lock_administrators(session: AsyncSession) -> None:
+    """The first statement of a write that may take the built-in admin role at the root from someone: that role's
+    row locked (utils/row_locks.py). Later locks of the write (the user) use row_locks.lock."""
+    await lock_first(session, select(Role).where(Role.builtin_key == UserType.ADMIN.value))
 
 
 async def holds_admin_at_root(session: AsyncSession, user_id: int) -> bool:

@@ -6,19 +6,16 @@ from sqlmodel import select
 from app.backend.models.role import Role, Permission, RolePermission
 from app.backend.errors.problems import ApiError
 from app.backend.enums.errors import ErrorCode
+from app.backend.utils.row_locks import lock_first
 
 
 async def get_role_or_404(session: AsyncSession, role_id: int, include_deleted: bool = False,
                           lock: bool = False) -> Role:
     """Get role by ID or raise 404. Soft-deleted roles are 404 unless include_deleted is set.
-    lock=True: SELECT ... FOR UPDATE (nothing on sqlite), the row read again, before the checks of a change that gives
-    the role's permissions to its holders (permissions added, restore) or removes it (delete): such changes of one
-    role run one after another."""
+    lock=True: the row locked as the first statement of the write and read as committed (utils/row_locks.py), before
+    the checks of any change of the role: changes of one role run one after another, each sees the one before."""
     query = select(Role).where(Role.id == role_id)
-    if lock:
-        query = query.with_for_update().execution_options(populate_existing=True)
-    result = await session.exec(query)
-    role = result.first()
+    role = await lock_first(session, query) if lock else (await session.exec(query)).first()
     if role and role.is_deleted and not include_deleted:
         role = None
     if not role:

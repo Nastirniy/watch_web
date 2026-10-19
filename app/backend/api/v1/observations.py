@@ -9,6 +9,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.database import get_session
+from app.backend.utils.row_locks import lock_first
 from app.backend.models.observation import Observation, SignalType, Tag
 from app.backend.models.post import Post
 from app.backend.auth.context import AuthContext
@@ -241,13 +242,11 @@ async def update_observation(
     Archived observations answer 404 until restored (POST /{observation_id}/restore); an archived post: 409 post_archived.
     """
     current_user = auth.user
-    # Get observation by ID with tags and bands pre-loaded
+    # Get observation by ID with tags and bands pre-loaded, locked: concurrent changes run one after another
     query = select(Observation).where(
         Observation.id == observation_id
     ).options(selectinload(Observation.tags), selectinload(Observation.all_frequencies))
-    
-    result = await session.exec(query)
-    observation = result.first()
+    observation = await lock_first(session, query)
 
     if not observation:
         raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
@@ -339,13 +338,10 @@ async def mark_observation_disappeared(
     An archived post: 409 post_archived.
     """
     current_user = auth.user
-    result = await session.exec(
-        select(Observation).where(
-            Observation.id == observation_id,
-            Observation.is_deleted == False
-        )
-    )
-    observation = result.first()
+    observation = await lock_first(session, select(Observation).where(
+        Observation.id == observation_id,
+        Observation.is_deleted == False
+    ))
 
     if not observation:
         raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
@@ -474,8 +470,7 @@ async def _set_observation_archived(
     inherited from a group or the root apply (a grant on the post itself stops applying: 403), and only callers with
     post.archive in effect at the post archive and restore; everyone else gets 409 post_archived."""
     current_user = auth.user
-    result = await session.exec(select(Observation).where(Observation.id == observation_id))
-    observation = result.first()
+    observation = await lock_first(session, select(Observation).where(Observation.id == observation_id))
     if not observation:
         raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
 

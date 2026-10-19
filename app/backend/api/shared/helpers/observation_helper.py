@@ -14,6 +14,7 @@ from app.backend.enums.errors import ErrorCode, FieldErrorCode
 from app.backend.enums.general import Permissions
 from app.backend.filters.observation_frequency_filter import ObservationFrequencyFilter
 from app.backend.utils.datetime_utils import as_utc
+from app.backend.utils.row_locks import lock_first
 from app.backend.utils.validators import INT_MAX
 
 
@@ -28,11 +29,10 @@ async def get_observation_for_write(
     permission of the change (observation.update, observation.archive for a band archive) in effect at its post, or
     without ownership (observation.manage_any in effect there overrides); 409 post_archived when its post is
     archived (after the 403 checks).
-    lock=True takes a row lock (MySQL) so concurrent band changes of one observation run one after another."""
+    lock=True locks the row as the first statement of the write (utils/row_locks.py), so concurrent changes of one
+    observation run one after another and each sees the result of the one before."""
     query = select(Observation).where(Observation.id == observation_id).options(selectinload(Observation.all_frequencies))
-    if lock:
-        query = query.with_for_update()
-    observation = (await session.exec(query)).first()
+    observation = await lock_first(session, query) if lock else (await session.exec(query)).first()
     if not observation:
         raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
 

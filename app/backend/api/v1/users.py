@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from app.backend.api.shared.helpers.db_errors import is_data_too_long, is_unique_violation, unique_violation_as
 from app.backend.api.shared.helpers.post_helper import refuse_archived_post
 from app.backend.database import get_session
+from app.backend.utils.row_locks import lock as lock_row, lock_first
 from app.backend.models.user import User, UserSession
 from app.backend.models.role import Role
 from app.backend.models.role_assignment import RoleAssignment, scope_columns
@@ -18,7 +19,8 @@ from app.backend.auth.require import require
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.assignments import assignment_views, change_user_type, create_assignment, delete_assignment
 from app.backend.auth.privileges import (
-    check_admin_kept, check_an_admin_remains, check_grant_at, check_target_user, role_permission_names,
+    check_admin_kept, check_an_admin_remains, check_grant_at, check_target_user, lock_administrators,
+    role_permission_names,
 )
 from app.backend.auth.scope import Node, ROOT
 from app.backend.bootstrap.permissions import role_level
@@ -250,9 +252,21 @@ async def create_user(
         raise
 
 
-async def _get_user_or_404(session: AsyncSession, user_id: int) -> User:
-    """The user, archived or not (each route decides what an archived user means after its scope check)"""
-    user = (await session.exec(select(User).where(User.id == user_id))).first()
+async def _get_user_or_404(session: AsyncSession, user_id: int, lock: Optional[str] = None) -> User:
+    """The user, archived or not (each route decides what an archived user means after its scope check).
+
+    lock (utils/row_locks.py) for writes: "user" locks the row as the first statement of the write, so changes of one
+    user, its assignments included, run one after another and each sees the one before (a user keeps at least one
+    assignment); "administrators" first locks the built-in admin role (lock_administrators) for writes that may take
+    it from someone, then the user."""
+    query = select(User).where(User.id == user_id)
+    if lock == "administrators":
+        await lock_administrators(session)
+        user = await lock_row(session, query)
+    elif lock == "user":
+        user = await lock_first(session, query)
+    else:
+        user = (await session.exec(query)).first()
     if not user:
         raise ApiError(ErrorCode.USER_NOT_FOUND)
     return user
@@ -342,7 +356,7 @@ async def update_user(
             content_type=content_type,
         )
 
-    user = await _get_user_or_404(session, user_id)
+    user = await _get_user_or_404(session, user_id, lock="administrators")
     # Scope before the state: an outsider gets the same 403 for an archived and a live user
     await check_target_user(session, auth, user, Permissions.USER_UPDATE)
     if user.is_deleted:
@@ -478,7 +492,7 @@ async def archive_user(
     for an archived and a live user; the last administrator: 409.
     """
     current_user = auth.user
-    user = await _get_user_or_404(session, user_id)
+    user = await _get_user_or_404(session, user_id, lock="administrators")
     if user.id == current_user.id:
         raise ApiError(ErrorCode.CANNOT_ARCHIVE_SELF)
     # Scope before the state: an outsider gets the same 403 for an archived and a live user
@@ -535,7 +549,7 @@ async def restore_user(
     Needs user.archive covering the user and every assignment of the user grantable by the caller (403
     target_user_more_privileged), answered before the archived state of the user."""
     current_user = auth.user
-    user = await _get_user_or_404(session, user_id)
+    user = await _get_user_or_404(session, user_id, lock="user")
     # Scope before the state: an outsider gets the same 403 for an archived and a live user
     await check_target_user(session, auth, user, Permissions.USER_ARCHIVE)
     if not user.is_deleted:
@@ -607,7 +621,7 @@ async def end_user_sessions(
     in again. The caller's own session ends too when user_id is the caller. Archived users: 404.
     Needs user.update covering the user and every assignment of the user grantable by the caller (403
     target_user_more_privileged), answered before the archived state of the user."""
-    target = await _get_user_or_404(session, user_id)
+    target = await _get_user_or_404(session, user_id, lock="user")
     # Scope before the state: an outsider gets the same 403 for an archived and a live user
     await check_target_user(session, auth, target, Permissions.USER_UPDATE)
     if target.is_deleted:
@@ -642,7 +656,7 @@ async def end_user_session(
     """Revoke one live session of a user (revoke_cause ended_by_admin). Ended already: 409 with its end_reason.
     Archived users: 404. Needs user.update covering the user and every assignment of the user grantable by the
     caller (403 target_user_more_privileged), answered before the archived state of the user and the session."""
-    target = await _get_user_or_404(session, user_id)
+    target = await _get_user_or_404(session, user_id, lock="user")
     # Scope before the state: an outsider gets the same 403 for an archived and a live user
     await check_target_user(session, auth, target, Permissions.USER_UPDATE)
     if target.is_deleted:
@@ -730,7 +744,7 @@ async def create_user_assignment(
     below the root 409 role_requires_root_scope; a role above the ceiling of the user's type 409
     role_exceeds_user_type; the same role at the same node 409 assignment_exists.
     """
-    target = await _get_user_or_404(session, user_id)
+    target = await _get_user_or_404(session, user_id, lock="user")
     assignment = await create_assignment(session, auth, target, data.role_id, data.scope.node)
     async with unique_violation_as(session, ErrorCode.ASSIGNMENT_EXISTS):
         await session.flush()
@@ -778,7 +792,7 @@ async def delete_user_assignment(
     at the root must stay with an active user (409 last_admin_required) and cannot be taken from oneself (409
     cannot_remove_own_admin).
     """
-    target = await _get_user_or_404(session, user_id)
+    target = await _get_user_or_404(session, user_id, lock="administrators")
     removed = await delete_assignment(session, auth, target, assignment_id)
     await create_audit_log(
         session=session,

@@ -40,6 +40,7 @@ from app.backend.pki.store import (
 from app.backend.services.signer_client import SignerUnavailable, signer_client
 from app.backend.utils.datetime_utils import as_utc, assume_utc
 from app.backend.utils.logging_config import get_security_logger
+from app.backend.utils.row_locks import lock_first
 from app.backend.utils.text import fit_column
 
 _logger = get_security_logger()
@@ -193,11 +194,10 @@ def _stored_certificate(row: UserCertificate) -> Optional[x509.Certificate]:
 async def get_user_certificate(session: AsyncSession, user_id: int, certificate_id: int,
                                lock: bool = False) -> UserCertificate:
     """The certificate of the user; CodedError certificate_not_found when there is none, also for the id of another
-    user's certificate. lock: the row is locked (FOR UPDATE) and read again"""
+    user's certificate. lock: the row locked as the first statement of the write and read as committed
+    (utils/row_locks.py)"""
     query = select(UserCertificate).where(UserCertificate.id == certificate_id, UserCertificate.user_id == user_id)
-    if lock:
-        query = query.with_for_update().execution_options(populate_existing=True)
-    row = (await session.exec(query)).first()
+    row = await lock_first(session, query) if lock else (await session.exec(query)).first()
     if row is None:
         raise CodedError(ErrorCode.CERTIFICATE_NOT_FOUND)
     return row
@@ -227,11 +227,9 @@ async def session_certificate(session: AsyncSession, user_id: int,
 
 
 async def _lock_live_user(session: AsyncSession, user: User) -> User:
-    """The user row locked (FOR UPDATE) and read again; CodedError user_not_found when it is archived. An inactive
-    user may receive a certificate."""
-    locked = (await session.exec(
-        select(User).where(User.id == user.id).with_for_update().execution_options(populate_existing=True)
-    )).first()
+    """The user row locked as the first statement of the write and read as committed (utils/row_locks.py);
+    CodedError user_not_found when it is archived. An inactive user may receive a certificate."""
+    locked = await lock_first(session, select(User).where(User.id == user.id))
     if locked is None or locked.is_deleted:
         raise CodedError(ErrorCode.USER_NOT_FOUND)
     return locked

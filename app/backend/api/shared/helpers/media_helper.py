@@ -9,6 +9,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.models.media import MediaFile
+from app.backend.utils.row_locks import lock_first
 from app.backend.models.observation import Observation
 from app.backend.config import settings
 from app.backend.errors.problems import ApiError
@@ -35,11 +36,13 @@ async def get_observation_from_media(session: AsyncSession, media_file: MediaFil
     return observation
 
 
-async def get_media_or_404(session: AsyncSession, media_id: int, include_deleted: bool = False) -> MediaFile:
+async def get_media_or_404(session: AsyncSession, media_id: int, include_deleted: bool = False,
+                           lock: bool = False) -> MediaFile:
+    """The media file; lock=True locks it as the first statement of the write (utils/row_locks.py)"""
     query = select(MediaFile).where(MediaFile.id == media_id)
     if not include_deleted:
         query = query.where(MediaFile.is_deleted == False)
-    media_file = (await session.exec(query)).first()
+    media_file = await lock_first(session, query) if lock else (await session.exec(query)).first()
     if not media_file:
         raise ApiError(ErrorCode.MEDIA_NOT_FOUND)
     return media_file
