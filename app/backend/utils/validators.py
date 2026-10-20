@@ -17,10 +17,9 @@ from app.backend.enums.errors import FieldErrorCode
 # Largest value of a MySQL INT column; request integers stored in one carry this as `le`
 INT_MAX = 2147483647
 
-# A datetime a client sends (request body, query parameter, query model): the UTC instant, aware. A value without
-# an offset is UTC. The database holds naive UTC and the drivers drop tzinfo, so every datetime that is written or
-# compared in SQL must be the UTC instant: 10:00+03:00 is stored and filtered as 07:00.
-UtcDatetime = Annotated[datetime, AfterValidator(as_utc)]
+# The calendar of a datetime: a value whose UTC instant lies outside it (0001-01-01T00:00:00+01:00) is refused
+CALENDAR_EARLIEST = "0001-01-01T00:00:00Z"
+CALENDAR_LATEST = "9999-12-31T23:59:59Z"
 
 # Observation times in request bodies (observed_at, disappeared_at) lie between these bounds: a value like 9999-12-31
 # breaks reports and durations. The latest is now + FUTURE_TOLERANCE (a client clock a little ahead), computed when
@@ -33,15 +32,46 @@ def _iso_z(value: datetime) -> str:
     return value.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _latest_observation_time() -> datetime:
+    return datetime.now(timezone.utc) + FUTURE_TOLERANCE
+
+
+def utc_instant(value: datetime) -> datetime:
+    """The UTC instant of a request datetime; 422 `time_out_of_range` when it lies outside the calendar.
+
+    `as_utc` raises OverflowError for such a value, and pydantic turns only ValueError into a validation error."""
+    try:
+        return as_utc(value)
+    except OverflowError:
+        raise invalid(FieldErrorCode.TIME_OUT_OF_RANGE, earliest=CALENDAR_EARLIEST, latest=CALENDAR_LATEST)
+
+
+def observation_utc_instant(value: datetime) -> datetime:
+    """The UTC instant of an observation time; outside the calendar it answers as outside the observation bounds"""
+    try:
+        return as_utc(value)
+    except OverflowError:
+        raise invalid(
+            FieldErrorCode.TIME_OUT_OF_RANGE,
+            earliest=_iso_z(EARLIEST_OBSERVATION_TIME), latest=_iso_z(_latest_observation_time()),
+        )
+
+
+# A datetime a client sends (request body, query parameter, query model): the UTC instant, aware. A value without
+# an offset is UTC. The database holds naive UTC and the drivers drop tzinfo, so every datetime that is written or
+# compared in SQL must be the UTC instant: 10:00+03:00 is stored and filtered as 07:00.
+UtcDatetime = Annotated[datetime, AfterValidator(utc_instant)]
+
+
 def within_observation_bounds(value: datetime) -> datetime:
     """The UTC instant of an observation time, 422 `time_out_of_range` outside the bounds"""
-    latest = datetime.now(timezone.utc) + FUTURE_TOLERANCE
+    latest = _latest_observation_time()
     if not EARLIEST_OBSERVATION_TIME <= value <= latest:
         raise invalid(FieldErrorCode.TIME_OUT_OF_RANGE, earliest=_iso_z(EARLIEST_OBSERVATION_TIME), latest=_iso_z(latest))
     return value
 
 
-ObservationTime = Annotated[datetime, AfterValidator(as_utc), AfterValidator(within_observation_bounds)]
+ObservationTime = Annotated[datetime, AfterValidator(observation_utc_instant), AfterValidator(within_observation_bounds)]
 
 
 def _with_offset(value: datetime, handler):

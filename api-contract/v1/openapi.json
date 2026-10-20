@@ -13779,11 +13779,25 @@
             }
           },
           "422": {
-            "description": "`validation_error`: Request validation failed",
+            "description": "`stats_period_out_of_range`: Period too close to the limits of the calendar; `validation_error`: Request validation failed",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/StatsPeriodOutOfRangeProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ValidationErrorProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "stats_period_out_of_range": "#/components/schemas/StatsPeriodOutOfRangeProblem",
+                      "validation_error": "#/components/schemas/ValidationErrorProblem"
+                    }
+                  }
                 }
               }
             }
@@ -17270,11 +17284,25 @@
             }
           },
           "422": {
-            "description": "`validation_error`: Request validation failed",
+            "description": "`stats_period_out_of_range`: Period too close to the limits of the calendar; `validation_error`: Request validation failed",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/StatsPeriodOutOfRangeProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ValidationErrorProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "stats_period_out_of_range": "#/components/schemas/StatsPeriodOutOfRangeProblem",
+                      "validation_error": "#/components/schemas/ValidationErrorProblem"
+                    }
+                  }
                 }
               }
             }
@@ -19063,11 +19091,25 @@
             }
           },
           "422": {
-            "description": "`validation_error`: Request validation failed",
+            "description": "`stats_period_out_of_range`: Period too close to the limits of the calendar; `validation_error`: Request validation failed",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/StatsPeriodOutOfRangeProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ValidationErrorProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "stats_period_out_of_range": "#/components/schemas/StatsPeriodOutOfRangeProblem",
+                      "validation_error": "#/components/schemas/ValidationErrorProblem"
+                    }
+                  }
                 }
               }
             }
@@ -43045,6 +43087,69 @@
         ],
         "title": "StatsGroupBy",
         "description": "Bucket size of time series statistics"
+      },
+      "StatsPeriodOutOfRangeProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Period too close to the limits of the calendar",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 422,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "The period, with its buckets in the time zone, must lie inside the years 1 to 9999"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "stats_period_out_of_range",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "StatsPeriodOutOfRangeProblem",
+        "description": "Period too close to the limits of the calendar (HTTP 422). Problem type stats_period_out_of_range.",
+        "examples": [
+          {
+            "code": "stats_period_out_of_range",
+            "detail": "The period, with its buckets in the time zone, must lie inside the years 1 to 9999",
+            "instance": "/api/v1/...",
+            "status": 422,
+            "title": "Period too close to the limits of the calendar",
+            "type": "https://example.org/problems/stats_period_out_of_range"
+          }
+        ]
       },
       "StorageStatisticsResponse": {
         "properties": {

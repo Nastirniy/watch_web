@@ -238,7 +238,8 @@ async def test_upload_expires_header_carries_an_offset(client, db, headers, stor
 def _bare_datetimes(annotation, metadata, marker, where: str, seen: set) -> List[str]:
     """Places of a datetime in a type that do not carry the marker (the shared input or output rule)"""
     if annotation is datetime:
-        return [] if marker in metadata else [where]
+        markers = marker if isinstance(marker, tuple) else (marker,)
+        return [] if any(m in metadata for m in markers) else [where]
     if get_origin(annotation) is Annotated:
         inner, *extra = get_args(annotation)
         return _bare_datetimes(inner, [*metadata, *extra], marker, where, seen)
@@ -260,8 +261,9 @@ def _api_routes() -> List[APIRoute]:
 
 def test_every_datetime_a_client_sends_is_converted_to_utc():
     """Bodies and query parameters (query models included) of every route type their datetimes as UtcDatetime"""
-    from app.backend.utils.validators import UtcDatetime
-    marker = get_args(UtcDatetime)[1]
+    from app.backend.utils.validators import ObservationTime, UtcDatetime
+    # ObservationTime converts with its own validator: the same conversion, the error params of the observation bounds
+    marker = (get_args(UtcDatetime)[1], get_args(ObservationTime)[1])
     bare = []
     for route in _api_routes():
         flat = get_flat_dependant(route.dependant)

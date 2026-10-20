@@ -307,6 +307,10 @@ parent.
   `observation.view`, or have a post under it now where `observation.view` is in effect (so the commander of a brigade
   counts its corps, and the viewer of one post its brigade, each only for the posts they see); otherwise 404
   `scope_group_not_found`, like an unknown id. An archived unit keeps answering its history.
+- The stats routes (corps, brigade, post) answer 422 `stats_period_out_of_range` for a period whose buckets would leave
+  the calendar (years 1 to 9999, e.g. `date_to=9999-12-31T23:00:00Z`); a future period of ordinary dates is fine. Any
+  datetime parameter or body time whose UTC instant leaves the calendar (`0001-01-01T00:00:00+01:00`) is a field error
+  `time_out_of_range` (params `earliest`, `latest`), as for `observed_at` out of its bounds.
 
 ## Client certificates
 

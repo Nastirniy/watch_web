@@ -164,12 +164,21 @@ async def observation_stats(
     zone = _zone(tz)
     now = as_utc(now) or datetime.now(timezone.utc)
     date_to = as_utc(date_to) or now
-    date_from = as_utc(date_from) or date_to - DEFAULT_STATS_PERIOD
+    try:
+        date_from = as_utc(date_from) or date_to - DEFAULT_STATS_PERIOD
+    except OverflowError:
+        raise CodedError(ErrorCode.STATS_PERIOD_OUT_OF_RANGE)
     check_period(date_from, date_to, "date_from / date_to")
     if date_to - date_from > MAX_STATS_PERIOD[group_by]:
         raise CodedError(
             ErrorCode.PERIOD_TOO_LONG, max_days=MAX_STATS_PERIOD[group_by].days, group_by=group_by.value,
         )
+    # The bucket edges (and their local time in the zone) are calendar arithmetic: a period touching year 1 or 9999
+    try:
+        edges = _bucket_starts(date_from, date_to, group_by, zone)
+        local_edges = [edge.astimezone(zone) for edge in edges]
+    except OverflowError:
+        raise CodedError(ErrorCode.STATS_PERIOD_OUT_OF_RANGE)
     of_post = [condition]
     if not include_archived:
         of_post.append(Observation.is_deleted == False)
@@ -199,7 +208,6 @@ async def observation_stats(
                *of_post[1:], Observation.created_at >= date_from, Observation.created_at <= date_to)
         .group_by(hour_key, Observation.is_deleted)
     )
-    edges = _bucket_starts(date_from, date_to, group_by, zone)
     per_bucket = {False: [0] * (len(edges) - 1), True: [0] * (len(edges) - 1)}
     for key, is_deleted, count in (await session.exec(series)).all():
         hour = datetime.strptime(key, "%Y-%m-%d %H").replace(tzinfo=timezone.utc)
@@ -224,8 +232,8 @@ async def observation_stats(
             **figures({flag: sum(values) for flag, values in per_bucket.items()}),
             buckets=[
                 StatsBucket(
-                    start=edges[i].astimezone(zone),
-                    end=edges[i + 1].astimezone(zone),
+                    start=local_edges[i],
+                    end=local_edges[i + 1],
                     **figures({flag: values[i] for flag, values in per_bucket.items()}),
                 )
                 for i in range(len(edges) - 1)

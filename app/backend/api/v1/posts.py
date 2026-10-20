@@ -184,7 +184,8 @@ async def get_post(
     PostRoutes.POST_OBSERVATION_STATS.value,
     response_model=PostObservationStatsResponse,
     responses=problems(
-        ErrorCode.PERIOD_REVERSED, ErrorCode.PERIOD_TOO_LONG, ErrorCode.UNKNOWN_TIME_ZONE,
+        ErrorCode.PERIOD_REVERSED, ErrorCode.PERIOD_TOO_LONG, ErrorCode.STATS_PERIOD_OUT_OF_RANGE,
+        ErrorCode.UNKNOWN_TIME_ZONE,
         AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.POST_NOT_FOUND, *GUARDED,
     ),
 )

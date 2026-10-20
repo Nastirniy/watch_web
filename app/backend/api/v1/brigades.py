@@ -269,7 +269,8 @@ async def list_brigade_posts(
     BrigadeRoutes.BRIGADE_OBSERVATION_STATS.value,
     response_model=UnitObservationStatsResponse,
     responses=problems(
-        ErrorCode.PERIOD_REVERSED, ErrorCode.PERIOD_TOO_LONG, ErrorCode.UNKNOWN_TIME_ZONE, ErrorCode.SCOPE_GROUP_NOT_FOUND,
+        ErrorCode.PERIOD_REVERSED, ErrorCode.PERIOD_TOO_LONG, ErrorCode.STATS_PERIOD_OUT_OF_RANGE,
+        ErrorCode.UNKNOWN_TIME_ZONE, ErrorCode.SCOPE_GROUP_NOT_FOUND,
         *GUARDED,
     ),
 )

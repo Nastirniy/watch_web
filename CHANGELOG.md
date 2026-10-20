@@ -5,6 +5,21 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Bug hunt 2 (branch fix/hunt2)
+
+### Fixed
+
+- A datetime whose UTC instant leaves the calendar (`0001-01-01T00:00:00+01:00`, `9999-12-31T23:59:59-00:01`) answered
+  500 on every route that takes one (`observed_at` / `disappeared_at` of create, update and mark-disappeared, and every
+  `*_from` / `*_to` / `date_from` / `date_to` filter of lists, searches, the report, the stats and `/statistics`). It
+  is now a 422 `validation_error` item with the existing field code `time_out_of_range`: for the observation times
+  with the params of their bounds (2000-01-01 .. now + 1 day), for filters with `earliest` 0001-01-01T00:00:00Z and
+  `latest` 9999-12-31T23:59:59Z. No new field code.
+- `GET /corps/{id}/observation-stats`, `GET /brigades/{id}/observation-stats` and `GET /posts/{id}/observation-stats`
+  answered 500 for a period touching year 1 or 9999 (the bucket arithmetic overflowed, also with plain `Z` values).
+  They answer 422 `stats_period_out_of_range` now (no params). New problem code: add its message to the web
+  localization. Ordinary periods, future ones included, are unchanged.
+
 ## Unit history fill (2026-10-20, branch feat/unit-history-fill)
 
 ### Added
