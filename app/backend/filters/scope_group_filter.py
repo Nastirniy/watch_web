@@ -34,12 +34,13 @@ class ScopeGroupFilterService(SimpleFilterEngine):
         query: Select,
         params: ScopeGroupCriteria,
         group_ids: Optional[Iterable[int]] = None,
-        archived_ids: Optional[FrozenSet[int]] = None,
+        *,
+        archived_ids: Optional[FrozenSet[int]],
     ) -> Select:
         """Apply all filters from ScopeGroupCriteria. group_ids: the groups the caller sees (None: every group);
         archived_ids: with include_deleted, the groups shown even when archived (None: every one)"""
         params = cls.criteria(params)
-        query = cls.apply_filters_for_count(query, params, group_ids, archived_ids)
+        query = cls.apply_filters_for_count(query, params, group_ids, archived_ids=archived_ids)
         query = cls._apply_sorting(query, params)
         return cls._apply_pagination(query, params)
 
@@ -49,7 +50,8 @@ class ScopeGroupFilterService(SimpleFilterEngine):
         query: Select,
         params: ScopeGroupCriteria,
         group_ids: Optional[Iterable[int]] = None,
-        archived_ids: Optional[FrozenSet[int]] = None,
+        *,
+        archived_ids: Optional[FrozenSet[int]],
     ) -> Select:
         """Apply filters without sorting and pagination"""
         params = cls.criteria(params)

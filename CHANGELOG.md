@@ -52,6 +52,10 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   still needs `scope_group.archive` held somewhere (403 otherwise), and now lists an archived group only where
   `scope_group.archive` is in effect (the group lies in a subtree where it is held), as posts do; live groups are
   listed as before. A holder at the root sees every archived group, as before.
+- Descriptions only (no behaviour change): the `observed_at` and `disappeared_at` fields of the observation request
+  bodies state their bounds, `PATCH /corps/{corps_id}` names its action `update_corps`, and API.md names the parent
+  rule of `permission_required_for_action`. The report cost in DEPLOYMENT.md is the measured end-to-end figure (about
+  0.45 ms per band row).
 - `POST /corps/{corps_id}/archive`, `POST /brigades/{brigade_id}/archive` without `cascade` no longer need `post.update`
   and `post.view` (at the unit and at its parent) for a unit that has no active post under it now: there is nothing to
   move, `scope_group.archive` at the parent is enough. A unit with an active post needs them as before.

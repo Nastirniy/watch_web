@@ -83,7 +83,8 @@ class ObservationCreate(BaseModel):
 
     observed_at: ObservationTime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
-        description="When the signal was observed; the current UTC time when omitted"
+        description="When the signal was observed, "
+                    "between 2000-01-01T00:00:00Z and now + 1 day (422 time_out_of_range); the current UTC time when omitted"
     )
     duration_seconds: Optional[int] = Field(None, ge=0, le=INT_MAX, description="Duration must be non-negative")
     comment: Optional[str] = Field(None, max_length=1000, description="Comment limited to 1000 characters")
@@ -123,7 +124,8 @@ class ObservationUpdate(BaseModel):
 
     signal_type_id: Optional[int] = Field(None, gt=0, description="Signal Type ID must be positive")
 
-    observed_at: Optional[ObservationTime] = None
+    observed_at: Optional[ObservationTime] = Field(
+        None, description="When the signal was observed, between 2000-01-01T00:00:00Z and now + 1 day (422 time_out_of_range)")
     duration_seconds: Optional[int] = Field(None, ge=0, le=INT_MAX, description="Duration must be non-negative")
     comment: Optional[str] = Field(None, max_length=1000, description="Comment limited to 1000 characters")
     confidence_level: Optional[str] = Field(
@@ -160,7 +162,7 @@ class ObservationUpdate(BaseModel):
 class ObservationDisappeared(BaseModel):
     """Mark observation as disappeared with validation"""
 
-    disappeared_at: ObservationTime = Field(description="Timestamp when observation disappeared")
+    disappeared_at: ObservationTime = Field(description="Timestamp when observation disappeared, between 2000-01-01T00:00:00Z and now + 1 day (422 time_out_of_range)")
 
 
 class ObservationReportParams(BaseModel):

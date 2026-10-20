@@ -147,7 +147,7 @@ The body adds `required` (`{all, any}`) and `missing` (permissions the user lack
 | `permission_denied` | The route's permissions are held nowhere (no assignment gives them; an assignment on an archived post or at an archived group gives nothing) |
 | `post_access_denied` / `post_write_denied` | The permission is held, but not in effect at this post (`post_id`; `*.view` / any other permission) |
 | `no_post_assigned` | The permission is held, but in effect at no post at all (for example only at a scope group without posts) |
-| `permission_required_for_action` | A permission a part or a target of the request needs (`permission`, `action`): `include_deleted`, the group a post is created in or moved to, the old and the new parent of a moved scope group or brigade (`post.update`, `post.view`), a corps or brigade archived with or without cascade (`post.archive` / `post.update`, `post.view`), the home post of a new or moved user, a media file without an observation (`media.update` at the root) |
+| `permission_required_for_action` | A permission a part or a target of the request needs (`permission`, `action`): `include_deleted`, the group a post is created in or moved to, the old and the new parent of a moved scope group or brigade (`post.update`, `post.view`), the parent of a group created, renamed, moved, archived or restored (`scope_group.create` / `.update` / `.archive`), a corps or brigade archived with or without cascade (`post.archive` / `post.update`, `post.view`), the home post of a new or moved user, a media file without an observation (`media.update` at the root) |
 | `user_self_only` | A user record outside the caller's `user.view` |
 | `target_user_more_privileged` | A change to a user the caller's `user.*` does not cover, or who holds an assignment the caller could not grant |
 | `grant_exceeds_own_permissions` | Granting or revoking permissions the caller does not hold (at the node, for an assignment; at every node the role is assigned at, for permissions added to a role and the restore of a role) |
@@ -237,8 +237,9 @@ plain groups are `group`): a role assigned at a corps or brigade (`{"kind": "gro
 below it, and `GET /scope-groups/tree` shows them with their `kind`. No new permissions: `scope_group.*` for the
 units, `post.*` for what happens to their posts.
 
-Who manages what: `scope_group.create`, `.update` and `.archive` are scoped permissions (assignable at a corps, a
-brigade or a plain group; the `post_admin` type may hold them, the operator types may not). A write on a group needs
+Who manages what: `scope_group.create`, `.update` and `.archive` are scoped permissions (assignable at the root, a corps, a
+brigade or a plain group; the `post_admin` type may hold them, the operator types may not; a holder at the root manages
+every corps, brigade and plain group). A write on a group needs
 its permission covering the group's parent, the root for a corps or a root plain group:
 
 | Holder of `scope_group.*` at | Manages |

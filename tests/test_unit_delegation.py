@@ -80,6 +80,20 @@ async def test_corps_commander_cannot_touch_the_corps_itself(client, db, headers
     assert r.status_code == 403, r.text
 
 
+async def test_corps_commander_renames_through_the_generic_scope_group_route_by_the_same_parent_rule(client, db, headers):
+    corps = await make_group(db, kind="corps")
+    brigade = await make_group(db, parent_id=corps.id, kind="brigade")
+    h = headers(await _commander(db, Node.group(corps.id)))
+
+    renamed = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=brigade.id), json={"name": "Brigade 7"},
+                                 headers=h)
+    assert renamed.status_code == 200 and renamed.json()["name"] == "Brigade 7", renamed.text
+    _refused(await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=corps.id), json={"name": "Mine"},
+                                headers=h), "update_scope_group")
+    await db.refresh(corps)
+    assert corps.name != "Mine"
+
+
 async def test_corps_commander_cannot_move_a_brigade_to_a_corps_it_does_not_cover(client, db, headers):
     corps = await make_group(db, kind="corps")
     other = await make_group(db, kind="corps")

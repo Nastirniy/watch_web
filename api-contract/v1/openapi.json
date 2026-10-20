@@ -15823,7 +15823,7 @@
           "CORPS"
         ],
         "summary": "Update Corps",
-        "description": "Rename or describe a corps; only the fields sent change. Archived, another kind of group, or outside the\ncaller's scope_group.view: 404. scope_group.update must cover the parent of the corps, the root (403\npermission_required_for_action): a holder at the corps manages its brigades, not the corps.",
+        "description": "Rename or describe a corps; only the fields sent change. Archived, another kind of group, or outside the\ncaller's scope_group.view: 404. scope_group.update must cover the parent of the corps, the root (403\npermission_required_for_action, action update_corps): a holder at the corps manages its brigades, not the corps.",
         "operationId": "update_corps",
         "security": [
           {
@@ -36464,7 +36464,7 @@
             "type": "string",
             "format": "date-time",
             "title": "Observed At",
-            "description": "When the signal was observed; the current UTC time when omitted"
+            "description": "When the signal was observed, between 2000-01-01T00:00:00Z and now + 1 day (422 time_out_of_range); the current UTC time when omitted"
           },
           "duration_seconds": {
             "anyOf": [
@@ -36538,7 +36538,7 @@
             "type": "string",
             "format": "date-time",
             "title": "Disappeared At",
-            "description": "Timestamp when observation disappeared"
+            "description": "Timestamp when observation disappeared, between 2000-01-01T00:00:00Z and now + 1 day (422 time_out_of_range)"
           }
         },
         "type": "object",
@@ -37596,7 +37596,8 @@
                 "type": "null"
               }
             ],
-            "title": "Observed At"
+            "title": "Observed At",
+            "description": "When the signal was observed, between 2000-01-01T00:00:00Z and now + 1 day (422 time_out_of_range)"
           },
           "duration_seconds": {
             "anyOf": [

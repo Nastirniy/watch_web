@@ -200,7 +200,7 @@ def observation_units_any(tree: ScopeTree, unit_ids: Mapping[ScopeGroupKind, Opt
 
 
 def visible_unit_ids(auth: AuthContext, unit_ids: Mapping[ScopeGroupKind, Optional[Iterable[int]]],
-                     permissions: Sequence[Permissions] = (Permissions.OBSERVATION_VIEW,)) -> List[int]:
+                     permissions: Sequence[Permissions]) -> List[int]:
     """The asked ids a report may name: of the right kind and inside where the caller holds scope_group.view or every
     one of the permissions (a report needs observation.view and export.create: both) (any other id is shown as its
     number only)"""

@@ -81,7 +81,7 @@ async def list_brigades(
     where scope_group.archive is in effect."""
     archived = AccessControlService.archived_group_scope(auth, filters, Permissions.SCOPE_GROUP_ARCHIVE)
     query = UnitFilterService.apply_filters(
-        select(ScopeGroup), filters, BRIGADE, auth.groups_with(Permissions.SCOPE_GROUP_VIEW), archived,
+        select(ScopeGroup), filters, BRIGADE, auth.groups_with(Permissions.SCOPE_GROUP_VIEW), archived_ids=archived,
     )
     return brigade_list_to_response((await session.exec(query)).all(), auth)
 

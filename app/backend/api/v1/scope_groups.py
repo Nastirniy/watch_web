@@ -97,7 +97,7 @@ async def list_scope_groups(
     where scope_group.archive is in effect."""
     archived = AccessControlService.archived_group_scope(auth, filters, Permissions.SCOPE_GROUP_ARCHIVE)
     query = ScopeGroupFilterService.apply_filters(
-        select(ScopeGroup), filters, auth.groups_with(Permissions.SCOPE_GROUP_VIEW), archived,
+        select(ScopeGroup), filters, auth.groups_with(Permissions.SCOPE_GROUP_VIEW), archived_ids=archived,
     )
     result = await session.exec(query)
     return [ScopeGroupResponse.model_validate(g) for g in result.all()]

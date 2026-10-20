@@ -66,7 +66,7 @@ async def list_corps(
     scope_group.archive is in effect."""
     archived = AccessControlService.archived_group_scope(auth, filters, Permissions.SCOPE_GROUP_ARCHIVE)
     query = UnitFilterService.apply_filters(
-        select(ScopeGroup), filters, CORPS, auth.groups_with(Permissions.SCOPE_GROUP_VIEW), archived,
+        select(ScopeGroup), filters, CORPS, auth.groups_with(Permissions.SCOPE_GROUP_VIEW), archived_ids=archived,
     )
     return corps_list_to_response((await session.exec(query)).all(), auth)
 
@@ -132,7 +132,7 @@ async def update_corps(
 ):
     """Rename or describe a corps; only the fields sent change. Archived, another kind of group, or outside the
     caller's scope_group.view: 404. scope_group.update must cover the parent of the corps, the root (403
-    permission_required_for_action): a holder at the corps manages its brigades, not the corps."""
+    permission_required_for_action, action update_corps): a holder at the corps manages its brigades, not the corps."""
     corps = await get_unit(session, auth, CORPS, corps_id, lock=True)
     AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_UPDATE, parent_node(corps), "update_corps")
     update_data = data.model_dump(exclude_unset=True)
@@ -219,7 +219,7 @@ async def list_corps_brigades(
     corps = await get_unit(session, auth, CORPS, corps_id)
     criteria = replace(UnitFilterService.criteria(filters), corps_id=corps.id)
     query = UnitFilterService.apply_filters(
-        select(ScopeGroup), criteria, ScopeGroupKind.BRIGADE, auth.groups_with(Permissions.SCOPE_GROUP_VIEW), archived,
+        select(ScopeGroup), criteria, ScopeGroupKind.BRIGADE, auth.groups_with(Permissions.SCOPE_GROUP_VIEW), archived_ids=archived,
     )
     return brigade_list_to_response((await session.exec(query)).all(), auth)
 
