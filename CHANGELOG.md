@@ -10,11 +10,19 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 ### Added
 
 - `python -m app.backend.cli.units fill-history [--dry-run]`: gives every observation (archived ones included) that has
-  no recorded corps or brigade the unit its post is in at the run, with the observation's `created_at`. Per post, in
-  chunks of 1000 observations, safe while the API runs, idempotent; one audit row per run that wrote anything
-  (`fill_history`, resource `observation_units`). Database content only: new `observation_units` rows, no schema, API
-  or contract change, no migration. Old observations now appear in `placement=recorded` filters, reports and the
-  corps / brigade `observation-stats`; `placement=current` is unchanged. See DEPLOYMENT.md.
+  no saved unit at all one row for every unit its post is in at the run, with the observation's `created_at`. An
+  observation that has any row (corps only, brigade only, or both) is recorded history and is left as it is. Per post,
+  in chunks of 1000 observations, safe while the API runs, idempotent; a post with nothing to fill is not locked; one
+  audit row per run that wrote anything (`fill_history`, resource `observation_units`). Database content only: new
+  `observation_units` rows, no schema, API or contract change, no migration. Old observations now appear in
+  `placement=recorded` filters, reports and the corps / brigade `observation-stats`; `placement=current` is
+  unchanged. See DEPLOYMENT.md.
+
+### Fixed
+
+- `PATCH /brigades/{brigade_id}` with `corps_id` answered 500 for a brigade sitting directly under the root (older data:
+  the API creates none): the post rights of the move are now checked at the root, 403 `permission_required_for_action`
+  (action `move_brigade`) without them, 200 with them.
 
 ## Corps follow-ups (2026-10-20, branch fix/corps-followups)
 
@@ -26,9 +34,6 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `POST /auth/refresh`, the end of a session bound to a certificate that is no longer active and the recording of
   an expired session's end take the same shared lock first: no 500 (1020) or deadlock against such an end; a refresh
   that waited for it answers 401 `session_expired`.
-- `PATCH /brigades/{brigade_id}` with `corps_id` answered 500 for a brigade sitting directly under the root (older data:
-  the API creates none): the post rights of the move are now checked at the root, 403 `permission_required_for_action`
-  (action `move_brigade`) without them, 200 with them.
 
 ### Changed
 

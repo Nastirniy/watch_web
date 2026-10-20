@@ -5,9 +5,10 @@ from sqlmodel import Field, SQLModel
 
 class ObservationUnit(SQLModel, table=True):
     """A unit (corps, brigade: a scope group of a unit kind) the observation's post was in when the observation was
-    created: one row per unit above the post, written once in the create transaction, never changed. An observation
-    that had no unit of a kind (created before the post was placed) gets the row of the unit its post was in when
-    `cli/units.py fill-history` ran, once; rows that exist are never changed or removed afterwards.
+    created: one row per unit above the post, written in the create transaction, or by `cli/units.py fill-history`
+    for an observation that had no row at all (every unit its post was in at the run). Rows are never changed or
+    removed afterwards (except the physical removal named below); an observation that has any row is never given
+    another one.
 
     Owned by the observation: archiving anything (observation, post, unit) never touches these rows; a physical
     removal of observations removes them in the same transaction (services/units.py delete_observation_units).

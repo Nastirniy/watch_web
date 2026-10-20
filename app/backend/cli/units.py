@@ -2,10 +2,11 @@
 
     python -m app.backend.cli.units fill-history [--dry-run]
 
-fill-history converts old observations into the unit style: every observation that has no recorded corps (or brigade)
-gets the one its post is in now (services/unit_history.py). Run it after the corps and brigades are set up and the
-posts placed, and again after later placements; each run fills only what is still missing. --dry-run prints the same
-numbers and writes nothing. Safe while the API runs.
+fill-history converts old observations into the unit style: every observation that has no saved unit at all gets one
+row for every unit its post is in now (services/unit_history.py). An observation that has any row (corps only,
+brigade only, or both) is recorded history and is left as it is. Run it after the corps and brigades are set up and
+the posts placed, and again after later placements; each run fills only observations still without a row. --dry-run
+prints the same numbers and writes nothing. Safe while the API runs.
 """
 import argparse
 import asyncio
@@ -41,7 +42,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Unit (corps, brigade) maintenance commands")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    fill = sub.add_parser("fill-history", help="give old observations the corps and brigade their post is in now")
+    fill = sub.add_parser("fill-history", help="give observations with no saved unit the corps and brigade their post is in now")
     fill.add_argument("--dry-run", action="store_true", help="print what would be filled, write nothing")
 
     args = parser.parse_args(argv)

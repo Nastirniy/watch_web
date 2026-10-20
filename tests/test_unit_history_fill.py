@@ -1,4 +1,4 @@
-"""fill_unit_history: old observations (no observation_units row of a kind) get the unit the post is in now."""
+"""fill_unit_history: observations with no observation_units row at all get the units the post is in now."""
 from typing import Dict, List
 
 import pytest
@@ -98,7 +98,7 @@ async def test_second_run_and_dry_run_write_nothing(client, db, headers):
     assert (await fill_unit_history(db, dry_run=True)).rows == 0
 
 
-async def test_brigade_only_rows_get_the_corps(client, db, headers):
+async def test_brigade_only_rows_are_history_and_stay(client, db, headers):
     h = headers(await make_admin(db))
     ids = await make_dictionary(db)
     k1 = await make_group(db, kind="corps")
@@ -111,8 +111,75 @@ async def test_brigade_only_rows_get_the_corps(client, db, headers):
 
     result = await fill_unit_history(db)
 
-    assert all([await _kinds(db, o) == {"brigade": b1.id, "corps": k1.id} for o in saved])
-    assert result.rows == 2 and [(u.kind, u.observations) for u in result.units] == [("corps", 2)]
+    assert [await _kinds(db, o) for o in saved] == [{"brigade": b1.id}, {"brigade": b1.id}]
+    assert result.rows == 0 and result.observations == 0 and result.units == []
+
+
+async def test_corps_only_history_does_not_gain_a_brigade_or_a_new_pair(client, db, headers):
+    h = headers(await make_admin(db))
+    ids = await make_dictionary(db)
+    k1, b1 = await _structure(db)
+    k2 = await make_group(db, name="Corps 2", kind="corps")
+    b2 = await make_group(db, name="Brigade 2", parent_id=k2.id, kind="brigade")
+    direct, later_in_brigade = await make_post(db, group_id=k1.id), await make_post(db, group_id=k1.id)
+    in_k1 = await _old(client, h, ids, direct, 2)
+    in_k1_too = await _old(client, h, ids, later_in_brigade, 2)
+    assert [await _kinds(db, o) for o in in_k1] == [{"corps": k1.id}] * 2
+    await _move(client, h, direct.id, b2.id)
+    await _move(client, h, later_in_brigade.id, b1.id)
+
+    result = await fill_unit_history(db)
+
+    assert result.rows == 0 and result.observations == 0
+    assert [await _kinds(db, o) for o in in_k1] == [{"corps": k1.id}] * 2
+    assert [await _kinds(db, o) for o in in_k1_too] == [{"corps": k1.id}] * 2
+    assert await _listed(client, h, corps_id=k1.id, brigade_id=b2.id) == []
+    assert await _listed(client, h, corps_id=k1.id, brigade_id=b1.id) == []
+    assert await _listed(client, h, corps_id=k1.id) == sorted([*in_k1, *in_k1_too])
+
+
+async def test_filled_post_is_not_touched_next_to_a_post_with_old_observations(client, db, headers):
+    h = headers(await make_admin(db))
+    ids = await make_dictionary(db)
+    k1, b1 = await _structure(db)
+    placed, old = await make_post(db, group_id=b1.id), await make_post(db)
+    saved = await _old(client, h, ids, placed, 2)
+    old_ids = await _old(client, h, ids, old, 3)
+    await _move(client, h, old.id, b1.id)
+    assert [await _kinds(db, o) for o in saved] == [{"brigade": b1.id, "corps": k1.id}] * 2
+
+    result = await fill_unit_history(db)
+
+    assert result.observations == 3 and result.rows == 6
+    assert all([await _kinds(db, o) == {"corps": k1.id, "brigade": b1.id} for o in old_ids])
+    assert (await fill_unit_history(db)).rows == 0
+
+
+async def test_post_with_nothing_to_fill_is_not_locked(client, db, headers, monkeypatch):
+    from app.backend.services import unit_history
+
+    h = headers(await make_admin(db))
+    ids = await make_dictionary(db)
+    k1, b1 = await _structure(db)
+    placed, old = await make_post(db, group_id=b1.id), await make_post(db)
+    await _old(client, h, ids, placed, 2)
+    await _old(client, h, ids, old, 2)
+    await _move(client, h, old.id, b1.id)
+    locked = []
+    real = unit_history.lock_first
+
+    async def spy(session, query, *args, **kwargs):
+        row = await real(session, query, *args, **kwargs)
+        locked.append(row.id)
+        return row
+
+    monkeypatch.setattr(unit_history, "lock_first", spy)
+
+    await fill_unit_history(db)
+    assert locked == [old.id]            # one chunk, shorter than the chunk size: the post is done
+    locked.clear()
+    await fill_unit_history(db)
+    assert locked == []
 
 
 async def test_moved_post_keeps_saved_brigade(client, db, headers):
