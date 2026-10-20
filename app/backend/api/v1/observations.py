@@ -215,10 +215,8 @@ async def create_observation(
     # still be missed (accepted, rare)
     units = await current_units_of_group(session, post.group_id)
     session.add_all(observation_unit_rows(units, observation.id, observation.created_at))
-    await session.commit()
-    observation = await _load_observation(session, observation.id)
-
-    # Create audit log
+    # The audit row in the same transaction as the observation (one commit): a failure before it stores neither, so
+    # the client never gets a 500 for an observation that exists (a retry would create it twice)
     await create_audit_log(
         session=session,
         action="create",

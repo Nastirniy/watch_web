@@ -43,6 +43,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   archived a post the request did not know of (nothing changes then). Without cascade, a corps archive asks
   `post.update` / `post.view` only for the posts directly in the corps, the ones a detach moves: a corps with an active
   brigade answers 409 `corps_has_brigades` to a caller with `scope_group` rights and no post rights instead of 403.
+- `POST /observations/` committed the observation and wrote its audit row in a second transaction: a failure there
+  (on MariaDB 1020 from the audit row's foreign key check, a lock wait timeout) answered 500 for a stored observation,
+  so a retry created it twice. The audit row is now written in the same transaction: a 500 stores nothing.
 
 ## Unit history fill (2026-10-20, branch feat/unit-history-fill)
 
