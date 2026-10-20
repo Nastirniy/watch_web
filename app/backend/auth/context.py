@@ -166,13 +166,15 @@ async def load_grants(session: AsyncSession, user_id: int) -> Tuple[Grant, ...]:
 
 async def load_scope_tree(session: AsyncSession) -> ScopeTree:
     """Two queries: every group and every post, archived ones included"""
-    groups = (await session.exec(select(ScopeGroup.id, ScopeGroup.parent_id, ScopeGroup.is_deleted))).all()
+    groups = (await session.exec(
+        select(ScopeGroup.id, ScopeGroup.parent_id, ScopeGroup.is_deleted, ScopeGroup.kind))).all()
     posts = (await session.exec(select(Post.id, Post.group_id, Post.is_deleted))).all()
     return ScopeTree(
-        group_parent={group_id: parent_id for group_id, parent_id, _ in groups},
-        archived_groups=frozenset(group_id for group_id, _, is_deleted in groups if is_deleted),
+        group_parent={group_id: parent_id for group_id, parent_id, _, _ in groups},
+        archived_groups=frozenset(group_id for group_id, _, is_deleted, _ in groups if is_deleted),
         post_group={post_id: group_id for post_id, group_id, _ in posts},
         archived_posts=frozenset(post_id for post_id, _, is_deleted in posts if is_deleted),
+        group_kind={group_id: kind for group_id, _, _, kind in groups},
     )
 
 

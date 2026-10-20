@@ -8,12 +8,13 @@ from datetime import datetime
 from decimal import Decimal
 from typing import FrozenSet, Optional, Iterable, List
 from sqlalchemy.orm import selectinload
+from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.selectable import Select
 
 from app.backend.models.observation import Observation
 from app.backend.filters.observation_frequency_filter import ObservationFrequencyFilter
 from app.backend.filters.observation_tag_filter import ObservationTagFilter
-from app.backend.enums.general import ConfidenceLevel, FrequencyKind, ObservationStatus, TagMatch
+from app.backend.enums.general import ConfidenceLevel, FrequencyKind, ObservationStatus, TagMatch, UnitPlacement
 from app.backend.filters.simple_engine import ListCriteria, SimpleFilterEngine
 
 
@@ -24,6 +25,9 @@ class ObservationCriteria(ListCriteria):
     user_id: Optional[int] = None
     post_id: Optional[int] = None
     signal_type_id: Optional[int] = None
+    corps_id: Optional[int] = None      # the route turns units into unit_condition (services/units.py)
+    brigade_id: Optional[int] = None
+    placement: UnitPlacement = UnitPlacement.RECORDED
     status: Optional[ObservationStatus] = None
     status_in: Optional[List[ObservationStatus]] = None
     confidence_level: Optional[ConfidenceLevel] = None
@@ -91,6 +95,7 @@ class ObservationFilterService(SimpleFilterEngine):
         params: ObservationCriteria,
         access_post_ids: Optional[Iterable[int]] = None,
         archived_post_ids: Optional[FrozenSet[int]] = None,
+        unit_condition: Optional[ColumnElement] = None,
     ) -> Select:
         """Apply all filters from ObservationCriteria. access_post_ids: the posts listed (None: every post);
         archived_post_ids: with include_deleted, the posts whose archived observations are shown (None: every post)"""
@@ -102,6 +107,8 @@ class ObservationFilterService(SimpleFilterEngine):
         # Post scope
         if access_post_ids is not None:
             query = query.where(Observation.post_id.in_(list(access_post_ids)))
+        if unit_condition is not None:   # corps_id / brigade_id with placement (services/units.py)
+            query = query.where(unit_condition)
 
         # === ID Filters ===
         query = cls._apply_exact(query, Observation.id, params.id)
@@ -168,6 +175,7 @@ class ObservationFilterService(SimpleFilterEngine):
         params: ObservationCriteria,
         access_post_ids: Optional[Iterable[int]] = None,
         archived_post_ids: Optional[FrozenSet[int]] = None,
+        unit_condition: Optional[ColumnElement] = None,
     ) -> Select:
         """Apply filters without pagination (for counting)"""
         params = cls.criteria(params)
@@ -176,6 +184,8 @@ class ObservationFilterService(SimpleFilterEngine):
 
         if access_post_ids is not None:
             query = query.where(Observation.post_id.in_(list(access_post_ids)))
+        if unit_condition is not None:   # corps_id / brigade_id with placement (services/units.py)
+            query = query.where(unit_condition)
 
         query = cls._apply_exact(query, Observation.id, params.id)
         query = cls._apply_exact(query, Observation.user_id, params.user_id)

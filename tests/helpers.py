@@ -58,9 +58,9 @@ async def make_post(db: AsyncSession, name: str = None, group_id: Optional[int] 
     return post
 
 
-async def make_group(db: AsyncSession, name: str = None, parent_id: Optional[int] = None) -> ScopeGroup:
+async def make_group(db: AsyncSession, name: str = None, parent_id: Optional[int] = None, kind: str = "group") -> ScopeGroup:
     n = _next()
-    group = ScopeGroup(name=name or f"Group {n}", parent_id=parent_id, parent_key=parent_id or 0)
+    group = ScopeGroup(name=name or f"Group {n}", parent_id=parent_id, parent_key=parent_id or 0, kind=kind)
     db.add(group)
     await db.commit()
     await db.refresh(group)

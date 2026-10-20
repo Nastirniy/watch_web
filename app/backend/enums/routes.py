@@ -86,6 +86,37 @@ class ScopeGroupRoutes(str, Enum):
         return "SCOPE_GROUPS"
 
 
+class CorpsRoutes(str, Enum):
+    """Corps: the top units of the organisation (scope groups of kind corps, directly under the root)"""
+    BASE = "/corps"
+    ROOT = "/"  # collection: list and create
+    CORPS_BY_ID = "/{corps_id}"
+    CORPS_ARCHIVE = "/{corps_id}/archive"
+    CORPS_RESTORE = "/{corps_id}/restore"
+    CORPS_BRIGADES = "/{corps_id}/brigades"
+    CORPS_POSTS = "/{corps_id}/posts"
+    CORPS_OBSERVATION_STATS = "/{corps_id}/observation-stats"
+
+    @staticmethod
+    def tag() -> str:
+        return "CORPS"
+
+
+class BrigadeRoutes(str, Enum):
+    """Brigades: units inside a corps (scope groups of kind brigade)"""
+    BASE = "/brigades"
+    ROOT = "/"  # collection: list and create
+    BRIGADE_BY_ID = "/{brigade_id}"
+    BRIGADE_ARCHIVE = "/{brigade_id}/archive"
+    BRIGADE_RESTORE = "/{brigade_id}/restore"
+    BRIGADE_POSTS = "/{brigade_id}/posts"
+    BRIGADE_OBSERVATION_STATS = "/{brigade_id}/observation-stats"
+
+    @staticmethod
+    def tag() -> str:
+        return "BRIGADES"
+
+
 class ObservationRoutes(str, Enum):
     """Observation management routes"""
     BASE = "/observations"
@@ -301,6 +332,8 @@ class Routes:
     AUTH = AuthRoutes
     POSTS = PostRoutes
     SCOPE_GROUPS = ScopeGroupRoutes
+    CORPS = CorpsRoutes
+    BRIGADES = BrigadeRoutes
     USER_TYPES = UserTypeRoutes
     STATISTICS = StatisticsRoutes
     OBSERVATIONS = ObservationRoutes

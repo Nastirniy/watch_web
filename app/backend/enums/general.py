@@ -128,6 +128,22 @@ class FrequencyKind(Enum):
     VIDEO = "video"
 
 
+# Where each kind may sit is ALLOWED_PARENT in services/scope_groups.py; a new level is a new value here plus its entry
+# there. The database column (scope_groups.kind) has no CHECK on it.
+class ScopeGroupKind(str, Enum):
+    """Kind of a scope group: a plain group, or a unit of the organisation (corps > brigade). Fixed at create."""
+    GROUP = "group"
+    CORPS = "corps"
+    BRIGADE = "brigade"
+
+
+class UnitPlacement(str, Enum):
+    """Which unit an observation belongs to for a corps or brigade filter: the one recorded when it was created, or
+    the one its post is in now. Not a time filter: both read today's data; the period is its own filter."""
+    RECORDED = "recorded"
+    CURRENT = "current"
+
+
 class ServiceHealthStatus(Enum):
     HEALTHY = "healthy"
     UNHEALTHY = "unhealthy"

@@ -123,3 +123,37 @@ def test_empty_tree():
     empty = ScopeTree.empty()
     assert empty.posts_under(ROOT) == frozenset()
     assert empty.nodes_in_effect_at_post(5) == (ROOT, Node.post(5))
+
+
+# corps 1 > brigade 2 > post 7; corps 1 > post 8; plain group 3 > post 9; post 10 at /
+UNITS = ScopeTree(
+    group_parent={1: None, 2: 1, 3: None},
+    archived_groups=frozenset(),
+    post_group={7: 2, 8: 1, 9: 3, 10: None},
+    archived_posts=frozenset(),
+    group_kind={1: "corps", 2: "brigade", 3: "group"},
+)
+
+
+def test_units_of_post():
+    assert UNITS.units_of_post(7) == {"corps": 1, "brigade": 2}
+    assert UNITS.units_of_post(8) == {"corps": 1}
+    assert UNITS.units_of_post(9) == {}
+    assert UNITS.units_of_post(10) == {}
+    assert UNITS.units_of_post(99) == {}
+
+
+def test_units_of_post_include_archived_units():
+    t = replace(UNITS, archived_groups=frozenset({1, 2}))
+    assert t.units_of_post(7) == {"corps": 1, "brigade": 2}
+
+
+def test_units_of_group():
+    assert UNITS.units_of_group(2) == {"corps": 1, "brigade": 2}
+    assert UNITS.units_of_group(1) == {"corps": 1}
+    assert UNITS.units_of_group(3) == {}
+
+
+def test_empty_tree_knows_no_kinds():
+    assert ScopeTree.empty().group_kind == {}
+    assert TREE.units_of_post(7) == {}

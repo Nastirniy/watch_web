@@ -24,6 +24,8 @@ class UserFilterParams(BaseFilterParams):
     username_alias: Optional[str] = Field(default=None, description="Exact username alias")
     username_alias_contains: Optional[str] = Field(default=None, max_length=50, description="Alias contains text")
     post_id: Optional[int] = Field(default=None, description="Filter by post ID")
+    corps_id: Optional[int] = Field(default=None, description="Users whose home post is in this corps now, its brigades included; an id of another kind gives nothing")
+    brigade_id: Optional[int] = Field(default=None, description="Users whose home post is in this brigade now; an id of another kind gives nothing")
     user_type: Optional[UserType] = Field(default=None, description="Users of this type (GET /user-types)")
     is_active: Optional[bool] = Field(default=None, description="Filter by active status")
     is_online: Optional[bool] = Field(default=None, description="Online now (session touched within the online threshold)")

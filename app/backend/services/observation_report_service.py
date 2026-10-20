@@ -10,7 +10,7 @@ Three report types:
   RC_FREQ_PART    - rc bands: date of creation, start time, disappear time,
                     signal type, frequency_min, frequency_max, [spacer], comment
   VIDEO_FREQ_PART - same layout for video bands
-  ALL_FIELDS      - every band: user, post, signal type, band kind, emitter
+  ALL_FIELDS      - every band: user, post, corps, brigade, signal type, band kind, emitter
                     group, frequency min/max/center, bandwidth,
                     observed/disappeared time, duration, comment,
                     creation date, tags
@@ -26,10 +26,12 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-from app.backend.enums.general import FrequencyKind, ObservationReportType, TagMatch
+from app.backend.enums.general import FrequencyKind, ObservationReportType, ScopeGroupKind, TagMatch, UnitPlacement
 from app.backend.models.observation import ObservationFrequency
 from app.backend.filters.observation_report_filter import ObservationReportCriteria
 from app.backend.filters.simple_engine import as_criteria, stored_value
+from app.backend.services.scope_groups import UNIT_KINDS
+from app.backend.services.units import UnitLabel
 
 _KYIV_TZ = ZoneInfo("Europe/Kyiv")
 
@@ -58,6 +60,8 @@ _HEADERS_VIDEO_FREQ = [
 _HEADERS_ALL_FIELDS = [
     "Користувач",
     "Пост",
+    "Корпус",       # one column per unit kind (_UNIT_COLUMNS), in UNIT_KINDS order
+    "Бригада",
     "Тип сигналу",
     "Тип частоти",
     "Група",
@@ -74,12 +78,22 @@ _HEADERS_ALL_FIELDS = [
 ]
 
 _COLUMN_WIDTHS_PARTIAL = [16, 12, 12, 28, 22, 22, 4, 40]
-_COLUMN_WIDTHS_ALL     = [20, 20, 28, 12, 8, 20, 20, 20, 14, 18, 18, 16, 40, 16, 30]
+_COLUMN_WIDTHS_ALL     = [20, 20, 20, 20, 28, 12, 8, 20, 20, 20, 14, 18, 18, 16, 40, 16, 30]
 
 _KIND_LABELS = {
     FrequencyKind.RC.value: "RC",
     FrequencyKind.VIDEO.value: "Відео",
 }
+
+# The unit columns of all_fields and the filter rows of corps_ids / brigade_ids, one per UNIT_KINDS
+_UNIT_COLUMNS = {ScopeGroupKind.CORPS: "Корпус", ScopeGroupKind.BRIGADE: "Бригада"}
+_UNIT_FILTER_LABELS = {ScopeGroupKind.CORPS: "Корпуси:", ScopeGroupKind.BRIGADE: "Бригади:"}
+_PLACEMENT_LABELS = {
+    UnitPlacement.RECORDED: "на момент створення спостереження",
+    UnitPlacement.CURRENT: "поточна (де пост зараз)",
+}
+# Until the report is localised on the web side
+ARCHIVED_UNIT_SUFFIX = " (архівовано)"
 
 
 def _put(ws, row: int, column: int, value):
@@ -151,7 +165,21 @@ def _tag_filter_label(tag_id: int, tag_names: Optional[Dict[int, str]]) -> str:
     return f"#{tag_id}"
 
 
-def _build_filter_rows(params: ObservationReportCriteria, tag_names: Optional[Dict[int, str]] = None) -> List[tuple]:
+def _unit_label(unit: Optional[UnitLabel]) -> str:
+    if unit is None:
+        return ""
+    return f"{unit.name}{ARCHIVED_UNIT_SUFFIX}" if unit.archived else unit.name
+
+
+def _unit_filter_label(unit_id: int, units: Optional[Dict[int, UnitLabel]]) -> str:
+    if units and unit_id in units:
+        return f"{_unit_label(units[unit_id])} (#{unit_id})"
+    return f"#{unit_id}"
+
+
+def _build_filter_rows(params: ObservationReportCriteria, tag_names: Optional[Dict[int, str]] = None,
+                       units: Optional[Dict[int, UnitLabel]] = None) -> List[tuple]:
+    """units: the labels of the corps_ids / brigade_ids (unit_labels)"""
     rows = []
     if params.observation_ids:
         rows.append(("ID спостережень:", ", ".join(str(i) for i in params.observation_ids)))
@@ -159,6 +187,12 @@ def _build_filter_rows(params: ObservationReportCriteria, tag_names: Optional[Di
         rows.append(("ID користувачів:", ", ".join(str(i) for i in params.user_ids)))
     if params.post_ids:
         rows.append(("ID постів:", ", ".join(str(i) for i in params.post_ids)))
+    asked = {kind: getattr(params, f"{kind.value}_ids", None) for kind in UNIT_KINDS}
+    for kind, ids in asked.items():
+        if ids:
+            rows.append((_UNIT_FILTER_LABELS[kind], ", ".join(_unit_filter_label(i, units) for i in ids)))
+    if any(asked.values()):
+        rows.append(("Належність:", _PLACEMENT_LABELS[UnitPlacement(params.placement)]))
     if params.signal_type_ids:
         rows.append(("ID типів сигналів:", ", ".join(str(i) for i in params.signal_type_ids)))
     if params.statuses:
@@ -211,7 +245,11 @@ class ObservationReportService:
         frequencies: List[ObservationFrequency],
         params: ObservationReportCriteria,
         tag_names: Optional[Dict[int, str]] = None,
+        units: Optional[Dict[int, Dict[str, UnitLabel]]] = None,
+        unit_filters: Optional[Dict[int, UnitLabel]] = None,
     ) -> bytes:
+        """units: observation id -> unit kind -> label for the unit columns of all_fields, as the placement says
+        (services/units.py observation_unit_labels); unit_filters: the labels of corps_ids / brigade_ids"""
         params = as_criteria(ObservationReportCriteria, params)
         rtype = params.report_type
         if rtype == ObservationReportType.VIDEO_FREQ_PART:
@@ -290,7 +328,7 @@ class ObservationReportService:
         row += 1
 
         # --- Filter rows ---
-        for label, value in _build_filter_rows(params, tag_names):
+        for label, value in _build_filter_rows(params, tag_names, unit_filters):
             c_lbl = ws.cell(row=row, column=1, value=label)
             c_lbl.font = _font(bold=True, size=10)
             c_lbl.fill = _fill(cls._COLOR_META_BG)
@@ -335,9 +373,11 @@ class ObservationReportService:
                 )
                 post_name = obs.post.name if obs.post else str(obs.post_id)
                 tags_str = ", ".join(_tag_label(t) for t in obs.tags) if obs.tags else ""
+                observation_units = (units or {}).get(obs.id, {})
                 row_data = [
                     user_name,
                     post_name,
+                    *(_unit_label(observation_units.get(kind.value)) for kind in UNIT_KINDS),
                     signal_name,
                     _kind_label(band.kind),
                     band.link_group,

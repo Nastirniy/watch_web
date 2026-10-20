@@ -16,7 +16,7 @@ ScopeTree is built by auth/context.py (load_scope_tree) from every group and eve
 Nodes missing from the maps (inconsistent data, a post created after the tree was read) never fail: a group or a
 post the maps do not know is a live node directly under the root.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 from typing import Dict, FrozenSet, List, Literal, Mapping, Optional, Tuple
 
@@ -25,6 +25,7 @@ NodeKind = Literal["root", "group", "post"]
 _PREFIXES = {"group": "g", "post": "p"}
 _KINDS = {prefix: kind for kind, prefix in _PREFIXES.items()}
 ROOT_KEY = "root"
+PLAIN_GROUP = "group"   # ScopeGroupKind.GROUP; every other kind is a unit (corps, brigade)
 
 
 @dataclass(frozen=True)
@@ -90,12 +91,14 @@ class Grant:
 
 @dataclass(frozen=True)
 class ScopeTree:
-    """Every group (parent, archived flag) and every post (group, archived flag). None as a parent or a group means
-    directly under the root. The maps are read, never changed."""
+    """Every group (parent, archived flag, kind) and every post (group, archived flag). None as a parent or a group
+    means directly under the root. A group missing from group_kind is a plain group. The maps are read, never
+    changed."""
     group_parent: Mapping[int, Optional[int]]
     archived_groups: FrozenSet[int]
     post_group: Mapping[int, Optional[int]]
     archived_posts: FrozenSet[int]
+    group_kind: Mapping[int, str] = field(default_factory=dict)
 
     @classmethod
     def empty(cls) -> "ScopeTree":
@@ -140,6 +143,24 @@ class ScopeTree:
         if node.kind == "post":
             return frozenset({node.id})
         return frozenset(post_id for post_id, chain in self._post_chains.items() if node.id in chain)
+
+    # ------------------------------------------------------------------ units
+    def _units(self, chain: Tuple[int, ...]) -> Dict[str, int]:
+        """unit kind -> group id for every group of the chain that is a unit, top down (archived ones included)"""
+        units: Dict[str, int] = {}
+        for group_id in reversed(chain):
+            kind = self.group_kind.get(group_id, PLAIN_GROUP)
+            if kind != PLAIN_GROUP:
+                units[kind] = group_id
+        return units
+
+    def units_of_post(self, post_id: int) -> Dict[str, int]:
+        """The units the post sits in now: {"corps": 1, "brigade": 2}, {} outside any unit or for an unknown post"""
+        return self._units(self._post_chains.get(post_id, ()))
+
+    def units_of_group(self, group_id: int) -> Dict[str, int]:
+        """The group itself when it is a unit and the units above it"""
+        return self._units(self._group_chain(group_id))
 
     # ------------------------------------------------------------------ effect
     def is_archived(self, node: Node) -> bool:

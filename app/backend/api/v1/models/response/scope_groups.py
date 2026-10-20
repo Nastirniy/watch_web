@@ -1,12 +1,14 @@
 from typing import List, Optional
 from pydantic import Field
 
+from app.backend.enums.general import ScopeGroupKind
 from app.backend.utils.validators import ResponseDatetime, SecureBaseModel
 
 
 class ScopeGroupResponse(SecureBaseModel):
     id: int
     name: str
+    kind: ScopeGroupKind = Field(description="A plain group, or a unit: corps, brigade (fixed at create)")
     parent_id: Optional[int] = Field(default=None, description="Group it sits in; null: directly under the root")
     description: Optional[str] = None
     is_deleted: bool
@@ -23,6 +25,7 @@ class ScopeTreePost(SecureBaseModel):
 class ScopeTreeGroup(SecureBaseModel):
     id: int
     name: str
+    kind: ScopeGroupKind
     description: Optional[str] = None
     groups: List["ScopeTreeGroup"] = Field(description="Subgroups")
     posts: List[ScopeTreePost] = Field(description="Posts placed directly in this group")

@@ -11,9 +11,11 @@ from decimal import Decimal
 from typing import Iterable, List, Optional
 
 from sqlalchemy.orm import contains_eager
+from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.selectable import Select
 
-from app.backend.enums.general import ConfidenceLevel, FrequencyKind, ObservationReportType, ObservationStatus, TagMatch
+from app.backend.enums.general import (ConfidenceLevel, FrequencyKind, ObservationReportType, ObservationStatus, TagMatch,
+                                      UnitPlacement)
 from app.backend.models.observation import Observation, ObservationFrequency
 from app.backend.filters.observation_frequency_filter import ObservationFrequencyFilter
 from app.backend.filters.observation_tag_filter import ObservationTagFilter
@@ -33,6 +35,9 @@ class ObservationReportCriteria:
     observation_ids: Optional[List[int]] = None
     user_ids: Optional[List[int]] = None
     post_ids: Optional[List[int]] = None
+    corps_ids: Optional[List[int]] = None       # the route turns units into unit_condition (services/units.py)
+    brigade_ids: Optional[List[int]] = None
+    placement: UnitPlacement = UnitPlacement.RECORDED
     signal_type_ids: Optional[List[int]] = None
     statuses: Optional[List[ObservationStatus]] = None
     confidence_level: Optional[ConfidenceLevel] = None
@@ -66,10 +71,12 @@ class ObservationReportFilter:
             params: ObservationReportCriteria,
             access_post_ids: Optional[Iterable[int]] = None,
             archived_post_ids: Optional[Iterable[int]] = None,
+            unit_condition: Optional[ColumnElement] = None,
     ) -> Select:
         """Bands matching the report filters, their observation and its report relations eager-loaded.
         access_post_ids: the posts covered (None: every post); archived_post_ids: with include_deleted, the posts
-        whose archived bands and observations are included (None: every post)."""
+        whose archived bands and observations are included (None: every post); unit_condition: corps_ids /
+        brigade_ids with placement (services/units.py observation_units_any)."""
         params = as_criteria(ObservationReportCriteria, params)
         query = ObservationFrequencyFilter.rows_query(
             access_post_ids, include_deleted=params.include_deleted, archived_post_ids=archived_post_ids,
@@ -95,6 +102,10 @@ class ObservationReportFilter:
         # Post filter
         if params.post_ids:
             query = query.where(Observation.post_id.in_(params.post_ids))
+
+        # Corps and brigades
+        if unit_condition is not None:
+            query = query.where(unit_condition)
 
         # Signal type filter
         if params.signal_type_ids:
