@@ -20,7 +20,7 @@ from app.backend.enums.routes import ObservationRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.services.scope_groups import UNIT_KINDS
 from app.backend.services.units import (observation_unit_labels, observation_unit_rows, observation_units_any,
-                                        observation_units_filter, unit_labels)
+                                        observation_units_filter, unit_labels, visible_unit_ids)
 from app.backend.services.audit import create_audit_log
 from app.backend.api.v1.models.request.observations import (
     ObservationCreate,
@@ -453,7 +453,10 @@ async def generate_observation_report(
     frequencies = list(result.all())
     units = await observation_unit_labels(
         session, auth.tree, {band.observation.id: band.observation for band in frequencies}.values(), params.placement)
-    unit_filters = await unit_labels(session, (unit_id for ids in asked_units.values() for unit_id in ids or ()))
+    # Names only of the units the caller sees or that the report's own columns show; others as their number
+    named = {label.id for found in units.values() for label in found.values()} | set(visible_unit_ids(auth, asked_units))
+    unit_filters = await unit_labels(session, (
+        unit_id for ids in asked_units.values() for unit_id in ids or () if unit_id in named))
 
     tag_names = None
     if params.tag_ids:

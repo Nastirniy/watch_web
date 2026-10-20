@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, FrozenSet, Iterable, List, Mapping, Optional, Tuple
 
-from sqlalchemy import and_, delete, false, or_
+from sqlalchemy import and_, delete, false
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -134,11 +134,23 @@ def observation_unit_condition(tree: ScopeTree, kind: ScopeGroupKind, unit_id: O
     separate condition: this one narrows, never widens."""
     if unit_id is None:
         return None
-    if tree.group_kind.get(unit_id) != ScopeGroupKind(kind).value:
-        return false()
-    if UnitPlacement(placement) is UnitPlacement.RECORDED:
-        return Observation.id.in_(select(ObservationUnit.observation_id).where(ObservationUnit.group_id == unit_id))
-    return Observation.post_id.in_(sorted(unit_post_ids(tree, kind, unit_id) - tree.archived_posts))
+    return observation_units_any(tree, {kind: [unit_id]}, placement)
+
+
+def _units_of_kind(tree: ScopeTree, kind: ScopeGroupKind, unit_ids: Iterable[int]) -> List[int]:
+    return sorted({unit_id for unit_id in unit_ids if tree.group_kind.get(unit_id) == ScopeGroupKind(kind).value})
+
+
+def recorded_in(units: List[int], created_from: Optional[datetime] = None,
+                created_to: Optional[datetime] = None) -> ColumnElement:
+    """Observations recorded in any of these units; with a period, only those created in it (the subquery then reads
+    a range of the primary key (group_id, created_at, observation_id) of observation_units)"""
+    rows = select(ObservationUnit.observation_id).where(ObservationUnit.group_id.in_(units))
+    if created_from is not None:
+        rows = rows.where(ObservationUnit.created_at >= created_from)
+    if created_to is not None:
+        rows = rows.where(ObservationUnit.created_at <= created_to)
+    return Observation.id.in_(rows)
 
 
 def observation_units_filter(tree: ScopeTree, params) -> Optional[ColumnElement]:
@@ -156,9 +168,26 @@ def observation_units_any(tree: ScopeTree, unit_ids: Mapping[ScopeGroupKind, Opt
     one of these brigades); None when no unit is asked for"""
     per_kind = []
     for kind, ids in unit_ids.items():
-        if ids:
-            per_kind.append(or_(*(observation_unit_condition(tree, kind, unit_id, placement) for unit_id in ids)))
+        if not ids:
+            continue
+        units = _units_of_kind(tree, kind, ids)     # an id of another kind or unknown matches nothing
+        if not units:
+            per_kind.append(false())
+        elif UnitPlacement(placement) is UnitPlacement.RECORDED:
+            # One subquery for every unit of the kind: an IN in the top-level AND, a semi-join on MariaDB
+            per_kind.append(recorded_in(units))
+        else:
+            posts = frozenset().union(*(unit_post_ids(tree, kind, unit_id) for unit_id in units))
+            per_kind.append(Observation.post_id.in_(sorted(posts - tree.archived_posts)))
     return and_(*per_kind) if per_kind else None
+
+
+def visible_unit_ids(auth: AuthContext, unit_ids: Mapping[ScopeGroupKind, Optional[Iterable[int]]]) -> List[int]:
+    """The asked ids a report may name: of the right kind and inside where the caller holds scope_group.view or
+    observation.view (any other id is shown as its number only)"""
+    return sorted(unit_id for kind, ids in unit_ids.items() for unit_id in _units_of_kind(auth.tree, kind, ids or ())
+                  if auth.covers(Permissions.SCOPE_GROUP_VIEW, Node.group(unit_id))
+                  or auth.covers(Permissions.OBSERVATION_VIEW, Node.group(unit_id)))
 
 
 @dataclass(frozen=True)

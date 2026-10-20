@@ -9,7 +9,7 @@ it returns counts, never archived rows.
 """
 from dataclasses import dataclass, fields
 from datetime import date, datetime, timedelta, timezone
-from typing import List, Optional
+from typing import Callable, List, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import case, func, String
@@ -153,9 +153,11 @@ async def observation_stats(
         tz: str,
         include_archived: bool,
         now: Optional[datetime] = None,
+        period_condition: Optional[Callable[[datetime, datetime], ColumnElement]] = None,
 ) -> ObservationStats:
     """The counters of the observations matching condition (a post: Observation.post_id == id; a unit: its
-    observations limited to the posts the caller may count).
+    observations limited to the posts the caller may count). period_condition(date_from, date_to), when given,
+    replaces condition in the period series (a unit's recorded observations: a range of observation_units).
     All-time and last-24-hours figures in one query, then the period series.
     The database groups the period by UTC hour (at most 24 * 366 rows); the hours are
     then summed into buckets of the zone. Exact for zones with whole-hour offsets."""
@@ -193,7 +195,8 @@ async def observation_stats(
     hour_key = utc_hour_key(Observation.created_at)
     series = (
         select(hour_key, Observation.is_deleted, func.count())
-        .where(*of_post, Observation.created_at >= date_from, Observation.created_at <= date_to)
+        .where(period_condition(date_from, date_to) if period_condition is not None else condition,
+               *of_post[1:], Observation.created_at >= date_from, Observation.created_at <= date_to)
         .group_by(hour_key, Observation.is_deleted)
     )
     edges = _bucket_starts(date_from, date_to, group_by, zone)

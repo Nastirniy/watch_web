@@ -32,7 +32,7 @@ from app.backend.models.scope_group import ScopeGroup
 from app.backend.services import scope_groups as groups_service
 from app.backend.services.audit import create_audit_log
 from app.backend.services.observation_counts import ObservationStats, observation_stats
-from app.backend.services.units import observation_unit_condition
+from app.backend.services.units import observation_unit_condition, recorded_in
 from app.backend.utils.row_locks import lock, lock_first
 
 
@@ -199,11 +199,15 @@ async def unit_observation_stats(session: AsyncSession, auth: AuthContext, kind:
         ScopeGroup.id == unit_id, ScopeGroup.kind == ScopeGroupKind(kind).value))).first()
     if found is None:
         raise ApiError(ErrorCode.SCOPE_GROUP_NOT_FOUND)
-    condition = observation_unit_condition(auth.tree, kind, unit_id, placement)
     visible = auth.posts_with(Permissions.OBSERVATION_VIEW)
-    if visible is not None:
-        condition = and_(condition, Observation.post_id.in_(sorted(visible)))
+    counted = [Observation.post_id.in_(sorted(visible))] if visible is not None else []
+    condition = and_(observation_unit_condition(auth.tree, kind, unit_id, placement), *counted)
+    period_condition = None
+    if UnitPlacement(placement) is UnitPlacement.RECORDED and auth.tree.group_kind.get(unit_id) == kind.value:
+        def period_condition(start: datetime, end: datetime):
+            return and_(recorded_in([unit_id], start, end), *counted)
     try:
-        return await observation_stats(session, condition, date_from, date_to, group_by, tz, include_archived)
+        return await observation_stats(session, condition, date_from, date_to, group_by, tz, include_archived,
+                                       period_condition=period_condition)
     except CodedError as exc:
         raise ApiError.from_coded(exc)
