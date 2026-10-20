@@ -118,7 +118,11 @@ def _to_kyiv(value: Optional[datetime]) -> Optional[datetime]:
         return None
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone(_KYIV_TZ)
+    try:
+        return value.astimezone(_KYIV_TZ)
+    except OverflowError:
+        # A stored value at the edge of the calendar (9999-12-31 23:59) has no Kyiv time: shown in UTC
+        return value
 
 
 def _fmt_date(value: Optional[datetime]) -> str:
