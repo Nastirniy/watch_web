@@ -286,6 +286,9 @@ parent.
 - `ObservationWithMedia.corps` and `.brigade` are where the post was when the observation was created, recorded at
   create and never changed (a later move of the post or the brigade does not change them); the names are today's.
   An observation created while its post moves may record the place from just before the move.
+  An observation created before its post was put into a unit has the unit the post was in when the operator ran
+  `cli.units fill-history` (once, DEPLOYMENT.md): that run is part of the recorded history, and `placement=current`
+  is not affected by it.
 - Unit names on posts and observations are shown to anyone who sees the post or observation, without
   `scope_group.view`.
 - Observations and media (lists and search) filter by `corps_id` / `brigade_id` with `placement`: `recorded` (the

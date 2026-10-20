@@ -5,6 +5,17 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Unit history fill (2026-10-20, branch feat/unit-history-fill)
+
+### Added
+
+- `python -m app.backend.cli.units fill-history [--dry-run]`: gives every observation (archived ones included) that has
+  no recorded corps or brigade the unit its post is in at the run, with the observation's `created_at`. Per post, in
+  chunks of 1000 observations, safe while the API runs, idempotent; one audit row per run that wrote anything
+  (`fill_history`, resource `observation_units`). Database content only: new `observation_units` rows, no schema, API
+  or contract change, no migration. Old observations now appear in `placement=recorded` filters, reports and the
+  corps / brigade `observation-stats`; `placement=current` is unchanged. See DEPLOYMENT.md.
+
 ## Corps follow-ups (2026-10-20, branch fix/corps-followups)
 
 ### Fixed

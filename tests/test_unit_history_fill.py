@@ -1,6 +1,8 @@
 """fill_unit_history: old observations (no observation_units row of a kind) get the unit the post is in now."""
 from typing import Dict, List
 
+import pytest
+
 from sqlalchemy import func
 from sqlmodel import select
 
@@ -9,7 +11,8 @@ from app.backend.enums.routes import BrigadeRoutes, CorpsRoutes, ObservationRout
 from app.backend.models.audit import AuditLog
 from app.backend.models.observation_unit import ObservationUnit
 from app.backend.models.scope_group import ScopeGroup
-from app.backend.services.unit_history import fill_unit_history
+from app.backend.cli.units import main, report_lines
+from app.backend.services.unit_history import HistoryFill, UnitFill, fill_unit_history
 from tests.helpers import make_admin, make_dictionary, make_group, make_post, observation_payload
 
 CREATE = V1.path(ObservationRoutes.CREATE)
@@ -228,3 +231,21 @@ async def test_audit_row_only_when_written(client, db, headers):
     await fill_unit_history(db)
     await fill_unit_history(db, dry_run=True)
     assert len((await db.exec(select(AuditLog).where(AuditLog.action == "fill_history"))).all()) == 1
+
+
+def test_report_lines():
+    result = HistoryFill(units=[UnitFill(7, "brigade", "Brigade 10", 3), UnitFill(2, "corps", "Corps 1", 3)],
+                         observations=3, rows=6, posts_skipped=1, dry_run=True)
+    assert report_lines(result) == [
+        "dry run: nothing written",
+        "brigade 7 Brigade 10: 3",
+        "corps 2 Corps 1: 3",
+        "observations: 3, rows: 6, posts in no unit: 1",
+    ]
+    written = HistoryFill(units=[], observations=0, rows=0, posts_skipped=0, dry_run=False)
+    assert report_lines(written) == ["observations: 0, rows: 0, posts in no unit: 0"]
+
+
+def test_parser_rejects_unknown_command():
+    with pytest.raises(SystemExit):
+        main(["nope"])
