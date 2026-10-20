@@ -21,8 +21,10 @@ from app.backend.auth.certificates import (
     create_pki_auth_audit_details,
     cn_hash_matches,
 )
+from app.backend.errors.coded import CodedError
 from app.backend.services.audit import create_audit_log
 from app.backend.services.certificates import active_certificate, certificate_state
+from app.backend.utils.row_locks import lock_all, lock_first
 from app.backend.utils.text import fit_column
 
 # Get authentication logger
@@ -152,7 +154,25 @@ class AuthService:
             request_url: Optional[str] = None,
             certificate_fingerprint: Optional[str] = None
     ) -> UserSession:
-        """Create a user session; with certificate_fingerprint (production login) it is bound to that certificate"""
+        """Create a user session; with certificate_fingerprint (production login) it is bound to that certificate.
+
+        A write of its own that begins with the user row locked shared (the account checks of authenticate_pki ran
+        in a transaction committed before): a deactivation, an archive or a certificate revocation holds that row FOR
+        UPDATE, so the login waits for it and checks the committed row again here. CodedError account_deleted /
+        account_deactivated, and for a bound login certificate_revoked / certificate_not_recognized (as
+        authenticate_pki answers) when the account or the certificate stopped being active meanwhile: no session
+        of a deactivated account is ever stored. Committed here."""
+        user_id = user.id
+        locked = await lock_first(session, select(User).where(User.id == user_id), shared=True)
+        if locked is None:
+            raise CodedError(AuthErrorCode.CERTIFICATE_NOT_RECOGNIZED)
+        if locked.is_deleted:
+            _logger.warning(f"Login of a user archived during the login refused: user_id={user_id}")
+            raise CodedError(AuthErrorCode.ACCOUNT_DELETED)
+        if not locked.is_active:
+            _logger.warning(f"Login of a user deactivated during the login refused: user_id={user_id}")
+            raise CodedError(AuthErrorCode.ACCOUNT_DEACTIVATED)
+
         session_id = secrets.token_urlsafe(64)
         now = datetime.now(timezone.utc)
 
@@ -167,6 +187,20 @@ class AuthService:
         )
         session_lifetimes.touch(user_session, now)
         await session_lifetimes.bind_certificate(user_session, certificate_fingerprint)
+        if user_session.certificate_fingerprint_hash:
+            # A revocation holds the user row FOR UPDATE as well (services/certificates.py): read after the lock,
+            # the certificate is as committed and stays so until the session is stored
+            certificate = (await session.exec(select(UserCertificate).where(
+                UserCertificate.user_id == user_id,
+                UserCertificate.fingerprint_hash == user_session.certificate_fingerprint_hash,
+            ))).first()
+            state = certificate_state(certificate) if certificate is not None else None
+            if state is not CertificateState.ACTIVE:
+                _logger.warning(f"Login with a certificate that stopped being active during the login refused: "
+                                f"user_id={user_id}, state={state.value if state else 'missing'}")
+                if state is CertificateState.REVOKED:
+                    raise CodedError(AuthErrorCode.CERTIFICATE_REVOKED)
+                raise CodedError(AuthErrorCode.CERTIFICATE_NOT_RECOGNIZED)
         # No write to the users row: last_login_at is derived from the sessions (presence_properties.py), so two logins
         # of one user, or a login next to the user's other requests, never collide on it
         session.add(user_session)
@@ -285,43 +319,40 @@ class AuthService:
     async def invalidate_session(
             session: AsyncSession,
             session_id: str,
-            user_id: Optional[int] = None,
+            user_id: int,
             ip_address: Optional[str] = None,
             user_agent: Optional[str] = None
     ) -> bool:
-        """End a live session by logout. False when there is no such session or it has already ended."""
-        query = select(UserSession).where(UserSession.id == session_id, UserSession.ended_at.is_(None))
-        if user_id:
-            query = query.where(UserSession.user_id == user_id)
+        """End a live session of the user by logout. False when it is not the user's or has ended already (another
+        request of it, an administrator, a revocation committed after this request was authenticated).
 
-        result = await session.exec(query)
-        user_session = result.first()
-        if user_session:
-            state = session_lifetimes.session_state(user_session)
-            if state.status is SessionStatus.ENDED:
-                await session_lifetimes.record_end(session, user_session, state)
-                return False
-
-            session_lifetimes.end(user_session, SessionEndReason.LOGOUT)
-            session.add(user_session)
-
-            # Create audit log using helper
-            await create_audit_log(
-                session=session,
-                user_id=user_session.user_id,
-                session_id=session_id,
-                action="logout",
-                resource_type="session",
-                ip_address=ip_address,
-                user_agent=user_agent,
-                details={"message": "User session invalidated (logout)"},
-                success=True
-            )
-
+        A write of its own, like every request's write to its sessions: the shared user lock first
+        (sessions.begin_session_write: it waits for an administrator ending the user's sessions), then one
+        conditional UPDATE (ended_at still empty) with no read before it, so it never updates a session row changed
+        after a read view (MariaDB error 1020), and the audit row only when it ended the session. Committed here."""
+        await session_lifetimes.begin_session_write(session, user_id)
+        result = await session.exec(
+            update(UserSession)
+            .where(UserSession.id == session_id, UserSession.user_id == user_id, UserSession.ended_at.is_(None))
+            .values(ended_at=datetime.now(timezone.utc), end_reason=SessionEndReason.LOGOUT.value, revoke_cause=None)
+            .execution_options(synchronize_session=False)
+        )
+        if result.rowcount != 1:
             await session.commit()
-            return True
-
-        return False
+            return False
+        await create_audit_log(
+            session=session,
+            user_id=user_id,
+            session_id=session_id,
+            action="logout",
+            resource_type="session",
+            ip_address=ip_address,
+            user_agent=user_agent,
+            details={"message": "User session invalidated (logout)"},
+            success=True
+        )
+        await session.commit()
+        return True
 
     @staticmethod
     async def invalidate_all_user_sessions(
@@ -483,17 +514,57 @@ class AuthService:
         return True
 
     @staticmethod
-    async def expire_sessions_of_inactive_user(session: AsyncSession, user: User) -> int:
-        """End every live session of a user whose account is deactivated or archived.
+    async def expire_sessions_of_inactive_user(session: AsyncSession, user_id: int, archived: bool) -> int:
+        """End every live session of a user whose account is deactivated (archived=False) or archived.
 
         Called from the request path when such a user presents a token: the sessions were normally ended
         when the flag changed, but a flag flipped outside the API (direct database change, restore of a
-        backup) would leave them live and count towards presence. Returns the number of sessions ended.
-        """
-        if user.is_active and not user.is_deleted:
-            return 0
-        cause = SessionRevokeCause.ACCOUNT_ARCHIVED if user.is_deleted else SessionRevokeCause.ACCOUNT_DEACTIVATED
-        return await AuthService.invalidate_all_user_sessions(session, user_id=user.id, cause=cause)
+        backup) would leave them live and count towards presence. Returns the number of sessions revoked.
+
+        A write of its own, like every request's write to the user's sessions: the shared user lock first
+        (sessions.begin_session_write; the request is no administrator changing the account, which holds the row
+        FOR UPDATE: parallel requests of the client share it and wait only for such a write), then one set-based
+        conditional UPDATE of the live sessions with no plain read before it. Of parallel requests the first ends
+        them and the others wait on the session rows, find them ended and change nothing: no session row changed
+        after a read view (MariaDB error 1020), and one statement locks the rows in index order (no deadlock, 1213).
+        Sessions past their end that nobody recorded are recorded with it after a locking read (no read view
+        either). The caller's transaction must hold no change (start_write): the refresh rolls its claim back
+        first. The audit row only when a session was revoked. Committed here."""
+        cause = SessionRevokeCause.ACCOUNT_ARCHIVED if archived else SessionRevokeCause.ACCOUNT_DEACTIVATED
+        await session_lifetimes.begin_session_write(session, user_id)
+        revoked = await session.exec(
+            update(UserSession)
+            .where(UserSession.user_id == user_id, session_lifetimes.live_clause())
+            .values(ended_at=datetime.now(timezone.utc), end_reason=SessionEndReason.REVOKED.value,
+                    revoke_cause=cause.value)
+            .execution_options(synchronize_session=False)
+        )
+        count = revoked.rowcount
+        past = await lock_all(session, select(UserSession).where(
+            UserSession.user_id == user_id, UserSession.ended_at.is_(None)).order_by(UserSession.id))
+        now = datetime.now(timezone.utc)
+        for user_session in past:
+            state = session_lifetimes.session_state(user_session, now)
+            if state.status is SessionStatus.ENDED:
+                session_lifetimes.end(user_session, state.end_reason, at=state.ends_at)
+            else:                # live by the computation only after a clock step back: revoked as well
+                session_lifetimes.end(user_session, SessionEndReason.REVOKED, cause, at=now)
+                count += 1
+            session.add(user_session)
+        if count > 0:
+            await create_audit_log(
+                session=session,
+                user_id=user_id,
+                action="force_logout",
+                resource_type="session",
+                resource_id=user_id,
+                details={"message": f"All {count} live sessions revoked for user_id={user_id}",
+                         "cause": cause.value},
+                success=True
+            )
+            _logger.info(f"Revoked {count} live sessions for user_id={user_id}, cause={cause.value}")
+        await session.commit()
+        return count
 
     @staticmethod
     def hash_password(password: str) -> str:

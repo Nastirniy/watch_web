@@ -18,6 +18,7 @@ replaces it (claim_refresh), so a copy of an older token refreshes nothing.
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from typing import Optional
 
 from sqlalchemy import bindparam, or_, update
@@ -86,15 +87,22 @@ async def begin_session_write(session: AsyncSession, user_id: int) -> None:
     await lock_first(session, select(User.id).where(User.id == user_id), shared=True)
 
 
-async def touch_session(session: AsyncSession, row: UserSession, now: Optional[datetime] = None) -> bool:
+class TouchResult(Enum):
+    TOUCHED = "touched"      # this request moved the activity
+    BEHIND = "behind"        # another request of the session touched it first: the session is live
+    ENDED = "ended"          # the session was ended meanwhile (an administrator, a revocation, a logout)
+
+
+async def touch_session(session: AsyncSession, row: UserSession, now: Optional[datetime] = None) -> TouchResult:
     """touch() for an authenticated request, as a write transaction of its own: it ends the read transaction the
     request opened, takes a shared lock on the user row (begin_session_write: an administrator ending the user's
     sessions or revoking a certificate holds it FOR UPDATE) and runs one conditional UPDATE, which moves
     last_activity only forward from the value this request read. Parallel requests of one session (a page loading
     several lists) wait for each other on the row instead of updating a row changed after their snapshot (MariaDB
-    error 1020); the later ones change nothing. A touch during such an administrator's write waits
-    for it and then finds the session ended, so that write never meets a touch committed after its reads (1020).
-    Committed here; False when another request touched or ended the session first."""
+    error 1020); the later ones change nothing (BEHIND). A touch during such an administrator's write waits for it
+    and then finds the session ended, so that write never meets a touch committed after its reads (1020); the
+    caller refuses the request then (ENDED: the session row read again after the commit, the request's copy shows
+    the end and its revoke_cause). Committed here."""
     now = now or _now()
     expires_at = deadline(row, now)
     await begin_session_write(session, row.user_id)
@@ -106,10 +114,19 @@ async def touch_session(session: AsyncSession, row: UserSession, now: Optional[d
         .execution_options(synchronize_session=False)
     )
     await session.commit()
-    if result.rowcount == 0:
-        return False
-    row.last_activity, row.expires_at = now, expires_at     # the request's own copy shows the touch
-    return True
+    if result.rowcount == 1:
+        row.last_activity, row.expires_at = now, expires_at     # the request's own copy shows the touch
+        return TouchResult.TOUCHED
+    # No row: another request touched first, or the session ended. A statement after the commit reads the
+    # committed row (a new read view on MariaDB)
+    stored = (await session.exec(
+        select(UserSession).where(UserSession.id == row.id).execution_options(populate_existing=True)
+    )).first()
+    if stored is None:
+        return TouchResult.ENDED
+    if stored is not row:          # a copy from another database session (the request's own one is refreshed above)
+        row.ended_at, row.end_reason, row.revoke_cause = stored.ended_at, stored.end_reason, stored.revoke_cause
+    return TouchResult.ENDED if stored.ended_at is not None else TouchResult.BEHIND
 
 
 @dataclass(frozen=True)

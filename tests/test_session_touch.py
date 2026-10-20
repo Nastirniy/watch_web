@@ -5,10 +5,11 @@ they had read: the losers answered 500 (error 1020). The touch now ends the read
 last_activity forward from the value the request read; a request that lost the race changes nothing."""
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from sqlalchemy import event
 from sqlmodel import select
 
-from app.backend.auth.sessions import touch_session, utc
+from app.backend.auth.sessions import TouchResult, touch_session, utc
 from app.backend.models.user import UserSession
 from tests.helpers import make_user
 
@@ -32,7 +33,7 @@ async def test_touch_moves_activity_and_end(db, session_maker):
     row = await _row(db, user, then)
     async with session_maker() as session:
         read = (await session.exec(select(UserSession).where(UserSession.id == row.id))).one()
-        assert await touch_session(session, read) is True
+        assert await touch_session(session, read) is TouchResult.TOUCHED
     stored = await _stored(session_maker, row.id)
     assert utc(stored.last_activity) > then + timedelta(minutes=4)
     assert utc(stored.expires_at) > utc(stored.last_activity)
@@ -45,9 +46,9 @@ async def test_a_request_that_read_an_older_activity_changes_nothing(db, session
     async with session_maker() as slow, session_maker() as fast:
         stale = (await slow.exec(select(UserSession).where(UserSession.id == row.id))).one()
         current = (await fast.exec(select(UserSession).where(UserSession.id == row.id))).one()
-        assert await touch_session(fast, current) is True
+        assert await touch_session(fast, current) is TouchResult.TOUCHED
         moved = (await _stored(session_maker, row.id)).last_activity
-        assert await touch_session(slow, stale) is False
+        assert await touch_session(slow, stale) is TouchResult.BEHIND
     assert (await _stored(session_maker, row.id)).last_activity == moved
 
 
@@ -78,7 +79,7 @@ async def test_touch_never_moves_an_ended_session_and_updates_the_row_in_memory(
     row = await _row(db, user, then)
     async with session_maker() as session:
         read = (await session.exec(select(UserSession).where(UserSession.id == row.id))).one()
-        assert await touch_session(session, read) is True
+        assert await touch_session(session, read) is TouchResult.TOUCHED
         assert utc(read.last_activity) > then + timedelta(minutes=4)     # the caller's copy shows the touch
     async with session_maker() as session:
         read = (await session.exec(select(UserSession).where(UserSession.id == row.id))).one()
@@ -87,7 +88,7 @@ async def test_touch_never_moves_an_ended_session_and_updates_the_row_in_memory(
             ended.ended_at, ended.end_reason = datetime.now(timezone.utc), "logout"
             other.add(ended)
             await other.commit()
-        assert await touch_session(session, read) is False     # read before the logout: never moves an ended row
+        assert await touch_session(session, read) is TouchResult.ENDED     # read before the logout: never moves an ended row
 
 
 async def test_ending_a_session_of_an_inactive_certificate_twice_keeps_the_first_end(db, session_maker):
@@ -151,7 +152,7 @@ async def test_touch_takes_a_shared_lock_on_its_user_first(db, session_maker, en
         read = (await session.exec(select(UserSession).where(UserSession.id == row.id))).one()
         seen, stop = _statements(engine)
         try:
-            assert await touch_session(session, read) is True
+            assert await touch_session(session, read) is TouchResult.TOUCHED
         finally:
             stop()
     write = _write_of(seen, "UPDATE user_sessions")
@@ -279,3 +280,391 @@ async def test_recording_an_end_shares_the_user_lock_first(db, session_maker, en
     write = _write_of(seen, "UPDATE user_sessions")
     assert write[0].startswith("SELECT users.id FROM users WHERE users.id = ?"), write
     assert write[1].startswith("UPDATE user_sessions"), write
+
+
+# ------------------------------------------------------------------------------------------------------------------
+# A request's writes to its session against an administrator's end of it (MariaDB: the request's shared user lock
+# waits for the administrator's FOR UPDATE, then runs). sqlite cannot race: the administrator's commit is placed
+# where MariaDB would let it land, inside the request's begin_session_write, before its lock.
+
+def _with_rollbacks(engine):
+    """_statements plus "ROLLBACK" where a transaction was rolled back"""
+    seen, stop = _statements(engine)
+
+    def rollback(conn):
+        seen.append("ROLLBACK")
+
+    event.listen(engine.sync_engine, "rollback", rollback)
+
+    def stop_all():
+        event.remove(engine.sync_engine, "rollback", rollback)
+        stop()
+    return seen, stop_all
+
+
+def _transaction_of(seen, marker):
+    """The statements of the transaction that ran the first statement starting with marker (COMMIT or ROLLBACK
+    ends one)"""
+    at = next(i for i, statement in enumerate(seen) if statement.startswith(marker))
+    begin = max((i for i in range(at) if seen[i] in ("COMMIT", "ROLLBACK")), default=-1) + 1
+    end = next((i for i in range(at, len(seen)) if seen[i] in ("COMMIT", "ROLLBACK")), len(seen))
+    return seen[begin:end + 1]
+
+
+async def _logged_in(db, user, idle_for: timedelta):
+    """A live session of the user (unbound, as the development login) whose last request was idle_for ago (a touch
+    is due from 60 s), and the Bearer header of an access token bound to it"""
+    from app.backend.auth.service import AuthService
+    from app.backend.config import settings
+    row = await AuthService.create_session(db, user)
+    then = datetime.now(timezone.utc) - idle_for
+    row.last_activity = then
+    row.expires_at = then + timedelta(minutes=settings.security.session_idle_timeout_minutes)
+    db.add(row)
+    await db.commit()
+    return row, {"Authorization": f"Bearer {AuthService.session_tokens(user.id, row)[0]}"}
+
+
+def _meanwhile(monkeypatch, change):
+    """change() commits in a session of its own just before the request's first begin_session_write takes its lock:
+    what MariaDB does when an administrator holds the user row FOR UPDATE at that moment"""
+    from app.backend.auth import sessions
+    original = sessions.begin_session_write
+    pending = [change]
+
+    async def after_the_other_write(session, user_id):
+        if pending:
+            await pending.pop()()
+        await original(session, user_id)
+
+    monkeypatch.setattr(sessions, "begin_session_write", after_the_other_write)
+
+
+def _end_session(session_maker, session_id, cause, deactivate_user_id=None, archive_user_id=None):
+    from app.backend.enums.general import SessionEndReason
+    from app.backend.models.user import User
+
+    async def change():
+        async with session_maker() as other:
+            row = (await other.exec(select(UserSession).where(UserSession.id == session_id))).one()
+            row.ended_at, row.end_reason = datetime.now(timezone.utc), SessionEndReason.REVOKED.value
+            row.revoke_cause = cause.value
+            other.add(row)
+            for user_id, field in ((deactivate_user_id, "is_active"), (archive_user_id, "is_deleted")):
+                if user_id is not None:
+                    user = (await other.exec(select(User).where(User.id == user_id))).one()
+                    setattr(user, field, field == "is_deleted")
+                    other.add(user)
+            await other.commit()
+    return change
+
+
+async def test_touch_tells_an_end_from_another_touch(db, session_maker):
+    """touch_session is tri-state: an end committed while it waited for the user lock is ENDED (the caller's copy
+    shows the end), a touch of another request first is BEHIND (the session is live)"""
+    from app.backend.auth.sessions import TouchResult
+    from app.backend.enums.general import SessionRevokeCause
+    user = await make_user(db)
+    row = await _row(db, user, datetime.now(timezone.utc) - timedelta(minutes=5))
+    async with session_maker() as session:
+        read = (await session.exec(select(UserSession).where(UserSession.id == row.id))).one()
+        await _end_session(session_maker, row.id, SessionRevokeCause.CERTIFICATE_REVOKED)()
+        assert await touch_session(session, read) is TouchResult.ENDED
+        assert read.ended_at is not None and read.revoke_cause == "certificate_revoked"
+
+
+async def test_touch_after_another_touch_is_behind(db, session_maker):
+    from app.backend.auth.sessions import TouchResult
+    user = await make_user(db)
+    row = await _row(db, user, datetime.now(timezone.utc) - timedelta(minutes=5))
+    async with session_maker() as slow, session_maker() as fast:
+        stale = (await slow.exec(select(UserSession).where(UserSession.id == row.id))).one()
+        current = (await fast.exec(select(UserSession).where(UserSession.id == row.id))).one()
+        assert await touch_session(fast, current) is TouchResult.TOUCHED
+        assert await touch_session(slow, stale) is TouchResult.BEHIND
+
+
+@pytest.mark.parametrize("cause, code", [("ended_by_admin", "session_expired"),
+                                         ("certificate_revoked", "token_certificate_mismatch")])
+async def test_a_request_whose_touch_waited_for_an_end_of_its_session_is_refused(
+        client, db, session_maker, monkeypatch, cause, code):
+    """The touch waited behind an administrator who ended the session (or revoked its certificate) and matched no
+    row: the request went on as authenticated. It answers what the next request of the session answers."""
+    from app.backend.api.v1 import V1
+    from app.backend.enums.general import SessionRevokeCause
+    from app.backend.enums.routes import AuthRoutes
+    user = await make_user(db)
+    row, auth_header = await _logged_in(db, user, timedelta(minutes=5))
+    _meanwhile(monkeypatch, _end_session(session_maker, row.id, SessionRevokeCause(cause)))
+    response = await client.get(V1.path(AuthRoutes.ME), headers=auth_header)
+    assert response.status_code == 401 and response.json()["code"] == code, response.text
+
+
+@pytest.mark.parametrize("archived, code", [(False, "account_deactivated"), (True, "account_deleted")])
+async def test_a_request_whose_touch_waited_for_a_deactivation_is_refused(
+        client, db, session_maker, monkeypatch, archived, code):
+    from app.backend.api.v1 import V1
+    from app.backend.enums.general import SessionRevokeCause
+    from app.backend.enums.routes import AuthRoutes
+    user = await make_user(db)
+    row, auth_header = await _logged_in(db, user, timedelta(minutes=5))
+    cause = SessionRevokeCause.ACCOUNT_ARCHIVED if archived else SessionRevokeCause.ACCOUNT_DEACTIVATED
+    _meanwhile(monkeypatch, _end_session(session_maker, row.id, cause,
+                                         archive_user_id=user.id if archived else None,
+                                         deactivate_user_id=None if archived else user.id))
+    response = await client.get(V1.path(AuthRoutes.ME), headers=auth_header)
+    assert response.status_code == 401 and response.json()["code"] == code, response.text
+
+
+async def test_a_write_whose_touch_waited_for_an_end_of_its_session_is_not_done(client, db, session_maker,
+                                                                                  monkeypatch):
+    from sqlalchemy import func
+    from app.backend.api.v1 import V1
+    from app.backend.enums.general import SessionRevokeCause
+    from app.backend.enums.routes import ObservationRoutes
+    from app.backend.models.observation import Observation
+    from tests.helpers import make_admin, make_dictionary, make_post, observation_payload
+    admin = await make_admin(db)
+    post = await make_post(db)
+    dictionary = await make_dictionary(db)
+    row, auth_header = await _logged_in(db, admin, timedelta(minutes=5))
+    _meanwhile(monkeypatch, _end_session(session_maker, row.id, SessionRevokeCause.ENDED_BY_ADMIN))
+    response = await client.post(V1.path(ObservationRoutes.CREATE), headers=auth_header,
+                                 json=observation_payload(post.id, dictionary["signal_type_id"]))
+    async with session_maker() as fresh:
+        stored = (await fresh.exec(select(func.count()).select_from(Observation))).one()
+    assert response.status_code == 401 and response.json()["code"] == "session_expired", response.text
+    assert stored == 0
+
+
+async def test_a_request_whose_touch_lost_to_another_touch_goes_on(client, db, session_maker, monkeypatch):
+    from app.backend.api.v1 import V1
+    from app.backend.enums.routes import AuthRoutes
+    user = await make_user(db)
+    row, auth_header = await _logged_in(db, user, timedelta(minutes=5))
+
+    async def another_request_touched():
+        async with session_maker() as other:
+            moved = (await other.exec(select(UserSession).where(UserSession.id == row.id))).one()
+            moved.last_activity = datetime.now(timezone.utc)
+            other.add(moved)
+            await other.commit()
+
+    _meanwhile(monkeypatch, another_request_touched)
+    response = await client.get(V1.path(AuthRoutes.ME), headers=auth_header)
+    assert response.status_code == 200, response.text
+
+
+# ------------------------------------------------------------------------------------------------------- logout
+
+async def test_logout_is_one_conditional_update_after_the_user_lock(client, db, engine, session_maker):
+    """Logout read the session and updated it in the transaction its authentication opened, with no user lock first:
+    on MariaDB 1020 (a 500) whenever an administrator's end, a refresh or a touch of the session committed between
+    its first read and its update"""
+    from app.backend.api.v1 import V1
+    from app.backend.enums.routes import AuthRoutes
+    from app.backend.models.audit import AuditLog
+    user = await make_user(db)
+    row, auth_header = await _logged_in(db, user, timedelta(seconds=5))            # no touch: the common case
+    seen, stop = _with_rollbacks(engine)
+    try:
+        response = await client.post(V1.path(AuthRoutes.LOGOUT), headers=auth_header)
+    finally:
+        stop()
+    assert response.status_code == 200, response.text
+    write = _transaction_of(seen, "UPDATE user_sessions")
+    assert write[0].startswith("SELECT users.id FROM users WHERE users.id = ?"), write
+    assert write[1].startswith("UPDATE user_sessions SET ended_at"), write
+    assert [s for s in write[2:] if not s.startswith("INSERT INTO audit_logs")] == ["COMMIT"], write
+    stored = await _stored(session_maker, row.id)
+    assert stored.end_reason == "logout" and stored.ended_at is not None and stored.revoke_cause is None
+    async with session_maker() as fresh:
+        logged = (await fresh.exec(select(AuditLog).where(AuditLog.action == "logout",
+                                                          AuditLog.session_id == row.id))).all()
+    assert len(logged) == 1
+
+
+async def test_logout_of_a_session_ended_meanwhile_is_already_invalidated(client, db, session_maker, monkeypatch):
+    from app.backend.api.v1 import V1
+    from app.backend.enums.general import SessionRevokeCause
+    from app.backend.enums.routes import AuthRoutes
+    from app.backend.models.audit import AuditLog
+    user = await make_user(db)
+    row, auth_header = await _logged_in(db, user, timedelta(seconds=5))
+    _meanwhile(monkeypatch, _end_session(session_maker, row.id, SessionRevokeCause.ENDED_BY_ADMIN))
+    response = await client.post(V1.path(AuthRoutes.LOGOUT), headers=auth_header)
+    assert response.status_code == 400 and response.json()["code"] == "session_already_invalidated", response.text
+    stored = await _stored(session_maker, row.id)
+    assert (stored.end_reason, stored.revoke_cause) == ("revoked", "ended_by_admin")
+    async with session_maker() as fresh:
+        logged = (await fresh.exec(select(AuditLog).where(AuditLog.action == "logout",
+                                                          AuditLog.session_id == row.id))).all()
+    assert logged == []
+
+
+# ---------------------------------------------------------------------------------- sessions of an inactive user
+
+async def _deactivate(db, user, archived: bool = False):
+    from app.backend.models.user import User
+    stored = (await db.exec(select(User).where(User.id == user.id))).one()
+    if archived:
+        stored.is_deleted = True
+    else:
+        stored.is_active = False                 # flipped outside the API (SQL, restore of a backup)
+    db.add(stored)
+    await db.commit()
+
+
+async def test_ending_the_sessions_of_an_inactive_user_locks_the_user_first(client, db, engine):
+    """Every request of a live session of an inactive user ended the user's sessions inside the transaction its
+    first read opened: of parallel requests of that client the first ended the session and every other one updated
+    a row changed after its read view (MariaDB 1020: 500 instead of 401). Now the shared user lock comes first and
+    the update is conditional, with no plain read before it."""
+    from app.backend.api.v1 import V1
+    from app.backend.enums.routes import AuthRoutes
+    user = await make_user(db)
+    _, auth_header = await _logged_in(db, user, timedelta(seconds=5))
+    await _deactivate(db, user)
+    seen, stop = _with_rollbacks(engine)
+    try:
+        response = await client.get(V1.path(AuthRoutes.ME), headers=auth_header)
+    finally:
+        stop()
+    assert response.status_code == 401 and response.json()["code"] == "account_deactivated", response.text
+    write = _transaction_of(seen, "UPDATE user_sessions")
+    assert write[0].startswith("SELECT users.id FROM users WHERE users.id = ?"), write
+    assert write[1].startswith("UPDATE user_sessions SET ended_at"), write
+
+
+async def test_the_sessions_of_an_inactive_user_end_once(client, db, session_maker):
+    """The live session is revoked (account_deactivated), one already past its idle timeout is recorded as such;
+    one force_logout row, none for a later request that finds nothing to end"""
+    from app.backend.api.v1 import V1
+    from app.backend.enums.routes import AuthRoutes
+    from app.backend.models.audit import AuditLog
+    user = await make_user(db)
+    live, auth_header = await _logged_in(db, user, timedelta(seconds=5))
+    idle, _ = await _logged_in(db, user, timedelta(days=2))
+    await _deactivate(db, user)
+    first = await client.get(V1.path(AuthRoutes.ME), headers=auth_header)
+    again = await client.get(V1.path(AuthRoutes.ME), headers=auth_header)
+    assert first.status_code == again.status_code == 401
+    assert first.json()["code"] == again.json()["code"] == "account_deactivated"
+    stored_live, stored_idle = await _stored(session_maker, live.id), await _stored(session_maker, idle.id)
+    assert (stored_live.end_reason, stored_live.revoke_cause) == ("revoked", "account_deactivated")
+    assert (stored_idle.end_reason, stored_idle.revoke_cause) == ("idle_timeout", None)
+    assert utc(stored_idle.ended_at) < datetime.now(timezone.utc) - timedelta(days=1)
+    async with session_maker() as fresh:
+        logged = (await fresh.exec(select(AuditLog).where(AuditLog.action == "force_logout",
+                                                          AuditLog.resource_id == user.id))).all()
+    assert len(logged) == 1 and logged[0].details["cause"] == "account_deactivated"
+
+
+async def test_a_refresh_of_an_inactive_user_ends_its_sessions_outside_its_claim(client, db, engine, session_maker):
+    """The refresh ended the user's sessions after its claim of the token, in one transaction: two refreshes of two
+    sessions of the user locked their own session each and then waited for the other's (1213). The claim is rolled
+    back first, the end is a write of its own."""
+    from app.backend.api.v1 import V1
+    from app.backend.auth.service import AuthService
+    from app.backend.enums.routes import AuthRoutes
+    user = await make_user(db)
+    row = await AuthService.create_session(db, user)
+    refresh = AuthService.session_tokens(user.id, row)[1]
+    await _deactivate(db, user, archived=True)
+    seen, stop = _with_rollbacks(engine)
+    try:
+        response = await client.post(V1.path(AuthRoutes.REFRESH), json={"refresh_token": refresh})
+    finally:
+        stop()
+    assert response.status_code == 401 and response.json()["code"] == "account_deleted", response.text
+    claim = _transaction_of(seen, "UPDATE user_sessions SET refresh_jti")
+    assert claim[-1] == "ROLLBACK" and not any(s.startswith("UPDATE user_sessions SET ended_at") for s in claim), claim
+    write = _transaction_of(seen, "UPDATE user_sessions SET ended_at")
+    assert write[0].startswith("SELECT users.id FROM users WHERE users.id = ?"), write
+    stored = await _stored(session_maker, row.id)
+    assert (stored.end_reason, stored.revoke_cause) == ("revoked", "account_archived")
+    assert stored.refresh_jti == row.refresh_jti                  # the claim was rolled back
+
+
+# --------------------------------------------------------------------------------- a login against a deactivation
+
+async def _pki_user(client, db, headers, monkeypatch, username, serial):
+    from app.backend.api.v1 import V1
+    from app.backend.config import settings
+    from app.backend.enums.general import AppEnvironment
+    from app.backend.enums.routes import UserRoutes
+    from tests.helpers import make_admin
+    from tests.test_pki_login import make_certificate, pem
+    monkeypatch.setattr(settings.app, "environment", AppEnvironment.PRODUCTION.value)
+    cert = make_certificate(f"cn-{username}", serial)
+    admin = await make_admin(db)
+    created = await client.post(V1.path(UserRoutes.ROOT), headers=headers(admin),
+                                files={"certificate": ("cert.pem", pem(cert), "application/x-pem-file")},
+                                data={"username": username, "username_alias": "Race", "user_type": "viewer"})
+    assert created.status_code == 200, created.text
+    return created.json()["id"], cert
+
+
+def _before_the_session_is_stored(monkeypatch, change):
+    """change() commits between the login's check of the account (authenticate_pki, committed) and its write of the
+    session: on MariaDB the deactivation holds the user row FOR UPDATE and the login's write waits for it"""
+    from app.backend.auth.service import AuthService
+    original = AuthService.create_session
+
+    async def changed_first(session, user, *args, **kwargs):
+        await change()
+        return await original(session, user, *args, **kwargs)
+
+    monkeypatch.setattr(AuthService, "create_session", staticmethod(changed_first))
+
+
+@pytest.mark.parametrize("field, code", [("is_active", "account_deactivated"), ("is_deleted", "account_deleted"),
+                                         ("revoked_at", "certificate_revoked")])
+async def test_a_login_that_raced_a_deactivation_is_refused(client, db, headers, session_maker, monkeypatch,
+                                                            field, code):
+    """The login checked the account, committed, and stored the session in a new transaction without checking
+    again: a deactivation (an archive, a revocation of the certificate) in between left a 200 with tokens and a
+    live session of a deactivated account"""
+    from app.backend.api.v1 import V1
+    from app.backend.auth.certificates import hash_data
+    from app.backend.auth.sessions import live_clause
+    from app.backend.enums.routes import AuthRoutes
+    from app.backend.models.user import User
+    from app.backend.models.user_certificate import UserCertificate
+    from tests.test_pki_login import nginx_headers
+    user_id, cert = await _pki_user(client, db, headers, monkeypatch, f"race{field.replace('_', '')}", 0x4E30)
+
+    async def change():
+        async with session_maker() as other:
+            if field == "revoked_at":
+                fingerprint_hash = await hash_data(nginx_headers(cert)["X-SSL-Client-Fingerprint"])
+                row = (await other.exec(select(UserCertificate).where(
+                    UserCertificate.fingerprint_hash == fingerprint_hash))).one()
+                row.revoked_at = datetime.now(timezone.utc)
+            else:
+                row = (await other.exec(select(User).where(User.id == user_id))).one()
+                setattr(row, field, field == "is_deleted")
+            other.add(row)
+            await other.commit()
+
+    _before_the_session_is_stored(monkeypatch, change)
+    response = await client.post(V1.path(AuthRoutes.LOGIN), headers=nginx_headers(cert))
+    async with session_maker() as fresh:
+        live = (await fresh.exec(select(UserSession).where(UserSession.user_id == user_id, live_clause()))).all()
+    assert response.status_code == 401 and response.json()["code"] == code, response.text
+    assert live == []
+
+
+async def test_a_login_stores_its_session_after_a_shared_lock_on_the_user(client, db, headers, engine, monkeypatch):
+    from app.backend.api.v1 import V1
+    from app.backend.enums.routes import AuthRoutes
+    from tests.test_pki_login import nginx_headers
+    _, cert = await _pki_user(client, db, headers, monkeypatch, "lockorder", 0x4E31)
+    seen, stop = _with_rollbacks(engine)
+    try:
+        response = await client.post(V1.path(AuthRoutes.LOGIN), headers=nginx_headers(cert))
+    finally:
+        stop()
+    assert response.status_code == 200, response.text
+    write = _transaction_of(seen, "INSERT INTO user_sessions")
+    assert write[0].startswith("SELECT users.") and "FROM users WHERE users.id = ?" in write[0], write

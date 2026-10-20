@@ -43,6 +43,26 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   archived a post the request did not know of (nothing changes then). Without cascade, a corps archive asks
   `post.update` / `post.view` only for the posts directly in the corps, the ones a detach moves: a corps with an active
   brigade answers 409 `corps_has_brigades` to a caller with `scope_group` rights and no post rights instead of 403.
+- A request whose session touch (the first request after `activity_touch_interval_seconds`) waited for an
+  administrator ending the session (an end of the user's sessions, a deactivation, an archive, a certificate
+  revocation) went on as authenticated, a write included. It now answers what the next request of the session
+  answers: 401 `account_deactivated` / `account_deleted` when the account was deactivated or archived,
+  `token_certificate_mismatch` when the certificate was revoked, else `session_expired`. A request whose touch lost to
+  another request of the same session goes on as before. No new problem code.
+- `POST /auth/logout` read the session and ended it in the transaction its authentication opened: on MariaDB an end
+  by an administrator, a refresh or a touch of the session committed in between made it answer 500 (error 1020). It
+  is now a write of its own (shared user lock, one conditional update); a session ended meanwhile answers 400
+  `session_already_invalidated` (as already declared) and writes no logout audit row.
+- A request of a live session of a deactivated or archived account ended the user's sessions inside its read
+  transaction: of parallel requests one answered 401 and the others 500 on MariaDB (1020), and two refreshes of two
+  sessions of such a user could deadlock. The end is now a write of its own after the shared user lock (one
+  conditional update, no read before it; a refresh rolls its token claim back first): every request answers 401
+  `account_deactivated` / `account_deleted`, one `force_logout` audit row.
+- `POST /auth/login` checked the account and stored the session in two transactions: a deactivation, an archive or a
+  revocation of the login certificate committed in between left a 200 with tokens and a live session of a
+  deactivated account. The session is now stored after a shared lock on the user row and a check of the committed
+  account and certificate: 401 `account_deactivated`, `account_deleted`, `certificate_revoked` or
+  `certificate_not_recognized`, as the login already declares. No new problem code.
 - `POST /observations/` committed the observation and wrote its audit row in a second transaction: a failure there
   (on MariaDB 1020 from the audit row's foreign key check, a lock wait timeout) answered 500 for a stored observation,
   so a retry created it twice. The audit row is now written in the same transaction: a 500 stores nothing.

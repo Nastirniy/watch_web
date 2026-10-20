@@ -40,6 +40,7 @@ from app.backend.api.v1.models.response.auth import (
     build_login_response,
     build_session_response,
 )
+from app.backend.errors.coded import CodedError
 from app.backend.errors.problems import ApiError
 from app.backend.errors.openapi import problems
 
@@ -127,15 +128,20 @@ async def login(
 
     # Create session
     # A production session is bound to the certificate nginx verified: every later request must present it
+    # (it checks the account and the certificate again on the locked user row: a deactivation or a revocation that
+    # landed after authenticate_pki answers as it would have there)
     development = settings.app.environment == AppEnvironment.DEVELOPMENT.value
-    user_session = await AuthService.create_session(
-        session,
-        user,
-        ip_address=client_ip,
-        user_agent=user_agent,
-        request_url=str(request.url),
-        certificate_fingerprint=None if development else ssl_fingerprint,
-    )
+    try:
+        user_session = await AuthService.create_session(
+            session,
+            user,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            request_url=str(request.url),
+            certificate_fingerprint=None if development else ssl_fingerprint,
+        )
+    except CodedError as exc:
+        raise ApiError.from_coded(exc)
 
     # Both tokens are bound to the session
     access_token, refresh_token, expires_in = AuthService.session_tokens(user.id, user_session)
@@ -195,10 +201,14 @@ async def refresh_token(
         raise ApiError(AuthErrorCode.ACCOUNT_NOT_FOUND)
 
     if user.is_deleted or not user.is_active:
-        # The refresh token of a deactivated or archived account is dead; end any session still live
-        ended = await AuthService.expire_sessions_of_inactive_user(session, user)
+        # The refresh token of a deactivated or archived account is dead; end any session still live. The claim is
+        # rolled back first and the end is a write of its own: inside the claim's transaction two refreshes of two
+        # sessions of the user would each hold their own session row and wait for the other's (a deadlock, 1213)
+        archived = user.is_deleted
+        await session.rollback()
+        ended = await AuthService.expire_sessions_of_inactive_user(session, user_id, archived=archived)
         _logger.warning(f"Refresh attempt for inactive account: user_id={user_id}, sessions ended={ended}")
-        if user.is_deleted:
+        if archived:
             raise ApiError(AuthErrorCode.ACCOUNT_DELETED)
         raise ApiError(AuthErrorCode.ACCOUNT_DEACTIVATED)
 
