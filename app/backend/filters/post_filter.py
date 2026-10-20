@@ -56,7 +56,8 @@ class PostFilterService(SimpleFilterEngine):
         params: PostCriteria,
         access_post_ids: Optional[Iterable[int]] = None,
         archived_post_ids: Optional[FrozenSet[int]] = None,
-        unit_post_ids: Optional[FrozenSet[int]] = None,
+        *,
+        unit_post_ids: Optional[FrozenSet[int]],
     ) -> Select:
         """Apply all filters from PostCriteria. access_post_ids: the posts the caller sees (None: every post);
         archived_post_ids: with include_deleted, the posts shown even when archived (None: every one);
@@ -115,7 +116,8 @@ class PostFilterService(SimpleFilterEngine):
         params: PostCriteria,
         access_post_ids: Optional[Iterable[int]] = None,
         archived_post_ids: Optional[FrozenSet[int]] = None,
-        unit_post_ids: Optional[FrozenSet[int]] = None,
+        *,
+        unit_post_ids: Optional[FrozenSet[int]],
     ) -> Select:
         """Apply filters without pagination"""
         params = cls.criteria(params)

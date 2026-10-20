@@ -341,7 +341,7 @@ async def test_include_deleted_shows_archived_only_where_archive_is_held(client,
     # the filter: archived rows only where post_column is in archived_post_ids, live rows untouched
     async def listed(criteria, archived_post_ids):
         query = UserFilterService.apply_filters(select(User), criteria, frozenset({a.id, b.id}),
-                                                archived_post_ids=archived_post_ids)
+                                                archived_post_ids=archived_post_ids, unit_post_ids=None)
         return {user.id for user in (await db.exec(query)).all()}
 
     assert await listed(UserCriteria(include_deleted=True), archived) == {live_a.id, gone_a.id, live_b.id}

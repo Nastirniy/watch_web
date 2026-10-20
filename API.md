@@ -147,7 +147,7 @@ The body adds `required` (`{all, any}`) and `missing` (permissions the user lack
 | `permission_denied` | The route's permissions are held nowhere (no assignment gives them; an assignment on an archived post or at an archived group gives nothing) |
 | `post_access_denied` / `post_write_denied` | The permission is held, but not in effect at this post (`post_id`; `*.view` / any other permission) |
 | `no_post_assigned` | The permission is held, but in effect at no post at all (for example only at a scope group without posts) |
-| `permission_required_for_action` | A permission a part or a target of the request needs (`permission`, `action`): `include_deleted`, the group a post is created in or moved to, the old and the new parent of a moved scope group (`post.update`), the home post of a new or moved user, a media file without an observation (`media.update` at the root) |
+| `permission_required_for_action` | A permission a part or a target of the request needs (`permission`, `action`): `include_deleted`, the group a post is created in or moved to, the old and the new parent of a moved scope group or brigade (`post.update`, `post.view`), the parent of a group created, renamed, moved, archived or restored (`scope_group.create` / `.update` / `.archive`), a corps or brigade archived with or without cascade (`post.archive` / `post.update`, `post.view`), the home post of a new or moved user, a media file without an observation (`media.update` at the root) |
 | `user_self_only` | A user record outside the caller's `user.view` |
 | `target_user_more_privileged` | A change to a user the caller's `user.*` does not cover, or who holds an assignment the caller could not grant |
 | `grant_exceeds_own_permissions` | Granting or revoking permissions the caller does not hold (at the node, for an assignment; at every node the role is assigned at, for permissions added to a role and the restore of a role) |
@@ -237,6 +237,24 @@ plain groups are `group`): a role assigned at a corps or brigade (`{"kind": "gro
 below it, and `GET /scope-groups/tree` shows them with their `kind`. No new permissions: `scope_group.*` for the
 units, `post.*` for what happens to their posts.
 
+Who manages what: `scope_group.create`, `.update` and `.archive` are scoped permissions (assignable at the root, a corps, a
+brigade or a plain group; the `post_admin` type may hold them, the operator types may not; a holder at the root manages
+every corps, brigade and plain group). A write on a group needs
+its permission covering the group's parent, the root for a corps or a root plain group:
+
+| Holder of `scope_group.*` at | Manages |
+|---|---|
+| the root | every corps, brigade and plain group (as before) |
+| a corps | the brigades of that corps: create, rename, archive, restore, move between corps it covers; not the corps itself |
+| a brigade | nothing of the structure (a brigade holds no groups); not the brigade itself |
+| a plain group | the plain groups inside it; not the group itself |
+
+A move (`PATCH` with a new `corps_id` / `parent_id`) needs `scope_group.update` covering the old and the new parent.
+A refusal is 403 `permission_required_for_action` with `action` `create_corps`, `update_corps`, `archive_corps`,
+`restore_corps` (the same with `brigade` and `scope_group`), `move_brigade` or `move_scope_group`; a group outside the
+caller's `scope_group.view` answers 404 first. Show the buttons of a group when the permission is in effect at its
+parent.
+
 - Where each kind sits: a corps directly under the root, a brigade directly in a corps, a plain group under the root
   or another plain group. The kind is fixed at create (`POST /corps/`, `POST /brigades/`; `POST /scope-groups/`
   makes plain groups). Anything else answers 409 `scope_group_parent_not_allowed` on every route.
@@ -245,18 +263,20 @@ units, `post.*` for what happens to their posts.
   and as a list filter, and `GET /brigades/{brigade_id}/posts`. Answers: `CorpsResponse` (`brigade_count`,
   `post_count`: active ones the caller sees), `BrigadeResponse` (`corps_id`, `post_count`). An id of another kind,
   an archived or invisible one: 404 `scope_group_not_found`. Names are unique within a parent (corps share the root
-  with root plain groups), case-insensitive.
-- Moving a brigade (`PATCH /brigades/{id}` with `corps_id`) takes its posts along and needs `post.update` covering
-  the old and the new corps.
+  with root plain groups). Names compare by the database collation: case, accents and trailing spaces do not make a
+  different name (409 `scope_group_name_taken`).
+- Moving a brigade (`PATCH /brigades/{id}` with `corps_id`) takes its posts along and needs `scope_group.update`,
+  `post.update` and `post.view` covering the old and the new corps.
 - `POST /corps/{id}/archive` and `POST /brigades/{id}/archive` take `?cascade=true|false` (default false):
 
   | | cascade=false | cascade=true |
   |---|---|---|
-  | brigade | its active posts move into its corps (`post.update` at the brigade and the corps) | the brigade and its active posts are archived (`post.archive` at the brigade) |
-  | corps | 409 `corps_has_brigades` while it has an active brigade; its active posts leave it, directly under the root (`post.update` at the corps and the root) | the corps, its active brigades and every active post below are archived (`post.archive` at the corps) |
+  | brigade | its active posts move into its corps (`post.update` and `post.view` at the brigade and the corps) | the brigade and its active posts are archived (`post.archive` and `post.view` at the brigade) |
+  | corps | 409 `corps_has_brigades` while it has an active brigade; its active posts leave it, directly under the root (`post.update` and `post.view` at the corps and the root) | the corps, its active brigades and every active post below are archived (`post.archive` and `post.view` at the corps) |
 
-  `scope_group.archive` must cover the node too. A missing permission answers 403 `permission_required_for_action`
-  and nothing changes. Moving posts out changes access: holders of a role at the archived unit lose those posts.
+  `scope_group.archive` must cover the parent of the node too (the root for a corps, the corps for a brigade; also
+  for restore), and `post.view` wherever posts change (the unit, and the destination of a detach). A missing
+  permission answers 403 `permission_required_for_action` and nothing changes. Moving posts out changes access: holders of a role at the archived unit lose those posts.
   Restore (`POST /{id}/restore`) brings back the node only; list the archived brigades and posts below with
   `include_deleted=true` and restore them one by one. A brigade whose corps is archived: restore the corps first
   (404 `scope_group_not_found`).
@@ -266,6 +286,10 @@ units, `post.*` for what happens to their posts.
 - `ObservationWithMedia.corps` and `.brigade` are where the post was when the observation was created, recorded at
   create and never changed (a later move of the post or the brigade does not change them); the names are today's.
   An observation created while its post moves may record the place from just before the move.
+  An observation that had no saved unit at all (created before its post was put into a unit) has the units the post
+  was in when the operator ran `cli.units fill-history` (DEPLOYMENT.md): that run is part of the recorded history,
+  and `placement=current` is not affected by it. The command may be run again after later placements; it adds rows
+  only to observations that still have none, and existing rows never change.
 - Unit names on posts and observations are shown to anyone who sees the post or observation, without
   `scope_group.view`.
 - Observations and media (lists and search) filter by `corps_id` / `brigade_id` with `placement`: `recorded` (the
@@ -280,7 +304,9 @@ units, `post.*` for what happens to their posts.
 - `GET /corps/{id}/observation-stats`, `GET /brigades/{id}/observation-stats` (`observation.view`): the counters of
   `GET /posts/{id}/observation-stats` over the unit (`placement`, the same period parameters), counting the posts
   where `observation.view` is in effect. The unit must lie where the caller holds `scope_group.view` or
-  `observation.view` (404 `scope_group_not_found` otherwise); an archived unit keeps its history.
+  `observation.view`, or have a post under it now where `observation.view` is in effect (so the commander of a brigade
+  counts its corps, and the viewer of one post its brigade, each only for the posts they see); otherwise 404
+  `scope_group_not_found`, like an unknown id. An archived unit keeps answering its history.
 
 ## Client certificates
 
@@ -376,7 +402,7 @@ Field codes inside `validation_error`: `certificate_label_invalid` (the label), 
 | `GET /api/v1/media/{media_id}/download`, `/stream` | The file in its own Content-Type; `206` for a single `Range`; an unsatisfiable one is `416` `range_not_satisfiable` with `Content-Range: bytes */size` |
 | `GET /api/v1/media/{media_id}/thumbnail` | The image; `202` with `Retry-After` while a video poster is being extracted |
 | `GET /api/v1/media/{media_id}/storyboard` | WebVTT (`text/vtt`) for seek previews; `202` with `Retry-After` and `X-Storyboard-Status` while the worker has not produced it |
-| `POST /api/v1/observations/report` | An `.xlsx` file |
+| `POST /api/v1/observations/report` | An `.xlsx` file with one row per frequency band; at most `reports.max_rows` rows (20000 by default), a larger result is `422` `report_too_large` with `max_rows`: narrow the filters |
 | `PATCH /api/v1/media/uploads/{upload_id}` | `204`, the result is in the `Upload-*` headers |
 
 Resumable uploads step by step: `UPLOADS.md`.

@@ -74,6 +74,7 @@ USER_TYPES: Dict[UserType, UserTypeSpec] = {spec.key: spec for spec in (
         "Керує користувачами та записами посту й даними старшого оператора", POST_ADMIN_BASE,
         _names(
             P.TAG_CREATE, P.TAG_UPDATE, P.CATEGORY_CREATE, P.CATEGORY_UPDATE, P.SIGNAL_TYPE_CREATE, P.SIGNAL_TYPE_UPDATE,
+            P.SCOPE_GROUP_CREATE, P.SCOPE_GROUP_UPDATE, P.SCOPE_GROUP_ARCHIVE,
         ),
     ),
     _spec(

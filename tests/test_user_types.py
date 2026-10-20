@@ -31,10 +31,12 @@ def test_every_permission_declares_a_level():
 def test_levels():
     assert permission_level("observation.view") == PermissionLevel.SCOPED
     assert permission_level("role.view") == PermissionLevel.SCOPED
-    for name in ("role.create", "tag.archive", "media_format.update", "scope_group.create", "media.monitor",
+    for name in ("role.create", "tag.archive", "media_format.update", "media.monitor",
                  "audit.view", "certificate.export"):
         assert permission_level(name) == PermissionLevel.SYSTEM, name
-    for name in ("certificate.view", "certificate.create", "certificate.revoke"):
+    # Units are managed below the root: a holder at a group manages the groups inside it
+    for name in ("certificate.view", "certificate.create", "certificate.revoke",
+                 "scope_group.create", "scope_group.update", "scope_group.archive"):
         assert permission_level(name) == PermissionLevel.SCOPED, name
 
 
@@ -87,7 +89,8 @@ def test_other_types_match_spec():
         "user.archive", "role.view", "scope_group.view", "certificate.view", "certificate.create",
         "certificate.revoke"}
     assert post_admin.allowed_permissions == post_admin.base_permissions | {
-        "tag.create", "tag.update", "category.create", "category.update", "signal_type.create", "signal_type.update"}
+        "tag.create", "tag.update", "category.create", "category.update", "signal_type.create", "signal_type.update",
+        "scope_group.create", "scope_group.update", "scope_group.archive"}
 
 
 async def test_user_types_catalog(client, db, headers):

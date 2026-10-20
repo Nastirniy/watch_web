@@ -146,7 +146,7 @@ async def test_detach_needs_post_update_at_the_node_and_the_destination(client, 
     user = await _limited_user(db, corps, [Permissions.POST_UPDATE], Node.group(brigade.id))
     r = await client.post(_archive_brigade(brigade.id), headers=headers(user))
     assert r.status_code == 403 and r.json()["code"] == "permission_required_for_action"
-    user = await _limited_user(db, corps, [Permissions.POST_UPDATE])
+    user = await _limited_user(db, corps, [Permissions.POST_UPDATE, Permissions.POST_VIEW])
     r = await client.post(_archive_brigade(brigade.id), headers=headers(user))
     assert r.status_code == 200, r.text
 

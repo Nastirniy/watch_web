@@ -12,7 +12,7 @@ from app.backend.enums.errors import AuthErrorCode
 from app.backend.auth.service import AuthService
 from app.backend.auth.context import AuthContext, load_auth_context
 from app.backend.auth.presence import should_touch
-from app.backend.auth.sessions import certificate_matches, live_session, touch
+from app.backend.auth.sessions import certificate_matches, live_session, touch_session
 from app.backend.errors.problems import ApiError
 
 security = HTTPBearer(auto_error=False)
@@ -84,10 +84,9 @@ async def get_current_user(
         logger.warning(f"Token presented with another client certificate: session_id={session_id}, user_id={user_id}")
         raise ApiError(AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH)
     if should_touch(user_session.last_activity):
-        # Activity moves the end of the session (and feeds presence), at most once per touch interval
-        touch(user_session)
-        session.add(user_session)
-        await session.commit()
+        # Activity moves the end of the session (and feeds presence), at most once per touch interval; a write of
+        # its own, so parallel requests of the session never answer 1020 (auth/sessions.py touch_session)
+        await touch_session(session, user_session)
 
     logger.debug(f"User authenticated: user_id={user_id}, username={user.username}")
     return user

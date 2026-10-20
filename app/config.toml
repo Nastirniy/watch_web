@@ -128,3 +128,7 @@ rate_limit_requests = 10  # Maximum requests per window (1-1000)
 rate_limit_window_seconds = 60  # Rate limit window in seconds (10-3600)
 enable_rate_limit = true  # Enable rate limiting for health endpoint
 # enable_host_check: left out = on in production, off in development; set true/false to decide explicitly
+
+[reports]
+# Excel reports are built in memory (about 1 ms per row)
+max_rows = 20000  # Band rows of one observations report; more answer 422 report_too_large

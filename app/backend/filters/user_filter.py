@@ -73,7 +73,8 @@ class UserFilterService(SimpleFilterEngine):
         access_post_ids: Optional[Iterable[int]] = None,
         archived_post_ids: Optional[FrozenSet[int]] = None,
         caller_id: Optional[int] = None,
-        unit_post_ids: Optional[FrozenSet[int]] = None,
+        *,
+        unit_post_ids: Optional[FrozenSet[int]],
     ) -> Select:
         """Apply all filters from UserCriteria (scope: _apply_scope); unit_post_ids: the posts of the units asked
         for (corps_id, brigade_id; None: no unit filter), matched against the home post"""
@@ -119,7 +120,8 @@ class UserFilterService(SimpleFilterEngine):
         access_post_ids: Optional[Iterable[int]] = None,
         archived_post_ids: Optional[FrozenSet[int]] = None,
         caller_id: Optional[int] = None,
-        unit_post_ids: Optional[FrozenSet[int]] = None,
+        *,
+        unit_post_ids: Optional[FrozenSet[int]],
     ) -> Select:
         """Apply filters without pagination"""
         params = cls.criteria(params)

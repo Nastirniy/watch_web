@@ -124,7 +124,8 @@ async def test_report_filter_matches_any_or_all_of_the_tags(db):
 
     async def reported(**criteria):
         query = ObservationReportFilter.build_query(
-            ObservationReportCriteria(report_type=ObservationReportType.ALL_FIELDS, tag_ids=[a, b], **criteria))
+            ObservationReportCriteria(report_type=ObservationReportType.ALL_FIELDS, tag_ids=[a, b], **criteria),
+            unit_condition=None)
         return {band.observation_id for band in (await db.exec(query)).all()}
 
     assert await reported() == {ids["both"], ids["only_a"], ids["only_b"]}

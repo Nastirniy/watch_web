@@ -13,13 +13,15 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.api.shared.helpers.db_errors import unique_violation_as
 from app.backend.api.shared.helpers.scope_group_helper import (
-    unit_observation_stats, archive_unit, audit_group, get_unit, name_taken, restore_unit,
+    unit_observation_stats, archive_unit, audit_group, get_unit, name_taken, parent_node, restore_unit,
 )
 from app.backend.api.v1.models.query.corps import UnitFilterParams
 from app.backend.api.v1.models.query.posts import PostFilterParams
 from app.backend.api.v1.models.request.corps import CorpsCreate, CorpsUpdate
-from app.backend.api.v1.models.response.brigades import BrigadeResponse, brigade_to_response
-from app.backend.api.v1.models.response.corps import CorpsResponse, UnitObservationStatsResponse, corps_to_response
+from app.backend.api.v1.models.response.brigades import BrigadeResponse, brigade_list_to_response
+from app.backend.api.v1.models.response.corps import (
+    CorpsResponse, UnitObservationStatsResponse, corps_list_to_response, corps_to_response,
+)
 from app.backend.api.v1.models.response.posts import PostResponse, posts_to_response
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.context import AuthContext, load_scope_tree
@@ -60,12 +62,13 @@ async def list_corps(
         auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW]))
 ):
     """List corps with filters: the corps inside the subtrees where the caller holds scope_group.view (every corps
-    with it at the root). Archived ones only with include_deleted (requires scope_group.archive)."""
-    AccessControlService.check_include_deleted(auth, filters, Permissions.SCOPE_GROUP_ARCHIVE)
+    with it at the root). Archived ones only with include_deleted (requires scope_group.archive), and only where
+    scope_group.archive is in effect."""
+    archived = AccessControlService.archived_group_scope(auth, filters, Permissions.SCOPE_GROUP_ARCHIVE)
     query = UnitFilterService.apply_filters(
-        select(ScopeGroup), filters, CORPS, auth.groups_with(Permissions.SCOPE_GROUP_VIEW),
+        select(ScopeGroup), filters, CORPS, auth.groups_with(Permissions.SCOPE_GROUP_VIEW), archived_ids=archived,
     )
-    return [corps_to_response(corps, auth) for corps in (await session.exec(query)).all()]
+    return corps_list_to_response((await session.exec(query)).all(), auth)
 
 
 @router.post(
@@ -115,7 +118,10 @@ async def get_corps(
 @router.patch(
     CorpsRoutes.CORPS_BY_ID.value,
     response_model=CorpsResponse,
-    responses=problems(ErrorCode.SCOPE_GROUP_NOT_FOUND, ErrorCode.SCOPE_GROUP_NAME_TAKEN, *GUARDED),
+    responses=problems(
+        ErrorCode.SCOPE_GROUP_NOT_FOUND, ErrorCode.SCOPE_GROUP_NAME_TAKEN, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION,
+        *GUARDED,
+    ),
 )
 async def update_corps(
         request: Request,
@@ -125,8 +131,10 @@ async def update_corps(
         auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_UPDATE]))
 ):
     """Rename or describe a corps; only the fields sent change. Archived, another kind of group, or outside the
-    caller's scope_group.view: 404."""
+    caller's scope_group.view: 404. scope_group.update must cover the parent of the corps, the root (403
+    permission_required_for_action, action update_corps): a holder at the corps manages its brigades, not the corps."""
     corps = await get_unit(session, auth, CORPS, corps_id, lock=True)
+    AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_UPDATE, parent_node(corps), "update_corps")
     update_data = data.model_dump(exclude_unset=True)
     old_values = corps.model_dump()
     if "name" in update_data and await name_taken(session, update_data["name"], None, exclude_id=corps.id):
@@ -159,10 +167,11 @@ async def archive_corps(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_ARCHIVE]))
 ):
-    """Archive a corps (is_deleted=true); the answer is the corps. scope_group.archive must cover it. Without
+    """Archive a corps (is_deleted=true); the answer is the corps. scope_group.archive must cover its parent, the
+    root (a holder at the corps manages its brigades, not the corps). Without
     cascade: a corps with an active brigade answers 409 corps_has_brigades (move or archive its brigades first), its
-    posts leave it (directly under the root), which needs post.update covering the corps and the root. With
-    cascade=true: its active brigades and every active post below are archived too, which needs post.archive covering
+    posts leave it (directly under the root), which needs post.update and post.view covering the corps and the root. With
+    cascade=true: its active brigades and every active post below are archived too, which needs post.archive and post.view covering
     the corps. Missing permissions: 403 permission_required_for_action, nothing changes. Holders of a role at the
     corps lose the posts that left it. Archived, unknown, another kind or outside scope_group.view: 404. Undo with
     POST /{corps_id}/restore (the corps only)"""
@@ -186,7 +195,7 @@ async def restore_corps(
 ):
     """Restore an archived corps (is_deleted=false): the corps only; its archived brigades and posts are
     listed with include_deleted (GET /{corps_id}/brigades, /{corps_id}/posts) and restored one by one.
-    scope_group.archive must cover it (403). Not archived: 409; unknown, another kind or outside
+    scope_group.archive must cover its parent, the root (403). Not archived: 409; unknown, another kind or outside
     scope_group.view: 404."""
     corps = await restore_unit(request, session, auth, CORPS, corps_id)
     return corps_to_response(corps, await _fresh(session, auth))
@@ -204,14 +213,15 @@ async def list_corps_brigades(
         auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW]))
 ):
     """The brigades of a corps the caller sees (scope_group.view), with the brigade filters. Archived ones only with
-    include_deleted (requires scope_group.archive). The corps: 404 as on GET /corps/{corps_id}."""
-    AccessControlService.check_include_deleted(auth, filters, Permissions.SCOPE_GROUP_ARCHIVE)
+    include_deleted (requires scope_group.archive), and only where scope_group.archive is in effect. The corps: 404
+    as on GET /corps/{corps_id}."""
+    archived = AccessControlService.archived_group_scope(auth, filters, Permissions.SCOPE_GROUP_ARCHIVE)
     corps = await get_unit(session, auth, CORPS, corps_id)
     criteria = replace(UnitFilterService.criteria(filters), corps_id=corps.id)
     query = UnitFilterService.apply_filters(
-        select(ScopeGroup), criteria, ScopeGroupKind.BRIGADE, auth.groups_with(Permissions.SCOPE_GROUP_VIEW),
+        select(ScopeGroup), criteria, ScopeGroupKind.BRIGADE, auth.groups_with(Permissions.SCOPE_GROUP_VIEW), archived_ids=archived,
     )
-    return [brigade_to_response(brigade, auth) for brigade in (await session.exec(query)).all()]
+    return brigade_list_to_response((await session.exec(query)).all(), auth)
 
 
 @router.get(
@@ -259,7 +269,8 @@ async def get_corps_observation_stats(
     """Observation counters of a corps by created_at, as for a post: all time, last 24 hours, and the period per
     hour or per day with every bucket included; not_archived and archived never overlap. Only the posts where
     observation.view is in effect are counted. The corps must lie where the caller holds scope_group.view or
-    observation.view, otherwise 404 like an unknown id or a group of another kind; an archived corps keeps its
+    observation.view, or have a post under it now where observation.view is in effect (a brigade's commander counts
+    its corps), otherwise 404 like an unknown id or a group of another kind. An archived corps keeps answering its
     history."""
     stats = await unit_observation_stats(
         session, auth, CORPS, corps_id, placement, date_from, date_to, group_by, tz or settings.timezone.timezone,

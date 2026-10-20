@@ -5,17 +5,16 @@ unknown id. Names are unique within a parent, case-insensitive, archived groups 
 shared by root plain groups and corps).
 
 Lock order (MariaDB snapshot isolation, utils/row_locks.py): every write that changes where groups or posts sit locks
-groups top down (a corps before its brigades; by depth in the tree, then by id), then posts in id order. The rule "no
-active post or brigade inside an archived unit" spans rows and holds only because every such writer takes the same
-locks in the same order.
+groups top down (a corps before its brigades; by depth in the tree, then by id), then posts in id order. The database
+does not choose an order: MariaDB takes the locks in the order of the statements, and this code fixes that order. The
+rule "no active post or brigade inside an archived unit" spans rows and holds only because every such writer takes the
+same locks in the same order.
 """
 from datetime import datetime, timezone
 from typing import Iterable, Optional
 
-from sqlalchemy import and_
-
 from fastapi import Request
-from sqlalchemy import func
+from sqlalchemy import and_, func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -32,7 +31,7 @@ from app.backend.models.scope_group import ScopeGroup
 from app.backend.services import scope_groups as groups_service
 from app.backend.services.audit import create_audit_log
 from app.backend.services.observation_counts import ObservationStats, observation_stats
-from app.backend.services.units import observation_unit_condition, recorded_in
+from app.backend.services.units import observation_unit_condition, recorded_in, unit_post_ids
 from app.backend.utils.row_locks import lock, lock_first
 
 
@@ -44,6 +43,18 @@ async def name_taken(session: AsyncSession, name: str, parent_id: Optional[int],
     if exclude_id is not None:
         query = query.where(ScopeGroup.id != exclude_id)
     return (await session.exec(query)).first() is not None
+
+
+def parent_location(parent_id: Optional[int]) -> Node:
+    """The node of a parent: that group, the root for None (a group directly under the root)"""
+    return Node.group(parent_id) if parent_id is not None else ROOT
+
+
+def parent_node(group: ScopeGroup) -> Node:
+    """Where the group sits: its parent group, the root for a group directly under it. A write on an existing group
+    needs its scope_group permission covering this node: a holder at a group manages the groups inside it, never the
+    group itself."""
+    return parent_location(group.parent_id)
 
 
 def check_visible(auth: AuthContext, group_id: int) -> None:
@@ -121,26 +132,43 @@ async def lock_unit(session: AsyncSession, auth: AuthContext, kind: Optional[Sco
     return unit
 
 
+def _check_detach(auth: AuthContext, unit: ScopeGroup, action: str) -> None:
+    """A detach moves the posts of a unit to its parent: post.update and post.view cover the unit and the parent (403
+    permission_required_for_action)"""
+    for location in (Node.group(unit.id), parent_node(unit)):
+        for permission in (Permissions.POST_UPDATE, Permissions.POST_VIEW):
+            AccessControlService.check_covers(auth, permission, location, action)
+
+
 async def archive_unit(request: Request, session: AsyncSession, auth: AuthContext, kind: ScopeGroupKind,
                        unit_id: int, cascade: bool) -> ScopeGroup:
-    """POST /corps/{id}/archive, /brigades/{id}/archive: 404 as get_unit; then the permissions on the node, once
-    (403 permission_required_for_action): scope_group.archive covering it, with cascade post.archive covering it,
-    without cascade post.update covering it and where its posts go (its parent, the root for a corps); then
-    services/scope_groups.py archive_unit (409 corps_has_brigades). One audit row per changed row; committed."""
+    """POST /corps/{id}/archive, /brigades/{id}/archive: 404 as get_unit; then the permissions, once (403
+    permission_required_for_action): scope_group.archive covering its parent (parent_node: the root for a corps),
+    with cascade post.view and post.archive covering the unit, without cascade post.view and post.update covering the
+    unit and where its posts go (its parent), skipped while the request's tree shows no active post under the unit and
+    asked after all if the database held one and the detach moved it; then services/scope_groups.py archive_unit (409
+    corps_has_brigades). One audit row per changed row; committed."""
     unit = await lock_unit(session, auth, kind, unit_id)
     node = Node.group(unit.id)
     action = f"archive_{ScopeGroupKind(kind).value}"
-    AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_ARCHIVE, node, action)
+    AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_ARCHIVE, parent_node(unit), action)
     if cascade:
-        AccessControlService.check_covers(auth, Permissions.POST_ARCHIVE, node, action)
-    else:
-        destination = Node.group(unit.parent_id) if unit.parent_id is not None else ROOT
-        for location in (node, destination):
-            AccessControlService.check_covers(auth, Permissions.POST_UPDATE, location, action)
+        for permission in (Permissions.POST_ARCHIVE, Permissions.POST_VIEW):
+            AccessControlService.check_covers(auth, permission, node, action)
+    unchecked = False       # a detach whose post checks wait for what the database moves
+    if not cascade:
+        if auth.tree.posts_under(node) - auth.tree.archived_posts:
+            _check_detach(auth, unit, action)
+        else:
+            unchecked = True
     try:
         changes = await groups_service.archive_unit(session, unit, cascade)
     except CodedError as exc:
         raise ApiError.from_coded(exc)
+    if unchecked and changes.moved_post_ids:
+        # the request's tree showed no active post, the database held one (committed after the tree was read): the
+        # checks of a detach run now, before any audit row; the 403 rolls the request session back
+        _check_detach(auth, unit, action)
 
     for change in changes.rows:
         await create_audit_log(
@@ -163,10 +191,10 @@ async def archive_unit(request: Request, session: AsyncSession, auth: AuthContex
 async def restore_unit(request: Request, session: AsyncSession, auth: AuthContext, kind: ScopeGroupKind,
                        unit_id: int) -> ScopeGroup:
     """POST /corps/{id}/restore, /brigades/{id}/restore: the node only. 404 as get_unit (archived ones included);
-    scope_group.archive covering it (403); not archived: 409 scope_group_not_archived; its parent archived: 404
-    scope_group_not_found (restore the parent first). Audited and committed."""
+    scope_group.archive covering its parent (parent_node, 403); not archived: 409 scope_group_not_archived; its parent
+    archived: 404 scope_group_not_found (restore the parent first). Audited and committed."""
     unit = await lock_unit(session, auth, kind, unit_id, include_deleted=True)
-    AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_ARCHIVE, Node.group(unit.id),
+    AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_ARCHIVE, parent_node(unit),
                                       f"restore_{ScopeGroupKind(kind).value}")
     if not unit.is_deleted:
         raise ApiError(ErrorCode.SCOPE_GROUP_NOT_ARCHIVED)
@@ -189,21 +217,29 @@ async def unit_observation_stats(session: AsyncSession, auth: AuthContext, kind:
                                  placement: UnitPlacement, date_from: Optional[datetime], date_to: Optional[datetime],
                                  group_by: StatsGroupBy, tz: str, include_archived: bool) -> ObservationStats:
     """GET /corps/{id}/observation-stats, /brigades/{id}/observation-stats. Scope before existence: the unit must lie
-    where the caller holds scope_group.view or observation.view, otherwise 404 like an unknown id or one of another
-    kind; an archived unit keeps its history. Counted: the unit's observations (placement) at the posts where
-    observation.view is in effect."""
+    where the caller holds scope_group.view or observation.view, or have a post under it now where observation.view
+    is in effect (a brigade's commander counts its corps, a post's viewer its brigade), otherwise 404 like an unknown
+    id or one of another kind; an archived unit keeps its history. Counted: the unit's observations (placement) at
+    the posts where observation.view is in effect."""
     node = Node.group(unit_id)
-    if not (auth.covers(Permissions.SCOPE_GROUP_VIEW, node) or auth.covers(Permissions.OBSERVATION_VIEW, node)):
+    visible = auth.posts_with(Permissions.OBSERVATION_VIEW)
+    if not (auth.covers(Permissions.SCOPE_GROUP_VIEW, node) or auth.covers(Permissions.OBSERVATION_VIEW, node)
+            or visible is None or visible & unit_post_ids(auth.tree, kind, unit_id)):
         raise ApiError(ErrorCode.SCOPE_GROUP_NOT_FOUND)
     found = (await session.exec(select(ScopeGroup.id).where(
         ScopeGroup.id == unit_id, ScopeGroup.kind == ScopeGroupKind(kind).value))).first()
     if found is None:
         raise ApiError(ErrorCode.SCOPE_GROUP_NOT_FOUND)
-    visible = auth.posts_with(Permissions.OBSERVATION_VIEW)
-    counted = [Observation.post_id.in_(sorted(visible))] if visible is not None else []
-    condition = and_(observation_unit_condition(auth.tree, kind, unit_id, placement), *counted)
+    recorded = UnitPlacement(placement) is UnitPlacement.RECORDED
+    counted = [Observation.post_id.in_(sorted(visible))] if visible is not None and recorded else []
+    if visible is None or recorded:
+        condition = and_(observation_unit_condition(auth.tree, kind, unit_id, placement), *counted)
+    else:
+        # current: one IN list, the posts under the unit now (archived ones left out) that the caller sees
+        under = unit_post_ids(auth.tree, kind, unit_id) - auth.tree.archived_posts
+        condition = Observation.post_id.in_(sorted(under & visible))
     period_condition = None
-    if UnitPlacement(placement) is UnitPlacement.RECORDED and auth.tree.group_kind.get(unit_id) == kind.value:
+    if recorded and auth.tree.group_kind.get(unit_id) == kind.value:
         def period_condition(start: datetime, end: datetime):
             return and_(recorded_in([unit_id], start, end), *counted)
     try:

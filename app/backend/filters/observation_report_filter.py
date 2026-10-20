@@ -71,7 +71,8 @@ class ObservationReportFilter:
             params: ObservationReportCriteria,
             access_post_ids: Optional[Iterable[int]] = None,
             archived_post_ids: Optional[Iterable[int]] = None,
-            unit_condition: Optional[ColumnElement] = None,
+            *,
+            unit_condition: Optional[ColumnElement],
     ) -> Select:
         """Bands matching the report filters, their observation and its report relations eager-loaded.
         access_post_ids: the posts covered (None: every post); archived_post_ids: with include_deleted, the posts

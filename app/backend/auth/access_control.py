@@ -128,6 +128,17 @@ class AccessControlService:
         AccessControlService.check_include_deleted(auth, params, permission)
         return auth.posts_with(permission)
 
+    @staticmethod
+    def archived_group_scope(auth: AuthContext, params, permission: Permissions) -> Optional[FrozenSet[int]]:
+        """archived_scope for scope groups: include_deleted needs the permission held anywhere
+        (check_include_deleted); archived groups are then shown only inside the subtrees where it is in effect
+        (groups_with). None means no restriction (held at the root); without include_deleted no archived group is
+        shown anywhere (an empty set)."""
+        if not getattr(params, "include_deleted", False):
+            return frozenset()
+        AccessControlService.check_include_deleted(auth, params, permission)
+        return auth.groups_with(permission)
+
     # ------------------------------------------------------------ permissions
     @staticmethod
     def check_permission(auth: AuthContext, permission: Permissions, action: str) -> None:

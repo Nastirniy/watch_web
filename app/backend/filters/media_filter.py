@@ -72,7 +72,8 @@ class MediaFilterService(SimpleFilterEngine):
         params: MediaCriteria,
         access_post_ids: Optional[Iterable[int]],
         archived_post_ids: Optional[FrozenSet[int]],
-        unit_condition: Optional[ColumnElement] = None,
+        *,
+        unit_condition: Optional[ColumnElement],
     ) -> Select:
         """Archived media only on include_deleted, and then only at archived_post_ids (None: every post); media of an
         archived observation never (the media routes answer 404 for it); the post scope through the observation's
@@ -93,14 +94,15 @@ class MediaFilterService(SimpleFilterEngine):
         params: MediaCriteria,
         access_post_ids: Optional[Iterable[int]] = None,
         archived_post_ids: Optional[FrozenSet[int]] = None,
-        unit_condition: Optional[ColumnElement] = None,
+        *,
+        unit_condition: Optional[ColumnElement],
     ) -> Select:
         """Apply all filters from MediaCriteria. archived_post_ids: with include_deleted, the posts whose archived
         media are shown (None: every post)"""
         params = cls.criteria(params)
         query = query.options(selectinload(MediaFile.user))
 
-        query = cls._apply_scope(query, params, access_post_ids, archived_post_ids, unit_condition)
+        query = cls._apply_scope(query, params, access_post_ids, archived_post_ids, unit_condition=unit_condition)
 
         query = cls._apply_exact(query, MediaFile.id, params.id)
         query = cls._apply_exact(query, MediaFile.observation_id, params.observation_id)
@@ -127,11 +129,12 @@ class MediaFilterService(SimpleFilterEngine):
         params: MediaCriteria,
         access_post_ids: Optional[Iterable[int]] = None,
         archived_post_ids: Optional[FrozenSet[int]] = None,
-        unit_condition: Optional[ColumnElement] = None,
+        *,
+        unit_condition: Optional[ColumnElement],
     ) -> Select:
         """Apply filters without pagination"""
         params = cls.criteria(params)
-        query = cls._apply_scope(query, params, access_post_ids, archived_post_ids, unit_condition)
+        query = cls._apply_scope(query, params, access_post_ids, archived_post_ids, unit_condition=unit_condition)
 
         query = cls._apply_exact(query, MediaFile.id, params.id)
         query = cls._apply_exact(query, MediaFile.observation_id, params.observation_id)

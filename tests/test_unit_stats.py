@@ -123,3 +123,60 @@ async def test_archived_unit_keeps_its_history(client, db, headers):
     assert r.status_code == 200, r.text
     got = await _stats(client, h, _brigade_stats(b10.id))
     assert got["all_time"]["not_archived"] == 1
+
+
+async def _observe(client, h, post_id, signal_type_id):
+    r = await client.post(V1.path(ObservationRoutes.CREATE), json=observation_payload(post_id, signal_type_id), headers=h)
+    assert r.status_code == 200, r.text
+
+
+async def test_brigade_commander_gets_stats_of_its_corps(client, db, headers):
+    h = headers(await make_admin(db))
+    ids = await make_dictionary(db)
+    corps = await make_group(db, kind="corps")
+    brigade = await make_group(db, parent_id=corps.id, kind="brigade")
+    other = await make_group(db, parent_id=corps.id, kind="brigade")
+    in_brigade = await make_post(db, group_id=brigade.id)
+    in_other = await make_post(db, group_id=other.id)
+    for post in (in_brigade, in_brigade, in_other):
+        await _observe(client, h, post.id, ids["signal_type_id"])
+    user = await make_user(db)
+    await assign(db, user, await make_role(db, [Permissions.OBSERVATION_VIEW]), Node.group(brigade.id))
+    for placement in ("recorded", "current"):
+        got = await _stats(client, headers(user), _corps_stats(corps.id), placement=placement)
+        assert got["all_time"]["not_archived"] == 2 and got["unit_id"] == corps.id, placement
+    r = await client.get(_corps_stats(other.id), headers=headers(user))
+    assert r.status_code == 404 and r.json()["code"] == "scope_group_not_found"
+
+
+async def test_post_viewer_gets_stats_of_its_brigade_counting_only_its_post(client, db, headers):
+    h = headers(await make_admin(db))
+    ids = await make_dictionary(db)
+    corps = await make_group(db, kind="corps")
+    brigade = await make_group(db, parent_id=corps.id, kind="brigade")
+    mine = await make_post(db, group_id=brigade.id)
+    other = await make_post(db, group_id=brigade.id)
+    for post in (mine, other, other):
+        await _observe(client, h, post.id, ids["signal_type_id"])
+    user = await make_user(db)
+    await assign(db, user, await make_role(db, [Permissions.OBSERVATION_VIEW]), Node.post(mine.id))
+    for placement in ("recorded", "current"):
+        got = await _stats(client, headers(user), _brigade_stats(brigade.id), placement=placement)
+        assert got["all_time"]["not_archived"] == 1 and got["period"]["not_archived"] == 1, placement
+    got = await _stats(client, headers(user), _corps_stats(corps.id))
+    assert got["all_time"]["not_archived"] == 1
+
+
+async def test_stats_of_a_unit_with_no_countable_post_still_404(client, db, headers):
+    corps = await make_group(db, kind="corps")
+    brigade = await make_group(db, parent_id=corps.id, kind="brigade")
+    outside = await make_post(db)
+    inside = await make_post(db, group_id=brigade.id)
+    user = await make_user(db)
+    await assign(db, user, await make_role(db, [Permissions.OBSERVATION_VIEW]), Node.post(outside.id))
+    for path in (_brigade_stats(brigade.id), _corps_stats(corps.id)):
+        r = await client.get(path, headers=headers(user))
+        assert r.status_code == 404 and r.json()["code"] == "scope_group_not_found", path
+    await assign(db, user, await make_role(db, [Permissions.OBSERVATION_VIEW]), Node.post(inside.id))
+    r = await client.get(_brigade_stats(brigade.id), headers=headers(user))
+    assert r.status_code == 200, r.text

@@ -17,6 +17,7 @@ Three report types:
 """
 
 import io
+from copy import copy
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import List, Optional, Dict
@@ -118,7 +119,11 @@ def _to_kyiv(value: Optional[datetime]) -> Optional[datetime]:
         return None
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone(_KYIV_TZ)
+    try:
+        return value.astimezone(_KYIV_TZ)
+    except OverflowError:
+        # A stored value at the edge of the calendar (9999-12-31 23:59) has no Kyiv time: shown in UTC
+        return value
 
 
 def _fmt_date(value: Optional[datetime]) -> str:
@@ -269,11 +274,21 @@ class ObservationReportService:
         ws = wb.active
         ws.title = "Звіт спостережень"
 
+        # Style objects are built once per report and shared by the cells: a cell stores an index into the workbook's
+        # style tables, and building (and hashing) new objects for every cell cost most of the time of a large report
+        fonts: Dict[tuple, Font] = {}
+        fills: Dict[str, PatternFill] = {}
+
         def _font(bold=False, size=10, color="000000"):
-            return Font(name="Arial", bold=bold, size=size, color=color)
+            key = (bold, size, color)
+            if key not in fonts:
+                fonts[key] = Font(name="Arial", bold=bold, size=size, color=color)
+            return fonts[key]
 
         def _fill(hex_color):
-            return PatternFill(fill_type="solid", fgColor=hex_color)
+            if hex_color not in fills:
+                fills[hex_color] = PatternFill(fill_type="solid", fgColor=hex_color)
+            return fills[hex_color]
 
         thin = Side(style="thin")
         thin_border = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -358,6 +373,7 @@ class ObservationReportService:
 
         # --- Data rows ---
         spacer_col = 7 if rtype != ObservationReportType.ALL_FIELDS else None
+        looks: Dict[tuple, object] = {}
 
         for i, band in enumerate(frequencies):
             use_alt = i % 2 == 1
@@ -406,14 +422,22 @@ class ObservationReportService:
 
             for col_idx, value in enumerate(row_data, start=1):
                 c = _put(ws, row, col_idx, value)
+                is_spacer = bool(spacer_col) and col_idx == spacer_col
+                # Four looks in all: a cell takes the style of the first cell that looks the same (openpyxl would
+                # hash its font, fill and border again for every cell, most of the time of a large report)
+                look = (is_spacer, use_alt, isinstance(value, str))
+                if look in looks:
+                    c._style = copy(looks[look])
+                    continue
                 c.border = thin_border
-                if spacer_col and col_idx == spacer_col:
+                if is_spacer:
                     c.fill = _fill(cls._COLOR_SPACER_ALT if use_alt else cls._COLOR_SPACER_BG)
                 else:
                     c.font = _font(size=10)
                     c.alignment = left
                     if use_alt:
                         c.fill = _fill(cls._COLOR_ALT_ROW_BG)
+                looks[look] = copy(c._style)
 
             row += 1
 

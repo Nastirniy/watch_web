@@ -6,11 +6,12 @@ import sqlite3
 import subprocess
 import sys
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 import sqlalchemy as sa
 from pydantic import ValidationError
+from sqlmodel import select
 from starlette.requests import Request
 
 from app.backend.api.shared.helpers.audit_helper import client_info
@@ -21,6 +22,7 @@ from app.backend.api.v1.models.request.observations import (
 from app.backend.enums.routes import ObservationRoutes
 from app.backend.models.audit import AuditLog
 from app.backend.models.media import MediaFile
+from app.backend.models.observation import Observation
 from tests.helpers import make_dictionary, make_observation, make_post, make_user
 from tests.test_migrations import HEAD, PROJECT_ROOT, run_migrate
 
@@ -80,7 +82,12 @@ async def test_disappeared_duration_that_does_not_fit_int_is_refused(client, db,
     observation = await make_observation(db, user, post, ids["signal_type_id"])
     url = DISAPPEARED.format(observation_id=observation.id)
 
-    far = datetime(9999, 1, 1, tzinfo=timezone.utc)
+    # the bounds of a request body keep a duration this long out of reach; only a row stored before them can have it
+    row = (await db.exec(select(Observation).where(Observation.id == observation.id))).one()
+    row.observed_at = datetime(1900, 1, 1)
+    db.add(row)
+    await db.commit()
+    far = datetime.now(timezone.utc)
     refused = await client.post(url, json={"disappeared_at": far.isoformat()}, headers=headers(user))
     assert refused.status_code == 422, refused.text
     body = refused.json()
@@ -88,6 +95,9 @@ async def test_disappeared_duration_that_does_not_fit_int_is_refused(client, db,
     assert body["errors"][0]["code"] == "value_too_large"
     assert body["errors"][0]["pointer"] == "#/disappeared_at"
 
+    row.observed_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    db.add(row)
+    await db.commit()
     now = datetime.now(timezone.utc)
     accepted = await client.post(url, json={"disappeared_at": now.isoformat()}, headers=headers(user))
     assert accepted.status_code == 200, accepted.text

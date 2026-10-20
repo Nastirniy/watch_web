@@ -70,7 +70,6 @@ _SYSTEM_PERMISSIONS = frozenset({
     "signal_type.create", "signal_type.update", "signal_type.archive",
     "tag.create", "tag.update", "tag.archive",
     "media_format.create", "media_format.update", "media_format.archive",
-    "scope_group.create", "scope_group.update", "scope_group.archive",
     "media.monitor", "audit.view",
     "certificate.export",
 })

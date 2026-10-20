@@ -5,6 +5,99 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Unit history fill (2026-10-20, branch feat/unit-history-fill)
+
+### Added
+
+- `python -m app.backend.cli.units fill-history [--dry-run]`: gives every observation (archived ones included) that has
+  no saved unit at all one row for every unit its post is in at the run, with the observation's `created_at`. An
+  observation that has any row (corps only, brigade only, or both) is recorded history and is left as it is. Per post,
+  in chunks of 1000 observations, safe while the API runs, idempotent; a post with nothing to fill is not locked; one
+  audit row per run that wrote anything (`fill_history`, resource `observation_units`). Database content only: new
+  `observation_units` rows, no schema, API or contract change, no migration. Old observations now appear in
+  `placement=recorded` filters, reports and the corps / brigade `observation-stats`; `placement=current` is
+  unchanged. See DEPLOYMENT.md.
+
+### Fixed
+
+- `PATCH /brigades/{brigade_id}` with `corps_id` answered 500 for a brigade sitting directly under the root (older data:
+  the API creates none): the post rights of the move are now checked at the root, 403 `permission_required_for_action`
+  (action `move_brigade`) without them, 200 with them.
+
+## Corps follow-ups (2026-10-20, branch fix/corps-followups)
+
+### Fixed
+
+- Ending a user's sessions (`POST /users/{user_id}/sessions/end`, deactivation, archive, a new user type) or revoking
+  a certificate while the user was active could answer 500 on MariaDB (error 1020 on `user_sessions`): a session
+  touch now shares the user row lock those writes take first, so it waits for them and finds the session ended.
+  `POST /auth/refresh`, the end of a session bound to a certificate that is no longer active and the recording of
+  an expired session's end take the same shared lock first: no 500 (1020) or deadlock against such an end; a refresh
+  that waited for it answers 401 `session_expired`.
+
+### Changed
+
+- `POST /observations/report` has at most `settings.reports.max_rows` band rows (20000 by default,
+  `MYSETTINGS_REPORTS__MAX_ROWS`); a larger result answers 422 `report_too_large` (param `max_rows`): narrow the
+  filters. New problem code: add its message to the web localization. The workbook styles are built once per report
+  (about 2 times faster), the unit labels are read only for `all_fields`, and a corps or brigade in the filter rows is
+  named only where `scope_group.view` or both `observation.view` and `export.create` cover it (before: either of
+  `scope_group.view` and `observation.view`).
+- Observation times in request bodies (`observed_at` of create and update, `disappeared_at` of mark-disappeared) lie
+  between 2000-01-01 and now + 1 day, else 422 `time_out_of_range` (params `earliest`, `latest`). Query filters take
+  any date, rows already stored are not touched, and an update without `observed_at` keeps working for them.
+  New field code `time_out_of_range`: add its message to the web localization.
+- `GET /corps/{corps_id}/observation-stats`, `GET /brigades/{brigade_id}/observation-stats` also answer for a unit
+  that has a post under it now where the caller holds `observation.view` (before: 404 unless `scope_group.view` or
+  `observation.view` covered the unit itself). A brigade's commander counts its corps and the viewer of one post its
+  brigade, each over the posts they see; a unit with no such post and no covering grant still answers 404. Documented:
+  an archived unit keeps answering its history. With `placement=current` the query has one `post_id` list.
+- Unit management is scoped: `scope_group.create`, `scope_group.update` and `scope_group.archive` are no longer
+  system permissions (`PermissionLevel` `scoped`, `RoleResponse.level` follows) and the `post_admin` type may hold
+  them (ceiling; not in its base role). A write on a corps, brigade or plain group needs its permission covering the
+  group's parent (the root for a corps or a root plain group), a move covering the old and the new parent: a holder
+  at a corps creates, renames, moves, archives and restores the brigades of that corps, never the corps itself; a
+  holder at a brigade manages nothing of the structure. Before, update, archive and restore checked the group's own
+  node and `PATCH /corps/{corps_id}`, `PATCH /scope-groups/{group_id}`, `POST /scope-groups/` and
+  `/scope-groups/{group_id}/archive|restore` checked no node at all. What an administrator gains: roles with these
+  permissions can be assigned at a corps or a group (before 409 `role_requires_root_scope`). Existing assignments at
+  the root behave exactly as before (the root is the parent of every top group and covers every other). A role
+  that held these permissions with no other system permission is now a scoped role. Newly declared on
+  `POST /scope-groups/`, `POST /scope-groups/{group_id}/archive|restore` and `PATCH /corps/{corps_id}`: 403
+  `permission_required_for_action` (new actions `update_corps`,
+  `update_brigade`, `create_scope_group`, `update_scope_group`, `archive_scope_group`, `restore_scope_group`; the
+  existing action names are kept). No migration: permission levels are computed from code.
+  `include_deleted` on `GET /corps/`, `GET /brigades/`, `GET /corps/{corps_id}/brigades` and `GET /scope-groups/`
+  still needs `scope_group.archive` held somewhere (403 otherwise), and now lists an archived group only where
+  `scope_group.archive` is in effect (the group lies in a subtree where it is held), as posts do; live groups are
+  listed as before. A holder at the root sees every archived group, as before.
+- Descriptions only (no behaviour change): the `observed_at` and `disappeared_at` fields of the observation request
+  bodies state their bounds, `PATCH /corps/{corps_id}` names its action `update_corps`, and API.md names the parent
+  rule of `permission_required_for_action`. The report cost in DEPLOYMENT.md is the measured end-to-end figure (about
+  0.45 ms per band row).
+- `POST /corps/{corps_id}/archive`, `POST /brigades/{brigade_id}/archive` without `cascade` no longer need `post.update`
+  and `post.view` (at the unit and at its parent) for a unit that has no active post under it now: there is nothing to
+  move, `scope_group.archive` at the parent is enough. A unit with an active post needs them as before.
+
+## Bug hunt fixes (2026-10-20, branch fix/corps-bughunt)
+
+### Fixed
+
+- Parallel requests of one login session right after the activity touch interval (a page loading several lists
+  after a minute idle) answered 500 for most of them on MariaDB (error 1020 on `user_sessions`; live: 14 of 32).
+  The touch is now a write of its own with one conditional UPDATE; every request answers 200.
+- Observation create during an archive with cascade of its brigade or corps answered 500 (1020; live: 28 of 104).
+  The create now shares a lock on its post first and answers 409 `post_archived` once the post is archived.
+- `POST /observations/report` answered 500 for every caller whose scope included an observation stored with a date
+  at the edge of the calendar (`observed_at` 9999-12-31 is accepted); such a value is now shown in UTC.
+
+### Changed
+
+- Archive of a corps or brigade and moves of brigades and groups also need `post.view` where they change posts
+  (cascade: covering the unit; detach and moves: the unit or group and the destination), as every write route
+  needs the view permission next to the write one. A missing one answers 403 `permission_required_for_action`.
+- The answer of a brigade move counts the brigade's posts after the move.
+
 ## Corps and brigades, stage 2: reporting (2026-10-20)
 
 The contract changes: rewrite the generated types (`openapi-typescript`). API.md, "Corps and brigades".

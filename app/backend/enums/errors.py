@@ -344,6 +344,8 @@ class ErrorCode(ProblemType):
     OBSERVATION_NOT_FOUND = ("observation_not_found", problem(404, "Observation not found"))
     OBSERVATION_SIGNAL_TYPE_ARCHIVED = ("observation_signal_type_archived", problem(
         409, "The signal type of the observation is archived"))
+    REPORT_TOO_LARGE = ("report_too_large", problem(
+        422, "Report too large", "The report has more than {max_rows} rows; narrow the filters", max_rows=int))
     OBSERVATION_NOT_ARCHIVED = ("observation_not_archived", problem(409, "Observation is not archived"))
     FREQUENCY_NOT_FOUND = ("frequency_not_found", problem(404, "Frequency not found"))
     FREQUENCY_NOT_ARCHIVED = ("frequency_not_archived", problem(409, "Frequency is not archived"))
@@ -510,6 +512,8 @@ class FieldErrorCode(FieldCode):
     FREQUENCY_CENTER_OUT_OF_RANGE = ("frequency_center_out_of_range", field("frequency_center must lie between frequency_min and frequency_max"))
     DISAPPEARED_BEFORE_OBSERVED = ("disappeared_before_observed", field("disappeared_at must not be before observed_at"))
     OBSERVED_AFTER_DISAPPEARED = ("observed_after_disappeared", field("observed_at must not be after disappeared_at"))
+    TIME_OUT_OF_RANGE = ("time_out_of_range", field(
+        "Time must be between {earliest} and {latest}", earliest=str, latest=str))
 
 
 PROBLEM_ENUMS = (AuthErrorCode, AccessErrorCode, ErrorCode)

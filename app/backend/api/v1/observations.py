@@ -8,6 +8,7 @@ from sqlalchemy import or_
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.backend.config import settings
 from app.backend.database import get_session
 from app.backend.utils.row_locks import lock_first
 from app.backend.models.observation import Observation, SignalType, Tag
@@ -19,8 +20,8 @@ from app.backend.enums.general import Permissions, ObservationStatus, Observatio
 from app.backend.enums.routes import ObservationRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.services.scope_groups import UNIT_KINDS
-from app.backend.services.units import (observation_unit_labels, observation_unit_rows, observation_units_any,
-                                        observation_units_filter, unit_labels, visible_unit_ids)
+from app.backend.services.units import (current_units_of_group, observation_unit_labels, observation_unit_rows,
+                                        observation_units_any, observation_units_filter, unit_labels, visible_unit_ids)
 from app.backend.services.audit import create_audit_log
 from app.backend.api.v1.models.request.observations import (
     ObservationCreate,
@@ -163,7 +164,15 @@ async def create_observation(
     AccessControlService.check_post(auth, Permissions.OBSERVATION_VIEW, observation_data.post_id, "observation")
     AccessControlService.check_post(auth, Permissions.OBSERVATION_CREATE, observation_data.post_id, "observation")
 
-    post = (await session.exec(select(Post).where(Post.id == observation_data.post_id))).first()
+    # A shared lock on the post first (the write begins with it): creates at one post run side by side, an archive of
+    # the post or of a unit above it waits for them, and a create after it sees the archived post. Without it the
+    # insert met a post row archived after the request's snapshot (MariaDB 1020, a 500). A post the request's tree does
+    # not know is not locked (no gap lock on a row that may not exist): it is read and answers 404.
+    of_post = select(Post).where(Post.id == observation_data.post_id)
+    if observation_data.post_id in auth.tree.post_group:
+        post = await lock_first(session, of_post, shared=True)
+    else:
+        post = (await session.exec(of_post)).first()
     if not post:
         raise ApiError(ErrorCode.POST_NOT_FOUND, post_id=observation_data.post_id)
     refuse_archived_post(post)
@@ -200,8 +209,12 @@ async def create_observation(
 
     session.add(observation)
     await session.flush()
-    # The units the post sits in now, recorded once with the observation (services/units.py)
-    session.add_all(observation_unit_rows(auth.tree, post.group_id, observation.id, observation.created_at))
+    # The units the post sits in now, recorded once with the observation (services/units.py). Read from the database
+    # after the post lock, not from the tree of the request: a unit added or a group moved since the tree was loaded
+    # is in the history row. A brigade move does not lock its posts, so a move between the post lock and this read can
+    # still be missed (accepted, rare)
+    units = await current_units_of_group(session, post.group_id)
+    session.add_all(observation_unit_rows(units, observation.id, observation.created_at))
     await session.commit()
     observation = await _load_observation(session, observation.id)
 
@@ -404,7 +417,7 @@ async def get_report_types(
                             {"Content-Disposition": header('attachment; filename="<report>.xlsx"')}),
         **problems(
             AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION,
-            AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, *GUARDED,
+            AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.REPORT_TOO_LARGE, *GUARDED,
         ),
     },
 )
@@ -428,6 +441,8 @@ async def generate_observation_report(
     band kind, emitter group, frequency min/max/center, bandwidth,
     observed time, disappeared time, duration (minutes, one decimal), comment, creation date, tags.
     All datetimes are displayed in Kyiv local time (EET/EEST).
+    A report has at most settings.reports.max_rows band rows (20000 by default); a larger result answers 422
+    report_too_large with max_rows: narrow the filters.
 
     Filter combinations supported:
     - By specific observation IDs
@@ -449,12 +464,20 @@ async def generate_observation_report(
         unit_condition=observation_units_any(auth.tree, asked_units, params.placement),
     )
 
-    result = await session.exec(query)
+    limit = settings.reports.max_rows
+    result = await session.exec(query.limit(limit + 1))
     frequencies = list(result.all())
-    units = await observation_unit_labels(
-        session, auth.tree, {band.observation.id: band.observation for band in frequencies}.values(), params.placement)
-    # Names only of the units the caller sees or that the report's own columns show; others as their number
-    named = {label.id for found in units.values() for label in found.values()} | set(visible_unit_ids(auth, asked_units))
+    if len(frequencies) > limit:
+        raise ApiError(ErrorCode.REPORT_TOO_LARGE, max_rows=limit)
+    units = {}
+    if params.report_type == ObservationReportType.ALL_FIELDS:      # the only report with unit columns
+        units = await observation_unit_labels(
+            session, auth.tree, {band.observation.id: band.observation for band in frequencies}.values(),
+            params.placement)
+    # Names only of the units the caller sees (scope_group.view), that the report's own columns show, or that both
+    # permissions of the report cover; others as their number
+    named = ({label.id for found in units.values() for label in found.values()}
+             | set(visible_unit_ids(auth, asked_units, (Permissions.OBSERVATION_VIEW, Permissions.EXPORT_CREATE))))
     unit_filters = await unit_labels(session, (
         unit_id for ids in asked_units.values() for unit_id in ids or () if unit_id in named))
 

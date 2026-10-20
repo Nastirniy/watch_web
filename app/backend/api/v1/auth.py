@@ -4,7 +4,9 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.database import get_session
 from app.backend.auth.service import AuthService
-from app.backend.auth.sessions import certificate_matches, claim_refresh, live_clause, live_session, session_state, touch
+from app.backend.auth.sessions import (
+    begin_session_write, certificate_matches, claim_refresh, live_clause, live_session, session_state, touch,
+)
 from datetime import datetime, timezone
 from sqlmodel import select
 from app.backend.auth.require import require
@@ -177,8 +179,10 @@ async def refresh_token(
     # A refresh token always belongs to a session (POST /auth/login), which must still be live
     if not session_id or not presented_jti:
         raise ApiError(AuthErrorCode.INVALID_REFRESH_TOKEN)
-    # The first statement of the transaction retires the token presented (sessions.claim_refresh); every check
-    # below that refuses the refresh rolls it back
+    # The write begins with the shared user lock (sessions.begin_session_write): a refresh waits for an administrator
+    # ending the user's sessions and then finds its session ended (session_expired). The first change retires the
+    # token presented (sessions.claim_refresh); every check below that refuses the refresh rolls it back
+    await begin_session_write(session, user_id)
     next_jti = await claim_refresh(session, session_id, user_id, presented_jti)
 
     # Verify user still exists
@@ -198,13 +202,13 @@ async def refresh_token(
             raise ApiError(AuthErrorCode.ACCOUNT_DELETED)
         raise ApiError(AuthErrorCode.ACCOUNT_DEACTIVATED)
 
-    refresh_session = await live_session(session, session_id, user_id)
+    refresh_session = await live_session(session, session_id, user_id, begin=False)   # the claim began the write
     if refresh_session is None:
         raise ApiError(AuthErrorCode.SESSION_EXPIRED)
 
     # A session bound to a certificate that is no active row of the user ends here (a login that raced a
     # revocation, an expired certificate)
-    if await AuthService.end_session_of_revoked_certificate(session, refresh_session, user):
+    if await AuthService.end_session_of_revoked_certificate(session, refresh_session, user, begin=False):
         raise ApiError(AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH)
     if not await certificate_matches(refresh_session, x_ssl_client_fingerprint):
         _logger.warning(f"Refresh token presented with another client certificate: session_id={session_id}, user_id={user_id}")
