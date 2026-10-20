@@ -30,6 +30,7 @@ from app.backend.auth.certificates import hash_data
 from app.backend.models.user import UserSession
 from app.backend.auth.presence import is_recent
 from app.backend.utils.logging_config import get_auth_logger
+from app.backend.utils.row_locks import start_write
 
 _logger = get_auth_logger()
 _NO_CAP = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -74,6 +75,24 @@ def touch(row: UserSession, now: Optional[datetime] = None) -> None:
     now = now or _now()
     row.last_activity = now
     row.expires_at = deadline(row, now)
+
+
+async def touch_session(session: AsyncSession, row: UserSession, now: Optional[datetime] = None) -> bool:
+    """touch() for an authenticated request, as a write transaction of its own: it ends the read transaction the
+    request opened and runs one conditional UPDATE as the first statement, which moves last_activity only forward
+    from the value this request read. Parallel requests of one session (a page loading several lists) wait for each
+    other on the row instead of updating a row changed after their snapshot (MariaDB error 1020); the later ones
+    change nothing. Committed here; False when another request touched the session first."""
+    now = now or _now()
+    await start_write(session)
+    result = await session.exec(
+        update(UserSession)
+        .where(UserSession.id == row.id, UserSession.last_activity <= row.last_activity)
+        .values(last_activity=now, expires_at=deadline(row, now))
+        .execution_options(synchronize_session=False)
+    )
+    await session.commit()
+    return result.rowcount > 0
 
 
 @dataclass(frozen=True)
