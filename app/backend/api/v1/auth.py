@@ -4,7 +4,9 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.database import get_session
 from app.backend.auth.service import AuthService
-from app.backend.auth.sessions import certificate_matches, claim_refresh, live_clause, live_session, session_state, touch
+from app.backend.auth.sessions import (
+    begin_session_write, certificate_matches, claim_refresh, live_clause, live_session, session_state, touch,
+)
 from datetime import datetime, timezone
 from sqlmodel import select
 from app.backend.auth.require import require
@@ -177,8 +179,10 @@ async def refresh_token(
     # A refresh token always belongs to a session (POST /auth/login), which must still be live
     if not session_id or not presented_jti:
         raise ApiError(AuthErrorCode.INVALID_REFRESH_TOKEN)
-    # The first statement of the transaction retires the token presented (sessions.claim_refresh); every check
-    # below that refuses the refresh rolls it back
+    # The write begins with the shared user lock (sessions.begin_session_write): a refresh waits for an administrator
+    # ending the user's sessions and then finds its session ended (session_expired). The first change retires the
+    # token presented (sessions.claim_refresh); every check below that refuses the refresh rolls it back
+    await begin_session_write(session, user_id)
     next_jti = await claim_refresh(session, session_id, user_id, presented_jti)
 
     # Verify user still exists

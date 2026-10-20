@@ -12,6 +12,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - Ending a user's sessions (`POST /users/{user_id}/sessions/end`, deactivation, archive, a new user type) or revoking
   a certificate while the user was active could answer 500 on MariaDB (error 1020 on `user_sessions`): a session
   touch now shares the user row lock those writes take first, so it waits for them and finds the session ended.
+  `POST /auth/refresh`, the end of a session bound to a certificate that is no longer active and the recording of
+  an expired session's end take the same shared lock first: no 500 (1020) or deadlock against such an end; a refresh
+  that waited for it answers 401 `session_expired`.
 
 ### Changed
 

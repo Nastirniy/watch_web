@@ -30,7 +30,7 @@ from app.backend.auth.certificates import hash_data
 from app.backend.models.user import User, UserSession
 from app.backend.auth.presence import is_recent
 from app.backend.utils.logging_config import get_auth_logger
-from app.backend.utils.row_locks import lock_first, start_write
+from app.backend.utils.row_locks import lock_first
 
 _logger = get_auth_logger()
 _NO_CAP = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -77,18 +77,27 @@ def touch(row: UserSession, now: Optional[datetime] = None) -> None:
     row.expires_at = deadline(row, now)
 
 
+async def begin_session_write(session: AsyncSession, user_id: int) -> None:
+    """The first statement of a request's write to sessions of a user (touch, refresh, a recorded end): the user row
+    locked shared (utils/row_locks.py lock_first). Every write that ends sessions of the user (an administrator
+    ending them, a deactivation, an archive, a certificate revocation) locks that row FOR UPDATE first: a request
+    waits for it and then finds its session ended, so that write never meets a session row changed after its reads
+    (MariaDB error 1020), and the user row always comes before the session rows (no deadlock, 1213)."""
+    await lock_first(session, select(User.id).where(User.id == user_id), shared=True)
+
+
 async def touch_session(session: AsyncSession, row: UserSession, now: Optional[datetime] = None) -> bool:
     """touch() for an authenticated request, as a write transaction of its own: it ends the read transaction the
-    request opened, takes a shared lock on the user row (the lock every writer of the user's sessions takes first:
-    an administrator ending them or revoking a certificate holds it FOR UPDATE) and runs one conditional UPDATE,
-    which moves last_activity only forward from the value this request read. Parallel requests of one session (a
-    page loading several lists) wait for each other on the row instead of updating a row changed after their
-    snapshot (MariaDB error 1020); the later ones change nothing. A touch during such an administrator's write waits
+    request opened, takes a shared lock on the user row (begin_session_write: an administrator ending the user's
+    sessions or revoking a certificate holds it FOR UPDATE) and runs one conditional UPDATE, which moves
+    last_activity only forward from the value this request read. Parallel requests of one session (a page loading
+    several lists) wait for each other on the row instead of updating a row changed after their snapshot (MariaDB
+    error 1020); the later ones change nothing. A touch during such an administrator's write waits
     for it and then finds the session ended, so that write never meets a touch committed after its reads (1020).
     Committed here; False when another request touched or ended the session first."""
     now = now or _now()
     expires_at = deadline(row, now)
-    await lock_first(session, select(User.id).where(User.id == row.user_id), shared=True)
+    await begin_session_write(session, row.user_id)
     result = await session.exec(
         update(UserSession)
         .where(UserSession.id == row.id, UserSession.last_activity <= row.last_activity,
@@ -163,12 +172,13 @@ async def record_end(session: AsyncSession, row: UserSession, state: SessionStat
     One conditional UPDATE (ended_at still empty): parallel requests of an expired session find the same end, the
     first one writes it and the others change nothing, and an end recorded in between (a revocation) is kept.
     begin=True (a request that only read so far) runs it as a write of its own, after the read transaction (MariaDB
-    error 1020 otherwise); a caller that already holds the row locked passes begin=False. Committed here."""
+    error 1020 otherwise), beginning with the shared user lock (begin_session_write); a caller whose write already
+    began (the user locked, the refresh claim) passes begin=False. Committed here."""
     if row.ended_at is not None or state.status is not SessionStatus.ENDED:
         return
     ended_at, reason = state.ends_at or _now(), state.end_reason.value if state.end_reason else None
     if begin:
-        await start_write(session)
+        await begin_session_write(session, row.user_id)
     result = await session.exec(
         update(UserSession)
         .where(UserSession.id == row.id, UserSession.ended_at.is_(None))
@@ -189,9 +199,10 @@ async def claim_refresh(session: AsyncSession, session_id: str, user_id: int, pr
     """Retire the refresh token presented and record the id of the next one: that id, or None when the presented
     token is not the session's current one (used already, or the session is not the user's).
 
-    One conditional UPDATE, issued as the first statement of the refresh transaction: of two refreshes with the
-    same token exactly one wins, and no row read earlier in the transaction can change under it (MariaDB's snapshot
-    isolation answers a write to such a row with error 1020). A session opened before migration 025 has no
+    One conditional UPDATE, the first change of the refresh transaction (after the shared user lock the caller
+    takes first, begin_session_write; a locking read opens no snapshot): of two refreshes with the same token
+    exactly one wins, and no row read earlier in the transaction can change under it (MariaDB's snapshot isolation
+    answers a write to such a row with error 1020). A session opened before migration 025 has no
     refresh_jti and takes any of its tokens once. The caller's transaction decides: a refresh refused after the
     claim rolls it back, and the token stays usable.
     """

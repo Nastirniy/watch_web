@@ -23,7 +23,6 @@ from app.backend.auth.certificates import (
 )
 from app.backend.services.audit import create_audit_log
 from app.backend.services.certificates import active_certificate, certificate_state
-from app.backend.utils.row_locks import start_write
 from app.backend.utils.text import fit_column
 
 # Get authentication logger
@@ -444,15 +443,18 @@ class AuthService:
         request and refresh of a bound session (one indexed lookup): True when it ended it (the caller answers
         token_certificate_mismatch). Unbound sessions (development logins) are never ended here.
 
-        One conditional UPDATE (ended_at still empty), a write of its own unless begin=False (the refresh claim
-        began it): parallel requests of the session end it once, the others find it ended and answer the same.
+        One conditional UPDATE (ended_at still empty), a write of its own beginning with the shared user lock
+        (sessions.begin_session_write: the user row before the session row, as for an administrator ending the user's
+        sessions, and the audit row's foreign key locks the user row again) unless begin=False (the refresh began it
+        with that lock): parallel requests of the session end it once, the others find it ended and answer the
+        same.
         """
         bound_to = user_session.certificate_fingerprint_hash
         if not bound_to or await active_certificate(session, user.id, bound_to) is not None:
             return False
         ended_at = datetime.now(timezone.utc)
         if begin:
-            await start_write(session)
+            await session_lifetimes.begin_session_write(session, user.id)
         result = await session.exec(
             update(UserSession)
             .where(UserSession.id == user_session.id, UserSession.ended_at.is_(None))

@@ -180,3 +180,102 @@ async def test_certificate_revoke_locks_the_user_first(client, db, headers, engi
     write = _write_of(seen, "UPDATE user_certificates")
     assert write[0].startswith("SELECT users.id FROM users WHERE users.id = ?"), write
     assert write[1].startswith("SELECT user_certificates."), write
+
+
+def test_the_touch_lock_is_shared(monkeypatch):
+    """A shared lock (LOCK IN SHARE MODE on MariaDB), never FOR UPDATE: touches of one user's sessions run side by
+    side and wait only for a write that holds the user row FOR UPDATE"""
+    import asyncio
+    from sqlalchemy.dialects import mysql
+    from app.backend.auth import sessions
+    from app.backend.utils.row_locks import locking
+    taken = []
+
+    async def record(session, query, shared=False):
+        taken.append(locking(query, shared))
+        raise LookupError("recorded")             # stop before the UPDATE: no database needed
+
+    monkeypatch.setattr(sessions, "lock_first", record)
+    then = datetime.now(timezone.utc) - timedelta(minutes=5)
+    row = UserSession(id="shared", user_id=7, created_at=then, last_activity=then, expires_at=then + timedelta(hours=1))
+    try:
+        asyncio.run(touch_session(None, row))
+    except LookupError:
+        pass
+    (statement,) = taken
+    sql = str(statement.compile(dialect=mysql.dialect(), compile_kwargs={"literal_binds": True}))
+    assert "FROM users" in sql and "LOCK IN SHARE MODE" in sql and "FOR UPDATE" not in sql, sql
+
+
+async def test_refresh_takes_a_shared_lock_on_its_user_first(client, db, engine):
+    """A refresh is activity like a touch: it shares the user lock before it claims its token, so it waits for an
+    administrator ending the user's sessions instead of changing a session row that write reads and then ends"""
+    from app.backend.api.v1 import V1
+    from app.backend.auth.service import AuthService
+    from app.backend.enums.routes import AuthRoutes
+    user = await make_user(db)
+    row = await AuthService.create_session(db, user)
+    refresh = AuthService.session_tokens(user.id, row)[1]
+    seen, stop = _statements(engine)
+    try:
+        response = await client.post(V1.path(AuthRoutes.REFRESH), json={"refresh_token": refresh})
+    finally:
+        stop()
+    assert response.status_code == 200, response.text
+    write = _write_of(seen, "UPDATE user_sessions SET refresh_jti")
+    assert write[0].startswith("SELECT users.id FROM users WHERE users.id = ?"), write
+    assert write[1].startswith("UPDATE user_sessions SET refresh_jti"), write
+
+
+async def test_a_refresh_after_an_admin_end_is_session_expired(client, db, headers):
+    """What a refresh that waited behind the administrator's end finds: the session ended"""
+    from app.backend.api.v1 import V1
+    from app.backend.auth.service import AuthService
+    from app.backend.enums.routes import AuthRoutes, UserRoutes
+    from tests.helpers import make_admin
+    admin = await make_admin(db)
+    user = await make_user(db)
+    row = await AuthService.create_session(db, user)
+    refresh = AuthService.session_tokens(user.id, row)[1]
+    ended = await client.post(V1.path(UserRoutes.USER_SESSIONS_END, user_id=user.id), headers=headers(admin))
+    assert ended.status_code == 200 and ended.json()["ended_count"] == 1, ended.text
+    response = await client.post(V1.path(AuthRoutes.REFRESH), json={"refresh_token": refresh})
+    assert response.status_code == 401 and response.json()["code"] == "session_expired", response.text
+
+
+async def test_ending_a_session_of_an_inactive_certificate_shares_the_user_lock_first(db, session_maker, engine):
+    """It ended the session row and then wrote the audit row of the user (a shared lock on the user row through the
+    foreign key): the reverse of an administrator's order, a deadlock (1213) against an end of the user's sessions"""
+    from app.backend.auth.service import AuthService
+    user = await make_user(db)
+    row = await _row(db, user, datetime.now(timezone.utc) - timedelta(minutes=1))
+    row.certificate_fingerprint_hash = "no-such-certificate"
+    db.add(row)
+    await db.commit()
+    async with session_maker() as session:
+        read = (await session.exec(select(UserSession).where(UserSession.id == row.id))).one()
+        seen, stop = _statements(engine)
+        try:
+            assert await AuthService.end_session_of_revoked_certificate(session, read, user) is True
+        finally:
+            stop()
+    write = _write_of(seen, "UPDATE user_sessions")
+    assert write[0].startswith("SELECT users.id FROM users WHERE users.id = ?"), write
+    assert write[1].startswith("UPDATE user_sessions"), write
+
+
+async def test_recording_an_end_shares_the_user_lock_first(db, session_maker, engine):
+    from app.backend.auth.sessions import record_end, session_state
+    user = await make_user(db)
+    row = await _row(db, user, datetime.now(timezone.utc) - timedelta(days=2))
+    async with session_maker() as session:
+        read = (await session.exec(select(UserSession).where(UserSession.id == row.id))).one()
+        seen, stop = _statements(engine)
+        try:
+            await record_end(session, read, session_state(read))
+        finally:
+            stop()
+    assert read.ended_at is not None
+    write = _write_of(seen, "UPDATE user_sessions")
+    assert write[0].startswith("SELECT users.id FROM users WHERE users.id = ?"), write
+    assert write[1].startswith("UPDATE user_sessions"), write
