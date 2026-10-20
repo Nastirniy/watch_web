@@ -30,10 +30,16 @@ async def start_write(session: AsyncSession) -> None:
         await session.commit()
 
 
-async def lock(session: AsyncSession, query: SelectOfScalar[T]) -> Optional[T]:
-    """The first row of query, locked (FOR UPDATE) and as committed: the copy the session holds from an earlier
-    read is overwritten (populate_existing). Inside a write that began with lock_first."""
-    return (await session.exec(query.with_for_update().execution_options(populate_existing=True))).first()
+def locking(query: SelectOfScalar[T], shared: bool = False) -> SelectOfScalar[T]:
+    """query as a locking read of the committed rows: FOR UPDATE, or with shared=True a shared lock (LOCK IN SHARE
+    MODE on MariaDB): readers of the row that must see it unchanged until they commit, side by side"""
+    return query.with_for_update(read=shared).execution_options(populate_existing=True)
+
+
+async def lock(session: AsyncSession, query: SelectOfScalar[T], shared: bool = False) -> Optional[T]:
+    """The first row of query, locked (FOR UPDATE, or shared) and as committed: the copy the session holds from an
+    earlier read is overwritten (populate_existing). Inside a write that began with lock_first."""
+    return (await session.exec(locking(query, shared))).first()
 
 
 async def lock_all(session: AsyncSession, query: SelectOfScalar[T]) -> List[T]:
@@ -42,7 +48,7 @@ async def lock_all(session: AsyncSession, query: SelectOfScalar[T]) -> List[T]:
     return list((await session.exec(query.with_for_update().execution_options(populate_existing=True))).all())
 
 
-async def lock_first(session: AsyncSession, query: SelectOfScalar[T]) -> Optional[T]:
+async def lock_first(session: AsyncSession, query: SelectOfScalar[T], shared: bool = False) -> Optional[T]:
     """The first statement of a write transaction: the row of query locked and as committed (see the module)"""
     await start_write(session)
-    return await lock(session, query)
+    return await lock(session, query, shared)

@@ -163,7 +163,15 @@ async def create_observation(
     AccessControlService.check_post(auth, Permissions.OBSERVATION_VIEW, observation_data.post_id, "observation")
     AccessControlService.check_post(auth, Permissions.OBSERVATION_CREATE, observation_data.post_id, "observation")
 
-    post = (await session.exec(select(Post).where(Post.id == observation_data.post_id))).first()
+    # A shared lock on the post first (the write begins with it): creates at one post run side by side, an archive of
+    # the post or of a unit above it waits for them, and a create after it sees the archived post. Without it the
+    # insert met a post row archived after the request's snapshot (MariaDB 1020, a 500). A post the request's tree does
+    # not know is not locked (no gap lock on a row that may not exist): it is read and answers 404.
+    of_post = select(Post).where(Post.id == observation_data.post_id)
+    if observation_data.post_id in auth.tree.post_group:
+        post = await lock_first(session, of_post, shared=True)
+    else:
+        post = (await session.exec(of_post)).first()
     if not post:
         raise ApiError(ErrorCode.POST_NOT_FOUND, post_id=observation_data.post_id)
     refuse_archived_post(post)
