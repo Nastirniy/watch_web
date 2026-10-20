@@ -300,9 +300,9 @@ async def test_a_group_move_needs_post_update_at_the_old_and_the_new_parent(clie
     assert renamed.status_code == 200, renamed.text
 
     # post.update at both parents: the move to West is allowed, the root is a location of its own
-    both = await _caller(db, Node.group(east.id), Permissions.POST_UPDATE, user_type=UserType.ADMIN)
+    both = await _caller(db, Node.group(east.id), Permissions.POST_UPDATE, Permissions.POST_VIEW, user_type=UserType.ADMIN)
     await assign(db, both, await make_role(db, [Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_UPDATE]), ROOT_NODE)
-    await assign(db, both, await make_role(db, [Permissions.POST_UPDATE]), Node.group(west.id))
+    await assign(db, both, await make_role(db, [Permissions.POST_UPDATE, Permissions.POST_VIEW]), Node.group(west.id))
     moved = await client.patch(_group(kharkiv.id), json={"parent_id": west.id}, headers=headers(both))
     assert moved.status_code == 200 and moved.json()["parent_id"] == west.id, moved.text
     r = await client.patch(_group(kharkiv.id), json={"parent_id": None}, headers=headers(both))

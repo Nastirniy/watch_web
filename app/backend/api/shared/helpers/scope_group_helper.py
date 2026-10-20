@@ -124,19 +124,22 @@ async def lock_unit(session: AsyncSession, auth: AuthContext, kind: Optional[Sco
 async def archive_unit(request: Request, session: AsyncSession, auth: AuthContext, kind: ScopeGroupKind,
                        unit_id: int, cascade: bool) -> ScopeGroup:
     """POST /corps/{id}/archive, /brigades/{id}/archive: 404 as get_unit; then the permissions on the node, once
-    (403 permission_required_for_action): scope_group.archive covering it, with cascade post.archive covering it,
-    without cascade post.update covering it and where its posts go (its parent, the root for a corps); then
+    (403 permission_required_for_action): scope_group.archive covering it, with cascade post.view and post.archive
+    covering it, without cascade post.view and post.update covering it and where its posts go (its parent, the root
+    for a corps); then
     services/scope_groups.py archive_unit (409 corps_has_brigades). One audit row per changed row; committed."""
     unit = await lock_unit(session, auth, kind, unit_id)
     node = Node.group(unit.id)
     action = f"archive_{ScopeGroupKind(kind).value}"
     AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_ARCHIVE, node, action)
     if cascade:
-        AccessControlService.check_covers(auth, Permissions.POST_ARCHIVE, node, action)
+        for permission in (Permissions.POST_ARCHIVE, Permissions.POST_VIEW):
+            AccessControlService.check_covers(auth, permission, node, action)
     else:
         destination = Node.group(unit.parent_id) if unit.parent_id is not None else ROOT
         for location in (node, destination):
-            AccessControlService.check_covers(auth, Permissions.POST_UPDATE, location, action)
+            for permission in (Permissions.POST_UPDATE, Permissions.POST_VIEW):
+                AccessControlService.check_covers(auth, permission, location, action)
     try:
         changes = await groups_service.archive_unit(session, unit, cascade)
     except CodedError as exc:

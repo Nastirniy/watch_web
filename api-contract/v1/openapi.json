@@ -17795,7 +17795,7 @@
           "BRIGADES"
         ],
         "summary": "Update Brigade",
-        "description": "Rename, describe or move a brigade; only the fields sent change. Archived, another kind of group, or outside\nthe caller's scope_group.view: 404. A move (corps_id) takes every post of the brigade along: it also needs\npost.update covering the old and the new corps (403 permission_required_for_action, action move_brigade),\nanswered before the existence of the new corps; the new corps unknown, archived or outside scope_group.view: 404,\nnot a corps: 409 scope_group_parent_not_allowed. Nothing changes on a refusal.",
+        "description": "Rename, describe or move a brigade; only the fields sent change. Archived, another kind of group, or outside\nthe caller's scope_group.view: 404. A move (corps_id) takes every post of the brigade along: it also needs\npost.view and post.update covering the old and the new corps (403 permission_required_for_action, action move_brigade),\nanswered before the existence of the new corps; the new corps unknown, archived or outside scope_group.view: 404,\nnot a corps: 409 scope_group_parent_not_allowed. Nothing changes on a refusal.",
         "operationId": "update_brigade",
         "security": [
           {

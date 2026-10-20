@@ -72,7 +72,8 @@ async def _check_chosen_parent(session: AsyncSession, auth: AuthContext, group_i
         check_visible(auth, parent_id)
     if group_id is not None:
         for location in (_location(old_parent_id), _location(parent_id)):
-            AccessControlService.check_covers(auth, Permissions.POST_UPDATE, location, "move_scope_group")
+            for permission in (Permissions.POST_UPDATE, Permissions.POST_VIEW):
+                AccessControlService.check_covers(auth, permission, location, "move_scope_group")
     await _check_parent(session, group_id, parent_id, kind)
 
 

@@ -14,7 +14,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.api.shared.helpers.db_errors import unique_violation_as
 from app.backend.api.shared.helpers.scope_group_helper import (
-    unit_observation_stats, archive_unit, audit_group, check_visible, get_unit, lock_unit, name_taken, restore_unit,
+    unit_observation_stats, archive_unit, audit_group, check_visible, get_unit, lock_groups, lock_unit, name_taken, restore_unit,
 )
 from app.backend.api.v1.models.query.brigades import BrigadeFilterParams
 from app.backend.api.v1.models.query.posts import PostFilterParams
@@ -40,7 +40,6 @@ from app.backend.models.post import Post
 from app.backend.models.scope_group import ScopeGroup
 from app.backend.services import scope_groups as groups_service
 from app.backend.services.units import posts_within
-from app.backend.utils.row_locks import lock_first
 from app.backend.utils.validators import UtcDatetime
 
 router = APIRouter(prefix=BrigadeRoutes.BASE.value, tags=[BrigadeRoutes.tag()])
@@ -104,9 +103,9 @@ async def create_brigade(
     group: 409 scope_group_parent_not_allowed. Names are unique within one corps, case-insensitive."""
     check_visible(auth, data.corps_id)
     AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_CREATE, Node.group(data.corps_id), "create_brigade")
-    # The corps is locked first: an archive of the corps waits, so no brigade appears inside an archived corps
-    if await lock_first(session, select(ScopeGroup).where(ScopeGroup.id == data.corps_id)) is None:
-        raise ApiError(ErrorCode.SCOPE_GROUP_NOT_FOUND)
+    # The corps is locked first: an archive of the corps waits, so no brigade appears inside an archived corps (a
+    # corps the request's tree does not know is not locked: the checks below answer 404)
+    await lock_groups(session, auth.tree, [data.corps_id])
     await _check_corps(session, None, data.corps_id)
     if await name_taken(session, data.name, data.corps_id):
         raise ApiError(ErrorCode.SCOPE_GROUP_NAME_TAKEN)
@@ -154,7 +153,7 @@ async def update_brigade(
 ):
     """Rename, describe or move a brigade; only the fields sent change. Archived, another kind of group, or outside
     the caller's scope_group.view: 404. A move (corps_id) takes every post of the brigade along: it also needs
-    post.update covering the old and the new corps (403 permission_required_for_action, action move_brigade),
+    post.view and post.update covering the old and the new corps (403 permission_required_for_action, action move_brigade),
     answered before the existence of the new corps; the new corps unknown, archived or outside scope_group.view: 404,
     not a corps: 409 scope_group_parent_not_allowed. Nothing changes on a refusal."""
     update_data = data.model_dump(exclude_unset=True)
@@ -167,7 +166,8 @@ async def update_brigade(
     new_corps = update_data.get("corps_id", brigade.parent_id)
     if new_corps != brigade.parent_id:
         for corps_id in (brigade.parent_id, new_corps):
-            AccessControlService.check_covers(auth, Permissions.POST_UPDATE, Node.group(corps_id), "move_brigade")
+            for permission in (Permissions.POST_UPDATE, Permissions.POST_VIEW):
+                AccessControlService.check_covers(auth, permission, Node.group(corps_id), "move_brigade")
         await _check_corps(session, brigade.id, new_corps)
     if ("corps_id" in update_data or "name" in update_data) and await name_taken(
             session, update_data.get("name", brigade.name), new_corps, exclude_id=brigade.id):
@@ -186,7 +186,7 @@ async def update_brigade(
 
     await audit_group(request, session, auth, "update", brigade, old_values)
     await session.commit()
-    return brigade_to_response(brigade, auth)
+    return brigade_to_response(brigade, await _fresh(session, auth))   # a move changed what the brigade holds
 
 
 @router.post(
