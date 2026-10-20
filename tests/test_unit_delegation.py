@@ -3,6 +3,7 @@ group needs its scope_group permission covering the group's parent (the root for
 needs scope_group.update covering the old and the new parent. A holder at a group manages the groups inside it,
 never the group itself. post_admin may hold the three (ceiling), the operator may not.
 """
+import pytest
 from sqlmodel import select
 
 from app.backend.api.v1 import V1
@@ -177,3 +178,70 @@ async def test_operator_type_may_not_hold_scope_group_writes(client, db, headers
     r = await _assign_through_api(client, db, headers, UserType.OPERATOR, corps)
     assert r.status_code == 409 and r.json()["code"] == "role_exceeds_user_type", r.text
     assert set(r.json()["excess_permissions"]) >= {p.value for p in WRITES}
+
+
+# ----------------------------------------------------------------- archived groups in lists (fix round 1)
+async def _archived_group(db, kind: str, parent_id=None):
+    group = await make_group(db, parent_id=parent_id, kind=kind)
+    group.is_deleted = True
+    db.add(group)
+    await db.commit()
+    return group
+
+
+LISTS = ("corps", "brigades", "corps_brigades", "scope_groups")
+
+
+def _list_urls(which: str, corps_a, corps_b) -> list:
+    if which == "corps":
+        return [V1.path(CorpsRoutes.ROOT)]
+    if which == "brigades":
+        return [V1.path(BrigadeRoutes.ROOT)]
+    if which == "corps_brigades":
+        return [V1.path(CorpsRoutes.CORPS_BRIGADES, corps_id=corps_a.id),
+                V1.path(CorpsRoutes.CORPS_BRIGADES, corps_id=corps_b.id)]
+    return [V1.path(ScopeGroupRoutes.ROOT)]
+
+
+@pytest.mark.parametrize("which", LISTS)
+async def test_include_deleted_shows_archived_groups_only_where_scope_group_archive_is_in_effect(
+        client, db, headers, which):
+    """scope_group.archive at corps A, scope_group.view at the root: archived groups inside A are listed, archived
+    ones elsewhere (a brigade of B, a corps, a root plain group) are not; live groups stay as before. The root holder
+    lists every archived group."""
+    corps_a = await make_group(db, kind="corps")
+    corps_b = await make_group(db, kind="corps")
+    brigade_a = await _archived_group(db, "brigade", corps_a.id)
+    brigade_b = await _archived_group(db, "brigade", corps_b.id)
+    corps_z = await _archived_group(db, "corps")
+    plain = await _archived_group(db, "group")
+    live_brigade = await make_group(db, parent_id=corps_b.id, kind="brigade")
+
+    user = await make_user(db)
+    await assign(db, user, await make_role(db, [Permissions.SCOPE_GROUP_VIEW]), ROOT)
+    await assign(db, user, await make_role(db, [Permissions.SCOPE_GROUP_ARCHIVE]), Node.group(corps_a.id))
+    admin = await make_admin(db)
+
+    def listed(responses) -> set:
+        ids = set()
+        for r in responses:
+            assert r.status_code == 200, r.text
+            ids |= {item["id"] for item in r.json()}
+        return ids
+
+    urls = _list_urls(which, corps_a, corps_b)
+    params = {"include_deleted": "true"}
+    mine = listed([await client.get(url, params=params, headers=headers(user)) for url in urls])
+    every = listed([await client.get(url, params=params, headers=headers(admin)) for url in urls])
+    archived_elsewhere = {brigade_b.id, corps_z.id, plain.id}
+
+    assert not mine & archived_elsewhere
+    assert archived_elsewhere & every == archived_elsewhere & {
+        "corps": {corps_z.id}, "brigades": {brigade_b.id}, "corps_brigades": {brigade_b.id},
+        "scope_groups": archived_elsewhere,
+    }[which]
+    if which == "corps":
+        assert {corps_a.id, corps_b.id} <= mine and corps_z.id in every
+    else:
+        assert brigade_a.id in mine and brigade_a.id in every
+        assert live_brigade.id in mine and brigade_b.id in every

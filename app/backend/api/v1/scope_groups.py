@@ -93,10 +93,11 @@ async def list_scope_groups(
         auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW]))
 ):
     """List scope groups with filters: the groups inside the subtrees where the caller holds scope_group.view (every
-    group with it at the root). Archived ones only with include_deleted (requires scope_group.archive)."""
-    AccessControlService.check_include_deleted(auth, filters, Permissions.SCOPE_GROUP_ARCHIVE)
+    group with it at the root). Archived ones only with include_deleted (requires scope_group.archive), and only
+    where scope_group.archive is in effect."""
+    archived = AccessControlService.archived_group_scope(auth, filters, Permissions.SCOPE_GROUP_ARCHIVE)
     query = ScopeGroupFilterService.apply_filters(
-        select(ScopeGroup), filters, auth.groups_with(Permissions.SCOPE_GROUP_VIEW),
+        select(ScopeGroup), filters, auth.groups_with(Permissions.SCOPE_GROUP_VIEW), archived,
     )
     result = await session.exec(query)
     return [ScopeGroupResponse.model_validate(g) for g in result.all()]

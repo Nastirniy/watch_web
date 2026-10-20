@@ -60,10 +60,11 @@ async def list_corps(
         auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW]))
 ):
     """List corps with filters: the corps inside the subtrees where the caller holds scope_group.view (every corps
-    with it at the root). Archived ones only with include_deleted (requires scope_group.archive)."""
-    AccessControlService.check_include_deleted(auth, filters, Permissions.SCOPE_GROUP_ARCHIVE)
+    with it at the root). Archived ones only with include_deleted (requires scope_group.archive), and only where
+    scope_group.archive is in effect."""
+    archived = AccessControlService.archived_group_scope(auth, filters, Permissions.SCOPE_GROUP_ARCHIVE)
     query = UnitFilterService.apply_filters(
-        select(ScopeGroup), filters, CORPS, auth.groups_with(Permissions.SCOPE_GROUP_VIEW),
+        select(ScopeGroup), filters, CORPS, auth.groups_with(Permissions.SCOPE_GROUP_VIEW), archived,
     )
     return [corps_to_response(corps, auth) for corps in (await session.exec(query)).all()]
 
@@ -210,12 +211,13 @@ async def list_corps_brigades(
         auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW]))
 ):
     """The brigades of a corps the caller sees (scope_group.view), with the brigade filters. Archived ones only with
-    include_deleted (requires scope_group.archive). The corps: 404 as on GET /corps/{corps_id}."""
-    AccessControlService.check_include_deleted(auth, filters, Permissions.SCOPE_GROUP_ARCHIVE)
+    include_deleted (requires scope_group.archive), and only where scope_group.archive is in effect. The corps: 404
+    as on GET /corps/{corps_id}."""
+    archived = AccessControlService.archived_group_scope(auth, filters, Permissions.SCOPE_GROUP_ARCHIVE)
     corps = await get_unit(session, auth, CORPS, corps_id)
     criteria = replace(UnitFilterService.criteria(filters), corps_id=corps.id)
     query = UnitFilterService.apply_filters(
-        select(ScopeGroup), criteria, ScopeGroupKind.BRIGADE, auth.groups_with(Permissions.SCOPE_GROUP_VIEW),
+        select(ScopeGroup), criteria, ScopeGroupKind.BRIGADE, auth.groups_with(Permissions.SCOPE_GROUP_VIEW), archived,
     )
     return [brigade_to_response(brigade, auth) for brigade in (await session.exec(query)).all()]
 

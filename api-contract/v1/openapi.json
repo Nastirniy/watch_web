@@ -14167,7 +14167,7 @@
           "SCOPE_GROUPS"
         ],
         "summary": "List Scope Groups",
-        "description": "List scope groups with filters: the groups inside the subtrees where the caller holds scope_group.view (every\ngroup with it at the root). Archived ones only with include_deleted (requires scope_group.archive).",
+        "description": "List scope groups with filters: the groups inside the subtrees where the caller holds scope_group.view (every\ngroup with it at the root). Archived ones only with include_deleted (requires scope_group.archive), and only\nwhere scope_group.archive is in effect.",
         "operationId": "list_scope_groups",
         "security": [
           {
@@ -15336,7 +15336,7 @@
           "CORPS"
         ],
         "summary": "List Corps",
-        "description": "List corps with filters: the corps inside the subtrees where the caller holds scope_group.view (every corps\nwith it at the root). Archived ones only with include_deleted (requires scope_group.archive).",
+        "description": "List corps with filters: the corps inside the subtrees where the caller holds scope_group.view (every corps\nwith it at the root). Archived ones only with include_deleted (requires scope_group.archive), and only where\nscope_group.archive is in effect.",
         "operationId": "list_corps",
         "security": [
           {
@@ -16286,7 +16286,7 @@
           "CORPS"
         ],
         "summary": "List Corps Brigades",
-        "description": "The brigades of a corps the caller sees (scope_group.view), with the brigade filters. Archived ones only with\ninclude_deleted (requires scope_group.archive). The corps: 404 as on GET /corps/{corps_id}.",
+        "description": "The brigades of a corps the caller sees (scope_group.view), with the brigade filters. Archived ones only with\ninclude_deleted (requires scope_group.archive), and only where scope_group.archive is in effect. The corps: 404\nas on GET /corps/{corps_id}.",
         "operationId": "list_corps_brigades",
         "security": [
           {
@@ -17336,7 +17336,7 @@
           "BRIGADES"
         ],
         "summary": "List Brigades",
-        "description": "List brigades with filters (corps_id: the brigades of one corps): the brigades inside the subtrees where the\ncaller holds scope_group.view. Archived ones only with include_deleted (requires scope_group.archive).",
+        "description": "List brigades with filters (corps_id: the brigades of one corps): the brigades inside the subtrees where the\ncaller holds scope_group.view. Archived ones only with include_deleted (requires scope_group.archive), and only\nwhere scope_group.archive is in effect.",
         "operationId": "list_brigades",
         "security": [
           {

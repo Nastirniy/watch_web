@@ -38,6 +38,10 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `permission_required_for_action` (new actions `update_corps`,
   `update_brigade`, `create_scope_group`, `update_scope_group`, `archive_scope_group`, `restore_scope_group`; the
   existing action names are kept). No migration: permission levels are computed from code.
+  `include_deleted` on `GET /corps/`, `GET /brigades/`, `GET /corps/{corps_id}/brigades` and `GET /scope-groups/`
+  still needs `scope_group.archive` held somewhere (403 otherwise), and now lists an archived group only where
+  `scope_group.archive` is in effect (the group lies in a subtree where it is held), as posts do; live groups are
+  listed as before. A holder at the root sees every archived group, as before.
 
 ## Bug hunt fixes (2026-10-20, branch fix/corps-bughunt)
 

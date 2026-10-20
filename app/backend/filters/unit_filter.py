@@ -34,11 +34,13 @@ class UnitFilterService(SimpleFilterEngine):
         params: UnitCriteria,
         kind: ScopeGroupKind,
         visible_ids: Optional[FrozenSet[int]] = None,
+        archived_ids: Optional[FrozenSet[int]] = None,
     ) -> Select:
         """Apply all filters from UnitCriteria to the groups of this kind. visible_ids: the groups the caller sees
-        (None: every group)"""
+        (None: every group); archived_ids: with include_deleted, the groups shown even when archived (None: every
+        one)"""
         params = cls.criteria(params)
-        query = cls.apply_filters_for_count(query, params, kind, visible_ids)
+        query = cls.apply_filters_for_count(query, params, kind, visible_ids, archived_ids)
         query = cls._apply_sorting(query, params)
         return cls._apply_pagination(query, params)
 
@@ -49,13 +51,15 @@ class UnitFilterService(SimpleFilterEngine):
         params: UnitCriteria,
         kind: ScopeGroupKind,
         visible_ids: Optional[FrozenSet[int]] = None,
+        archived_ids: Optional[FrozenSet[int]] = None,
     ) -> Select:
         """Apply filters without sorting and pagination"""
         params = cls.criteria(params)
         query = query.where(ScopeGroup.kind == ScopeGroupKind(kind).value)
         if visible_ids is not None:
             query = query.where(ScopeGroup.id.in_(sorted(visible_ids)))
-        query = cls._apply_soft_delete(query, params)
+        # Archived units only on include_deleted, and only where scope_group.archive is in effect
+        query = cls._apply_soft_delete(query, params, ScopeGroup.id, archived_ids)
         query = cls._apply_exact(query, ScopeGroup.id, params.id)
         query = cls._apply_exact(query, ScopeGroup.parent_id, params.corps_id)
         return cls._apply_contains(query, ScopeGroup.name, params.name_contains)

@@ -3,7 +3,7 @@ ScopeGroupFilterService - Filter service for ScopeGroup entity
 """
 
 from dataclasses import dataclass
-from typing import Optional, Iterable
+from typing import FrozenSet, Optional, Iterable
 from sqlalchemy.sql.selectable import Select
 
 from app.backend.enums.general import ScopeGroupKind
@@ -33,11 +33,13 @@ class ScopeGroupFilterService(SimpleFilterEngine):
         cls,
         query: Select,
         params: ScopeGroupCriteria,
-        group_ids: Optional[Iterable[int]] = None
+        group_ids: Optional[Iterable[int]] = None,
+        archived_ids: Optional[FrozenSet[int]] = None,
     ) -> Select:
-        """Apply all filters from ScopeGroupCriteria. group_ids: the groups the caller sees (None: every group)"""
+        """Apply all filters from ScopeGroupCriteria. group_ids: the groups the caller sees (None: every group);
+        archived_ids: with include_deleted, the groups shown even when archived (None: every one)"""
         params = cls.criteria(params)
-        query = cls.apply_filters_for_count(query, params, group_ids)
+        query = cls.apply_filters_for_count(query, params, group_ids, archived_ids)
         query = cls._apply_sorting(query, params)
         return cls._apply_pagination(query, params)
 
@@ -46,13 +48,15 @@ class ScopeGroupFilterService(SimpleFilterEngine):
         cls,
         query: Select,
         params: ScopeGroupCriteria,
-        group_ids: Optional[Iterable[int]] = None
+        group_ids: Optional[Iterable[int]] = None,
+        archived_ids: Optional[FrozenSet[int]] = None,
     ) -> Select:
         """Apply filters without sorting and pagination"""
         params = cls.criteria(params)
         if group_ids is not None:
             query = query.where(ScopeGroup.id.in_(sorted(group_ids)))
-        query = cls._apply_soft_delete(query, params)
+        # Archived groups only on include_deleted, and only where scope_group.archive is in effect
+        query = cls._apply_soft_delete(query, params, ScopeGroup.id, archived_ids)
         query = cls._apply_exact(query, ScopeGroup.id, params.id)
         query = cls._apply_exact(query, ScopeGroup.parent_id, params.parent_id)
         query = cls._apply_exact(query, ScopeGroup.kind, params.kind)

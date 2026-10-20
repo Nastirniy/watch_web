@@ -77,10 +77,11 @@ async def list_brigades(
         auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW]))
 ):
     """List brigades with filters (corps_id: the brigades of one corps): the brigades inside the subtrees where the
-    caller holds scope_group.view. Archived ones only with include_deleted (requires scope_group.archive)."""
-    AccessControlService.check_include_deleted(auth, filters, Permissions.SCOPE_GROUP_ARCHIVE)
+    caller holds scope_group.view. Archived ones only with include_deleted (requires scope_group.archive), and only
+    where scope_group.archive is in effect."""
+    archived = AccessControlService.archived_group_scope(auth, filters, Permissions.SCOPE_GROUP_ARCHIVE)
     query = UnitFilterService.apply_filters(
-        select(ScopeGroup), filters, BRIGADE, auth.groups_with(Permissions.SCOPE_GROUP_VIEW),
+        select(ScopeGroup), filters, BRIGADE, auth.groups_with(Permissions.SCOPE_GROUP_VIEW), archived,
     )
     return [brigade_to_response(brigade, auth) for brigade in (await session.exec(query)).all()]
 
