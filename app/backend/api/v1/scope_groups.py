@@ -65,8 +65,8 @@ async def _check_chosen_parent(session: AsyncSession, auth: AuthContext, group_i
     unknown one; the root (None) is no id to hide: without scope_group.view there it answers 403
     permission_required_for_action (create_scope_group / move_scope_group). A create needs scope_group.create covering
     the parent location (403 permission_required_for_action, create_scope_group). A move (group_id) needs
-    scope_group.update covering the old and the new parent location and, as it takes every post below the group
-    along, post.update and post.view covering both, as a post move (403 permission_required_for_action,
+    scope_group.view and scope_group.update covering the old and the new parent location and, as it takes every
+    post below the group along, post.update and post.view covering both, as a post move (403 permission_required_for_action,
     move_scope_group). All before the tree rules (the parent exists and is live, no cycle, the depth), the placement
     rules of the kind and the caller's name check."""
     action = "create_scope_group" if group_id is None else "move_scope_group"
@@ -78,6 +78,8 @@ async def _check_chosen_parent(session: AsyncSession, auth: AuthContext, group_i
         AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_CREATE, parent_location(parent_id), action)
     else:
         locations = (parent_location(old_parent_id), parent_location(parent_id))
+        # X.view AND X.update at both ends: the new parent is seen by check_visible (the root above), the old one here
+        AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_VIEW, locations[0], action)
         for location in locations:
             AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_UPDATE, location, action)
         for location in locations:
@@ -217,8 +219,8 @@ async def update_scope_group(
     the caller's scope_group.view (the group or the new parent): 404. scope_group.update must cover the parent of the
     group (the root for a group directly under it), otherwise 403 permission_required_for_action (action
     update_scope_group): a holder at a group manages the groups inside it, not the group itself. A move needs
-    scope_group.update covering the old and the new parent location (a move to the root: scope_group.view there too)
-    and, as it takes every post below the group along, post.update and post.view covering both (the group or above it; the root for a group directly under it),
+    scope_group.view and scope_group.update covering the old and the new parent location (the root for a group
+    directly under it) and, as it takes every post below the group along, post.update and post.view covering both (the group or above it; the root for a group directly under it),
     otherwise 403 permission_required_for_action (action move_scope_group), answered before the existence of the new
     parent and the tree rules; nothing changes on a refusal. The group keeps its kind and
     the parent must suit it (a plain group never moves into a corps or brigade, a corps stays under the root, a

@@ -43,6 +43,12 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   archived a post the request did not know of (nothing changes then). Without cascade, a corps archive asks
   `post.update` / `post.view` only for the posts directly in the corps, the ones a detach moves: a corps with an active
   brigade answers 409 `corps_has_brigades` to a caller with `scope_group` rights and no post rights instead of 403.
+- `PATCH /scope-groups/{group_id}` with a new `parent_id` and `PATCH /brigades/{brigade_id}` with a new `corps_id` check
+  `scope_group.view` at the old parent (the root for a group at the root) next to `scope_group.update`, as they already
+  did at the new one: a caller with `scope_group.update` at both ends and `scope_group.view` only at the new one moved
+  a group out of a parent it could not see. It now gets 403 `permission_required_for_action` (`move_scope_group` /
+  `move_brigade`, missing `scope_group.view`). Corps never move. No new problem code; the two operation descriptions
+  in `api-contract/v1/openapi.json` say it.
 - A request whose session touch (the first request after `activity_touch_interval_seconds`) waited for an
   administrator ending the session (an end of the user's sessions, a deactivation, an archive, a certificate
   revocation) went on as authenticated, a write included. It now answers what the next request of the session

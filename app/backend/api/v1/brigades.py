@@ -157,7 +157,7 @@ async def update_brigade(
     the caller's scope_group.view: 404. scope_group.update must cover its corps (403 permission_required_for_action,
     action update_brigade): a holder at the brigade does not manage the brigade itself. A move (corps_id other than
     its corps; its own corps sent back is no move and answers as without it) needs
-    scope_group.update covering the old and the new corps and, as it takes every post of the brigade along, post.view
+    scope_group.view and scope_group.update covering the old and the new corps and, as it takes every post of the brigade along, post.view
     and post.update covering both (403 permission_required_for_action, action move_brigade), answered before the
     existence of the new corps; the new corps unknown, archived or outside scope_group.view: 404, not a corps: 409
     scope_group_parent_not_allowed. Nothing changes on a refusal."""
@@ -173,6 +173,9 @@ async def update_brigade(
     moving = new_corps != brigade.parent_id
     if moving:
         check_visible(auth, new_corps)     # the brigade moved since the tree was read: decided by the locked row
+        # X.view AND X.update at both ends: the new corps is seen by check_visible, the old one here
+        AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_VIEW, parent_location(brigade.parent_id),
+                                          "move_brigade")
     for corps_id in ((brigade.parent_id, new_corps) if moving else (brigade.parent_id,)):
         AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_UPDATE, parent_location(corps_id),
                                           "move_brigade" if moving else "update_brigade")

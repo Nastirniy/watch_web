@@ -454,3 +454,60 @@ async def test_corps_archive_without_cascade_answers_corps_has_brigades_without_
     _refused(await client.post(V1.path(CorpsRoutes.CORPS_ARCHIVE, corps_id=corps.id), headers=h), "archive_corps")
     await db.refresh(corps)
     assert corps.is_deleted is False
+
+
+# ----------------------------------------------------------------- bug hunt 2 (move: view at the old parent)
+async def test_moving_a_group_needs_scope_group_view_at_the_old_parent(client, db, headers):
+    """X.view AND X.update at both ends of a move: update and post rights at both parents, view only at the new one
+    and at the group itself -> 403 move_scope_group (missing scope_group.view); with view at the old parent too, 200"""
+    east = await make_group(db, "East")
+    west = await make_group(db, "West")
+    kharkiv = await make_group(db, "Kharkiv", parent_id=east.id)
+    posts = ([Permissions.SCOPE_GROUP_UPDATE, Permissions.POST_UPDATE, Permissions.POST_VIEW], ROOT)
+    url = V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=kharkiv.id)
+    sees = [([Permissions.SCOPE_GROUP_VIEW], Node.group(kharkiv.id)),
+            ([Permissions.SCOPE_GROUP_VIEW], Node.group(west.id))]
+
+    blind = await _holder(db, [posts, *sees])
+    _missing_view(await client.patch(url, json={"parent_id": west.id}, headers=headers(blind)), "move_scope_group")
+    await db.refresh(kharkiv)
+    assert kharkiv.parent_id == east.id
+
+    sighted = await _holder(db, [posts, *sees, ([Permissions.SCOPE_GROUP_VIEW], Node.group(east.id))])
+    r = await client.patch(url, json={"parent_id": west.id}, headers=headers(sighted))
+    assert r.status_code == 200 and r.json()["parent_id"] == west.id, r.text
+
+
+async def test_moving_a_root_group_needs_scope_group_view_at_the_root_as_the_old_parent(client, db, headers):
+    west = await make_group(db, "West")
+    lone = await make_group(db, "Lone")
+    posts = ([Permissions.SCOPE_GROUP_UPDATE, Permissions.POST_UPDATE, Permissions.POST_VIEW], ROOT)
+    url = V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=lone.id)
+    sees = [([Permissions.SCOPE_GROUP_VIEW], Node.group(lone.id)),
+            ([Permissions.SCOPE_GROUP_VIEW], Node.group(west.id))]
+
+    blind = await _holder(db, [posts, *sees])
+    _missing_view(await client.patch(url, json={"parent_id": west.id}, headers=headers(blind)), "move_scope_group")
+
+    sighted = await _holder(db, [posts, *sees, ([Permissions.SCOPE_GROUP_VIEW], ROOT)])
+    r = await client.patch(url, json={"parent_id": west.id}, headers=headers(sighted))
+    assert r.status_code == 200 and r.json()["parent_id"] == west.id, r.text
+
+
+async def test_moving_a_brigade_needs_scope_group_view_at_the_old_corps(client, db, headers):
+    corps = await make_group(db, kind="corps")
+    other = await make_group(db, kind="corps")
+    brigade = await make_group(db, parent_id=corps.id, kind="brigade")
+    posts = ([Permissions.SCOPE_GROUP_UPDATE, Permissions.POST_UPDATE, Permissions.POST_VIEW], ROOT)
+    url = V1.path(BrigadeRoutes.BRIGADE_BY_ID, brigade_id=brigade.id)
+    sees = [([Permissions.SCOPE_GROUP_VIEW], Node.group(brigade.id)),
+            ([Permissions.SCOPE_GROUP_VIEW], Node.group(other.id))]
+
+    blind = await _holder(db, [posts, *sees])
+    _missing_view(await client.patch(url, json={"corps_id": other.id}, headers=headers(blind)), "move_brigade")
+    await db.refresh(brigade)
+    assert brigade.parent_id == corps.id
+
+    sighted = await _holder(db, [posts, *sees, ([Permissions.SCOPE_GROUP_VIEW], Node.group(corps.id))])
+    r = await client.patch(url, json={"corps_id": other.id}, headers=headers(sighted))
+    assert r.status_code == 200 and r.json()["corps_id"] == other.id, r.text
