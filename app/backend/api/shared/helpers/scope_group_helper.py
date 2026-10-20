@@ -46,6 +46,18 @@ async def name_taken(session: AsyncSession, name: str, parent_id: Optional[int],
     return (await session.exec(query)).first() is not None
 
 
+def parent_location(parent_id: Optional[int]) -> Node:
+    """The node of a parent: that group, the root for None (a group directly under the root)"""
+    return Node.group(parent_id) if parent_id is not None else ROOT
+
+
+def parent_node(group: ScopeGroup) -> Node:
+    """Where the group sits: its parent group, the root for a group directly under it. A write on an existing group
+    needs its scope_group permission covering this node: a holder at a group manages the groups inside it, never the
+    group itself."""
+    return parent_location(group.parent_id)
+
+
 def check_visible(auth: AuthContext, group_id: int) -> None:
     """Scope before existence: a group outside every subtree where the caller holds scope_group.view answers like an
     unknown id (an outsider learns nothing about ids)"""
@@ -123,21 +135,20 @@ async def lock_unit(session: AsyncSession, auth: AuthContext, kind: Optional[Sco
 
 async def archive_unit(request: Request, session: AsyncSession, auth: AuthContext, kind: ScopeGroupKind,
                        unit_id: int, cascade: bool) -> ScopeGroup:
-    """POST /corps/{id}/archive, /brigades/{id}/archive: 404 as get_unit; then the permissions on the node, once
-    (403 permission_required_for_action): scope_group.archive covering it, with cascade post.view and post.archive
-    covering it, without cascade post.view and post.update covering it and where its posts go (its parent, the root
-    for a corps); then
-    services/scope_groups.py archive_unit (409 corps_has_brigades). One audit row per changed row; committed."""
+    """POST /corps/{id}/archive, /brigades/{id}/archive: 404 as get_unit; then the permissions, once (403
+    permission_required_for_action): scope_group.archive covering its parent (parent_node: the root for a corps),
+    with cascade post.view and post.archive covering the unit, without cascade post.view and post.update covering the
+    unit and where its posts go (its parent); then services/scope_groups.py archive_unit (409 corps_has_brigades). One
+    audit row per changed row; committed."""
     unit = await lock_unit(session, auth, kind, unit_id)
     node = Node.group(unit.id)
     action = f"archive_{ScopeGroupKind(kind).value}"
-    AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_ARCHIVE, node, action)
+    AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_ARCHIVE, parent_node(unit), action)
     if cascade:
         for permission in (Permissions.POST_ARCHIVE, Permissions.POST_VIEW):
             AccessControlService.check_covers(auth, permission, node, action)
     else:
-        destination = Node.group(unit.parent_id) if unit.parent_id is not None else ROOT
-        for location in (node, destination):
+        for location in (node, parent_node(unit)):
             for permission in (Permissions.POST_UPDATE, Permissions.POST_VIEW):
                 AccessControlService.check_covers(auth, permission, location, action)
     try:
@@ -166,10 +177,10 @@ async def archive_unit(request: Request, session: AsyncSession, auth: AuthContex
 async def restore_unit(request: Request, session: AsyncSession, auth: AuthContext, kind: ScopeGroupKind,
                        unit_id: int) -> ScopeGroup:
     """POST /corps/{id}/restore, /brigades/{id}/restore: the node only. 404 as get_unit (archived ones included);
-    scope_group.archive covering it (403); not archived: 409 scope_group_not_archived; its parent archived: 404
-    scope_group_not_found (restore the parent first). Audited and committed."""
+    scope_group.archive covering its parent (parent_node, 403); not archived: 409 scope_group_not_archived; its parent
+    archived: 404 scope_group_not_found (restore the parent first). Audited and committed."""
     unit = await lock_unit(session, auth, kind, unit_id, include_deleted=True)
-    AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_ARCHIVE, Node.group(unit.id),
+    AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_ARCHIVE, parent_node(unit),
                                       f"restore_{ScopeGroupKind(kind).value}")
     if not unit.is_deleted:
         raise ApiError(ErrorCode.SCOPE_GROUP_NOT_ARCHIVED)

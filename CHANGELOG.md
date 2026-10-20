@@ -23,6 +23,21 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `observation.view` covered the unit itself). A brigade's commander counts its corps and the viewer of one post its
   brigade, each over the posts they see; a unit with no such post and no covering grant still answers 404. Documented:
   an archived unit keeps answering its history. With `placement=current` the query has one `post_id` list.
+- Unit management is scoped: `scope_group.create`, `scope_group.update` and `scope_group.archive` are no longer
+  system permissions (`PermissionLevel` `scoped`, `RoleResponse.level` follows) and the `post_admin` type may hold
+  them (ceiling; not in its base role). A write on a corps, brigade or plain group needs its permission covering the
+  group's parent (the root for a corps or a root plain group), a move covering the old and the new parent: a holder
+  at a corps creates, renames, moves, archives and restores the brigades of that corps, never the corps itself; a
+  holder at a brigade manages nothing of the structure. Before, update, archive and restore checked the group's own
+  node and `PATCH /corps/{corps_id}`, `PATCH /scope-groups/{group_id}`, `POST /scope-groups/` and
+  `/scope-groups/{group_id}/archive|restore` checked no node at all. What an administrator gains: roles with these
+  permissions can be assigned at a corps or a group (before 409 `role_requires_root_scope`). Existing assignments at
+  the root behave exactly as before (the root is the parent of every top group and covers every other). A role
+  that held these permissions with no other system permission is now a scoped role. Newly declared on
+  `POST /scope-groups/`, `POST /scope-groups/{group_id}/archive|restore` and `PATCH /corps/{corps_id}`: 403
+  `permission_required_for_action` (new actions `update_corps`,
+  `update_brigade`, `create_scope_group`, `update_scope_group`, `archive_scope_group`, `restore_scope_group`; the
+  existing action names are kept). No migration: permission levels are computed from code.
 
 ## Bug hunt fixes (2026-10-20, branch fix/corps-bughunt)
 

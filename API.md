@@ -237,6 +237,23 @@ plain groups are `group`): a role assigned at a corps or brigade (`{"kind": "gro
 below it, and `GET /scope-groups/tree` shows them with their `kind`. No new permissions: `scope_group.*` for the
 units, `post.*` for what happens to their posts.
 
+Who manages what: `scope_group.create`, `.update` and `.archive` are scoped permissions (assignable at a corps, a
+brigade or a plain group; the `post_admin` type may hold them, the operator types may not). A write on a group needs
+its permission covering the group's parent, the root for a corps or a root plain group:
+
+| Holder of `scope_group.*` at | Manages |
+|---|---|
+| the root | every corps, brigade and plain group (as before) |
+| a corps | the brigades of that corps: create, rename, archive, restore, move between corps it covers; not the corps itself |
+| a brigade | nothing of the structure (a brigade holds no groups); not the brigade itself |
+| a plain group | the plain groups inside it; not the group itself |
+
+A move (`PATCH` with a new `corps_id` / `parent_id`) needs `scope_group.update` covering the old and the new parent.
+A refusal is 403 `permission_required_for_action` with `action` `create_corps`, `update_corps`, `archive_corps`,
+`restore_corps` (the same with `brigade` and `scope_group`), `move_brigade` or `move_scope_group`; a group outside the
+caller's `scope_group.view` answers 404 first. Show the buttons of a group when the permission is in effect at its
+parent.
+
 - Where each kind sits: a corps directly under the root, a brigade directly in a corps, a plain group under the root
   or another plain group. The kind is fixed at create (`POST /corps/`, `POST /brigades/`; `POST /scope-groups/`
   makes plain groups). Anything else answers 409 `scope_group_parent_not_allowed` on every route.
@@ -246,8 +263,8 @@ units, `post.*` for what happens to their posts.
   `post_count`: active ones the caller sees), `BrigadeResponse` (`corps_id`, `post_count`). An id of another kind,
   an archived or invisible one: 404 `scope_group_not_found`. Names are unique within a parent (corps share the root
   with root plain groups), case-insensitive.
-- Moving a brigade (`PATCH /brigades/{id}` with `corps_id`) takes its posts along and needs `post.update` and
-  `post.view` covering the old and the new corps.
+- Moving a brigade (`PATCH /brigades/{id}` with `corps_id`) takes its posts along and needs `scope_group.update`,
+  `post.update` and `post.view` covering the old and the new corps.
 - `POST /corps/{id}/archive` and `POST /brigades/{id}/archive` take `?cascade=true|false` (default false):
 
   | | cascade=false | cascade=true |
@@ -255,9 +272,9 @@ units, `post.*` for what happens to their posts.
   | brigade | its active posts move into its corps (`post.update` and `post.view` at the brigade and the corps) | the brigade and its active posts are archived (`post.archive` and `post.view` at the brigade) |
   | corps | 409 `corps_has_brigades` while it has an active brigade; its active posts leave it, directly under the root (`post.update` and `post.view` at the corps and the root) | the corps, its active brigades and every active post below are archived (`post.archive` and `post.view` at the corps) |
 
-  `scope_group.archive` must cover the node too, and `post.view` wherever posts change (the unit, and the
-  destination of a detach). A missing permission answers 403 `permission_required_for_action`
-  and nothing changes. Moving posts out changes access: holders of a role at the archived unit lose those posts.
+  `scope_group.archive` must cover the parent of the node too (the root for a corps, the corps for a brigade; also
+  for restore), and `post.view` wherever posts change (the unit, and the destination of a detach). A missing
+  permission answers 403 `permission_required_for_action` and nothing changes. Moving posts out changes access: holders of a role at the archived unit lose those posts.
   Restore (`POST /{id}/restore`) brings back the node only; list the archived brigades and posts below with
   `include_deleted=true` and restore them one by one. A brigade whose corps is archived: restore the corps first
   (404 `scope_group_not_found`).

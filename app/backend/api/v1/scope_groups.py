@@ -6,7 +6,9 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.api.shared.helpers.db_errors import unique_violation_as
-from app.backend.api.shared.helpers.scope_group_helper import audit_group, check_visible, lock_unit, name_taken
+from app.backend.api.shared.helpers.scope_group_helper import (
+    audit_group, check_visible, lock_unit, name_taken, parent_location, parent_node,
+)
 from app.backend.api.v1.models.query.scope_groups import ScopeGroupFilterParams
 from app.backend.api.v1.models.request.scope_groups import ScopeGroupCreate, ScopeGroupUpdate
 from app.backend.api.v1.models.response.scope_groups import (
@@ -15,7 +17,7 @@ from app.backend.api.v1.models.response.scope_groups import (
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
-from app.backend.auth.scope import Node, ROOT
+from app.backend.auth.scope import Node
 from app.backend.database import get_session
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.enums.general import Permissions, ScopeGroupKind
@@ -56,22 +58,25 @@ async def _check_parent(session: AsyncSession, group_id: Optional[int], parent_i
         raise ApiError.from_coded(exc)
 
 
-def _location(parent_id: Optional[int]) -> Node:
-    """Where a group sits: its parent group, the root for a group directly under it"""
-    return Node.group(parent_id) if parent_id is not None else ROOT
-
-
 async def _check_chosen_parent(session: AsyncSession, auth: AuthContext, group_id: Optional[int],
                                parent_id: Optional[int], kind: ScopeGroupKind,
                                old_parent_id: Optional[int] = None) -> None:
     """A parent the caller names (create, move): outside the caller's scope_group.view it answers 404 like an
-    unknown one. A move (group_id) takes every post below the group along: it needs post.update and post.view covering the
-    old and the new parent location, as a post move (403 permission_required_for_action, move_scope_group). Both before the
-    tree rules (the parent exists and is live, no cycle, the depth) and the placement rules of the kind."""
+    unknown one. A create needs scope_group.create covering the parent location (403 permission_required_for_action,
+    create_scope_group). A move (group_id) needs scope_group.update covering the old and the new parent location and,
+    as it takes every post below the group along, post.update and post.view covering both, as a post move (403
+    permission_required_for_action, move_scope_group). All before the tree rules (the parent exists and is live, no
+    cycle, the depth) and the placement rules of the kind."""
     if parent_id is not None:
         check_visible(auth, parent_id)
-    if group_id is not None:
-        for location in (_location(old_parent_id), _location(parent_id)):
+    if group_id is None:
+        AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_CREATE, parent_location(parent_id),
+                                          "create_scope_group")
+    else:
+        locations = (parent_location(old_parent_id), parent_location(parent_id))
+        for location in locations:
+            AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_UPDATE, location, "move_scope_group")
+        for location in locations:
             for permission in (Permissions.POST_UPDATE, Permissions.POST_VIEW):
                 AccessControlService.check_covers(auth, permission, location, "move_scope_group")
     await _check_parent(session, group_id, parent_id, kind)
@@ -100,7 +105,7 @@ async def list_scope_groups(
 @router.post(
     ScopeGroupRoutes.ROOT.value,
     response_model=ScopeGroupResponse,
-    responses=problems(*TREE_PROBLEMS, *GUARDED),
+    responses=problems(*TREE_PROBLEMS, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
 )
 async def create_scope_group(
         request: Request,
@@ -110,8 +115,9 @@ async def create_scope_group(
             all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_CREATE]))
 ):
     """Create a group under parent_id (null: directly under the root). Names are unique within a parent; groups
-    nest at most 6 levels deep. A parent outside the caller's scope_group.view answers 404 like an unknown one.
-    Creates a plain group: it sits under the root or a plain group, never in a corps or brigade (409
+    nest at most 6 levels deep. A parent outside the caller's scope_group.view answers 404 like an unknown one;
+    scope_group.create must cover the parent (the root for null), otherwise 403 permission_required_for_action
+    (action create_scope_group), before the tree rules. Creates a plain group: it sits under the root or a plain group, never in a corps or brigade (409
     scope_group_parent_not_allowed)."""
     await _check_chosen_parent(session, auth, None, data.parent_id, ScopeGroupKind.GROUP)
     if await name_taken(session, data.name, data.parent_id):
@@ -203,10 +209,13 @@ async def update_scope_group(
 ):
     """Rename, describe or move a group (parent_id null: directly under the root). Only the fields sent change.
     A group cannot move into its own subtree, and the moved subtree must still fit 6 levels. Archived, or outside
-    the caller's scope_group.view (the group or the new parent): 404. A move takes every post below the group along:
-    it also needs post.update and post.view covering the old and the new parent location (the group or above it; the root for a
-    group directly under it), otherwise 403 permission_required_for_action (action move_scope_group), answered before
-    the existence of the new parent and the tree rules; nothing changes on a refusal. The group keeps its kind and
+    the caller's scope_group.view (the group or the new parent): 404. scope_group.update must cover the parent of the
+    group (the root for a group directly under it), otherwise 403 permission_required_for_action (action
+    update_scope_group): a holder at a group manages the groups inside it, not the group itself. A move needs
+    scope_group.update covering the old and the new parent location and, as it takes every post below the group along,
+    post.update and post.view covering both (the group or above it; the root for a group directly under it),
+    otherwise 403 permission_required_for_action (action move_scope_group), answered before the existence of the new
+    parent and the tree rules; nothing changes on a refusal. The group keeps its kind and
     the parent must suit it (a plain group never moves into a corps or brigade, a corps stays under the root, a
     brigade in a corps): 409 scope_group_parent_not_allowed."""
     update_data = data.model_dump(exclude_unset=True)
@@ -219,6 +228,8 @@ async def update_scope_group(
     if "parent_id" in update_data and new_parent != group.parent_id:
         await _check_chosen_parent(session, auth, group.id, new_parent, ScopeGroupKind(group.kind),
                                    old_parent_id=group.parent_id)
+    else:
+        AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_UPDATE, parent_node(group), "update_scope_group")
     if ("parent_id" in update_data or "name" in update_data) and await name_taken(
             session, new_name, new_parent, exclude_id=group.id):
         raise ApiError(ErrorCode.SCOPE_GROUP_NAME_TAKEN)
@@ -240,7 +251,10 @@ async def update_scope_group(
 @router.post(
     ScopeGroupRoutes.GROUP_ARCHIVE.value,
     response_model=ScopeGroupResponse,
-    responses=problems(ErrorCode.SCOPE_GROUP_NOT_FOUND, ErrorCode.SCOPE_GROUP_NOT_EMPTY, *GUARDED),
+    responses=problems(
+        ErrorCode.SCOPE_GROUP_NOT_FOUND, ErrorCode.SCOPE_GROUP_NOT_EMPTY, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION,
+        *GUARDED,
+    ),
 )
 async def archive_scope_group(
         request: Request,
@@ -250,9 +264,11 @@ async def archive_scope_group(
             all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_ARCHIVE]))
 ):
     """Archive a group (is_deleted=true). Only an empty group: no active subgroup and no active post (409
-    scope_group_not_empty). Already archived, unknown or outside the caller's scope_group.view: 404. Undo with
-    POST /{group_id}/restore."""
+    scope_group_not_empty). Already archived, unknown or outside the caller's scope_group.view: 404. scope_group.archive
+    must cover its parent (the root for a group directly under it), otherwise 403 permission_required_for_action
+    (action archive_scope_group). Undo with POST /{group_id}/restore."""
     group = await _group_or_404(session, auth, group_id, lock=True)
+    AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_ARCHIVE, parent_node(group), "archive_scope_group")
     try:
         await groups_service.check_empty(session, group.id)
     except CodedError as exc:
@@ -271,7 +287,9 @@ async def archive_scope_group(
 @router.post(
     ScopeGroupRoutes.GROUP_RESTORE.value,
     response_model=ScopeGroupResponse,
-    responses=problems(ErrorCode.SCOPE_GROUP_NOT_ARCHIVED, *TREE_PROBLEMS, *GUARDED),
+    responses=problems(
+        ErrorCode.SCOPE_GROUP_NOT_ARCHIVED, *TREE_PROBLEMS, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED,
+    ),
 )
 async def restore_scope_group(
         request: Request,
@@ -281,8 +299,11 @@ async def restore_scope_group(
             all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_ARCHIVE]))
 ):
     """Restore an archived group (is_deleted=false) under its former parent. Unknown: 404, and 404 when the
-    parent is archived (restore the parent first); outside the caller's scope_group.view: 404. Not archived: 409."""
+    parent is archived (restore the parent first); outside the caller's scope_group.view: 404. scope_group.archive
+    must cover its parent (the root for a group directly under it), otherwise 403 permission_required_for_action
+    (action restore_scope_group). Not archived: 409."""
     group = await lock_unit(session, auth, None, group_id, include_deleted=True)   # its parent first
+    AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_ARCHIVE, parent_node(group), "restore_scope_group")
     if not group.is_deleted:
         raise ApiError(ErrorCode.SCOPE_GROUP_NOT_ARCHIVED)
     await _check_parent(session, group.id, group.parent_id, ScopeGroupKind(group.kind))

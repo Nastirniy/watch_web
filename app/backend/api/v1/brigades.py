@@ -14,7 +14,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.api.shared.helpers.db_errors import unique_violation_as
 from app.backend.api.shared.helpers.scope_group_helper import (
-    unit_observation_stats, archive_unit, audit_group, check_visible, get_unit, lock_groups, lock_unit, name_taken, restore_unit,
+    unit_observation_stats, archive_unit, audit_group, check_visible, get_unit, lock_groups, lock_unit, name_taken,
+    parent_location, restore_unit,
 )
 from app.backend.api.v1.models.query.brigades import BrigadeFilterParams
 from app.backend.api.v1.models.query.posts import PostFilterParams
@@ -152,10 +153,12 @@ async def update_brigade(
         auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_UPDATE]))
 ):
     """Rename, describe or move a brigade; only the fields sent change. Archived, another kind of group, or outside
-    the caller's scope_group.view: 404. A move (corps_id) takes every post of the brigade along: it also needs
-    post.view and post.update covering the old and the new corps (403 permission_required_for_action, action move_brigade),
-    answered before the existence of the new corps; the new corps unknown, archived or outside scope_group.view: 404,
-    not a corps: 409 scope_group_parent_not_allowed. Nothing changes on a refusal."""
+    the caller's scope_group.view: 404. scope_group.update must cover its corps (403 permission_required_for_action,
+    action update_brigade): a holder at the brigade does not manage the brigade itself. A move (corps_id) needs
+    scope_group.update covering the old and the new corps and, as it takes every post of the brigade along, post.view
+    and post.update covering both (403 permission_required_for_action, action move_brigade), answered before the
+    existence of the new corps; the new corps unknown, archived or outside scope_group.view: 404, not a corps: 409
+    scope_group_parent_not_allowed. Nothing changes on a refusal."""
     update_data = data.model_dump(exclude_unset=True)
     if "corps_id" in update_data:
         check_visible(auth, update_data["corps_id"])
@@ -164,7 +167,11 @@ async def update_brigade(
     old_values = brigade.model_dump()
 
     new_corps = update_data.get("corps_id", brigade.parent_id)
-    if new_corps != brigade.parent_id:
+    moving = new_corps != brigade.parent_id
+    for corps_id in ((brigade.parent_id, new_corps) if moving else (brigade.parent_id,)):
+        AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_UPDATE, parent_location(corps_id),
+                                          "move_brigade" if moving else "update_brigade")
+    if moving:
         for corps_id in (brigade.parent_id, new_corps):
             for permission in (Permissions.POST_UPDATE, Permissions.POST_VIEW):
                 AccessControlService.check_covers(auth, permission, Node.group(corps_id), "move_brigade")
@@ -203,7 +210,7 @@ async def archive_brigade(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_ARCHIVE]))
 ):
-    """Archive a brigade (is_deleted=true); the answer is the brigade. scope_group.archive must cover it.
+    """Archive a brigade (is_deleted=true); the answer is the brigade. scope_group.archive must cover its corps.
     Without cascade its active posts move into its corps, which needs post.update and post.view covering the brigade
     and the corps; with cascade=true they are archived, which needs post.archive and post.view covering the brigade.
     Missing permissions: 403 permission_required_for_action, nothing changes. Holders of a role at the brigade lose its posts. Archived,
@@ -227,8 +234,8 @@ async def restore_brigade(
         auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_ARCHIVE]))
 ):
     """Restore an archived brigade (is_deleted=false) in its corps: the brigade only; its archived posts are
-    listed with include_deleted (GET /{brigade_id}/posts) and restored one by one. scope_group.archive must cover it
-    (403). Not archived: 409; its corps archived (restore the corps first), unknown, another kind or outside
+    listed with include_deleted (GET /{brigade_id}/posts) and restored one by one. scope_group.archive must cover its
+    corps (403). Not archived: 409; its corps archived (restore the corps first), unknown, another kind or outside
     scope_group.view: 404."""
     brigade = await restore_unit(request, session, auth, BRIGADE, brigade_id)
     return brigade_to_response(brigade, await _fresh(session, auth))
