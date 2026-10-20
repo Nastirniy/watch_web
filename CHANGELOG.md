@@ -42,6 +42,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   still needs `scope_group.archive` held somewhere (403 otherwise), and now lists an archived group only where
   `scope_group.archive` is in effect (the group lies in a subtree where it is held), as posts do; live groups are
   listed as before. A holder at the root sees every archived group, as before.
+- `POST /corps/{corps_id}/archive`, `POST /brigades/{brigade_id}/archive` without `cascade` no longer need `post.update`
+  and `post.view` (at the unit and at its parent) for a unit that has no active post under it now: there is nothing to
+  move, `scope_group.archive` at the parent is enough. A unit with an active post needs them as before.
 
 ## Bug hunt fixes (2026-10-20, branch fix/corps-bughunt)
 

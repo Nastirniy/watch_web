@@ -95,7 +95,8 @@ class ObservationFilterService(SimpleFilterEngine):
         params: ObservationCriteria,
         access_post_ids: Optional[Iterable[int]] = None,
         archived_post_ids: Optional[FrozenSet[int]] = None,
-        unit_condition: Optional[ColumnElement] = None,
+        *,
+        unit_condition: Optional[ColumnElement],
     ) -> Select:
         """Apply all filters from ObservationCriteria. access_post_ids: the posts listed (None: every post);
         archived_post_ids: with include_deleted, the posts whose archived observations are shown (None: every post)"""
@@ -175,7 +176,8 @@ class ObservationFilterService(SimpleFilterEngine):
         params: ObservationCriteria,
         access_post_ids: Optional[Iterable[int]] = None,
         archived_post_ids: Optional[FrozenSet[int]] = None,
-        unit_condition: Optional[ColumnElement] = None,
+        *,
+        unit_condition: Optional[ColumnElement],
     ) -> Select:
         """Apply filters without pagination (for counting)"""
         params = cls.criteria(params)

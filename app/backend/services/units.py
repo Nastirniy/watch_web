@@ -95,16 +95,16 @@ def unit_filter_of(tree: ScopeTree, params) -> Optional[FrozenSet[int]]:
     return units_filter(tree, {kind: getattr(params, f"{kind.value}_id", None) for kind in UNIT_KINDS})
 
 
-def unit_counts(auth: AuthContext, unit_id: int) -> Tuple[int, int]:
+def unit_counts(auth: AuthContext, unit_id: int, viewable: Optional[FrozenSet[int]]) -> Tuple[int, int]:
     """(active units directly inside it the caller sees (scope_group.view), active posts at any depth below it with
-    post.view in effect): the brigade_count and post_count of a unit answer, from the request's tree"""
+    post.view in effect): the brigade_count and post_count of a unit answer, from the request's tree. viewable is
+    auth.posts_with(Permissions.POST_VIEW) (None: every post), read once per response by the caller"""
     tree = auth.tree
     children = sum(
         1 for group_id, parent_id in tree.group_parent.items()
         if parent_id == unit_id and tree.group_kind.get(group_id) not in (None, ScopeGroupKind.GROUP.value)
         and group_id not in tree.archived_groups and auth.covers(Permissions.SCOPE_GROUP_VIEW, Node.group(group_id))
     )
-    viewable = auth.posts_with(Permissions.POST_VIEW)
     posts = sum(
         1 for post_id in tree.posts_under(Node.group(unit_id))
         if post_id not in tree.archived_posts and (viewable is None or post_id in viewable)

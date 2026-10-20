@@ -18,8 +18,10 @@ from app.backend.api.shared.helpers.scope_group_helper import (
 from app.backend.api.v1.models.query.corps import UnitFilterParams
 from app.backend.api.v1.models.query.posts import PostFilterParams
 from app.backend.api.v1.models.request.corps import CorpsCreate, CorpsUpdate
-from app.backend.api.v1.models.response.brigades import BrigadeResponse, brigade_to_response
-from app.backend.api.v1.models.response.corps import CorpsResponse, UnitObservationStatsResponse, corps_to_response
+from app.backend.api.v1.models.response.brigades import BrigadeResponse, brigade_list_to_response
+from app.backend.api.v1.models.response.corps import (
+    CorpsResponse, UnitObservationStatsResponse, corps_list_to_response, corps_to_response,
+)
 from app.backend.api.v1.models.response.posts import PostResponse, posts_to_response
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.context import AuthContext, load_scope_tree
@@ -66,7 +68,7 @@ async def list_corps(
     query = UnitFilterService.apply_filters(
         select(ScopeGroup), filters, CORPS, auth.groups_with(Permissions.SCOPE_GROUP_VIEW), archived,
     )
-    return [corps_to_response(corps, auth) for corps in (await session.exec(query)).all()]
+    return corps_list_to_response((await session.exec(query)).all(), auth)
 
 
 @router.post(
@@ -219,7 +221,7 @@ async def list_corps_brigades(
     query = UnitFilterService.apply_filters(
         select(ScopeGroup), criteria, ScopeGroupKind.BRIGADE, auth.groups_with(Permissions.SCOPE_GROUP_VIEW), archived,
     )
-    return [brigade_to_response(brigade, auth) for brigade in (await session.exec(query)).all()]
+    return brigade_list_to_response((await session.exec(query)).all(), auth)
 
 
 @router.get(

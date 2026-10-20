@@ -20,7 +20,7 @@ from app.backend.api.shared.helpers.scope_group_helper import (
 from app.backend.api.v1.models.query.brigades import BrigadeFilterParams
 from app.backend.api.v1.models.query.posts import PostFilterParams
 from app.backend.api.v1.models.request.brigades import BrigadeCreate, BrigadeUpdate
-from app.backend.api.v1.models.response.brigades import BrigadeResponse, brigade_to_response
+from app.backend.api.v1.models.response.brigades import BrigadeResponse, brigade_list_to_response, brigade_to_response
 from app.backend.api.v1.models.response.corps import UnitObservationStatsResponse
 from app.backend.api.v1.models.response.posts import PostResponse, posts_to_response
 from app.backend.auth.access_control import AccessControlService
@@ -83,7 +83,7 @@ async def list_brigades(
     query = UnitFilterService.apply_filters(
         select(ScopeGroup), filters, BRIGADE, auth.groups_with(Permissions.SCOPE_GROUP_VIEW), archived,
     )
-    return [brigade_to_response(brigade, auth) for brigade in (await session.exec(query)).all()]
+    return brigade_list_to_response((await session.exec(query)).all(), auth)
 
 
 @router.post(

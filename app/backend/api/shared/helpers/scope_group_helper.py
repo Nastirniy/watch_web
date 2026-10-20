@@ -5,17 +5,16 @@ unknown id. Names are unique within a parent, case-insensitive, archived groups 
 shared by root plain groups and corps).
 
 Lock order (MariaDB snapshot isolation, utils/row_locks.py): every write that changes where groups or posts sit locks
-groups top down (a corps before its brigades; by depth in the tree, then by id), then posts in id order. The rule "no
-active post or brigade inside an archived unit" spans rows and holds only because every such writer takes the same
-locks in the same order.
+groups top down (a corps before its brigades; by depth in the tree, then by id), then posts in id order. The database
+does not choose an order: MariaDB takes the locks in the order of the statements, and this code fixes that order. The
+rule "no active post or brigade inside an archived unit" spans rows and holds only because every such writer takes the
+same locks in the same order.
 """
 from datetime import datetime, timezone
 from typing import Iterable, Optional
 
-from sqlalchemy import and_
-
 from fastapi import Request
-from sqlalchemy import func
+from sqlalchemy import and_, func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -138,8 +137,9 @@ async def archive_unit(request: Request, session: AsyncSession, auth: AuthContex
     """POST /corps/{id}/archive, /brigades/{id}/archive: 404 as get_unit; then the permissions, once (403
     permission_required_for_action): scope_group.archive covering its parent (parent_node: the root for a corps),
     with cascade post.view and post.archive covering the unit, without cascade post.view and post.update covering the
-    unit and where its posts go (its parent); then services/scope_groups.py archive_unit (409 corps_has_brigades). One
-    audit row per changed row; committed."""
+    unit and where its posts go (its parent), and nothing about posts when no active post sits under the unit (a detach
+    of an empty unit moves nothing); then services/scope_groups.py archive_unit (409 corps_has_brigades). One audit
+    row per changed row; committed."""
     unit = await lock_unit(session, auth, kind, unit_id)
     node = Node.group(unit.id)
     action = f"archive_{ScopeGroupKind(kind).value}"
@@ -147,7 +147,7 @@ async def archive_unit(request: Request, session: AsyncSession, auth: AuthContex
     if cascade:
         for permission in (Permissions.POST_ARCHIVE, Permissions.POST_VIEW):
             AccessControlService.check_covers(auth, permission, node, action)
-    else:
+    elif auth.tree.posts_under(node) - auth.tree.archived_posts:
         for location in (node, parent_node(unit)):
             for permission in (Permissions.POST_UPDATE, Permissions.POST_VIEW):
                 AccessControlService.check_covers(auth, permission, location, action)

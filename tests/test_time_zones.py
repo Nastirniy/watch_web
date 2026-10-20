@@ -117,7 +117,7 @@ async def test_a_range_filter_with_offset_bounds_finds_the_row(client, db, heade
     # The report body converts the same way
     report = ObservationReportParams(report_type=ObservationReportType.ALL_FIELDS, **around)
     assert report.observed_at_from == datetime(2026, 9, 20, 6, 30, tzinfo=timezone.utc)
-    bands = (await db.exec(ObservationReportFilter.build_query(report))).all()
+    bands = (await db.exec(ObservationReportFilter.build_query(report, unit_condition=None))).all()
     assert {band.observation_id for band in bands} == {observation.id}
 
 
@@ -133,14 +133,14 @@ async def test_filters_compare_the_utc_instant_of_criteria_built_without_the_api
     low, high = datetime(2026, 9, 20, 9, 30, tzinfo=KYIV_SUMMER), datetime(2026, 9, 20, 10, 30, tzinfo=KYIV_SUMMER)
 
     query = ObservationFilterService.apply_filters(
-        select(Observation), ObservationCriteria(observed_at_from=low, observed_at_to=high),
+        select(Observation), ObservationCriteria(observed_at_from=low, observed_at_to=high), unit_condition=None,
     )
     assert [row.id for row in (await db.exec(query)).all()] == [observation.id]
 
     report = ObservationReportCriteria(
         report_type=ObservationReportType.ALL_FIELDS, observed_at_from=low, observed_at_to=high,
     )
-    assert {band.observation_id for band in (await db.exec(ObservationReportFilter.build_query(report))).all()} == {observation.id}
+    assert {band.observation_id for band in (await db.exec(ObservationReportFilter.build_query(report, unit_condition=None))).all()} == {observation.id}
 
 
 @pytest.mark.asyncio

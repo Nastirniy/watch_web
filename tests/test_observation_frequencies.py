@@ -218,7 +218,7 @@ async def test_report_rows_are_bands_of_visible_observations(db):
     await db.commit()
 
     async def rows(report_type, scope=None, **params):
-        query = ObservationReportFilter.build_query(ObservationReportCriteria(report_type=ObservationReportType(report_type), **params), scope)
+        query = ObservationReportFilter.build_query(ObservationReportCriteria(report_type=ObservationReportType(report_type), **params), scope, unit_condition=None)
         return [(f.observation_id, f.kind, str(f.frequency_min)) for f in (await db.exec(query)).all()]
 
     rc_rows = await rows("rc_freq_part", scope={post.id})
