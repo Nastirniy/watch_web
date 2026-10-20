@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validat
 from app.backend.enums.general import (ConfidenceLevel, FrequencyKind, ObservationReportType, ObservationStatus, TagMatch,
                                       UnitPlacement)
 from app.backend.errors.coded import invalid
-from app.backend.utils.validators import INT_MAX, UtcDatetime, not_null
+from app.backend.utils.validators import INT_MAX, ObservationTime, UtcDatetime, not_null
 from app.backend.enums.errors import FieldErrorCode
 
 FREQUENCY_QUANTUM = Decimal("0.001")
@@ -81,7 +81,7 @@ class ObservationCreate(BaseModel):
         description="Frequency bands of the observation, at least one (any kind)"
     )
 
-    observed_at: UtcDatetime = Field(
+    observed_at: ObservationTime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="When the signal was observed; the current UTC time when omitted"
     )
@@ -123,7 +123,7 @@ class ObservationUpdate(BaseModel):
 
     signal_type_id: Optional[int] = Field(None, gt=0, description="Signal Type ID must be positive")
 
-    observed_at: Optional[UtcDatetime] = None
+    observed_at: Optional[ObservationTime] = None
     duration_seconds: Optional[int] = Field(None, ge=0, le=INT_MAX, description="Duration must be non-negative")
     comment: Optional[str] = Field(None, max_length=1000, description="Comment limited to 1000 characters")
     confidence_level: Optional[str] = Field(
@@ -160,7 +160,7 @@ class ObservationUpdate(BaseModel):
 class ObservationDisappeared(BaseModel):
     """Mark observation as disappeared with validation"""
 
-    disappeared_at: UtcDatetime = Field(description="Timestamp when observation disappeared")
+    disappeared_at: ObservationTime = Field(description="Timestamp when observation disappeared")
 
 
 class ObservationReportParams(BaseModel):

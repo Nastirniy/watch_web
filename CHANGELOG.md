@@ -19,6 +19,10 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ### Changed
 
+- Observation times in request bodies (`observed_at` of create and update, `disappeared_at` of mark-disappeared) lie
+  between 2000-01-01 and now + 1 day, else 422 `time_out_of_range` (params `earliest`, `latest`). Query filters take
+  any date, rows already stored are not touched, and an update without `observed_at` keeps working for them.
+  New field code `time_out_of_range`: add its message to the web localization.
 - Archive of a corps or brigade and moves of brigades and groups also need `post.view` where they change posts
   (cascade: covering the unit; detach and moves: the unit or group and the destination), as every write route
   needs the view permission next to the write one. A missing one answers 403 `permission_required_for_action`.

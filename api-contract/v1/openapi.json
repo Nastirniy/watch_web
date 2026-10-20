@@ -32427,7 +32427,8 @@
           "frequency_range_invalid",
           "frequency_center_out_of_range",
           "disappeared_before_observed",
-          "observed_after_disappeared"
+          "observed_after_disappeared",
+          "time_out_of_range"
         ],
         "title": "FieldErrorCode",
         "description": "Rules of the API on single values. Built-in checks keep pydantic's codes (missing, string_too_short, ...)."

@@ -4,7 +4,7 @@ Following OWASP security guidelines and industry standards
 """
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 from app.backend.utils.text import unescape_html, unescape_deep
 from app.backend.utils.datetime_utils import as_utc, assume_utc
@@ -21,6 +21,27 @@ INT_MAX = 2147483647
 # an offset is UTC. The database holds naive UTC and the drivers drop tzinfo, so every datetime that is written or
 # compared in SQL must be the UTC instant: 10:00+03:00 is stored and filtered as 07:00.
 UtcDatetime = Annotated[datetime, AfterValidator(as_utc)]
+
+# Observation times in request bodies (observed_at, disappeared_at) lie between these bounds: a value like 9999-12-31
+# breaks reports and durations. The latest is now + FUTURE_TOLERANCE (a client clock a little ahead), computed when
+# the value is checked. Query filters keep UtcDatetime, rows already stored are never checked.
+EARLIEST_OBSERVATION_TIME = datetime(2000, 1, 1, tzinfo=timezone.utc)
+FUTURE_TOLERANCE = timedelta(days=1)
+
+
+def _iso_z(value: datetime) -> str:
+    return value.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def within_observation_bounds(value: datetime) -> datetime:
+    """The UTC instant of an observation time, 422 `time_out_of_range` outside the bounds"""
+    latest = datetime.now(timezone.utc) + FUTURE_TOLERANCE
+    if not EARLIEST_OBSERVATION_TIME <= value <= latest:
+        raise invalid(FieldErrorCode.TIME_OUT_OF_RANGE, earliest=_iso_z(EARLIEST_OBSERVATION_TIME), latest=_iso_z(latest))
+    return value
+
+
+ObservationTime = Annotated[datetime, AfterValidator(as_utc), AfterValidator(within_observation_bounds)]
 
 
 def _with_offset(value: datetime, handler):
