@@ -132,14 +132,22 @@ async def lock_unit(session: AsyncSession, auth: AuthContext, kind: Optional[Sco
     return unit
 
 
+def _check_detach(auth: AuthContext, unit: ScopeGroup, action: str) -> None:
+    """A detach moves the posts of a unit to its parent: post.update and post.view cover the unit and the parent (403
+    permission_required_for_action)"""
+    for location in (Node.group(unit.id), parent_node(unit)):
+        for permission in (Permissions.POST_UPDATE, Permissions.POST_VIEW):
+            AccessControlService.check_covers(auth, permission, location, action)
+
+
 async def archive_unit(request: Request, session: AsyncSession, auth: AuthContext, kind: ScopeGroupKind,
                        unit_id: int, cascade: bool) -> ScopeGroup:
     """POST /corps/{id}/archive, /brigades/{id}/archive: 404 as get_unit; then the permissions, once (403
     permission_required_for_action): scope_group.archive covering its parent (parent_node: the root for a corps),
     with cascade post.view and post.archive covering the unit, without cascade post.view and post.update covering the
-    unit and where its posts go (its parent), and nothing about posts when no active post sits under the unit (a detach
-    of an empty unit moves nothing); then services/scope_groups.py archive_unit (409 corps_has_brigades). One audit
-    row per changed row; committed."""
+    unit and where its posts go (its parent), skipped while the request's tree shows no active post under the unit and
+    asked after all if the database held one and the detach moved it; then services/scope_groups.py archive_unit (409
+    corps_has_brigades). One audit row per changed row; committed."""
     unit = await lock_unit(session, auth, kind, unit_id)
     node = Node.group(unit.id)
     action = f"archive_{ScopeGroupKind(kind).value}"
@@ -147,14 +155,20 @@ async def archive_unit(request: Request, session: AsyncSession, auth: AuthContex
     if cascade:
         for permission in (Permissions.POST_ARCHIVE, Permissions.POST_VIEW):
             AccessControlService.check_covers(auth, permission, node, action)
-    elif auth.tree.posts_under(node) - auth.tree.archived_posts:
-        for location in (node, parent_node(unit)):
-            for permission in (Permissions.POST_UPDATE, Permissions.POST_VIEW):
-                AccessControlService.check_covers(auth, permission, location, action)
+    unchecked = False       # a detach whose post checks wait for what the database moves
+    if not cascade:
+        if auth.tree.posts_under(node) - auth.tree.archived_posts:
+            _check_detach(auth, unit, action)
+        else:
+            unchecked = True
     try:
         changes = await groups_service.archive_unit(session, unit, cascade)
     except CodedError as exc:
         raise ApiError.from_coded(exc)
+    if unchecked and changes.moved_post_ids:
+        # the request's tree showed no active post, the database held one (committed after the tree was read): the
+        # checks of a detach run now, before any audit row; the 403 rolls the request session back
+        _check_detach(auth, unit, action)
 
     for change in changes.rows:
         await create_audit_log(
