@@ -16,7 +16,8 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   with the params of their bounds (2000-01-01 .. now + 1 day), for filters with `earliest` 0001-01-01T00:00:00Z and
   `latest` 9999-12-31T23:59:59Z. No new field code.
 - `GET /corps/{id}/observation-stats`, `GET /brigades/{id}/observation-stats` and `GET /posts/{id}/observation-stats`
-  answered 500 for a period touching year 1 or 9999 (the bucket arithmetic overflowed, also with plain `Z` values).
+  answered 500 for a period touching year 1 or 9999 (the bucket arithmetic overflowed, also with plain `Z` values),
+  and `GET /statistics` for a `date_to` within 30 days of year 1 without `date_from` (the default start overflowed).
   They answer 422 `stats_period_out_of_range` now (no params). New problem code: add its message to the web
   localization. Ordinary periods, future ones included, are unchanged.
 - Post writes check `post.view` where they act, next to the write permission (CLAUDE.md: X.view AND the write, each

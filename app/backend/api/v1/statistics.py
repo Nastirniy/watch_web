@@ -50,7 +50,7 @@ async def _scalar(session: AsyncSession, query) -> int:
 @router.get(
     StatisticsRoutes.ROOT.value,
     response_model=StatisticsResponse,
-    responses=problems(ErrorCode.PERIOD_REVERSED, *GUARDED),
+    responses=problems(ErrorCode.PERIOD_REVERSED, ErrorCode.STATS_PERIOD_OUT_OF_RANGE, *GUARDED),
 )
 async def get_statistics(
         date_from: Optional[UtcDatetime] = Query(None, description="Period start, observations by created_at (default: date_to minus 30 days)"),
@@ -61,7 +61,11 @@ async def get_statistics(
     """Application statistics over the posts where statistics.view is in effect (post_ids; null: every post)"""
     now = datetime.now(timezone.utc)
     date_to = date_to or now
-    date_from = date_from or date_to - timedelta(days=DEFAULT_PERIOD_DAYS)
+    try:
+        date_from = date_from or date_to - timedelta(days=DEFAULT_PERIOD_DAYS)
+    except OverflowError:
+        # date_to within 30 days of 0001-01-01: the default start leaves the calendar (as in the observation-stats)
+        raise ApiError(ErrorCode.STATS_PERIOD_OUT_OF_RANGE)
     if date_from > date_to:
         raise ApiError(ErrorCode.PERIOD_REVERSED, fields="date_from / date_to")
 

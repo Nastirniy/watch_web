@@ -29066,11 +29066,25 @@
             }
           },
           "422": {
-            "description": "`validation_error`: Request validation failed",
+            "description": "`stats_period_out_of_range`: Period too close to the limits of the calendar; `validation_error`: Request validation failed",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/StatsPeriodOutOfRangeProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ValidationErrorProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "stats_period_out_of_range": "#/components/schemas/StatsPeriodOutOfRangeProblem",
+                      "validation_error": "#/components/schemas/ValidationErrorProblem"
+                    }
+                  }
                 }
               }
             }
@@ -43125,7 +43139,7 @@
             "title": "Detail",
             "description": "Explanation of this occurrence",
             "examples": [
-              "The period, with its buckets in the time zone, must lie inside the years 1 to 9999"
+              "The period, with its default start and its buckets in the time zone, must lie inside the years 1 to 9999"
             ]
           },
           "instance": {
@@ -43155,7 +43169,7 @@
         "examples": [
           {
             "code": "stats_period_out_of_range",
-            "detail": "The period, with its buckets in the time zone, must lie inside the years 1 to 9999",
+            "detail": "The period, with its default start and its buckets in the time zone, must lie inside the years 1 to 9999",
             "instance": "/api/v1/...",
             "status": 422,
             "title": "Period too close to the limits of the calendar",

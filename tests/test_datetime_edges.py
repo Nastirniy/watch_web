@@ -153,3 +153,18 @@ async def test_stats_of_an_ordinary_period_and_of_the_rest_of_the_year_still_ans
         for params in periods:
             r = await client.get(path, params=params, headers=h)
             assert r.status_code == 200, (path, params, r.text[:300])
+
+
+@pytest.mark.parametrize("params", [{"date_to": "0001-01-05T00:00:00Z"}, {"date_to": "0001-01-30T23:59:59Z"}])
+async def test_statistics_default_start_before_year_1_answers_422(client, db, headers, params):
+    """No date_from: the default start (date_to minus 30 days) leaves the calendar"""
+    h = headers(await make_admin(db))
+    r = await client.get(V1.path(StatisticsRoutes.ROOT), params=params, headers=h)
+    assert r.status_code == 422, (r.status_code, r.text[:300])
+    assert r.json()["code"] == "stats_period_out_of_range"
+
+
+async def test_statistics_default_start_inside_the_calendar_still_answers_200(client, db, headers):
+    h = headers(await make_admin(db))
+    r = await client.get(V1.path(StatisticsRoutes.ROOT), params={"date_to": "0001-02-05T00:00:00Z"}, headers=h)
+    assert r.status_code == 200, r.text[:300]

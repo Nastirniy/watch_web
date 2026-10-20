@@ -358,7 +358,7 @@ class ErrorCode(ProblemType):
         400, "Period too long", "Period longer than {max_days} days for group_by={group_by}", max_days=int, group_by=str))
     STATS_PERIOD_OUT_OF_RANGE = ("stats_period_out_of_range", problem(
         422, "Period too close to the limits of the calendar",
-        "The period, with its buckets in the time zone, must lie inside the years 1 to 9999"))
+        "The period, with its default start and its buckets in the time zone, must lie inside the years 1 to 9999"))
     UNKNOWN_TIME_ZONE = ("unknown_time_zone", problem(400, "Unknown time zone", "Unknown time zone: {time_zone}", time_zone=str))
 
     # ---------------------------------------------------------------- media files
