@@ -20,8 +20,8 @@ from app.backend.enums.general import Permissions, ObservationStatus, Observatio
 from app.backend.enums.routes import ObservationRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.services.scope_groups import UNIT_KINDS
-from app.backend.services.units import (observation_unit_labels, observation_unit_rows, observation_units_any,
-                                        observation_units_filter, unit_labels, visible_unit_ids)
+from app.backend.services.units import (current_units_of_group, observation_unit_labels, observation_unit_rows,
+                                        observation_units_any, observation_units_filter, unit_labels, visible_unit_ids)
 from app.backend.services.audit import create_audit_log
 from app.backend.api.v1.models.request.observations import (
     ObservationCreate,
@@ -209,8 +209,11 @@ async def create_observation(
 
     session.add(observation)
     await session.flush()
-    # The units the post sits in now, recorded once with the observation (services/units.py)
-    session.add_all(observation_unit_rows(auth.tree, post.group_id, observation.id, observation.created_at))
+    # The units the post sits in now, recorded once with the observation (services/units.py). Read from the database
+    # after the post lock, not from the tree of the request: a unit added or a group moved since the tree was loaded
+    # is in the history row
+    units = await current_units_of_group(session, post.group_id)
+    session.add_all(observation_unit_rows(units, observation.id, observation.created_at))
     await session.commit()
     observation = await _load_observation(session, observation.id)
 

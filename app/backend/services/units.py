@@ -1,7 +1,7 @@
 """Units of the organisation (corps, brigades: scope groups of a unit kind): what a post or an observation belongs to.
 
 The units of a post come from the scope tree every request loads (ScopeTree.units_of_post); the units of an
-observation are the observation_units rows written at its create.
+observation are the observation_units rows written at its create, from the database (current_units_of_group).
 """
 from dataclasses import dataclass
 from datetime import datetime
@@ -35,6 +35,23 @@ def post_units(tree: ScopeTree, group_id: Optional[int]) -> Dict[str, int]:
     """The units a post in this group sits in now (unit kind -> group id); {} directly under the root. Read through
     the post's group, not the post: a post created or moved in this request is right with the tree it loaded."""
     return tree.units_of_group(group_id) if group_id is not None else {}
+
+
+async def current_units_of_group(session: AsyncSession, group_id: Optional[int]) -> Dict[str, int]:
+    """The units a group is in or above, as the database holds them now (unit kind -> group id): what
+    ScopeTree.units_of_group gives for the same state, read with plain selects up the parent_id chain (archived
+    groups count; a plain group is skipped; a group seen twice or a missing one ends the chain). For the writes that
+    record units: the tree of the request may be older than the lock the write holds."""
+    chain: List[Tuple[int, str]] = []
+    seen = set()
+    while group_id is not None and group_id not in seen:
+        seen.add(group_id)
+        row = (await session.exec(select(ScopeGroup.parent_id, ScopeGroup.kind).where(ScopeGroup.id == group_id))).first()
+        if row is None:
+            break
+        chain.append((group_id, row[1]))
+        group_id = row[0]
+    return {kind: unit_id for unit_id, kind in reversed(chain) if kind != ScopeGroupKind.GROUP.value}
 
 
 async def unit_names(session: AsyncSession, group_ids: Iterable[int]) -> Dict[int, str]:
@@ -103,11 +120,11 @@ def posts_within(tree: ScopeTree, kind: ScopeGroupKind, unit_id: int, params) ->
     return under if asked is None else under & asked
 
 
-def observation_unit_rows(tree: ScopeTree, group_id: Optional[int], observation_id: int,
-                          created_at: datetime) -> List[ObservationUnit]:
-    """The observation_units rows of a new observation at a post in this group: every unit above the post now"""
+def observation_unit_rows(units: Mapping[str, int], observation_id: int, created_at: datetime) -> List[ObservationUnit]:
+    """The observation_units rows of a new observation: one per unit above its post (current_units_of_group of the
+    post's group, read after the post lock)"""
     return [ObservationUnit(observation_id=observation_id, group_id=unit_id, created_at=created_at)
-            for unit_id in post_units(tree, group_id).values()]
+            for unit_id in units.values()]
 
 
 async def recorded_units(session: AsyncSession, observation_ids: Iterable[int]) -> Dict[int, Dict[str, Tuple[int, str]]]:

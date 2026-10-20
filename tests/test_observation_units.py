@@ -3,9 +3,12 @@ after; answers show the recorded units with today's names."""
 from sqlmodel import select
 
 from app.backend.api.v1 import V1
+from app.backend.auth import context
+from app.backend.auth.context import load_scope_tree
 from app.backend.enums.routes import BrigadeRoutes, ObservationRoutes, PostRoutes, ScopeGroupRoutes, SearchRoutes
 from app.backend.models.observation import Observation
 from app.backend.models.observation_unit import ObservationUnit
+from app.backend.services.units import current_units_of_group
 from tests.helpers import make_admin, make_dictionary, make_group, make_post, observation_payload
 
 CREATE = V1.path(ObservationRoutes.CREATE)
@@ -81,3 +84,48 @@ async def test_observation_outside_any_unit_has_none(client, db, headers):
     ids = await make_dictionary(db)
     created = await _create(client, h, (await make_post(db)).id, ids["signal_type_id"])
     assert created["corps"] is None and created["brigade"] is None
+
+
+async def test_create_records_a_brigade_the_request_tree_does_not_know(client, db, headers, monkeypatch):
+    """The tree of the request was loaded before a brigade was added and the post moved into it: the rows follow the
+    database"""
+    h = headers(await make_admin(db))
+    ids = await make_dictionary(db)
+    corps = await make_group(db, kind="corps")
+    post = await make_post(db, group_id=corps.id)
+    stale = await load_scope_tree(db)
+
+    brigade = await make_group(db, parent_id=corps.id, kind="brigade")
+    post.group_id = brigade.id
+    await db.commit()
+    assert stale.units_of_group(post.group_id) == {}        # the old tree has never heard of the brigade
+
+    async def old_tree(session):
+        return stale
+    monkeypatch.setattr(context, "load_scope_tree", old_tree)
+    created = await _create(client, h, post.id, ids["signal_type_id"])
+    assert [group_id for group_id, _ in await _units(db, created["id"])] == [corps.id, brigade.id]
+    assert created["corps"]["id"] == corps.id and created["brigade"]["id"] == brigade.id
+
+
+async def test_current_units_of_group_equal_the_tree(db):
+    corps = await make_group(db, kind="corps")
+    plain = await make_group(db, parent_id=corps.id)
+    brigade = await make_group(db, parent_id=plain.id, kind="brigade")
+    archived_corps = await make_group(db, kind="corps")
+    archived_brigade = await make_group(db, parent_id=archived_corps.id, kind="brigade")
+    archived_corps.is_deleted = True
+    archived_brigade.is_deleted = True
+    await db.commit()
+    lone = await make_group(db)
+    tree = await load_scope_tree(db)
+
+    for group in (corps, plain, brigade, archived_corps, archived_brigade, lone):
+        assert await current_units_of_group(db, group.id) == tree.units_of_group(group.id)
+    assert await current_units_of_group(db, brigade.id) == {"corps": corps.id, "brigade": brigade.id}
+    assert await current_units_of_group(db, plain.id) == {"corps": corps.id}
+    assert await current_units_of_group(db, archived_brigade.id) == {"corps": archived_corps.id,
+                                                                    "brigade": archived_brigade.id}
+    assert await current_units_of_group(db, lone.id) == {}
+    assert await current_units_of_group(db, None) == {}
+    assert await current_units_of_group(db, 999999) == tree.units_of_group(999999) == {}
