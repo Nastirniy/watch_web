@@ -112,10 +112,11 @@ async def create_post(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW, Permissions.POST_CREATE]))
 ):
-    """Create new post. post.create must be held at the target group (or above it); a post directly under the
-    root needs post.create at the root."""
+    """Create new post. post.view and post.create must be held at the target group (or above it); a post directly
+    under the root needs both at the root (403 permission_required_for_action, action create_post)."""
     current_user = auth.user
-    AccessControlService.check_covers(auth, Permissions.POST_CREATE, _location(post_data.group_id), "create_post")
+    for permission in (Permissions.POST_CREATE, Permissions.POST_VIEW):
+        AccessControlService.check_covers(auth, permission, _location(post_data.group_id), "create_post")
     # The group is locked first: an archive of the group waits, so no post appears inside an archived group
     await lock_groups(session, auth.tree, [post_data.group_id])
     await _check_group(session, post_data.group_id)
@@ -221,7 +222,7 @@ async def get_post_observation_stats(
     PostRoutes.POST_BY_ID.value,
     response_model=PostResponse,
     responses=problems(
-        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_WRITE_DENIED,
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED,
         AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, ErrorCode.POST_CODE_TAKEN, ErrorCode.POST_NOT_FOUND,
         ErrorCode.SCOPE_GROUP_NOT_FOUND, *GUARDED,
     ),
@@ -233,13 +234,15 @@ async def update_post(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW, Permissions.POST_UPDATE]))
 ):
-    """Update post by ID. post.update must be in effect at the post; a move (group_id) also needs post.update
-    covering both the old and the new location (the group or above it; the root for a post directly under it).
+    """Update post by ID. post.view (403 post_access_denied) and post.update (403 post_write_denied) must be in effect
+    at the post; a move (group_id) also needs post.update and post.view covering both the old and the new location
+    (the group or above it; the root for a post directly under it; 403 permission_required_for_action, move_post).
 
     Only the fields sent are changed; null is refused for name, code and is_active (omit them instead).
     Archived posts answer 404 until restored (POST /{post_id}/restore); is_deleted is never read from the body.
     """
     current_user = auth.user
+    AccessControlService.check_post(auth, Permissions.POST_VIEW, post_id)
     AccessControlService.check_post(auth, Permissions.POST_UPDATE, post_id)
     # A move locks the old and the new group first (groups top down, then the post), like an archive of either
     groups = [auth.tree.post_group.get(post_id), post_data.group_id] if "group_id" in post_data.model_fields_set else []
@@ -251,9 +254,11 @@ async def update_post(
 
     update_data = post_data.model_dump(exclude_unset=True)
     if "group_id" in update_data and update_data["group_id"] != post.group_id:
-        # A move needs post.update covering the old and the new location (a grant on the post itself covers neither)
+        # A move needs post.update and post.view covering the old and the new location, as a group or brigade move
+        # does (a grant on the post itself covers neither)
         for location in (_location(post.group_id), _location(update_data["group_id"])):
-            AccessControlService.check_covers(auth, Permissions.POST_UPDATE, location, "move_post")
+            for permission in (Permissions.POST_UPDATE, Permissions.POST_VIEW):
+                AccessControlService.check_covers(auth, permission, location, "move_post")
         await _check_group(session, update_data["group_id"])
     # Check code uniqueness if being updated
     if "code" in update_data:
@@ -296,10 +301,11 @@ async def _set_post_archived(
         post_id: int,
         archived: bool,
 ) -> PostResponse:
-    """Shared body of archive / restore: post.archive at the post, state checks, flag flip, audit row. An archived
-    post is restored only through a grant inherited from a group or the root (a grant on the post itself stops
-    applying while it is archived)."""
+    """Shared body of archive / restore: post.view (403 post_access_denied), then post.archive (403 post_write_denied)
+    at the post, state checks, flag flip, audit row. An archived post is restored only through grants inherited from
+    a group or the root (a grant on the post itself stops applying while it is archived)."""
     current_user = auth.user
+    AccessControlService.check_post(auth, Permissions.POST_VIEW, post_id)
     AccessControlService.check_post(auth, Permissions.POST_ARCHIVE, post_id)
     # A restore locks the group first (groups before posts): an archive of the group cannot slip in between
     started = await lock_groups(session, auth.tree, [] if archived else [auth.tree.post_group.get(post_id)])
@@ -337,7 +343,8 @@ async def _set_post_archived(
     PostRoutes.POST_ARCHIVE.value,
     response_model=PostResponse,
     responses=problems(
-        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.POST_NOT_FOUND, *GUARDED,
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED,
+        ErrorCode.POST_NOT_FOUND, *GUARDED,
     ),
 )
 async def archive_post(
@@ -346,7 +353,7 @@ async def archive_post(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW, Permissions.POST_ARCHIVE]))
 ):
-    """Archive a post (is_deleted=true). post.archive must be in effect at the post.
+    """Archive a post (is_deleted=true). post.view and post.archive must be in effect at the post.
 
     Nothing is removed and no user row changes. Role assignments made on the post itself stop applying until it is
     restored; assignments inherited from a group or the root keep read access to its data. Its observations and media
@@ -362,8 +369,8 @@ async def archive_post(
     PostRoutes.POST_RESTORE.value,
     response_model=PostResponse,
     responses=problems(
-        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.POST_NOT_FOUND,
-        ErrorCode.POST_NOT_ARCHIVED, ErrorCode.SCOPE_GROUP_NOT_FOUND, *GUARDED,
+        AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED,
+        ErrorCode.POST_NOT_FOUND, ErrorCode.POST_NOT_ARCHIVED, ErrorCode.SCOPE_GROUP_NOT_FOUND, *GUARDED,
     ),
 )
 async def restore_post(
@@ -373,7 +380,7 @@ async def restore_post(
         auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW, Permissions.POST_ARCHIVE]))
 ):
     """Restore an archived post (is_deleted=false): role assignments made on it apply again.
-    post.archive must be in effect at the post through a group or the root (a grant on the archived post itself
-    does not apply). Unknown: 404. Not archived: 409. Its group archived: 404 scope_group_not_found (restore the
+    post.view and post.archive must be in effect at the post through a group or the root (a grant on the archived
+    post itself does not apply). Unknown: 404. Not archived: 409. Its group archived: 404 scope_group_not_found (restore the
     group first, as for a group under an archived parent)."""
     return await _set_post_archived(request, session, auth, post_id, archived=False)

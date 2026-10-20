@@ -147,7 +147,7 @@ The body adds `required` (`{all, any}`) and `missing` (permissions the user lack
 | `permission_denied` | The route's permissions are held nowhere (no assignment gives them; an assignment on an archived post or at an archived group gives nothing) |
 | `post_access_denied` / `post_write_denied` | The permission is held, but not in effect at this post (`post_id`; `*.view` / any other permission) |
 | `no_post_assigned` | The permission is held, but in effect at no post at all (for example only at a scope group without posts) |
-| `permission_required_for_action` | A permission a part or a target of the request needs (`permission`, `action`): `include_deleted`, the group a post is created in or moved to, the old and the new parent of a moved scope group or brigade (`post.update`, `post.view`), the parent of a group created, renamed, moved, archived or restored (`scope_group.create` / `.update` / `.archive`), a corps or brigade archived with or without cascade (`post.archive` / `post.update`, `post.view`), the home post of a new or moved user, a media file without an observation (`media.update` at the root) |
+| `permission_required_for_action` | A permission a part or a target of the request needs (`permission`, `action`): `include_deleted`, the group a post is created in or moved to and the one it leaves (`post.create` / `post.update`, `post.view`), the old and the new parent of a moved scope group or brigade (`post.update`, `post.view`), the parent of a group created, renamed, moved, archived or restored (`scope_group.create` / `.update` / `.archive`), a corps or brigade archived with or without cascade (`post.archive` / `post.update`, `post.view`), the home post of a new or moved user, a media file without an observation (`media.update` at the root) |
 | `user_self_only` | A user record outside the caller's `user.view` |
 | `target_user_more_privileged` | A change to a user the caller's `user.*` does not cover, or who holds an assignment the caller could not grant |
 | `grant_exceeds_own_permissions` | Granting or revoking permissions the caller does not hold (at the node, for an assignment; at every node the role is assigned at, for permissions added to a role and the restore of a role) |
@@ -161,6 +161,11 @@ The body carries `error_id`, the request id of the response (`X-Request-ID`); th
 Access is role assignments: a user holds a role at one node of the scope tree, the root (`/`, the whole system), a
 scope group (a group of posts, groups nest) or a post, and it applies to that node and everything below it.
 Assignments add up. Every route checks its own permissions where it acts; there is no administrator flag.
+A write needs the view permission of the record next to the write permission, both in effect where it acts. Posts:
+update, archive and restore need `post.view` and `post.update` / `post.archive` at the post (a post the caller cannot
+see answers 403 `post_access_denied`, as `GET` does, before the write permission); a create needs `post.create` and
+`post.view` covering the group (the root for a post directly under it), a move `post.update` and `post.view`
+covering the old and the new location (403 `permission_required_for_action`, `create_post` / `move_post`).
 
 The login, the refresh and `GET /api/v1/auth/me` carry what the interface is built from:
 

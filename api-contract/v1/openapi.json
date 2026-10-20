@@ -13154,7 +13154,7 @@
           "POSTS"
         ],
         "summary": "Create Post",
-        "description": "Create new post. post.create must be held at the target group (or above it); a post directly under the\nroot needs post.create at the root.",
+        "description": "Create new post. post.view and post.create must be held at the target group (or above it); a post directly\nunder the root needs both at the root (403 permission_required_for_action, action create_post).",
         "operationId": "create_post",
         "security": [
           {
@@ -13437,7 +13437,7 @@
           "POSTS"
         ],
         "summary": "Update Post",
-        "description": "Update post by ID. post.update must be in effect at the post; a move (group_id) also needs post.update\ncovering both the old and the new location (the group or above it; the root for a post directly under it).\n\nOnly the fields sent are changed; null is refused for name, code and is_active (omit them instead).\nArchived posts answer 404 until restored (POST /{post_id}/restore); is_deleted is never read from the body.",
+        "description": "Update post by ID. post.view (403 post_access_denied) and post.update (403 post_write_denied) must be in effect\nat the post; a move (group_id) also needs post.update and post.view covering both the old and the new location\n(the group or above it; the root for a post directly under it; 403 permission_required_for_action, move_post).\n\nOnly the fields sent are changed; null is refused for name, code and is_active (omit them instead).\nArchived posts answer 404 until restored (POST /{post_id}/restore); is_deleted is never read from the body.",
         "operationId": "update_post",
         "security": [
           {
@@ -13551,7 +13551,7 @@
             }
           },
           "403": {
-            "description": "`no_post_assigned`: You are not assigned to any post. Please contact an administrator.; `permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action; `post_write_denied`: Read-only access to this post",
+            "description": "`no_post_assigned`: You are not assigned to any post. Please contact an administrator.; `permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action; `post_access_denied`: No access to the data of this post; `post_write_denied`: Read-only access to this post",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13566,6 +13566,9 @@
                       "$ref": "#/components/schemas/PermissionRequiredForActionProblem"
                     },
                     {
+                      "$ref": "#/components/schemas/PostAccessDeniedProblem"
+                    },
+                    {
                       "$ref": "#/components/schemas/PostWriteDeniedProblem"
                     }
                   ],
@@ -13575,6 +13578,7 @@
                       "no_post_assigned": "#/components/schemas/NoPostAssignedProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem",
                       "permission_required_for_action": "#/components/schemas/PermissionRequiredForActionProblem",
+                      "post_access_denied": "#/components/schemas/PostAccessDeniedProblem",
                       "post_write_denied": "#/components/schemas/PostWriteDeniedProblem"
                     }
                   }
@@ -13877,7 +13881,7 @@
           "POSTS"
         ],
         "summary": "Archive Post",
-        "description": "Archive a post (is_deleted=true). post.archive must be in effect at the post.\n\nNothing is removed and no user row changes. Role assignments made on the post itself stop applying until it is\nrestored; assignments inherited from a group or the root keep read access to its data. Its observations and media\nbecome read-only history: writes answer 409 post_archived, except that callers with post.archive in effect at the\npost (plus observation.view, observation.archive and ownership or observation.manage_any) still archive and\nrestore its observations. It cannot become a home post. Hidden from lists unless include_deleted=true.\nUndo with POST /{post_id}/restore. Already archived or unknown: 404.",
+        "description": "Archive a post (is_deleted=true). post.view and post.archive must be in effect at the post.\n\nNothing is removed and no user row changes. Role assignments made on the post itself stop applying until it is\nrestored; assignments inherited from a group or the root keep read access to its data. Its observations and media\nbecome read-only history: writes answer 409 post_archived, except that callers with post.archive in effect at the\npost (plus observation.view, observation.archive and ownership or observation.manage_any) still archive and\nrestore its observations. It cannot become a home post. Hidden from lists unless include_deleted=true.\nUndo with POST /{post_id}/restore. Already archived or unknown: 404.",
         "operationId": "archive_post",
         "security": [
           {
@@ -13971,7 +13975,7 @@
             }
           },
           "403": {
-            "description": "`no_post_assigned`: You are not assigned to any post. Please contact an administrator.; `permission_denied`: Insufficient permissions; `post_write_denied`: Read-only access to this post",
+            "description": "`no_post_assigned`: You are not assigned to any post. Please contact an administrator.; `permission_denied`: Insufficient permissions; `post_access_denied`: No access to the data of this post; `post_write_denied`: Read-only access to this post",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13983,6 +13987,9 @@
                       "$ref": "#/components/schemas/PermissionDeniedProblem"
                     },
                     {
+                      "$ref": "#/components/schemas/PostAccessDeniedProblem"
+                    },
+                    {
                       "$ref": "#/components/schemas/PostWriteDeniedProblem"
                     }
                   ],
@@ -13991,6 +13998,7 @@
                     "mapping": {
                       "no_post_assigned": "#/components/schemas/NoPostAssignedProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "post_access_denied": "#/components/schemas/PostAccessDeniedProblem",
                       "post_write_denied": "#/components/schemas/PostWriteDeniedProblem"
                     }
                   }
@@ -14017,7 +14025,7 @@
           "POSTS"
         ],
         "summary": "Restore Post",
-        "description": "Restore an archived post (is_deleted=false): role assignments made on it apply again.\npost.archive must be in effect at the post through a group or the root (a grant on the archived post itself\ndoes not apply). Unknown: 404. Not archived: 409. Its group archived: 404 scope_group_not_found (restore the\ngroup first, as for a group under an archived parent).",
+        "description": "Restore an archived post (is_deleted=false): role assignments made on it apply again.\npost.view and post.archive must be in effect at the post through a group or the root (a grant on the archived\npost itself does not apply). Unknown: 404. Not archived: 409. Its group archived: 404 scope_group_not_found (restore the\ngroup first, as for a group under an archived parent).",
         "operationId": "restore_post",
         "security": [
           {
@@ -14111,7 +14119,7 @@
             }
           },
           "403": {
-            "description": "`no_post_assigned`: You are not assigned to any post. Please contact an administrator.; `permission_denied`: Insufficient permissions; `post_write_denied`: Read-only access to this post",
+            "description": "`no_post_assigned`: You are not assigned to any post. Please contact an administrator.; `permission_denied`: Insufficient permissions; `post_access_denied`: No access to the data of this post; `post_write_denied`: Read-only access to this post",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -14123,6 +14131,9 @@
                       "$ref": "#/components/schemas/PermissionDeniedProblem"
                     },
                     {
+                      "$ref": "#/components/schemas/PostAccessDeniedProblem"
+                    },
+                    {
                       "$ref": "#/components/schemas/PostWriteDeniedProblem"
                     }
                   ],
@@ -14131,6 +14142,7 @@
                     "mapping": {
                       "no_post_assigned": "#/components/schemas/NoPostAssignedProblem",
                       "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "post_access_denied": "#/components/schemas/PostAccessDeniedProblem",
                       "post_write_denied": "#/components/schemas/PostWriteDeniedProblem"
                     }
                   }

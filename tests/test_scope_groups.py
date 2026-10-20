@@ -371,7 +371,7 @@ async def test_a_post_is_not_restored_into_an_archived_group(client, db, headers
     other = await make_post(db, "Elsewhere")
     outsider = await _caller(db, Node.post(other.id), Permissions.POST_VIEW, Permissions.POST_ARCHIVE)
     r = await client.post(restore, headers=headers(outsider))
-    assert r.status_code == 403 and r.json()["code"] == "post_write_denied", r.text
+    assert r.status_code == 403 and r.json()["code"] == "post_access_denied", r.text
 
     r = await client.post(V1.path(ScopeGroupRoutes.GROUP_RESTORE, group_id=old.id), headers=h)
     assert r.status_code == 200, r.text

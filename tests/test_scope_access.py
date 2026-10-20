@@ -225,8 +225,9 @@ async def test_create_and_move_need_the_permission_at_the_target(client, db, hea
         body = _denied(await client.put(_post_url(in_east.id), json={"group_id": group_id}, headers=headers(manager)),
                        "permission_required_for_action", ["post.update"])
         assert body["permission"] == "post.update" and body["action"] == "move_post"
+    # a post the caller cannot see answers as GET does (post.view first), before the write permission
     body = _denied(await client.put(_post_url(in_west.id), json={"name": "x"}, headers=headers(manager)),
-                   "post_write_denied", ["post.update"])
+                   "post_access_denied", ["post.view"])
     assert body["post_id"] == in_west.id
     await db.refresh(in_east)
     assert in_east.group_id == sector.id
@@ -267,10 +268,10 @@ async def test_archive_and_restore_follow_post_archive_at_the_post(client, db, h
 
     assert (await client.post(V1.path(archive, post_id=in_east.id), headers=headers(manager))).status_code == 200
     assert (await client.post(V1.path(restore, post_id=in_east.id), headers=headers(manager))).status_code == 200
-    _denied(await client.post(V1.path(archive, post_id=outside.id), headers=headers(manager)), "post_write_denied", ["post.archive"])
+    _denied(await client.post(V1.path(archive, post_id=outside.id), headers=headers(manager)), "post_access_denied", ["post.view"])
     # a grant on the post itself archives it, but stops applying once it is archived: restore needs an inherited grant
     assert (await client.post(V1.path(archive, post_id=direct.id), headers=headers(manager))).status_code == 200
-    _denied(await client.post(V1.path(restore, post_id=direct.id), headers=headers(manager)), "post_write_denied", ["post.archive"])
+    _denied(await client.post(V1.path(restore, post_id=direct.id), headers=headers(manager)), "post_access_denied", ["post.view"])
 
 
 # ----------------------------------------------------------------- user records

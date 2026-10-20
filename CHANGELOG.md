@@ -19,6 +19,16 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   answered 500 for a period touching year 1 or 9999 (the bucket arithmetic overflowed, also with plain `Z` values).
   They answer 422 `stats_period_out_of_range` now (no params). New problem code: add its message to the web
   localization. Ordinary periods, future ones included, are unchanged.
+- Post writes check `post.view` where they act, next to the write permission (CLAUDE.md: X.view AND the write, each
+  in effect where it acts). `PUT /posts/{post_id}`, `POST /posts/{post_id}/archive` and `/restore` check `post.view`
+  at the post first: a caller with `post.update` / `post.archive` wider than its `post.view` edited, archived or
+  restored posts it could not see and got their full `PostResponse` back; it now gets 403 `post_access_denied`, as
+  `GET /posts/{post_id}` answers (newly declared on these three operations). A caller without any of the two at the
+  post gets `post_access_denied` (missing `post.view`) instead of `post_write_denied`; one who sees the post and lacks
+  the write still gets `post_write_denied`. A move (`group_id`) needs `post.view` covering the old and the new
+  location next to `post.update`, as a brigade or group move does, and `POST /posts/` needs `post.view` covering the
+  location next to `post.create` (403 `permission_required_for_action`, `move_post` / `create_post`). The built-in
+  user types always pair view with the writes: only custom roles see a difference.
 
 ## Unit history fill (2026-10-20, branch feat/unit-history-fill)
 
