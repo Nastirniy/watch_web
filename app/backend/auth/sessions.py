@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Optional
 
-from sqlalchemy import bindparam, or_, update
+from sqlalchemy import Row, bindparam, or_, update
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -87,12 +87,19 @@ async def begin_session_write(session: AsyncSession, user_id: int) -> None:
     await lock_first(session, select(User.id).where(User.id == user_id), shared=True)
 
 
-async def begin_account_session_write(session: AsyncSession, user_id: int) -> Optional[User]:
-    """begin_session_write for a write that depends on the account flags (the end of an inactive user's sessions):
-    the same shared lock, on the whole user row, returned as committed (populate_existing: the session's copy of the
-    user is overwritten). is_active / is_deleted cannot change before the commit: a change of them locks the row FOR
-    UPDATE. None when there is no such user."""
-    return await lock_first(session, select(User).where(User.id == user_id), shared=True)
+async def begin_account_session_write(session: AsyncSession, user_id: int) -> Optional[Row]:
+    """begin_session_write for a write that depends on the account flags (the end of an inactive user's sessions, a
+    login storing its session): the same shared lock, returning (id, is_active, is_deleted) as committed, or None
+    when there is no such user. The flags cannot change before the commit: a change of them locks the row FOR UPDATE.
+
+    Plain columns of users only, never the ORM entity: User carries presence column properties
+    (models/presence_properties.py: last_activity_at, last_login_at) whose subqueries read user_sessions. A locking
+    statement locks only its outer table; the subqueries are consistent reads and would open the transaction's read
+    view inside the lock (MariaDB), so two writers sharing the user lock (two requests of an inactive account, two
+    refreshes) would meet session rows the other changed after that view: error 1020. The session's copy of the user
+    is left as it is (no populate_existing on an entity)."""
+    return await lock_first(
+        session, select(User.id, User.is_active, User.is_deleted).where(User.id == user_id), shared=True)
 
 
 class TouchResult(Enum):

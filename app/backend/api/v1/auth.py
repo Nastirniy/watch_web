@@ -206,8 +206,13 @@ async def refresh_token(
         # sessions of the user would each hold their own session row and wait for the other's (a deadlock, 1213)
         await session.rollback()
         ended = await AuthService.expire_sessions_of_inactive_user(session, user_id)
-        # It locked the user row and put it, as committed, into `user`. Reactivated between the rollback and that
-        # lock (nothing ended): the refresh runs again as for an active user, once
+        # The account as committed now (a new transaction after that write's commit). Reactivated between the
+        # rollback and its lock (nothing ended): the refresh runs again as for an active user, once
+        user = (await session.exec(
+            select(User).where(User.id == user_id).execution_options(populate_existing=True)
+        )).first()
+        if user is None:
+            raise ApiError(AuthErrorCode.ACCOUNT_NOT_FOUND)
         if user.is_deleted or not user.is_active or attempt == 2:
             _logger.warning(f"Refresh attempt for inactive account: user_id={user_id}, sessions ended={ended}")
             if user.is_deleted:

@@ -24,7 +24,7 @@ from app.backend.auth.certificates import (
 from app.backend.errors.coded import CodedError
 from app.backend.services.audit import create_audit_log
 from app.backend.services.certificates import active_certificate, certificate_state
-from app.backend.utils.row_locks import lock_all, lock_first
+from app.backend.utils.row_locks import lock_all
 from app.backend.utils.text import fit_column
 
 # Get authentication logger
@@ -163,7 +163,7 @@ class AuthService:
         authenticate_pki answers) when the account or the certificate stopped being active meanwhile: no session
         of a deactivated account is ever stored. Committed here."""
         user_id = user.id
-        locked = await lock_first(session, select(User).where(User.id == user_id), shared=True)
+        locked = await session_lifetimes.begin_account_session_write(session, user_id)   # columns only, see there
         if locked is None:
             raise CodedError(AuthErrorCode.CERTIFICATE_NOT_RECOGNIZED)
         if locked.is_deleted:
@@ -522,8 +522,9 @@ class AuthService:
         backup) would leave them live and count towards presence. Returns the number of sessions revoked.
 
         The flags are checked again on the locked, committed user row: an account reactivated since the caller read
-        it ends nothing (0). The session's copy of the user is that row (same identity, overwritten), so the caller
-        reads the flags from its own copy afterwards and answers as for an active user when they changed.
+        it ends nothing (0). The lock reads plain columns only (begin_account_session_write: no read view inside it)
+        and leaves the caller's copy of the user as it was: the caller reads the user again after this commit
+        (a new transaction) and answers as for an active user when the flags changed.
 
         A write of its own, like every request's write to the user's sessions: the shared user lock first
         (sessions.begin_account_session_write; the request is no administrator changing the account, which holds the

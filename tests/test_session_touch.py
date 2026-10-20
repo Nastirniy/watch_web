@@ -539,6 +539,7 @@ async def test_ending_the_sessions_of_an_inactive_user_locks_the_user_first(clie
     assert response.status_code == 401 and response.json()["code"] == "account_deactivated", response.text
     write = _transaction_of(seen, "UPDATE user_sessions")
     assert write[0].startswith("SELECT users.id, ") and "FROM users WHERE users.id = ?" in write[0], write
+    assert "user_sessions" not in write[0], write[0]          # no consistent read inside the lock (see below)
     assert write[1].startswith("UPDATE user_sessions SET ended_at"), write
 
 
@@ -587,6 +588,7 @@ async def test_a_refresh_of_an_inactive_user_ends_its_sessions_outside_its_claim
     assert claim[-1] == "ROLLBACK" and not any(s.startswith("UPDATE user_sessions SET ended_at") for s in claim), claim
     write = _transaction_of(seen, "UPDATE user_sessions SET ended_at")
     assert write[0].startswith("SELECT users.id, ") and "FROM users WHERE users.id = ?" in write[0], write
+    assert "user_sessions" not in write[0], write[0]          # no consistent read inside the lock (see below)
     stored = await _stored(session_maker, row.id)
     assert (stored.end_reason, stored.revoke_cause) == ("revoked", "account_archived")
     assert stored.refresh_jti == row.refresh_jti                  # the claim was rolled back
@@ -730,3 +732,43 @@ async def test_a_login_stores_its_session_after_a_shared_lock_on_the_user(client
     assert response.status_code == 200, response.text
     write = _transaction_of(seen, "INSERT INTO user_sessions")
     assert write[0].startswith("SELECT users.") and "FROM users WHERE users.id = ?" in write[0], write
+    assert "user_sessions" not in write[0], write[0]
+
+
+def _locking_statement(monkeypatch, module, call):
+    """The statement module.lock_first was asked to run first, compiled for MariaDB; call stops right after it"""
+    import asyncio
+    from sqlalchemy.dialects import mysql
+    from app.backend.utils.row_locks import locking
+    taken = []
+
+    async def record(session, query, shared=False):
+        taken.append(locking(query, shared))
+        raise LookupError("recorded")             # stop before anything else: no database needed
+
+    monkeypatch.setattr(module, "lock_first", record)
+    try:
+        asyncio.run(call())
+    except LookupError:
+        pass
+    (statement,) = taken
+    return str(statement.compile(dialect=mysql.dialect(), compile_kwargs={"literal_binds": True}))
+
+
+def test_the_account_locks_select_columns_only(monkeypatch):
+    """The ORM entity User carries presence column properties (models/presence_properties.py: last_activity_at,
+    last_login_at) whose subqueries read user_sessions. In a locking statement only the outer table is locked: the
+    subqueries are consistent reads and open the transaction's read view inside the lock (MariaDB). Two parallel ends
+    of an inactive account's sessions (both share the user lock) then met session rows changed after that view: 1020.
+    The shared account locks select plain columns of users only."""
+    from app.backend.auth import service, sessions
+    from app.backend.auth.service import AuthService
+    from app.backend.models.user import User
+    end = _locking_statement(monkeypatch, sessions,
+                             lambda: AuthService.expire_sessions_of_inactive_user(None, 7))
+    login = _locking_statement(monkeypatch, sessions,
+                               lambda: AuthService.create_session(None, User(id=7, username="u7")))
+    for sql in (end, login):
+        assert "LOCK IN SHARE MODE" in sql and "FOR UPDATE" not in sql, sql
+        assert "user_sessions" not in sql and sql.count("SELECT") == 1, sql
+        assert "is_active" in sql and "is_deleted" in sql, sql

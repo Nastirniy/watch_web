@@ -102,12 +102,13 @@ async def _committed_user(session: AsyncSession, user_id: int) -> User:
 async def _refuse_inactive_account(session: AsyncSession, user: User) -> None:
     """A deactivated or archived account is refused whatever the state of its sessions, and any session of it still
     live is ended here, so the token stops working even when the flag was changed outside the API. The flags are
-    checked again on the locked row (expire_sessions_of_inactive_user puts it into `user`): an account reactivated
-    since the request read it is let through, the request goes on as for an active user."""
+    checked again on the locked row (expire_sessions_of_inactive_user) and read again after its commit: an account
+    reactivated since the request read it is let through, the request goes on as for an active user."""
     if not user.is_deleted and user.is_active:
         return
     user_id, username = user.id, user.username
     ended = await AuthService.expire_sessions_of_inactive_user(session, user_id)
+    user = await _committed_user(session, user_id)
     if not user.is_deleted and user.is_active:
         logger.info(f"Account reactivated before its sessions were ended: user_id={user_id}")
         return
