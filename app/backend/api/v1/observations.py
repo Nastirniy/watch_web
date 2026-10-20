@@ -309,10 +309,11 @@ async def update_observation(
 
     session.add(observation)
 
-    await session.commit()
+    # One transaction: flush and refresh (server-side values for the audit) before the audit row, a single commit.
+    # A failure of the audit row stores no update (a second transaction answered 500 for a stored update)
+    await session.flush()
     await session.refresh(observation)
 
-    # Create audit log
     await create_audit_log(
         session=session,
         action="update",
@@ -678,8 +679,9 @@ async def add_observation_frequency(
     observation.all_frequencies.append(frequency)
     observation.updated_at = datetime.now(timezone.utc)
     session.add(observation)
-    await session.commit()
-
+    # One commit: flush gives the band its id (and the generated bandwidth) for the audit row, so a failure stores no
+    # band (a second transaction answered 500 for a stored band and a retry added another)
+    await session.flush()
     await _audit_frequency(request, session, auth, "create", frequency)
     await session.commit()
     return ObservationFrequencyResponse.model_validate(frequency)
@@ -729,8 +731,7 @@ async def update_observation_frequency(
     frequency.updated_at = now
     observation.updated_at = now
     session.add(observation)
-    await session.commit()
-
+    await session.flush()
     await _audit_frequency(request, session, auth, "update", frequency, old_values=old_values)
     await session.commit()
     return ObservationFrequencyResponse.model_validate(frequency)
@@ -763,8 +764,7 @@ async def _set_frequency_archived(
     frequency.updated_at = now
     observation.updated_at = now
     session.add(observation)
-    await session.commit()
-
+    await session.flush()
     await _audit_frequency(request, session, auth, action, frequency, old_values=old_values)
     await session.commit()
     logger.info(f"User {auth.user.username} {action}d frequency {frequency.id} of observation {observation.id}")
