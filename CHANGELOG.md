@@ -15,6 +15,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `POST /auth/refresh`, the end of a session bound to a certificate that is no longer active and the recording of
   an expired session's end take the same shared lock first: no 500 (1020) or deadlock against such an end; a refresh
   that waited for it answers 401 `session_expired`.
+- `PATCH /brigades/{brigade_id}` with `corps_id` answered 500 for a brigade sitting directly under the root (older data:
+  the API creates none): the post rights of the move are now checked at the root, 403 `permission_required_for_action`
+  (action `move_brigade`) without them, 200 with them.
 
 ### Changed
 

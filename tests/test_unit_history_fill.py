@@ -5,7 +5,7 @@ from sqlalchemy import func
 from sqlmodel import select
 
 from app.backend.api.v1 import V1
-from app.backend.enums.routes import CorpsRoutes, ObservationRoutes, PostRoutes
+from app.backend.enums.routes import BrigadeRoutes, CorpsRoutes, ObservationRoutes, PostRoutes
 from app.backend.models.audit import AuditLog
 from app.backend.models.observation_unit import ObservationUnit
 from app.backend.models.scope_group import ScopeGroup
@@ -103,9 +103,8 @@ async def test_brigade_only_rows_get_the_corps(client, db, headers):
     post = await make_post(db, group_id=b1.id)
     saved = await _old(client, h, ids, post, 2)
     assert await _kinds(db, saved[0]) == {"brigade": b1.id}
-    brigade = await db.get(ScopeGroup, b1.id)       # the brigade is put into the corps (the API move of a root brigade answers 500)
-    brigade.parent_id = brigade.parent_key = k1.id
-    await db.commit()
+    r = await client.patch(V1.path(BrigadeRoutes.BRIGADE_BY_ID, brigade_id=b1.id), json={"corps_id": k1.id}, headers=h)
+    assert r.status_code == 200, r.text
 
     result = await fill_unit_history(db)
 

@@ -175,7 +175,7 @@ async def update_brigade(
     if moving:
         for corps_id in (brigade.parent_id, new_corps):
             for permission in (Permissions.POST_UPDATE, Permissions.POST_VIEW):
-                AccessControlService.check_covers(auth, permission, Node.group(corps_id), "move_brigade")
+                AccessControlService.check_covers(auth, permission, parent_location(corps_id), "move_brigade")
         await _check_corps(session, brigade.id, new_corps)
     if ("corps_id" in update_data or "name" in update_data) and await name_taken(
             session, update_data.get("name", brigade.name), new_corps, exclude_id=brigade.id):

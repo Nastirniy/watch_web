@@ -176,3 +176,36 @@ async def test_posts_of_a_brigade(client, db, headers):
     assert r.status_code == 200 and [p["id"] for p in r.json()] == [inside.id]
     shown = (await client.get(_one(brigade.id), headers=h)).json()
     assert shown["post_count"] == 1
+
+
+async def test_move_a_brigade_from_the_root_into_a_corps(client, db, headers):
+    # A brigade directly under the root (older data; the API creates none) can only be moved into a corps
+    h = headers(await make_admin(db))
+    corps = await make_group(db, name="Corps 1", kind="corps")
+    brigade = await make_group(db, kind="brigade")
+    post = await make_post(db, group_id=brigade.id)
+    r = await client.patch(_one(brigade.id), json={"corps_id": corps.id}, headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["corps_id"] == corps.id
+    row = (await db.exec(select(ScopeGroup).where(ScopeGroup.id == brigade.id))).one()
+    await db.refresh(row)
+    assert (row.parent_id, row.parent_key) == (corps.id, corps.id)
+    shown = (await client.get(V1.path(PostRoutes.POST_BY_ID, post_id=post.id), headers=h)).json()
+    assert shown["corps"] == {"id": corps.id, "name": "Corps 1"}
+    # The root is not a place for a brigade: no way back
+    r = await client.patch(_one(brigade.id), json={"corps_id": None}, headers=h)
+    assert r.status_code == 422, r.text
+
+
+async def test_move_from_the_root_needs_post_rights_at_the_root(client, db, headers):
+    corps = await make_group(db, kind="corps")
+    brigade = await make_group(db, kind="brigade")
+    user = await make_user(db)
+    await assign(db, user, await make_role(db, [Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_UPDATE]), ROOT)
+    await assign(db, user, await make_role(db, [Permissions.POST_UPDATE, Permissions.POST_VIEW]), Node.group(corps.id))
+    r = await client.patch(_one(brigade.id), json={"corps_id": corps.id}, headers=headers(user))
+    assert r.status_code == 403, r.text
+    assert r.json()["code"] == "permission_required_for_action"
+    row = (await db.exec(select(ScopeGroup).where(ScopeGroup.id == brigade.id))).one()
+    await db.refresh(row)
+    assert row.parent_id is None
