@@ -32,7 +32,7 @@ from app.backend.models.scope_group import ScopeGroup
 from app.backend.services import scope_groups as groups_service
 from app.backend.services.audit import create_audit_log
 from app.backend.services.observation_counts import ObservationStats, observation_stats
-from app.backend.services.units import observation_unit_condition, recorded_in
+from app.backend.services.units import observation_unit_condition, recorded_in, unit_post_ids
 from app.backend.utils.row_locks import lock, lock_first
 
 
@@ -192,21 +192,29 @@ async def unit_observation_stats(session: AsyncSession, auth: AuthContext, kind:
                                  placement: UnitPlacement, date_from: Optional[datetime], date_to: Optional[datetime],
                                  group_by: StatsGroupBy, tz: str, include_archived: bool) -> ObservationStats:
     """GET /corps/{id}/observation-stats, /brigades/{id}/observation-stats. Scope before existence: the unit must lie
-    where the caller holds scope_group.view or observation.view, otherwise 404 like an unknown id or one of another
-    kind; an archived unit keeps its history. Counted: the unit's observations (placement) at the posts where
-    observation.view is in effect."""
+    where the caller holds scope_group.view or observation.view, or have a post under it now where observation.view
+    is in effect (a brigade's commander counts its corps, a post's viewer its brigade), otherwise 404 like an unknown
+    id or one of another kind; an archived unit keeps its history. Counted: the unit's observations (placement) at
+    the posts where observation.view is in effect."""
     node = Node.group(unit_id)
-    if not (auth.covers(Permissions.SCOPE_GROUP_VIEW, node) or auth.covers(Permissions.OBSERVATION_VIEW, node)):
+    visible = auth.posts_with(Permissions.OBSERVATION_VIEW)
+    if not (auth.covers(Permissions.SCOPE_GROUP_VIEW, node) or auth.covers(Permissions.OBSERVATION_VIEW, node)
+            or visible is None or visible & unit_post_ids(auth.tree, kind, unit_id)):
         raise ApiError(ErrorCode.SCOPE_GROUP_NOT_FOUND)
     found = (await session.exec(select(ScopeGroup.id).where(
         ScopeGroup.id == unit_id, ScopeGroup.kind == ScopeGroupKind(kind).value))).first()
     if found is None:
         raise ApiError(ErrorCode.SCOPE_GROUP_NOT_FOUND)
-    visible = auth.posts_with(Permissions.OBSERVATION_VIEW)
-    counted = [Observation.post_id.in_(sorted(visible))] if visible is not None else []
-    condition = and_(observation_unit_condition(auth.tree, kind, unit_id, placement), *counted)
+    recorded = UnitPlacement(placement) is UnitPlacement.RECORDED
+    counted = [Observation.post_id.in_(sorted(visible))] if visible is not None and recorded else []
+    if visible is None or recorded:
+        condition = and_(observation_unit_condition(auth.tree, kind, unit_id, placement), *counted)
+    else:
+        # current: one IN list, the posts under the unit now (archived ones left out) that the caller sees
+        under = unit_post_ids(auth.tree, kind, unit_id) - auth.tree.archived_posts
+        condition = Observation.post_id.in_(sorted(under & visible))
     period_condition = None
-    if UnitPlacement(placement) is UnitPlacement.RECORDED and auth.tree.group_kind.get(unit_id) == kind.value:
+    if recorded and auth.tree.group_kind.get(unit_id) == kind.value:
         def period_condition(start: datetime, end: datetime):
             return and_(recorded_in([unit_id], start, end), *counted)
     try:

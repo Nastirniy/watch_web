@@ -281,7 +281,9 @@ units, `post.*` for what happens to their posts.
 - `GET /corps/{id}/observation-stats`, `GET /brigades/{id}/observation-stats` (`observation.view`): the counters of
   `GET /posts/{id}/observation-stats` over the unit (`placement`, the same period parameters), counting the posts
   where `observation.view` is in effect. The unit must lie where the caller holds `scope_group.view` or
-  `observation.view` (404 `scope_group_not_found` otherwise); an archived unit keeps its history.
+  `observation.view`, or have a post under it now where `observation.view` is in effect (so the commander of a brigade
+  counts its corps, and the viewer of one post its brigade, each only for the posts they see); otherwise 404
+  `scope_group_not_found`, like an unknown id. An archived unit keeps answering its history.
 
 ## Client certificates
 

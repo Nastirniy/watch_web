@@ -17038,7 +17038,7 @@
           "CORPS"
         ],
         "summary": "Get Corps Observation Stats",
-        "description": "Observation counters of a corps by created_at, as for a post: all time, last 24 hours, and the period per\nhour or per day with every bucket included; not_archived and archived never overlap. Only the posts where\nobservation.view is in effect are counted. The corps must lie where the caller holds scope_group.view or\nobservation.view, otherwise 404 like an unknown id or a group of another kind; an archived corps keeps its\nhistory.",
+        "description": "Observation counters of a corps by created_at, as for a post: all time, last 24 hours, and the period per\nhour or per day with every bucket included; not_archived and archived never overlap. Only the posts where\nobservation.view is in effect are counted. The corps must lie where the caller holds scope_group.view or\nobservation.view, or have a post under it now where observation.view is in effect (a brigade's commander counts\nits corps), otherwise 404 like an unknown id or a group of another kind. An archived corps keeps answering its\nhistory.",
         "operationId": "get_corps_observation_stats",
         "security": [
           {
@@ -18831,7 +18831,7 @@
           "BRIGADES"
         ],
         "summary": "Get Brigade Observation Stats",
-        "description": "Observation counters of a brigade by created_at, as for a post: all time, last 24 hours, and the period per\nhour or per day with every bucket included; not_archived and archived never overlap. Only the posts where\nobservation.view is in effect are counted. The brigade must lie where the caller holds scope_group.view or\nobservation.view, otherwise 404 like an unknown id or a group of another kind; an archived brigade keeps its\nhistory.",
+        "description": "Observation counters of a brigade by created_at, as for a post: all time, last 24 hours, and the period per\nhour or per day with every bucket included; not_archived and archived never overlap. Only the posts where\nobservation.view is in effect are counted. The brigade must lie where the caller holds scope_group.view or\nobservation.view, or have a post under it now where observation.view is in effect (a brigade's commander counts\nits corps), otherwise 404 like an unknown id or a group of another kind. An archived brigade keeps answering its\nhistory.",
         "operationId": "get_brigade_observation_stats",
         "security": [
           {

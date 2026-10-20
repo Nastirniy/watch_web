@@ -259,7 +259,8 @@ async def get_corps_observation_stats(
     """Observation counters of a corps by created_at, as for a post: all time, last 24 hours, and the period per
     hour or per day with every bucket included; not_archived and archived never overlap. Only the posts where
     observation.view is in effect are counted. The corps must lie where the caller holds scope_group.view or
-    observation.view, otherwise 404 like an unknown id or a group of another kind; an archived corps keeps its
+    observation.view, or have a post under it now where observation.view is in effect (a brigade's commander counts
+    its corps), otherwise 404 like an unknown id or a group of another kind. An archived corps keeps answering its
     history."""
     stats = await unit_observation_stats(
         session, auth, CORPS, corps_id, placement, date_from, date_to, group_by, tz or settings.timezone.timezone,

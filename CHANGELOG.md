@@ -5,6 +5,16 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Corps follow-ups (2026-10-20, branch fix/corps-followups)
+
+### Changed
+
+- `GET /corps/{corps_id}/observation-stats`, `GET /brigades/{brigade_id}/observation-stats` also answer for a unit
+  that has a post under it now where the caller holds `observation.view` (before: 404 unless `scope_group.view` or
+  `observation.view` covered the unit itself). A brigade's commander counts its corps and the viewer of one post its
+  brigade, each over the posts they see; a unit with no such post and no covering grant still answers 404. Documented:
+  an archived unit keeps answering its history. With `placement=current` the query has one `post_id` list.
+
 ## Bug hunt fixes (2026-10-20, branch fix/corps-bughunt)
 
 ### Fixed
