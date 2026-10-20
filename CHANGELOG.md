@@ -5,6 +5,25 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Bug hunt fixes (2026-10-20, branch fix/corps-bughunt)
+
+### Fixed
+
+- Parallel requests of one login session right after the activity touch interval (a page loading several lists
+  after a minute idle) answered 500 for most of them on MariaDB (error 1020 on `user_sessions`; live: 14 of 32).
+  The touch is now a write of its own with one conditional UPDATE; every request answers 200.
+- Observation create during an archive with cascade of its brigade or corps answered 500 (1020; live: 28 of 104).
+  The create now shares a lock on its post first and answers 409 `post_archived` once the post is archived.
+- `POST /observations/report` answered 500 for every caller whose scope included an observation stored with a date
+  at the edge of the calendar (`observed_at` 9999-12-31 is accepted); such a value is now shown in UTC.
+
+### Changed
+
+- Archive of a corps or brigade and moves of brigades and groups also need `post.view` where they change posts
+  (cascade: covering the unit; detach and moves: the unit or group and the destination), as every write route
+  needs the view permission next to the write one. A missing one answers 403 `permission_required_for_action`.
+- The answer of a brigade move counts the brigade's posts after the move.
+
 ## Corps and brigades, stage 2: reporting (2026-10-20)
 
 The contract changes: rewrite the generated types (`openapi-typescript`). API.md, "Corps and brigades".

@@ -246,8 +246,8 @@ units, `post.*` for what happens to their posts.
   `post_count`: active ones the caller sees), `BrigadeResponse` (`corps_id`, `post_count`). An id of another kind,
   an archived or invisible one: 404 `scope_group_not_found`. Names are unique within a parent (corps share the root
   with root plain groups), case-insensitive.
-- Moving a brigade (`PATCH /brigades/{id}` with `corps_id`) takes its posts along and needs `post.update` covering
-  the old and the new corps.
+- Moving a brigade (`PATCH /brigades/{id}` with `corps_id`) takes its posts along and needs `post.update` and
+  `post.view` covering the old and the new corps.
 - `POST /corps/{id}/archive` and `POST /brigades/{id}/archive` take `?cascade=true|false` (default false):
 
   | | cascade=false | cascade=true |
@@ -255,7 +255,8 @@ units, `post.*` for what happens to their posts.
   | brigade | its active posts move into its corps (`post.update` at the brigade and the corps) | the brigade and its active posts are archived (`post.archive` at the brigade) |
   | corps | 409 `corps_has_brigades` while it has an active brigade; its active posts leave it, directly under the root (`post.update` at the corps and the root) | the corps, its active brigades and every active post below are archived (`post.archive` at the corps) |
 
-  `scope_group.archive` must cover the node too. A missing permission answers 403 `permission_required_for_action`
+  `scope_group.archive` must cover the node too, and `post.view` wherever posts change (the unit, and the
+  destination of a detach). A missing permission answers 403 `permission_required_for_action`
   and nothing changes. Moving posts out changes access: holders of a role at the archived unit lose those posts.
   Restore (`POST /{id}/restore`) brings back the node only; list the archived brigades and posts below with
   `include_deleted=true` and restore them one by one. A brigade whose corps is archived: restore the corps first
