@@ -83,9 +83,11 @@ async def create_corps(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_CREATE]))
 ):
-    """Create a corps directly under the root: scope_group.create at the root (403 permission_required_for_action
-    otherwise). Names are unique among the corps and the plain groups of the root, case-insensitive."""
-    AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_CREATE, ROOT, "create_corps")
+    """Create a corps directly under the root: scope_group.view and scope_group.create at the root (403
+    permission_required_for_action otherwise, before the name check). Names are unique among the corps and the plain
+    groups of the root, case-insensitive."""
+    for permission in (Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_CREATE):
+        AccessControlService.check_covers(auth, permission, ROOT, "create_corps")
     if await name_taken(session, data.name, None):
         raise ApiError(ErrorCode.SCOPE_GROUP_NAME_TAKEN)
 
@@ -169,10 +171,11 @@ async def archive_corps(
 ):
     """Archive a corps (is_deleted=true); the answer is the corps. scope_group.archive must cover its parent, the
     root (a holder at the corps manages its brigades, not the corps). Without
-    cascade: a corps with an active brigade answers 409 corps_has_brigades (move or archive its brigades first), its
-    posts leave it (directly under the root), which needs post.update and post.view covering the corps and the root. With
-    cascade=true: its active brigades and every active post below are archived too, which needs post.archive and post.view covering
-    the corps. Missing permissions: 403 permission_required_for_action, nothing changes. Holders of a role at the
+    cascade: a corps with an active brigade answers 409 corps_has_brigades (move or archive its brigades first), the
+    active posts directly in it leave it (directly under the root), which needs post.update and post.view covering the
+    corps and the root. With cascade=true: its active brigades and every active post below are archived too, which
+    needs post.archive and post.view covering the corps. No post permission is asked when no active post would change.
+    Missing permissions: 403 permission_required_for_action, nothing changes. Holders of a role at the
     corps lose the posts that left it. Archived, unknown, another kind or outside scope_group.view: 404. Undo with
     POST /{corps_id}/restore (the corps only)"""
     corps = await archive_unit(request, session, auth, CORPS, corps_id, cascade)

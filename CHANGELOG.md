@@ -29,6 +29,19 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   location next to `post.update`, as a brigade or group move does, and `POST /posts/` needs `post.view` covering the
   location next to `post.create` (403 `permission_required_for_action`, `move_post` / `create_post`). The built-in
   user types always pair view with the writes: only custom roles see a difference.
+- `POST /corps/`, `POST /scope-groups/` without `parent_id` and `PATCH /scope-groups/{group_id}` with `parent_id: null`
+  check `scope_group.view` at the root next to `scope_group.create` / `.update`, before the name check: a holder of
+  `scope_group.create` at the root who cannot see it created groups it would never see and learned which root names
+  exist (409 against 201). It now gets 403 `permission_required_for_action` (`create_corps`, `create_scope_group`,
+  `move_scope_group`, missing `scope_group.view`).
+- `PATCH /brigades/{brigade_id}` with the brigade's own `corps_id` (a form sending every field) answered 404
+  `scope_group_not_found` to a holder who cannot see the corps; the current corps is no move and the answer is the same
+  as without it (403 `update_brigade` for a holder at the brigade).
+- `POST /corps/{id}/archive` and `POST /brigades/{id}/archive` with `cascade=true` of a unit with no active post below
+  it no longer ask for `post.archive` / `post.view` (as without cascade); they are asked after all when the database
+  archived a post the request did not know of (nothing changes then). Without cascade, a corps archive asks
+  `post.update` / `post.view` only for the posts directly in the corps, the ones a detach moves: a corps with an active
+  brigade answers 409 `corps_has_brigades` to a caller with `scope_group` rights and no post rights instead of 403.
 
 ## Unit history fill (2026-10-20, branch feat/unit-history-fill)
 

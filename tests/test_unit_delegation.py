@@ -10,7 +10,12 @@ from app.backend.api.v1 import V1
 from app.backend.auth.scope import Node, ROOT
 from app.backend.enums.general import Permissions, UserType
 from app.backend.enums.routes import BrigadeRoutes, CorpsRoutes, ScopeGroupRoutes, UserRoutes
+from app.backend.auth import context
+from app.backend.auth.context import load_scope_tree
+from app.backend.models.audit import AuditLog
+from app.backend.models.post import Post
 from app.backend.models.role import Role
+from app.backend.models.scope_group import ScopeGroup
 from tests.helpers import assign, make_admin, make_group, make_post, make_role, make_user
 
 COMMANDER = [
@@ -259,3 +264,193 @@ async def test_include_deleted_shows_archived_groups_only_where_scope_group_arch
     else:
         assert brigade_a.id in mine and brigade_a.id in every
         assert live_brigade.id in mine and brigade_b.id in every
+
+
+# ----------------------------------------------------------------- bug hunt 2 (A-02, A-05, A-06, C-L1)
+async def _holder(db, grants):
+    """A post_admin holding one custom role per (permissions, node)"""
+    user = await make_user(db, user_type=UserType.POST_ADMIN)
+    for perms, node in grants:
+        await assign(db, user, await make_role(db, perms), node)
+    return user
+
+
+def _missing_view(r, action: str) -> None:
+    _refused(r, action)
+    assert r.json()["missing"] == [Permissions.SCOPE_GROUP_VIEW.value], r.text
+
+
+async def test_creating_a_corps_needs_scope_group_view_at_the_root_before_the_name_check(client, db, headers):
+    """X.view AND X.create at the root: a holder of scope_group.create there who cannot see the root neither creates
+    a corps it would never see nor learns which root names exist (403 before 409)"""
+    seen = await make_group(db)
+    taken = await make_group(db, "Taken corps", kind="corps")
+    blind = await _holder(db, [([Permissions.SCOPE_GROUP_CREATE], ROOT),
+                               ([Permissions.SCOPE_GROUP_VIEW], Node.group(seen.id))])
+    for name in ("Blind corps", taken.name):
+        _missing_view(await client.post(V1.path(CorpsRoutes.ROOT), json={"name": name}, headers=headers(blind)),
+                      "create_corps")
+    assert (await db.exec(select(ScopeGroup).where(ScopeGroup.name == "Blind corps"))).first() is None
+
+    sighted = await _holder(db, [([Permissions.SCOPE_GROUP_CREATE, Permissions.SCOPE_GROUP_VIEW], ROOT)])
+    r = await client.post(V1.path(CorpsRoutes.ROOT), json={"name": "Blind corps"}, headers=headers(sighted))
+    assert r.status_code == 201, r.text
+    r = await client.post(V1.path(CorpsRoutes.ROOT), json={"name": taken.name}, headers=headers(sighted))
+    assert r.status_code == 409 and r.json()["code"] == "scope_group_name_taken", r.text
+
+
+async def test_creating_a_root_group_needs_scope_group_view_at_the_root_before_the_name_check(client, db, headers):
+    seen = await make_group(db)
+    taken = await make_group(db, "Taken group")
+    blind = await _holder(db, [([Permissions.SCOPE_GROUP_CREATE], ROOT),
+                               ([Permissions.SCOPE_GROUP_VIEW], Node.group(seen.id))])
+    for name in ("Blind group", taken.name):
+        _missing_view(await client.post(V1.path(ScopeGroupRoutes.ROOT), json={"name": name}, headers=headers(blind)),
+                      "create_scope_group")
+
+    sighted = await _holder(db, [([Permissions.SCOPE_GROUP_CREATE, Permissions.SCOPE_GROUP_VIEW], ROOT)])
+    r = await client.post(V1.path(ScopeGroupRoutes.ROOT), json={"name": "Blind group"}, headers=headers(sighted))
+    assert r.status_code == 200 and r.json()["parent_id"] is None, r.text
+
+
+async def test_moving_a_group_to_the_root_needs_scope_group_view_at_the_root(client, db, headers):
+    east = await make_group(db, "East")
+    kharkiv = await make_group(db, "Kharkiv", parent_id=east.id)
+    post_rights = ([Permissions.POST_UPDATE, Permissions.POST_VIEW], ROOT)
+    blind = await _holder(db, [([Permissions.SCOPE_GROUP_UPDATE], ROOT),
+                               ([Permissions.SCOPE_GROUP_VIEW], Node.group(east.id)), post_rights])
+    url = V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=kharkiv.id)
+    _missing_view(await client.patch(url, json={"parent_id": None}, headers=headers(blind)), "move_scope_group")
+    await db.refresh(kharkiv)
+    assert kharkiv.parent_id == east.id
+
+    sighted = await _holder(db, [([Permissions.SCOPE_GROUP_UPDATE, Permissions.SCOPE_GROUP_VIEW], ROOT), post_rights])
+    r = await client.patch(url, json={"parent_id": None}, headers=headers(sighted))
+    assert r.status_code == 200 and r.json()["parent_id"] is None, r.text
+
+
+async def test_brigade_holder_sending_its_current_corps_is_answered_like_without_it(client, db, headers):
+    """corps_id equal to the brigade's own corps is no move: the same 403 update_brigade as the body without it, not
+    the 404 of a corps the holder cannot see"""
+    corps = await make_group(db, kind="corps")
+    brigade = await make_group(db, parent_id=corps.id, kind="brigade")
+    h = headers(await _commander(db, Node.group(brigade.id)))
+    url = V1.path(BrigadeRoutes.BRIGADE_BY_ID, brigade_id=brigade.id)
+    _refused(await client.patch(url, json={"name": "x"}, headers=h), "update_brigade")
+    _refused(await client.patch(url, json={"name": "x", "corps_id": corps.id}, headers=h), "update_brigade")
+    # A real move to a corps it cannot see still answers 404
+    hidden = await make_group(db, kind="corps")
+    r = await client.patch(url, json={"corps_id": hidden.id}, headers=h)
+    assert r.status_code == 404 and r.json()["code"] == "scope_group_not_found", r.text
+
+
+async def test_corps_holder_sending_the_current_corps_renames_its_brigade(client, db, headers):
+    corps = await make_group(db, kind="corps")
+    brigade = await make_group(db, parent_id=corps.id, kind="brigade")
+    h = headers(await _commander(db, Node.group(corps.id)))
+    r = await client.patch(V1.path(BrigadeRoutes.BRIGADE_BY_ID, brigade_id=brigade.id),
+                           json={"name": "Renamed", "corps_id": corps.id}, headers=h)
+    assert r.status_code == 200 and r.json()["name"] == "Renamed" and r.json()["corps_id"] == corps.id, r.text
+
+
+UNIT_ARCHIVER = [Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_ARCHIVE]
+
+
+async def test_cascade_archive_of_an_empty_unit_needs_no_post_rights(client, db, headers):
+    """Like a detach: the request's tree shows no active post under the unit, so nothing but the unit (and its empty
+    brigades) is archived and no post right is asked"""
+    corps = await make_group(db, kind="corps")
+    brigade = await make_group(db, parent_id=corps.id, kind="brigade")
+    archived_post = await make_post(db, group_id=brigade.id)
+    archived_post.is_deleted = True
+    db.add(archived_post)
+    await db.commit()
+    h = headers(await _holder(db, [(UNIT_ARCHIVER, Node.group(corps.id))]))
+    r = await client.post(V1.path(BrigadeRoutes.BRIGADE_ARCHIVE, brigade_id=brigade.id), params={"cascade": "true"},
+                          headers=h)
+    assert r.status_code == 200 and r.json()["is_deleted"] is True, r.text
+
+    empty_corps = await make_group(db, kind="corps")
+    await make_group(db, parent_id=empty_corps.id, kind="brigade")
+    root_holder = headers(await _holder(db, [(UNIT_ARCHIVER, ROOT)]))
+    r = await client.post(V1.path(CorpsRoutes.CORPS_ARCHIVE, corps_id=empty_corps.id), params={"cascade": "true"},
+                          headers=root_holder)
+    assert r.status_code == 200 and r.json()["is_deleted"] is True, r.text
+
+
+async def test_cascade_archive_of_a_unit_with_a_post_still_needs_post_rights(client, db, headers):
+    corps = await make_group(db, kind="corps")
+    brigade = await make_group(db, parent_id=corps.id, kind="brigade")
+    post = await make_post(db, group_id=brigade.id)
+    h = headers(await _holder(db, [(UNIT_ARCHIVER, Node.group(corps.id))]))
+    r = await client.post(V1.path(BrigadeRoutes.BRIGADE_ARCHIVE, brigade_id=brigade.id), params={"cascade": "true"},
+                          headers=h)
+    _refused(r, "archive_brigade")
+    assert r.json()["missing"] == [Permissions.POST_ARCHIVE.value], r.text
+    await db.refresh(post)
+    await db.refresh(brigade)
+    assert post.is_deleted is False and brigade.is_deleted is False
+
+
+async def _stale_tree(monkeypatch, db) -> None:
+    """Requests read the tree as it is now, before the test adds rows (a post committed after the tree was read)"""
+    stale = await load_scope_tree(db)
+
+    async def old_tree(session):
+        return stale
+    monkeypatch.setattr(context, "load_scope_tree", old_tree)
+
+
+async def test_cascade_of_a_unit_the_tree_shows_empty_checks_a_post_that_arrived_late(client, db, headers, monkeypatch):
+    """The request's tree shows an empty brigade; an active post is committed into it before the lock: the cascade
+    archives it, so post.archive / post.view are asked after all (403) and nothing changes"""
+    corps = await make_group(db, kind="corps")
+    brigade = await make_group(db, parent_id=corps.id, kind="brigade")
+    user = await _holder(db, [(UNIT_ARCHIVER, Node.group(corps.id))])
+    brigade_id = brigade.id
+    await _stale_tree(monkeypatch, db)
+    post = await make_post(db, group_id=brigade_id)
+    post_id = post.id
+
+    r = await client.post(V1.path(BrigadeRoutes.BRIGADE_ARCHIVE, brigade_id=brigade_id), params={"cascade": "true"},
+                          headers=headers(user))
+    _refused(r, "archive_brigade")
+    unit_row = (await db.exec(select(ScopeGroup).where(ScopeGroup.id == brigade_id).execution_options(
+        populate_existing=True))).one()
+    late = (await db.exec(select(Post).where(Post.id == post_id).execution_options(populate_existing=True))).one()
+    assert unit_row.is_deleted is False and late.is_deleted is False
+    audited = (await db.exec(select(AuditLog).where(AuditLog.resource_type.in_(["scope_group", "post"])))).all()
+    assert not [row for row in audited if row.action == "archive"]
+
+
+async def test_cascade_with_a_late_post_succeeds_for_a_caller_with_the_post_rights(client, db, headers, monkeypatch):
+    corps = await make_group(db, kind="corps")
+    brigade = await make_group(db, parent_id=corps.id, kind="brigade")
+    user = await _holder(db, [(UNIT_ARCHIVER, Node.group(corps.id)),
+                              ([Permissions.POST_ARCHIVE, Permissions.POST_VIEW], Node.group(corps.id))])
+    brigade_id = brigade.id
+    await _stale_tree(monkeypatch, db)
+    post = await make_post(db, group_id=brigade_id)
+    post_id = post.id
+    r = await client.post(V1.path(BrigadeRoutes.BRIGADE_ARCHIVE, brigade_id=brigade_id), params={"cascade": "true"},
+                          headers=headers(user))
+    assert r.status_code == 200, r.text
+    late = (await db.exec(select(Post).where(Post.id == post_id).execution_options(populate_existing=True))).one()
+    assert late.is_deleted is True
+
+
+async def test_corps_archive_without_cascade_answers_corps_has_brigades_without_post_rights(client, db, headers):
+    """C-L1: the posts of its brigades never move on a corps detach (409 first); only the posts directly in the corps
+    need post.update / post.view"""
+    corps = await make_group(db, kind="corps")
+    brigade = await make_group(db, parent_id=corps.id, kind="brigade")
+    await make_post(db, group_id=brigade.id)
+    h = headers(await _holder(db, [(UNIT_ARCHIVER, ROOT)]))
+    r = await client.post(V1.path(CorpsRoutes.CORPS_ARCHIVE, corps_id=corps.id), headers=h)
+    assert r.status_code == 409 and r.json()["code"] == "corps_has_brigades", r.text
+
+    # A post directly in the corps would move under the root: post rights are asked
+    await make_post(db, group_id=corps.id)
+    _refused(await client.post(V1.path(CorpsRoutes.CORPS_ARCHIVE, corps_id=corps.id), headers=h), "archive_corps")
+    await db.refresh(corps)
+    assert corps.is_deleted is False

@@ -254,7 +254,10 @@ its permission covering the group's parent, the root for a corps or a root plain
 | a brigade | nothing of the structure (a brigade holds no groups); not the brigade itself |
 | a plain group | the plain groups inside it; not the group itself |
 
-A move (`PATCH` with a new `corps_id` / `parent_id`) needs `scope_group.update` covering the old and the new parent.
+A move (`PATCH` with a new `corps_id` / `parent_id`) needs `scope_group.update` covering the old and the new parent
+(the current `corps_id` / `parent_id` sent back is no move). Creating at the root (a corps, a root plain group) or
+moving a group to the root also needs `scope_group.view` at the root (X.view AND X.create / X.update where it acts),
+checked before the name: a holder of `scope_group.create` at the root who cannot see it gets 403, never 409.
 A refusal is 403 `permission_required_for_action` with `action` `create_corps`, `update_corps`, `archive_corps`,
 `restore_corps` (the same with `brigade` and `scope_group`), `move_brigade` or `move_scope_group`; a group outside the
 caller's `scope_group.view` answers 404 first. Show the buttons of a group when the permission is in effect at its
@@ -280,8 +283,10 @@ parent.
   | corps | 409 `corps_has_brigades` while it has an active brigade; its active posts leave it, directly under the root (`post.update` and `post.view` at the corps and the root) | the corps, its active brigades and every active post below are archived (`post.archive` and `post.view` at the corps) |
 
   `scope_group.archive` must cover the parent of the node too (the root for a corps, the corps for a brigade; also
-  for restore), and `post.view` wherever posts change (the unit, and the destination of a detach). A missing
-  permission answers 403 `permission_required_for_action` and nothing changes. Moving posts out changes access: holders of a role at the archived unit lose those posts.
+  for restore), and `post.view` wherever posts change (the unit, and the destination of a detach). The post
+  permissions are asked only when an active post would change: none for an empty unit (cascade or not), and a corps
+  detach counts only the posts directly in the corps (one with an active brigade answers 409 `corps_has_brigades`
+  without asking them). A missing permission answers 403 `permission_required_for_action` and nothing changes. Moving posts out changes access: holders of a role at the archived unit lose those posts.
   Restore (`POST /{id}/restore`) brings back the node only; list the archived brigades and posts below with
   `include_deleted=true` and restore them one by one. A brigade whose corps is archived: restore the corps first
   (404 `scope_group_not_found`).

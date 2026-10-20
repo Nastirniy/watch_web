@@ -14460,7 +14460,7 @@
           "SCOPE_GROUPS"
         ],
         "summary": "Create Scope Group",
-        "description": "Create a group under parent_id (null: directly under the root). Names are unique within a parent; groups\nnest at most 6 levels deep. A parent outside the caller's scope_group.view answers 404 like an unknown one;\nscope_group.create must cover the parent (the root for null), otherwise 403 permission_required_for_action\n(action create_scope_group), before the tree rules. Creates a plain group: it sits under the root or a plain group, never in a corps or brigade (409\nscope_group_parent_not_allowed).",
+        "description": "Create a group under parent_id (null: directly under the root). Names are unique within a parent; groups\nnest at most 6 levels deep. A parent outside the caller's scope_group.view answers 404 like an unknown one;\nscope_group.create must cover the parent (the root for null, where scope_group.view is needed too), otherwise 403\npermission_required_for_action (action create_scope_group), before the tree rules and the name check. Creates a plain group: it sits under the root or a plain group, never in a corps or brigade (409\nscope_group_parent_not_allowed).",
         "operationId": "create_scope_group",
         "security": [
           {
@@ -14863,7 +14863,7 @@
           "SCOPE_GROUPS"
         ],
         "summary": "Update Scope Group",
-        "description": "Rename, describe or move a group (parent_id null: directly under the root). Only the fields sent change.\nA group cannot move into its own subtree, and the moved subtree must still fit 6 levels. Archived, or outside\nthe caller's scope_group.view (the group or the new parent): 404. scope_group.update must cover the parent of the\ngroup (the root for a group directly under it), otherwise 403 permission_required_for_action (action\nupdate_scope_group): a holder at a group manages the groups inside it, not the group itself. A move needs\nscope_group.update covering the old and the new parent location and, as it takes every post below the group along,\npost.update and post.view covering both (the group or above it; the root for a group directly under it),\notherwise 403 permission_required_for_action (action move_scope_group), answered before the existence of the new\nparent and the tree rules; nothing changes on a refusal. The group keeps its kind and\nthe parent must suit it (a plain group never moves into a corps or brigade, a corps stays under the root, a\nbrigade in a corps): 409 scope_group_parent_not_allowed.",
+        "description": "Rename, describe or move a group (parent_id null: directly under the root). Only the fields sent change.\nA group cannot move into its own subtree, and the moved subtree must still fit 6 levels. Archived, or outside\nthe caller's scope_group.view (the group or the new parent): 404. scope_group.update must cover the parent of the\ngroup (the root for a group directly under it), otherwise 403 permission_required_for_action (action\nupdate_scope_group): a holder at a group manages the groups inside it, not the group itself. A move needs\nscope_group.update covering the old and the new parent location (a move to the root: scope_group.view there too)\nand, as it takes every post below the group along, post.update and post.view covering both (the group or above it; the root for a group directly under it),\notherwise 403 permission_required_for_action (action move_scope_group), answered before the existence of the new\nparent and the tree rules; nothing changes on a refusal. The group keeps its kind and\nthe parent must suit it (a plain group never moves into a corps or brigade, a corps stays under the root, a\nbrigade in a corps): 409 scope_group_parent_not_allowed.",
         "operationId": "update_scope_group",
         "security": [
           {
@@ -15593,7 +15593,7 @@
           "CORPS"
         ],
         "summary": "Create Corps",
-        "description": "Create a corps directly under the root: scope_group.create at the root (403 permission_required_for_action\notherwise). Names are unique among the corps and the plain groups of the root, case-insensitive.",
+        "description": "Create a corps directly under the root: scope_group.view and scope_group.create at the root (403\npermission_required_for_action otherwise, before the name check). Names are unique among the corps and the plain\ngroups of the root, case-insensitive.",
         "operationId": "create_corps",
         "security": [
           {
@@ -16006,7 +16006,7 @@
           "CORPS"
         ],
         "summary": "Archive Corps",
-        "description": "Archive a corps (is_deleted=true); the answer is the corps. scope_group.archive must cover its parent, the\nroot (a holder at the corps manages its brigades, not the corps). Without\ncascade: a corps with an active brigade answers 409 corps_has_brigades (move or archive its brigades first), its\nposts leave it (directly under the root), which needs post.update and post.view covering the corps and the root. With\ncascade=true: its active brigades and every active post below are archived too, which needs post.archive and post.view covering\nthe corps. Missing permissions: 403 permission_required_for_action, nothing changes. Holders of a role at the\ncorps lose the posts that left it. Archived, unknown, another kind or outside scope_group.view: 404. Undo with\nPOST /{corps_id}/restore (the corps only)",
+        "description": "Archive a corps (is_deleted=true); the answer is the corps. scope_group.archive must cover its parent, the\nroot (a holder at the corps manages its brigades, not the corps). Without\ncascade: a corps with an active brigade answers 409 corps_has_brigades (move or archive its brigades first), the\nactive posts directly in it leave it (directly under the root), which needs post.update and post.view covering the\ncorps and the root. With cascade=true: its active brigades and every active post below are archived too, which\nneeds post.archive and post.view covering the corps. No post permission is asked when no active post would change.\nMissing permissions: 403 permission_required_for_action, nothing changes. Holders of a role at the\ncorps lose the posts that left it. Archived, unknown, another kind or outside scope_group.view: 404. Undo with\nPOST /{corps_id}/restore (the corps only)",
         "operationId": "archive_corps",
         "security": [
           {
@@ -17905,7 +17905,7 @@
           "BRIGADES"
         ],
         "summary": "Update Brigade",
-        "description": "Rename, describe or move a brigade; only the fields sent change. Archived, another kind of group, or outside\nthe caller's scope_group.view: 404. scope_group.update must cover its corps (403 permission_required_for_action,\naction update_brigade): a holder at the brigade does not manage the brigade itself. A move (corps_id) needs\nscope_group.update covering the old and the new corps and, as it takes every post of the brigade along, post.view\nand post.update covering both (403 permission_required_for_action, action move_brigade), answered before the\nexistence of the new corps; the new corps unknown, archived or outside scope_group.view: 404, not a corps: 409\nscope_group_parent_not_allowed. Nothing changes on a refusal.",
+        "description": "Rename, describe or move a brigade; only the fields sent change. Archived, another kind of group, or outside\nthe caller's scope_group.view: 404. scope_group.update must cover its corps (403 permission_required_for_action,\naction update_brigade): a holder at the brigade does not manage the brigade itself. A move (corps_id other than\nits corps; its own corps sent back is no move and answers as without it) needs\nscope_group.update covering the old and the new corps and, as it takes every post of the brigade along, post.view\nand post.update covering both (403 permission_required_for_action, action move_brigade), answered before the\nexistence of the new corps; the new corps unknown, archived or outside scope_group.view: 404, not a corps: 409\nscope_group_parent_not_allowed. Nothing changes on a refusal.",
         "operationId": "update_brigade",
         "security": [
           {
@@ -18076,7 +18076,7 @@
           "BRIGADES"
         ],
         "summary": "Archive Brigade",
-        "description": "Archive a brigade (is_deleted=true); the answer is the brigade. scope_group.archive must cover its corps.\nWithout cascade its active posts move into its corps, which needs post.update and post.view covering the brigade\nand the corps; with cascade=true they are archived, which needs post.archive and post.view covering the brigade.\nMissing permissions: 403 permission_required_for_action, nothing changes. Holders of a role at the brigade lose its posts. Archived,\nunknown, another kind or outside scope_group.view: 404. Undo with POST /{brigade_id}/restore (the brigade only)",
+        "description": "Archive a brigade (is_deleted=true); the answer is the brigade. scope_group.archive must cover its corps.\nWithout cascade its active posts move into its corps, which needs post.update and post.view covering the brigade\nand the corps; with cascade=true they are archived, which needs post.archive and post.view covering the brigade.\nNo post permission is asked when the brigade has no active post.\nMissing permissions: 403 permission_required_for_action, nothing changes. Holders of a role at the brigade lose its posts. Archived,\nunknown, another kind or outside scope_group.view: 404. Undo with POST /{brigade_id}/restore (the brigade only)",
         "operationId": "archive_brigade",
         "security": [
           {

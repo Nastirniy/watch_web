@@ -140,35 +140,49 @@ def _check_detach(auth: AuthContext, unit: ScopeGroup, action: str) -> None:
             AccessControlService.check_covers(auth, permission, location, action)
 
 
+def _check_cascade(auth: AuthContext, unit: ScopeGroup, action: str) -> None:
+    """A cascade archives every active post below the unit: post.archive and post.view cover the unit (403
+    permission_required_for_action)"""
+    for permission in (Permissions.POST_ARCHIVE, Permissions.POST_VIEW):
+        AccessControlService.check_covers(auth, permission, Node.group(unit.id), action)
+
+
+def _posts_changed(auth: AuthContext, unit: ScopeGroup, cascade: bool) -> frozenset:
+    """The active posts the request's tree shows the archive would change: with cascade every one below the unit; a
+    detach moves only the posts directly in the unit (those of its brigades never move: a corps with an active
+    brigade answers corps_has_brigades)"""
+    tree = auth.tree
+    if cascade:
+        posts = tree.posts_under(Node.group(unit.id))
+    else:
+        posts = {post_id for post_id, group_id in tree.post_group.items() if group_id == unit.id}
+    return frozenset(posts) - tree.archived_posts
+
+
 async def archive_unit(request: Request, session: AsyncSession, auth: AuthContext, kind: ScopeGroupKind,
                        unit_id: int, cascade: bool) -> ScopeGroup:
     """POST /corps/{id}/archive, /brigades/{id}/archive: 404 as get_unit; then the permissions, once (403
     permission_required_for_action): scope_group.archive covering its parent (parent_node: the root for a corps),
     with cascade post.view and post.archive covering the unit, without cascade post.view and post.update covering the
-    unit and where its posts go (its parent), skipped while the request's tree shows no active post under the unit and
-    asked after all if the database held one and the detach moved it; then services/scope_groups.py archive_unit (409
-    corps_has_brigades). One audit row per changed row; committed."""
+    unit and where its posts go (its parent). The post checks are skipped while the request's tree shows no active
+    post the archive would change (_posts_changed: for a detach only the posts directly in the unit) and asked after
+    all if the database held one and the service archived or moved it; then services/scope_groups.py archive_unit
+    (409 corps_has_brigades). One audit row per changed row; committed."""
     unit = await lock_unit(session, auth, kind, unit_id)
-    node = Node.group(unit.id)
     action = f"archive_{ScopeGroupKind(kind).value}"
     AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_ARCHIVE, parent_node(unit), action)
-    if cascade:
-        for permission in (Permissions.POST_ARCHIVE, Permissions.POST_VIEW):
-            AccessControlService.check_covers(auth, permission, node, action)
-    unchecked = False       # a detach whose post checks wait for what the database moves
-    if not cascade:
-        if auth.tree.posts_under(node) - auth.tree.archived_posts:
-            _check_detach(auth, unit, action)
-        else:
-            unchecked = True
+    check_posts = _check_cascade if cascade else _check_detach
+    unchecked = not _posts_changed(auth, unit, cascade)     # the post checks wait for what the database changes
+    if not unchecked:
+        check_posts(auth, unit, action)
     try:
         changes = await groups_service.archive_unit(session, unit, cascade)
     except CodedError as exc:
         raise ApiError.from_coded(exc)
-    if unchecked and changes.moved_post_ids:
-        # the request's tree showed no active post, the database held one (committed after the tree was read): the
-        # checks of a detach run now, before any audit row; the 403 rolls the request session back
-        _check_detach(auth, unit, action)
+    if unchecked and (changes.archived_post_ids or changes.moved_post_ids):
+        # the request's tree showed no such post, the database held one (committed after the tree was read): the
+        # post checks run now, before any audit row; the 403 rolls the request session back
+        check_posts(auth, unit, action)
 
     for change in changes.rows:
         await create_audit_log(

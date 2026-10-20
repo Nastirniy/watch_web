@@ -155,13 +155,15 @@ async def update_brigade(
 ):
     """Rename, describe or move a brigade; only the fields sent change. Archived, another kind of group, or outside
     the caller's scope_group.view: 404. scope_group.update must cover its corps (403 permission_required_for_action,
-    action update_brigade): a holder at the brigade does not manage the brigade itself. A move (corps_id) needs
+    action update_brigade): a holder at the brigade does not manage the brigade itself. A move (corps_id other than
+    its corps; its own corps sent back is no move and answers as without it) needs
     scope_group.update covering the old and the new corps and, as it takes every post of the brigade along, post.view
     and post.update covering both (403 permission_required_for_action, action move_brigade), answered before the
     existence of the new corps; the new corps unknown, archived or outside scope_group.view: 404, not a corps: 409
     scope_group_parent_not_allowed. Nothing changes on a refusal."""
     update_data = data.model_dump(exclude_unset=True)
-    if "corps_id" in update_data:
+    # The current corps sent back is no move: only another corps must be visible (404 before any lock)
+    if "corps_id" in update_data and update_data["corps_id"] != auth.tree.group_parent.get(brigade_id):
         check_visible(auth, update_data["corps_id"])
     # Groups top down: the old and the new corps, then the brigade
     brigade = await lock_unit(session, auth, BRIGADE, brigade_id, also=[update_data.get("corps_id")])
@@ -169,6 +171,8 @@ async def update_brigade(
 
     new_corps = update_data.get("corps_id", brigade.parent_id)
     moving = new_corps != brigade.parent_id
+    if moving:
+        check_visible(auth, new_corps)     # the brigade moved since the tree was read: decided by the locked row
     for corps_id in ((brigade.parent_id, new_corps) if moving else (brigade.parent_id,)):
         AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_UPDATE, parent_location(corps_id),
                                           "move_brigade" if moving else "update_brigade")
@@ -214,6 +218,7 @@ async def archive_brigade(
     """Archive a brigade (is_deleted=true); the answer is the brigade. scope_group.archive must cover its corps.
     Without cascade its active posts move into its corps, which needs post.update and post.view covering the brigade
     and the corps; with cascade=true they are archived, which needs post.archive and post.view covering the brigade.
+    No post permission is asked when the brigade has no active post.
     Missing permissions: 403 permission_required_for_action, nothing changes. Holders of a role at the brigade lose its posts. Archived,
     unknown, another kind or outside scope_group.view: 404. Undo with POST /{brigade_id}/restore (the brigade only)"""
     brigade = await archive_unit(request, session, auth, BRIGADE, brigade_id, cascade)

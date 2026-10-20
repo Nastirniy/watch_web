@@ -17,7 +17,7 @@ from app.backend.api.v1.models.response.scope_groups import (
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
-from app.backend.auth.scope import Node
+from app.backend.auth.scope import Node, ROOT
 from app.backend.database import get_session
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.enums.general import Permissions, ScopeGroupKind
@@ -62,23 +62,27 @@ async def _check_chosen_parent(session: AsyncSession, auth: AuthContext, group_i
                                parent_id: Optional[int], kind: ScopeGroupKind,
                                old_parent_id: Optional[int] = None) -> None:
     """A parent the caller names (create, move): outside the caller's scope_group.view it answers 404 like an
-    unknown one. A create needs scope_group.create covering the parent location (403 permission_required_for_action,
-    create_scope_group). A move (group_id) needs scope_group.update covering the old and the new parent location and,
-    as it takes every post below the group along, post.update and post.view covering both, as a post move (403
-    permission_required_for_action, move_scope_group). All before the tree rules (the parent exists and is live, no
-    cycle, the depth) and the placement rules of the kind."""
+    unknown one; the root (None) is no id to hide: without scope_group.view there it answers 403
+    permission_required_for_action (create_scope_group / move_scope_group). A create needs scope_group.create covering
+    the parent location (403 permission_required_for_action, create_scope_group). A move (group_id) needs
+    scope_group.update covering the old and the new parent location and, as it takes every post below the group
+    along, post.update and post.view covering both, as a post move (403 permission_required_for_action,
+    move_scope_group). All before the tree rules (the parent exists and is live, no cycle, the depth), the placement
+    rules of the kind and the caller's name check."""
+    action = "create_scope_group" if group_id is None else "move_scope_group"
     if parent_id is not None:
         check_visible(auth, parent_id)
+    else:
+        AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_VIEW, ROOT, action)
     if group_id is None:
-        AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_CREATE, parent_location(parent_id),
-                                          "create_scope_group")
+        AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_CREATE, parent_location(parent_id), action)
     else:
         locations = (parent_location(old_parent_id), parent_location(parent_id))
         for location in locations:
-            AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_UPDATE, location, "move_scope_group")
+            AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_UPDATE, location, action)
         for location in locations:
             for permission in (Permissions.POST_UPDATE, Permissions.POST_VIEW):
-                AccessControlService.check_covers(auth, permission, location, "move_scope_group")
+                AccessControlService.check_covers(auth, permission, location, action)
     await _check_parent(session, group_id, parent_id, kind)
 
 
@@ -117,8 +121,8 @@ async def create_scope_group(
 ):
     """Create a group under parent_id (null: directly under the root). Names are unique within a parent; groups
     nest at most 6 levels deep. A parent outside the caller's scope_group.view answers 404 like an unknown one;
-    scope_group.create must cover the parent (the root for null), otherwise 403 permission_required_for_action
-    (action create_scope_group), before the tree rules. Creates a plain group: it sits under the root or a plain group, never in a corps or brigade (409
+    scope_group.create must cover the parent (the root for null, where scope_group.view is needed too), otherwise 403
+    permission_required_for_action (action create_scope_group), before the tree rules and the name check. Creates a plain group: it sits under the root or a plain group, never in a corps or brigade (409
     scope_group_parent_not_allowed)."""
     await _check_chosen_parent(session, auth, None, data.parent_id, ScopeGroupKind.GROUP)
     if await name_taken(session, data.name, data.parent_id):
@@ -213,8 +217,8 @@ async def update_scope_group(
     the caller's scope_group.view (the group or the new parent): 404. scope_group.update must cover the parent of the
     group (the root for a group directly under it), otherwise 403 permission_required_for_action (action
     update_scope_group): a holder at a group manages the groups inside it, not the group itself. A move needs
-    scope_group.update covering the old and the new parent location and, as it takes every post below the group along,
-    post.update and post.view covering both (the group or above it; the root for a group directly under it),
+    scope_group.update covering the old and the new parent location (a move to the root: scope_group.view there too)
+    and, as it takes every post below the group along, post.update and post.view covering both (the group or above it; the root for a group directly under it),
     otherwise 403 permission_required_for_action (action move_scope_group), answered before the existence of the new
     parent and the tree rules; nothing changes on a refusal. The group keeps its kind and
     the parent must suit it (a plain group never moves into a corps or brigade, a corps stays under the root, a
