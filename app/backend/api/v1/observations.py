@@ -8,6 +8,7 @@ from sqlalchemy import or_
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.backend.config import settings
 from app.backend.database import get_session
 from app.backend.utils.row_locks import lock_first
 from app.backend.models.observation import Observation, SignalType, Tag
@@ -412,7 +413,7 @@ async def get_report_types(
                             {"Content-Disposition": header('attachment; filename="<report>.xlsx"')}),
         **problems(
             AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION,
-            AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, *GUARDED,
+            AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.REPORT_TOO_LARGE, *GUARDED,
         ),
     },
 )
@@ -436,6 +437,8 @@ async def generate_observation_report(
     band kind, emitter group, frequency min/max/center, bandwidth,
     observed time, disappeared time, duration (minutes, one decimal), comment, creation date, tags.
     All datetimes are displayed in Kyiv local time (EET/EEST).
+    A report has at most settings.reports.max_rows band rows (20000 by default); a larger result answers 422
+    report_too_large with max_rows: narrow the filters.
 
     Filter combinations supported:
     - By specific observation IDs
@@ -457,12 +460,20 @@ async def generate_observation_report(
         unit_condition=observation_units_any(auth.tree, asked_units, params.placement),
     )
 
-    result = await session.exec(query)
+    limit = settings.reports.max_rows
+    result = await session.exec(query.limit(limit + 1))
     frequencies = list(result.all())
-    units = await observation_unit_labels(
-        session, auth.tree, {band.observation.id: band.observation for band in frequencies}.values(), params.placement)
-    # Names only of the units the caller sees or that the report's own columns show; others as their number
-    named = {label.id for found in units.values() for label in found.values()} | set(visible_unit_ids(auth, asked_units))
+    if len(frequencies) > limit:
+        raise ApiError(ErrorCode.REPORT_TOO_LARGE, max_rows=limit)
+    units = {}
+    if params.report_type == ObservationReportType.ALL_FIELDS:      # the only report with unit columns
+        units = await observation_unit_labels(
+            session, auth.tree, {band.observation.id: band.observation for band in frequencies}.values(),
+            params.placement)
+    # Names only of the units the caller sees (scope_group.view), that the report's own columns show, or that both
+    # permissions of the report cover; others as their number
+    named = ({label.id for found in units.values() for label in found.values()}
+             | set(visible_unit_ids(auth, asked_units, (Permissions.OBSERVATION_VIEW, Permissions.EXPORT_CREATE))))
     unit_filters = await unit_labels(session, (
         unit_id for ids in asked_units.values() for unit_id in ids or () if unit_id in named))
 

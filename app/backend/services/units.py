@@ -5,7 +5,7 @@ observation are the observation_units rows written at its create.
 """
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, FrozenSet, Iterable, List, Mapping, Optional, Tuple
+from typing import Dict, FrozenSet, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from sqlalchemy import and_, delete, false
 from sqlalchemy.sql.elements import ColumnElement
@@ -182,12 +182,14 @@ def observation_units_any(tree: ScopeTree, unit_ids: Mapping[ScopeGroupKind, Opt
     return and_(*per_kind) if per_kind else None
 
 
-def visible_unit_ids(auth: AuthContext, unit_ids: Mapping[ScopeGroupKind, Optional[Iterable[int]]]) -> List[int]:
-    """The asked ids a report may name: of the right kind and inside where the caller holds scope_group.view or
-    observation.view (any other id is shown as its number only)"""
+def visible_unit_ids(auth: AuthContext, unit_ids: Mapping[ScopeGroupKind, Optional[Iterable[int]]],
+                     permissions: Sequence[Permissions] = (Permissions.OBSERVATION_VIEW,)) -> List[int]:
+    """The asked ids a report may name: of the right kind and inside where the caller holds scope_group.view or every
+    one of the permissions (a report needs observation.view and export.create: both) (any other id is shown as its
+    number only)"""
     return sorted(unit_id for kind, ids in unit_ids.items() for unit_id in _units_of_kind(auth.tree, kind, ids or ())
                   if auth.covers(Permissions.SCOPE_GROUP_VIEW, Node.group(unit_id))
-                  or auth.covers(Permissions.OBSERVATION_VIEW, Node.group(unit_id)))
+                  or all(auth.covers(permission, Node.group(unit_id)) for permission in permissions))
 
 
 @dataclass(frozen=True)

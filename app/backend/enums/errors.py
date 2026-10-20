@@ -344,6 +344,8 @@ class ErrorCode(ProblemType):
     OBSERVATION_NOT_FOUND = ("observation_not_found", problem(404, "Observation not found"))
     OBSERVATION_SIGNAL_TYPE_ARCHIVED = ("observation_signal_type_archived", problem(
         409, "The signal type of the observation is archived"))
+    REPORT_TOO_LARGE = ("report_too_large", problem(
+        422, "Report too large", "The report has more than {max_rows} rows; narrow the filters", max_rows=int))
     OBSERVATION_NOT_ARCHIVED = ("observation_not_archived", problem(409, "Observation is not archived"))
     FREQUENCY_NOT_FOUND = ("frequency_not_found", problem(404, "Frequency not found"))
     FREQUENCY_NOT_ARCHIVED = ("frequency_not_archived", problem(409, "Frequency is not archived"))

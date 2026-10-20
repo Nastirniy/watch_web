@@ -11200,7 +11200,7 @@
           "OBSERVATIONS"
         ],
         "summary": "Generate Observation Report",
-        "description": "Generate an Excel (.xlsx) report for observations (observation.view and export.create).\n\nThe report header contains the filter criteria used (in Ukrainian).\nOne row per frequency band (rc_freq_part: rc bands, video_freq_part: video bands, all_fields: every band);\nthe observation columns repeat for each of its bands. Bands of archived observations and archived bands\nappear only with include_deleted (requires observation.archive), and only for the posts where\nobservation.archive is in effect. Only the posts where both observation.view and export.create are in effect\nare included; a post_ids entry outside them answers 403.\ncorps_ids / brigade_ids narrow the report to observations of these units (placement: recorded, where the post\nwas when the observation was created, or current, where it is now); access always follows the current tree.\nall_fields columns: user, post, corps, brigade (as the placement says; an archived unit is marked), signal type,\nband kind, emitter group, frequency min/max/center, bandwidth,\nobserved time, disappeared time, duration (minutes, one decimal), comment, creation date, tags.\nAll datetimes are displayed in Kyiv local time (EET/EEST).\n\nFilter combinations supported:\n- By specific observation IDs\n- By date range (observed_at or created_at)\n- By user IDs (one or many)\n- By post IDs (one or many)\n- By signal type IDs\n- By statuses\n- Any combination of the above",
+        "description": "Generate an Excel (.xlsx) report for observations (observation.view and export.create).\n\nThe report header contains the filter criteria used (in Ukrainian).\nOne row per frequency band (rc_freq_part: rc bands, video_freq_part: video bands, all_fields: every band);\nthe observation columns repeat for each of its bands. Bands of archived observations and archived bands\nappear only with include_deleted (requires observation.archive), and only for the posts where\nobservation.archive is in effect. Only the posts where both observation.view and export.create are in effect\nare included; a post_ids entry outside them answers 403.\ncorps_ids / brigade_ids narrow the report to observations of these units (placement: recorded, where the post\nwas when the observation was created, or current, where it is now); access always follows the current tree.\nall_fields columns: user, post, corps, brigade (as the placement says; an archived unit is marked), signal type,\nband kind, emitter group, frequency min/max/center, bandwidth,\nobserved time, disappeared time, duration (minutes, one decimal), comment, creation date, tags.\nAll datetimes are displayed in Kyiv local time (EET/EEST).\nA report has at most settings.reports.max_rows band rows (20000 by default); a larger result answers 422\nreport_too_large with max_rows: narrow the filters.\n\nFilter combinations supported:\n- By specific observation IDs\n- By date range (observed_at or created_at)\n- By user IDs (one or many)\n- By post IDs (one or many)\n- By signal type IDs\n- By statuses\n- Any combination of the above",
         "operationId": "generate_observation_report",
         "requestBody": {
           "content": {
@@ -11287,11 +11287,25 @@
             }
           },
           "422": {
-            "description": "`validation_error`: Request validation failed",
+            "description": "`report_too_large`: Report too large; `validation_error`: Request validation failed",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ReportTooLargeProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ValidationErrorProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "report_too_large": "#/components/schemas/ReportTooLargeProblem",
+                      "validation_error": "#/components/schemas/ValidationErrorProblem"
+                    }
+                  }
                 }
               }
             }
@@ -39349,6 +39363,75 @@
           "refresh_token"
         ],
         "title": "RefreshRequest"
+      },
+      "ReportTooLargeProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Report too large",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 422,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "The report has more than {max_rows} rows; narrow the filters"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "report_too_large",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          },
+          "max_rows": {
+            "type": "integer",
+            "title": "Max Rows"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code",
+          "max_rows"
+        ],
+        "title": "ReportTooLargeProblem",
+        "description": "Report too large (HTTP 422). Problem type report_too_large.",
+        "examples": [
+          {
+            "code": "report_too_large",
+            "detail": "The report has more than <max_rows> rows; narrow the filters",
+            "instance": "/api/v1/...",
+            "max_rows": "<max_rows>",
+            "status": 422,
+            "title": "Report too large",
+            "type": "https://example.org/problems/report_too_large"
+          }
+        ]
       },
       "ReportTypeChoice": {
         "properties": {

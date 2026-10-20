@@ -377,7 +377,7 @@ Field codes inside `validation_error`: `certificate_label_invalid` (the label), 
 | `GET /api/v1/media/{media_id}/download`, `/stream` | The file in its own Content-Type; `206` for a single `Range`; an unsatisfiable one is `416` `range_not_satisfiable` with `Content-Range: bytes */size` |
 | `GET /api/v1/media/{media_id}/thumbnail` | The image; `202` with `Retry-After` while a video poster is being extracted |
 | `GET /api/v1/media/{media_id}/storyboard` | WebVTT (`text/vtt`) for seek previews; `202` with `Retry-After` and `X-Storyboard-Status` while the worker has not produced it |
-| `POST /api/v1/observations/report` | An `.xlsx` file |
+| `POST /api/v1/observations/report` | An `.xlsx` file with one row per frequency band; at most `reports.max_rows` rows (20000 by default), a larger result is `422` `report_too_large` with `max_rows`: narrow the filters |
 | `PATCH /api/v1/media/uploads/{upload_id}` | `204`, the result is in the `Upload-*` headers |
 
 Resumable uploads step by step: `UPLOADS.md`.

@@ -273,11 +273,21 @@ class ObservationReportService:
         ws = wb.active
         ws.title = "Звіт спостережень"
 
+        # Style objects are built once per report and shared by the cells: a cell stores an index into the workbook's
+        # style tables, and building (and hashing) new objects for every cell cost most of the time of a large report
+        fonts: Dict[tuple, Font] = {}
+        fills: Dict[str, PatternFill] = {}
+
         def _font(bold=False, size=10, color="000000"):
-            return Font(name="Arial", bold=bold, size=size, color=color)
+            key = (bold, size, color)
+            if key not in fonts:
+                fonts[key] = Font(name="Arial", bold=bold, size=size, color=color)
+            return fonts[key]
 
         def _fill(hex_color):
-            return PatternFill(fill_type="solid", fgColor=hex_color)
+            if hex_color not in fills:
+                fills[hex_color] = PatternFill(fill_type="solid", fgColor=hex_color)
+            return fills[hex_color]
 
         thin = Side(style="thin")
         thin_border = Border(left=thin, right=thin, top=thin, bottom=thin)

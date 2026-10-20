@@ -19,6 +19,12 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ### Changed
 
+- `POST /observations/report` has at most `settings.reports.max_rows` band rows (20000 by default,
+  `MYSETTINGS_REPORTS__MAX_ROWS`); a larger result answers 422 `report_too_large` (param `max_rows`): narrow the
+  filters. New problem code: add its message to the web localization. The workbook styles are built once per report
+  (about 2 times faster), the unit labels are read only for `all_fields`, and a corps or brigade in the filter rows is
+  named only where `scope_group.view` or both `observation.view` and `export.create` cover it (before: either of
+  `scope_group.view` and `observation.view`).
 - Observation times in request bodies (`observed_at` of create and update, `disappeared_at` of mark-disappeared) lie
   between 2000-01-01 and now + 1 day, else 422 `time_out_of_range` (params `earliest`, `latest`). Query filters take
   any date, rows already stored are not touched, and an update without `observed_at` keeps working for them.

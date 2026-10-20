@@ -212,6 +212,14 @@ Seek previews (sprite sheets) made by the media worker with ffmpeg, only while t
 
 ---
 
+## Reports
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MYSETTINGS_REPORTS__MAX_ROWS` | `20000` | Most band rows in one Excel report (`POST /observations/report`); a larger result answers `422 report_too_large` with `max_rows`. The workbook is built in memory |
+
+---
+
 ## Admin account
 
 | Variable | Default | Description |

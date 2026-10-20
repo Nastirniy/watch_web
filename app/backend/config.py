@@ -1,7 +1,7 @@
 import os
 from typing import Optional
 from pathlib import Path
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, PositiveInt, field_validator, model_validator
 from pydantic_settings import BaseSettings
 import toml
 
@@ -376,6 +376,12 @@ class HealthConfig(BaseModel):
         return max(10, min(3600, v))
 
 
+class ReportConfig(BaseModel):
+    """Configuration of the Excel reports"""
+    # Band rows of one observations report; more answer 422 report_too_large (the workbook is built in memory)
+    max_rows: PositiveInt = 20000
+
+
 def _warn_unknown_settings(values: dict, fields: dict, prefix: str = "") -> None:
     """A key that no settings model declares is ignored: a setting that was removed or renamed, or a typo.
     Say so at startup instead of running silently with the default (logging is not set up yet: print)."""
@@ -401,6 +407,7 @@ class Settings(BaseSettings):
     storage: StorageConfig = Field(default_factory=StorageConfig)
     health: HealthConfig = Field(default_factory=HealthConfig)
     pki: PkiConfig = Field(default_factory=PkiConfig)
+    reports: ReportConfig = Field(default_factory=ReportConfig)
 
     def __init__(self, **kwargs):
         # Load from TOML first
