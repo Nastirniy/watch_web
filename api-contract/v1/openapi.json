@@ -14809,7 +14809,7 @@
           "SCOPE_GROUPS"
         ],
         "summary": "Update Scope Group",
-        "description": "Rename, describe or move a group (parent_id null: directly under the root). Only the fields sent change.\nA group cannot move into its own subtree, and the moved subtree must still fit 6 levels. Archived, or outside\nthe caller's scope_group.view (the group or the new parent): 404. A move takes every post below the group along:\nit also needs post.update covering the old and the new parent location (the group or above it; the root for a\ngroup directly under it), otherwise 403 permission_required_for_action (action move_scope_group), answered before\nthe existence of the new parent and the tree rules; nothing changes on a refusal. The group keeps its kind and\nthe parent must suit it (a plain group never moves into a corps or brigade, a corps stays under the root, a\nbrigade in a corps): 409 scope_group_parent_not_allowed.",
+        "description": "Rename, describe or move a group (parent_id null: directly under the root). Only the fields sent change.\nA group cannot move into its own subtree, and the moved subtree must still fit 6 levels. Archived, or outside\nthe caller's scope_group.view (the group or the new parent): 404. A move takes every post below the group along:\nit also needs post.update and post.view covering the old and the new parent location (the group or above it; the root for a\ngroup directly under it), otherwise 403 permission_required_for_action (action move_scope_group), answered before\nthe existence of the new parent and the tree rules; nothing changes on a refusal. The group keeps its kind and\nthe parent must suit it (a plain group never moves into a corps or brigade, a corps stays under the root, a\nbrigade in a corps): 409 scope_group_parent_not_allowed.",
         "operationId": "update_scope_group",
         "security": [
           {
@@ -15910,7 +15910,7 @@
           "CORPS"
         ],
         "summary": "Archive Corps",
-        "description": "Archive a corps (is_deleted=true); the answer is the corps. scope_group.archive must cover it. Without\ncascade: a corps with an active brigade answers 409 corps_has_brigades (move or archive its brigades first), its\nposts leave it (directly under the root), which needs post.update covering the corps and the root. With\ncascade=true: its active brigades and every active post below are archived too, which needs post.archive covering\nthe corps. Missing permissions: 403 permission_required_for_action, nothing changes. Holders of a role at the\ncorps lose the posts that left it. Archived, unknown, another kind or outside scope_group.view: 404. Undo with\nPOST /{corps_id}/restore (the corps only)",
+        "description": "Archive a corps (is_deleted=true); the answer is the corps. scope_group.archive must cover it. Without\ncascade: a corps with an active brigade answers 409 corps_has_brigades (move or archive its brigades first), its\nposts leave it (directly under the root), which needs post.update and post.view covering the corps and the root. With\ncascade=true: its active brigades and every active post below are archived too, which needs post.archive and post.view covering\nthe corps. Missing permissions: 403 permission_required_for_action, nothing changes. Holders of a role at the\ncorps lose the posts that left it. Archived, unknown, another kind or outside scope_group.view: 404. Undo with\nPOST /{corps_id}/restore (the corps only)",
         "operationId": "archive_corps",
         "security": [
           {
@@ -17966,7 +17966,7 @@
           "BRIGADES"
         ],
         "summary": "Archive Brigade",
-        "description": "Archive a brigade (is_deleted=true); the answer is the brigade. scope_group.archive must cover it.\nWithout cascade its active posts move into its corps, which needs post.update covering the brigade and the corps;\nwith cascade=true they are archived, which needs post.archive covering the brigade. Missing permissions: 403\npermission_required_for_action, nothing changes. Holders of a role at the brigade lose its posts. Archived,\nunknown, another kind or outside scope_group.view: 404. Undo with POST /{brigade_id}/restore (the brigade only)",
+        "description": "Archive a brigade (is_deleted=true); the answer is the brigade. scope_group.archive must cover it.\nWithout cascade its active posts move into its corps, which needs post.update and post.view covering the brigade\nand the corps; with cascade=true they are archived, which needs post.archive and post.view covering the brigade.\nMissing permissions: 403 permission_required_for_action, nothing changes. Holders of a role at the brigade lose its posts. Archived,\nunknown, another kind or outside scope_group.view: 404. Undo with POST /{brigade_id}/restore (the brigade only)",
         "operationId": "archive_brigade",
         "security": [
           {

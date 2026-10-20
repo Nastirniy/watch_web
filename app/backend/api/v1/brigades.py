@@ -204,9 +204,9 @@ async def archive_brigade(
         auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_ARCHIVE]))
 ):
     """Archive a brigade (is_deleted=true); the answer is the brigade. scope_group.archive must cover it.
-    Without cascade its active posts move into its corps, which needs post.update covering the brigade and the corps;
-    with cascade=true they are archived, which needs post.archive covering the brigade. Missing permissions: 403
-    permission_required_for_action, nothing changes. Holders of a role at the brigade lose its posts. Archived,
+    Without cascade its active posts move into its corps, which needs post.update and post.view covering the brigade
+    and the corps; with cascade=true they are archived, which needs post.archive and post.view covering the brigade.
+    Missing permissions: 403 permission_required_for_action, nothing changes. Holders of a role at the brigade lose its posts. Archived,
     unknown, another kind or outside scope_group.view: 404. Undo with POST /{brigade_id}/restore (the brigade only)"""
     brigade = await archive_unit(request, session, auth, BRIGADE, brigade_id, cascade)
     return brigade_to_response(brigade, await _fresh(session, auth))

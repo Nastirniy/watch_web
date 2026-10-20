@@ -65,8 +65,8 @@ async def _check_chosen_parent(session: AsyncSession, auth: AuthContext, group_i
                                parent_id: Optional[int], kind: ScopeGroupKind,
                                old_parent_id: Optional[int] = None) -> None:
     """A parent the caller names (create, move): outside the caller's scope_group.view it answers 404 like an
-    unknown one. A move (group_id) takes every post below the group along: it needs post.update covering the old and
-    the new parent location, as a post move (403 permission_required_for_action, move_scope_group). Both before the
+    unknown one. A move (group_id) takes every post below the group along: it needs post.update and post.view covering the
+    old and the new parent location, as a post move (403 permission_required_for_action, move_scope_group). Both before the
     tree rules (the parent exists and is live, no cycle, the depth) and the placement rules of the kind."""
     if parent_id is not None:
         check_visible(auth, parent_id)
@@ -204,7 +204,7 @@ async def update_scope_group(
     """Rename, describe or move a group (parent_id null: directly under the root). Only the fields sent change.
     A group cannot move into its own subtree, and the moved subtree must still fit 6 levels. Archived, or outside
     the caller's scope_group.view (the group or the new parent): 404. A move takes every post below the group along:
-    it also needs post.update covering the old and the new parent location (the group or above it; the root for a
+    it also needs post.update and post.view covering the old and the new parent location (the group or above it; the root for a
     group directly under it), otherwise 403 permission_required_for_action (action move_scope_group), answered before
     the existence of the new parent and the tree rules; nothing changes on a refusal. The group keeps its kind and
     the parent must suit it (a plain group never moves into a corps or brigade, a corps stays under the root, a

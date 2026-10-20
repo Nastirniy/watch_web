@@ -161,8 +161,8 @@ async def archive_corps(
 ):
     """Archive a corps (is_deleted=true); the answer is the corps. scope_group.archive must cover it. Without
     cascade: a corps with an active brigade answers 409 corps_has_brigades (move or archive its brigades first), its
-    posts leave it (directly under the root), which needs post.update covering the corps and the root. With
-    cascade=true: its active brigades and every active post below are archived too, which needs post.archive covering
+    posts leave it (directly under the root), which needs post.update and post.view covering the corps and the root. With
+    cascade=true: its active brigades and every active post below are archived too, which needs post.archive and post.view covering
     the corps. Missing permissions: 403 permission_required_for_action, nothing changes. Holders of a role at the
     corps lose the posts that left it. Archived, unknown, another kind or outside scope_group.view: 404. Undo with
     POST /{corps_id}/restore (the corps only)"""

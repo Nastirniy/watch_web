@@ -1,4 +1,4 @@
-"""Randomized model-based test of corps / brigades (not committed).
+"""Randomized model-based test of corps / brigades.
 
 A shadow model (plain dicts) of groups, posts and observations is driven by seeded random operation sequences. Every
 operation goes to the API as the admin; the status (and problem code) must match the model's prediction, and the
@@ -6,7 +6,8 @@ model is updated only on success. Invariants (a)-(g) are compared against the AP
 test runs the same sequences with a non-admin viewer holding a role at one corps or brigade.
 
 Failures are collected per seed (never stop at the first), distinct failure keys are replayed through a small
-delta-debugging loop to get a short reproduction, and everything is summarised by test_zz_summary at the end.
+delta-debugging loop to get a short reproduction, and everything is summarised by test_zz_summary at the end. Each
+seed test also fails on its own mismatches, so -k, -n (xdist) or a deselected summary never hide one.
 Env: FUZZ_SEEDS (default 6; 24+ for a deep run), FUZZ_OPS (default 60), FUZZ_MINIMIZE (default 1), FUZZ_OUT (json report path).
 """
 import io
@@ -1324,12 +1325,14 @@ async def run_seed(seed, viewer):
 
 @pytest.mark.parametrize("seed", range(SEEDS))
 async def test_admin_model(seed):
-    await run_seed(SEED_BASE + seed, viewer=False)
+    result = await run_seed(SEED_BASE + seed, viewer=False)
+    assert not result["fails"], {str(k): v["message"][:300] for k, v in result["fails"].items()}
 
 
 @pytest.mark.parametrize("seed", range(max(1, SEEDS * 2 // 5)))
 async def test_viewer_model(seed):
-    await run_seed(SEED_BASE + 1000 + seed, viewer=True)
+    result = await run_seed(SEED_BASE + 1000 + seed, viewer=True)
+    assert not result["fails"], {str(k): v["message"][:300] for k, v in result["fails"].items()}
 
 
 async def test_zz_summary():

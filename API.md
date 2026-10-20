@@ -147,7 +147,7 @@ The body adds `required` (`{all, any}`) and `missing` (permissions the user lack
 | `permission_denied` | The route's permissions are held nowhere (no assignment gives them; an assignment on an archived post or at an archived group gives nothing) |
 | `post_access_denied` / `post_write_denied` | The permission is held, but not in effect at this post (`post_id`; `*.view` / any other permission) |
 | `no_post_assigned` | The permission is held, but in effect at no post at all (for example only at a scope group without posts) |
-| `permission_required_for_action` | A permission a part or a target of the request needs (`permission`, `action`): `include_deleted`, the group a post is created in or moved to, the old and the new parent of a moved scope group (`post.update`), the home post of a new or moved user, a media file without an observation (`media.update` at the root) |
+| `permission_required_for_action` | A permission a part or a target of the request needs (`permission`, `action`): `include_deleted`, the group a post is created in or moved to, the old and the new parent of a moved scope group or brigade (`post.update`, `post.view`), a corps or brigade archived with or without cascade (`post.archive` / `post.update`, `post.view`), the home post of a new or moved user, a media file without an observation (`media.update` at the root) |
 | `user_self_only` | A user record outside the caller's `user.view` |
 | `target_user_more_privileged` | A change to a user the caller's `user.*` does not cover, or who holds an assignment the caller could not grant |
 | `grant_exceeds_own_permissions` | Granting or revoking permissions the caller does not hold (at the node, for an assignment; at every node the role is assigned at, for permissions added to a role and the restore of a role) |
@@ -252,8 +252,8 @@ units, `post.*` for what happens to their posts.
 
   | | cascade=false | cascade=true |
   |---|---|---|
-  | brigade | its active posts move into its corps (`post.update` at the brigade and the corps) | the brigade and its active posts are archived (`post.archive` at the brigade) |
-  | corps | 409 `corps_has_brigades` while it has an active brigade; its active posts leave it, directly under the root (`post.update` at the corps and the root) | the corps, its active brigades and every active post below are archived (`post.archive` at the corps) |
+  | brigade | its active posts move into its corps (`post.update` and `post.view` at the brigade and the corps) | the brigade and its active posts are archived (`post.archive` and `post.view` at the brigade) |
+  | corps | 409 `corps_has_brigades` while it has an active brigade; its active posts leave it, directly under the root (`post.update` and `post.view` at the corps and the root) | the corps, its active brigades and every active post below are archived (`post.archive` and `post.view` at the corps) |
 
   `scope_group.archive` must cover the node too, and `post.view` wherever posts change (the unit, and the
   destination of a detach). A missing permission answers 403 `permission_required_for_action`
