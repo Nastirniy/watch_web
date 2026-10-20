@@ -52,8 +52,8 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - A request whose session touch (the first request after `activity_touch_interval_seconds`) waited for an
   administrator ending the session (an end of the user's sessions, a deactivation, an archive, a certificate
   revocation) went on as authenticated, a write included. It now answers what the next request of the session
-  answers: 401 `account_deactivated` / `account_deleted` when the account was deactivated or archived,
-  `token_certificate_mismatch` when the certificate was revoked, else `session_expired`. A request whose touch lost to
+  answers: 401 `account_deactivated` / `account_deleted` when the account was deactivated or archived, else
+  `session_expired`, whatever ended the session (a certificate revocation included). A request whose touch lost to
   another request of the same session goes on as before. No new problem code.
 - `POST /auth/logout` read the session and ended it in the transaction its authentication opened: on MariaDB an end
   by an administrator, a refresh or a touch of the session committed in between made it answer 500 (error 1020). It
@@ -63,7 +63,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   transaction: of parallel requests one answered 401 and the others 500 on MariaDB (1020), and two refreshes of two
   sessions of such a user could deadlock. The end is now a write of its own after the shared user lock (one
   conditional update, no read before it; a refresh rolls its token claim back first): every request answers 401
-  `account_deactivated` / `account_deleted`, one `force_logout` audit row.
+  `account_deactivated` / `account_deleted`, one `force_logout` audit row. The flags are checked again on the locked
+  user row: an account reactivated since the request read it ends nothing and the request (a refresh: once more)
+  goes on as for an active user.
 - `POST /auth/login` checked the account and stored the session in two transactions: a deactivation, an archive or a
   revocation of the login certificate committed in between left a 200 with tokens and a live session of a
   deactivated account. The session is now stored after a shared lock on the user row and a check of the committed

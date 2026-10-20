@@ -87,6 +87,14 @@ async def begin_session_write(session: AsyncSession, user_id: int) -> None:
     await lock_first(session, select(User.id).where(User.id == user_id), shared=True)
 
 
+async def begin_account_session_write(session: AsyncSession, user_id: int) -> Optional[User]:
+    """begin_session_write for a write that depends on the account flags (the end of an inactive user's sessions):
+    the same shared lock, on the whole user row, returned as committed (populate_existing: the session's copy of the
+    user is overwritten). is_active / is_deleted cannot change before the commit: a change of them locks the row FOR
+    UPDATE. None when there is no such user."""
+    return await lock_first(session, select(User).where(User.id == user_id), shared=True)
+
+
 class TouchResult(Enum):
     TOUCHED = "touched"      # this request moved the activity
     BEHIND = "behind"        # another request of the session touched it first: the session is live

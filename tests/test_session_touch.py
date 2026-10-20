@@ -326,18 +326,22 @@ async def _logged_in(db, user, idle_for: timedelta):
 
 
 def _meanwhile(monkeypatch, change):
-    """change() commits in a session of its own just before the request's first begin_session_write takes its lock:
-    what MariaDB does when an administrator holds the user row FOR UPDATE at that moment"""
+    """change() commits in a session of its own just before the request's first session write takes its user lock
+    (sessions.begin_session_write or begin_account_session_write): what MariaDB does when an administrator holds the
+    user row FOR UPDATE at that moment"""
     from app.backend.auth import sessions
-    original = sessions.begin_session_write
     pending = [change]
 
-    async def after_the_other_write(session, user_id):
-        if pending:
-            await pending.pop()()
-        await original(session, user_id)
+    def after_the_other_write(original):
+        async def locked(session, user_id):
+            if pending:
+                await pending.pop()()
+            return await original(session, user_id)
+        return locked
 
-    monkeypatch.setattr(sessions, "begin_session_write", after_the_other_write)
+    for name in ("begin_session_write", "begin_account_session_write"):
+        if hasattr(sessions, name):
+            monkeypatch.setattr(sessions, name, after_the_other_write(getattr(sessions, name)))
 
 
 def _end_session(session_maker, session_id, cause, deactivate_user_id=None, archive_user_id=None):
@@ -384,12 +388,14 @@ async def test_touch_after_another_touch_is_behind(db, session_maker):
         assert await touch_session(slow, stale) is TouchResult.BEHIND
 
 
-@pytest.mark.parametrize("cause, code", [("ended_by_admin", "session_expired"),
-                                         ("certificate_revoked", "token_certificate_mismatch")])
+@pytest.mark.parametrize("cause", ["ended_by_admin", "certificate_revoked"])
 async def test_a_request_whose_touch_waited_for_an_end_of_its_session_is_refused(
-        client, db, session_maker, monkeypatch, cause, code):
+        client, db, session_maker, monkeypatch, cause):
     """The touch waited behind an administrator who ended the session (or revoked its certificate) and matched no
-    row: the request went on as authenticated. It answers what the next request of the session answers."""
+    row: the request went on as authenticated. It answers what the next request of the session answers: an ended
+    session is session_expired whatever ended it (token_certificate_mismatch is for a certificate that stopped being
+    active without its sessions being ended, API.md)."""
+    code = "session_expired"
     from app.backend.api.v1 import V1
     from app.backend.enums.general import SessionRevokeCause
     from app.backend.enums.routes import AuthRoutes
@@ -532,7 +538,7 @@ async def test_ending_the_sessions_of_an_inactive_user_locks_the_user_first(clie
         stop()
     assert response.status_code == 401 and response.json()["code"] == "account_deactivated", response.text
     write = _transaction_of(seen, "UPDATE user_sessions")
-    assert write[0].startswith("SELECT users.id FROM users WHERE users.id = ?"), write
+    assert write[0].startswith("SELECT users.id, ") and "FROM users WHERE users.id = ?" in write[0], write
     assert write[1].startswith("UPDATE user_sessions SET ended_at"), write
 
 
@@ -580,10 +586,66 @@ async def test_a_refresh_of_an_inactive_user_ends_its_sessions_outside_its_claim
     claim = _transaction_of(seen, "UPDATE user_sessions SET refresh_jti")
     assert claim[-1] == "ROLLBACK" and not any(s.startswith("UPDATE user_sessions SET ended_at") for s in claim), claim
     write = _transaction_of(seen, "UPDATE user_sessions SET ended_at")
-    assert write[0].startswith("SELECT users.id FROM users WHERE users.id = ?"), write
+    assert write[0].startswith("SELECT users.id, ") and "FROM users WHERE users.id = ?" in write[0], write
     stored = await _stored(session_maker, row.id)
     assert (stored.end_reason, stored.revoke_cause) == ("revoked", "account_archived")
     assert stored.refresh_jti == row.refresh_jti                  # the claim was rolled back
+
+
+def _reactivate(session_maker, user_id):
+    from app.backend.models.user import User
+
+    async def change():
+        async with session_maker() as other:
+            row = (await other.exec(select(User).where(User.id == user_id))).one()
+            row.is_active, row.is_deleted = True, False
+            other.add(row)
+            await other.commit()
+    return change
+
+
+async def _ended_and_logged(session_maker, user_id):
+    from app.backend.models.audit import AuditLog
+    async with session_maker() as fresh:
+        ended = (await fresh.exec(select(UserSession).where(UserSession.user_id == user_id,
+                                                            UserSession.ended_at.is_not(None)))).all()
+        logged = (await fresh.exec(select(AuditLog).where(AuditLog.action == "force_logout",
+                                                          AuditLog.resource_id == user_id))).all()
+    return ended, logged
+
+
+@pytest.mark.parametrize("archived", [False, True])
+async def test_a_request_of_an_account_reactivated_before_the_lock_ends_nothing(client, db, session_maker,
+                                                                                monkeypatch, archived):
+    """The request read the account inactive, an administrator reactivated it before the request's user lock: the
+    flags are checked again on the locked row, nothing is ended and the request goes on as for an active user"""
+    from app.backend.api.v1 import V1
+    from app.backend.enums.routes import AuthRoutes
+    user = await make_user(db)
+    _, auth_header = await _logged_in(db, user, timedelta(seconds=5))
+    await _deactivate(db, user, archived=archived)
+    _meanwhile(monkeypatch, _reactivate(session_maker, user.id))
+    response = await client.get(V1.path(AuthRoutes.ME), headers=auth_header)
+    assert response.status_code == 200, response.text
+    assert await _ended_and_logged(session_maker, user.id) == ([], [])
+
+
+async def test_a_refresh_of_an_account_reactivated_before_the_lock_ends_nothing(client, db, session_maker,
+                                                                                monkeypatch):
+    """Same for a refresh: its claim was rolled back before the end, so it refreshes again as for an active user"""
+    from app.backend.api.v1 import V1
+    from app.backend.auth.service import AuthService
+    from app.backend.enums.routes import AuthRoutes
+    user = await make_user(db)
+    row = await AuthService.create_session(db, user)
+    refresh = AuthService.session_tokens(user.id, row)[1]
+    await _deactivate(db, user)
+    _meanwhile(monkeypatch, _reactivate(session_maker, user.id))
+    response = await client.post(V1.path(AuthRoutes.REFRESH), json={"refresh_token": refresh})
+    assert response.status_code == 200, response.text
+    assert await _ended_and_logged(session_maker, user.id) == ([], [])
+    again = await client.post(V1.path(AuthRoutes.REFRESH), json={"refresh_token": refresh})
+    assert again.status_code == 401 and again.json()["code"] == "invalid_refresh_token", again.text
 
 
 # --------------------------------------------------------------------------------- a login against a deactivation

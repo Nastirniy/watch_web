@@ -188,29 +188,32 @@ async def refresh_token(
     # The write begins with the shared user lock (sessions.begin_session_write): a refresh waits for an administrator
     # ending the user's sessions and then finds its session ended (session_expired). The first change retires the
     # token presented (sessions.claim_refresh); every check below that refuses the refresh rolls it back
-    await begin_session_write(session, user_id)
-    next_jti = await claim_refresh(session, session_id, user_id, presented_jti)
+    for attempt in (1, 2):
+        await begin_session_write(session, user_id)
+        next_jti = await claim_refresh(session, session_id, user_id, presented_jti)
 
-    # Verify user still exists
-    user_result = await session.exec(
-        select(User).where(User.id == user_id)
-    )
-    user = user_result.first()
+        # Verify user still exists (as committed: the user lock keeps it so until the commit)
+        user = (await session.exec(
+            select(User).where(User.id == user_id).execution_options(populate_existing=True)
+        )).first()
+        if not user:
+            raise ApiError(AuthErrorCode.ACCOUNT_NOT_FOUND)
+        if user.is_active and not user.is_deleted:
+            break
 
-    if not user:
-        raise ApiError(AuthErrorCode.ACCOUNT_NOT_FOUND)
-
-    if user.is_deleted or not user.is_active:
         # The refresh token of a deactivated or archived account is dead; end any session still live. The claim is
         # rolled back first and the end is a write of its own: inside the claim's transaction two refreshes of two
         # sessions of the user would each hold their own session row and wait for the other's (a deadlock, 1213)
-        archived = user.is_deleted
         await session.rollback()
-        ended = await AuthService.expire_sessions_of_inactive_user(session, user_id, archived=archived)
-        _logger.warning(f"Refresh attempt for inactive account: user_id={user_id}, sessions ended={ended}")
-        if archived:
-            raise ApiError(AuthErrorCode.ACCOUNT_DELETED)
-        raise ApiError(AuthErrorCode.ACCOUNT_DEACTIVATED)
+        ended = await AuthService.expire_sessions_of_inactive_user(session, user_id)
+        # It locked the user row and put it, as committed, into `user`. Reactivated between the rollback and that
+        # lock (nothing ended): the refresh runs again as for an active user, once
+        if user.is_deleted or not user.is_active or attempt == 2:
+            _logger.warning(f"Refresh attempt for inactive account: user_id={user_id}, sessions ended={ended}")
+            if user.is_deleted:
+                raise ApiError(AuthErrorCode.ACCOUNT_DELETED)
+            raise ApiError(AuthErrorCode.ACCOUNT_DEACTIVATED)
+        _logger.info(f"Account reactivated during a refresh, refreshing again: user_id={user_id}")
 
     refresh_session = await live_session(session, session_id, user_id, begin=False)   # the claim began the write
     if refresh_session is None:

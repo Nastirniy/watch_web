@@ -514,24 +514,31 @@ class AuthService:
         return True
 
     @staticmethod
-    async def expire_sessions_of_inactive_user(session: AsyncSession, user_id: int, archived: bool) -> int:
-        """End every live session of a user whose account is deactivated (archived=False) or archived.
+    async def expire_sessions_of_inactive_user(session: AsyncSession, user_id: int) -> int:
+        """End every live session of a user whose account is deactivated or archived.
 
         Called from the request path when such a user presents a token: the sessions were normally ended
         when the flag changed, but a flag flipped outside the API (direct database change, restore of a
         backup) would leave them live and count towards presence. Returns the number of sessions revoked.
 
+        The flags are checked again on the locked, committed user row: an account reactivated since the caller read
+        it ends nothing (0). The session's copy of the user is that row (same identity, overwritten), so the caller
+        reads the flags from its own copy afterwards and answers as for an active user when they changed.
+
         A write of its own, like every request's write to the user's sessions: the shared user lock first
-        (sessions.begin_session_write; the request is no administrator changing the account, which holds the row
-        FOR UPDATE: parallel requests of the client share it and wait only for such a write), then one set-based
+        (sessions.begin_account_session_write; the request is no administrator changing the account, which holds the
+        row FOR UPDATE: parallel requests of the client share it and wait only for such a write), then one set-based
         conditional UPDATE of the live sessions with no plain read before it. Of parallel requests the first ends
         them and the others wait on the session rows, find them ended and change nothing: no session row changed
         after a read view (MariaDB error 1020), and one statement locks the rows in index order (no deadlock, 1213).
         Sessions past their end that nobody recorded are recorded with it after a locking read (no read view
         either). The caller's transaction must hold no change (start_write): the refresh rolls its claim back
         first. The audit row only when a session was revoked. Committed here."""
-        cause = SessionRevokeCause.ACCOUNT_ARCHIVED if archived else SessionRevokeCause.ACCOUNT_DEACTIVATED
-        await session_lifetimes.begin_session_write(session, user_id)
+        account = await session_lifetimes.begin_account_session_write(session, user_id)
+        if account is None or (account.is_active and not account.is_deleted):
+            await session.commit()
+            return 0
+        cause = SessionRevokeCause.ACCOUNT_ARCHIVED if account.is_deleted else SessionRevokeCause.ACCOUNT_DEACTIVATED
         revoked = await session.exec(
             update(UserSession)
             .where(UserSession.user_id == user_id, session_lifetimes.live_clause())
