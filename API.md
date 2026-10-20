@@ -262,7 +262,8 @@ parent.
   and as a list filter, and `GET /brigades/{brigade_id}/posts`. Answers: `CorpsResponse` (`brigade_count`,
   `post_count`: active ones the caller sees), `BrigadeResponse` (`corps_id`, `post_count`). An id of another kind,
   an archived or invisible one: 404 `scope_group_not_found`. Names are unique within a parent (corps share the root
-  with root plain groups), case-insensitive.
+  with root plain groups). Names compare by the database collation: case, accents and trailing spaces do not make a
+  different name (409 `scope_group_name_taken`).
 - Moving a brigade (`PATCH /brigades/{id}` with `corps_id`) takes its posts along and needs `scope_group.update`,
   `post.update` and `post.view` covering the old and the new corps.
 - `POST /corps/{id}/archive` and `POST /brigades/{id}/archive` take `?cascade=true|false` (default false):

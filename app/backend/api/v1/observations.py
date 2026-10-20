@@ -211,7 +211,8 @@ async def create_observation(
     await session.flush()
     # The units the post sits in now, recorded once with the observation (services/units.py). Read from the database
     # after the post lock, not from the tree of the request: a unit added or a group moved since the tree was loaded
-    # is in the history row
+    # is in the history row. A brigade move does not lock its posts, so a move between the post lock and this read can
+    # still be missed (accepted, rare)
     units = await current_units_of_group(session, post.group_id)
     session.add_all(observation_unit_rows(units, observation.id, observation.created_at))
     await session.commit()
