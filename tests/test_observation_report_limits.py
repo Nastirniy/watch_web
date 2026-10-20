@@ -132,3 +132,20 @@ def test_styles_are_built_once_per_report(monkeypatch):
         return dict(built)
 
     assert count_for(50) == count_for(5)
+
+
+def test_rows_keep_their_look_when_cells_share_styles():
+    """Data cells take the style of the first cell that looks the same: fill by row parity, a text cell stays text"""
+    bands = [_band(i) for i in range(1, 5)]
+    bands[1].observation.comment = "=SUM(A1)"
+    out = report_service.ObservationReportService.generate_excel(
+        bands, ObservationReportCriteria(report_type=ObservationReportType.ALL_FIELDS))
+    sheet = openpyxl.load_workbook(io.BytesIO(out)).active
+    first = next(row[0].row for row in sheet.iter_rows() if row[0].value == "Користувач") + 1
+    plain, alt = sheet.cell(first, 1), sheet.cell(first + 1, 1)
+    assert plain.fill.fill_type is None and alt.fill.fgColor.rgb.endswith("EBF3FB")
+    assert alt.font.name == "Arial" and alt.border.left.style == "thin" and alt.alignment.wrap_text
+    comment = sheet.cell(first + 1, 15)
+    assert comment.value == "=SUM(A1)" and comment.data_type == "s" and comment.quotePrefix
+    assert not sheet.cell(first, 8).quotePrefix            # a number
+    assert sheet.cell(first + 2, 1).fill.fill_type is None  # parity goes on

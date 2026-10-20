@@ -17,6 +17,7 @@ Three report types:
 """
 
 import io
+from copy import copy
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import List, Optional, Dict
@@ -372,6 +373,7 @@ class ObservationReportService:
 
         # --- Data rows ---
         spacer_col = 7 if rtype != ObservationReportType.ALL_FIELDS else None
+        looks: Dict[tuple, object] = {}
 
         for i, band in enumerate(frequencies):
             use_alt = i % 2 == 1
@@ -420,14 +422,22 @@ class ObservationReportService:
 
             for col_idx, value in enumerate(row_data, start=1):
                 c = _put(ws, row, col_idx, value)
+                is_spacer = bool(spacer_col) and col_idx == spacer_col
+                # Four looks in all: a cell takes the style of the first cell that looks the same (openpyxl would
+                # hash its font, fill and border again for every cell, most of the time of a large report)
+                look = (is_spacer, use_alt, isinstance(value, str))
+                if look in looks:
+                    c._style = copy(looks[look])
+                    continue
                 c.border = thin_border
-                if spacer_col and col_idx == spacer_col:
+                if is_spacer:
                     c.fill = _fill(cls._COLOR_SPACER_ALT if use_alt else cls._COLOR_SPACER_BG)
                 else:
                     c.font = _font(size=10)
                     c.alignment = left
                     if use_alt:
                         c.fill = _fill(cls._COLOR_ALT_ROW_BG)
+                looks[look] = copy(c._style)
 
             row += 1
 
