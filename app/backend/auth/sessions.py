@@ -27,10 +27,10 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.config import settings
 from app.backend.enums.general import SessionEndReason, SessionRevokeCause, SessionStatus
 from app.backend.auth.certificates import hash_data
-from app.backend.models.user import UserSession
+from app.backend.models.user import User, UserSession
 from app.backend.auth.presence import is_recent
 from app.backend.utils.logging_config import get_auth_logger
-from app.backend.utils.row_locks import start_write
+from app.backend.utils.row_locks import lock_first, start_write
 
 _logger = get_auth_logger()
 _NO_CAP = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -79,13 +79,16 @@ def touch(row: UserSession, now: Optional[datetime] = None) -> None:
 
 async def touch_session(session: AsyncSession, row: UserSession, now: Optional[datetime] = None) -> bool:
     """touch() for an authenticated request, as a write transaction of its own: it ends the read transaction the
-    request opened and runs one conditional UPDATE as the first statement, which moves last_activity only forward
-    from the value this request read. Parallel requests of one session (a page loading several lists) wait for each
-    other on the row instead of updating a row changed after their snapshot (MariaDB error 1020); the later ones
-    change nothing. Committed here; False when another request touched the session first."""
+    request opened, takes a shared lock on the user row (the lock every writer of the user's sessions takes first:
+    an administrator ending them or revoking a certificate holds it FOR UPDATE) and runs one conditional UPDATE,
+    which moves last_activity only forward from the value this request read. Parallel requests of one session (a
+    page loading several lists) wait for each other on the row instead of updating a row changed after their
+    snapshot (MariaDB error 1020); the later ones change nothing. A touch during such an administrator's write waits
+    for it and then finds the session ended, so that write never meets a touch committed after its reads (1020).
+    Committed here; False when another request touched or ended the session first."""
     now = now or _now()
     expires_at = deadline(row, now)
-    await start_write(session)
+    await lock_first(session, select(User.id).where(User.id == row.user_id), shared=True)
     result = await session.exec(
         update(UserSession)
         .where(UserSession.id == row.id, UserSession.last_activity <= row.last_activity,

@@ -5,6 +5,7 @@ they had read: the losers answered 500 (error 1020). The touch now ends the read
 last_activity forward from the value the request read; a request that lost the race changes nothing."""
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import event
 from sqlmodel import select
 
 from app.backend.auth.sessions import touch_session, utc
@@ -110,3 +111,72 @@ async def test_ending_a_session_of_an_inactive_certificate_twice_keeps_the_first
         logged = (await fresh.exec(select(AuditLog).where(AuditLog.action == "force_logout",
                                                           AuditLog.session_id == row.id))).all()
     assert len(logged) == 1
+
+
+def _statements(engine):
+    """The statements executed while the returned list is open, whitespace folded, with "COMMIT" where a
+    transaction ended (sqlite drops FOR UPDATE / FOR SHARE: the order is what the tests can see)"""
+    seen = []
+
+    def execute(conn, cursor, statement, parameters, context, executemany):
+        seen.append(" ".join(statement.split()))
+
+    def commit(conn):
+        seen.append("COMMIT")
+
+    event.listen(engine.sync_engine, "before_cursor_execute", execute)
+    event.listen(engine.sync_engine, "commit", commit)
+
+    def stop():
+        event.remove(engine.sync_engine, "before_cursor_execute", execute)
+        event.remove(engine.sync_engine, "commit", commit)
+    return seen, stop
+
+
+def _write_of(seen, marker):
+    """The statements of the transaction that ran the first statement starting with marker"""
+    at = next(i for i, statement in enumerate(seen) if statement.startswith(marker))
+    begin = max((i for i in range(at) if seen[i] == "COMMIT"), default=-1) + 1
+    end = next((i for i in range(at, len(seen)) if seen[i] == "COMMIT"), len(seen))
+    return seen[begin:end]
+
+
+async def test_touch_takes_a_shared_lock_on_its_user_first(db, session_maker, engine):
+    """Live on MariaDB an administrator ending the sessions of a user (or revoking a certificate) read the sessions
+    and then updated them; a touch committed in between made that update answer 500 (error 1020). Every writer of a
+    user's sessions now takes the user row first: the administrator FOR UPDATE, the touch shared."""
+    user = await make_user(db)
+    row = await _row(db, user, datetime.now(timezone.utc) - timedelta(minutes=5))
+    async with session_maker() as session:
+        read = (await session.exec(select(UserSession).where(UserSession.id == row.id))).one()
+        seen, stop = _statements(engine)
+        try:
+            assert await touch_session(session, read) is True
+        finally:
+            stop()
+    write = _write_of(seen, "UPDATE user_sessions")
+    assert write[0].startswith("SELECT users.id FROM users WHERE users.id = ?"), write
+    assert write[1].startswith("UPDATE user_sessions"), write
+
+
+async def test_certificate_revoke_locks_the_user_first(client, db, headers, engine):
+    """The revocation ends the sessions of the certificate: like every other end of a user's sessions it begins with
+    the user row, so it waits for a touch of the user instead of meeting it (1020)"""
+    from app.backend.api.v1 import V1
+    from app.backend.enums.general import CertificateSource
+    from app.backend.enums.routes import UserRoutes
+    from tests.helpers import make_admin, make_certificate_row
+    admin = await make_admin(db)
+    user = await make_user(db)
+    certificate = await make_certificate_row(db, user, CertificateSource.LEGACY)
+    seen, stop = _statements(engine)
+    try:
+        response = await client.post(
+            V1.path(UserRoutes.USER_CERTIFICATE_REVOKE, user_id=user.id, certificate_id=certificate.id),
+            headers=headers(admin))
+    finally:
+        stop()
+    assert response.status_code == 200, response.text
+    write = _write_of(seen, "UPDATE user_certificates")
+    assert write[0].startswith("SELECT users.id FROM users WHERE users.id = ?"), write
+    assert write[1].startswith("SELECT user_certificates."), write

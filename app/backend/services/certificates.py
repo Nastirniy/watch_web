@@ -40,7 +40,7 @@ from app.backend.pki.store import (
 from app.backend.services.signer_client import SignerUnavailable, signer_client
 from app.backend.utils.datetime_utils import as_utc, assume_utc
 from app.backend.utils.logging_config import get_security_logger
-from app.backend.utils.row_locks import lock_first
+from app.backend.utils.row_locks import lock as lock_row, lock_first
 from app.backend.utils.text import fit_column
 
 _logger = get_security_logger()
@@ -196,11 +196,15 @@ async def get_user_certificate(session: AsyncSession, user_id: int, certificate_
     """The certificate of the user; CodedError certificate_not_found when there is none, also for the id of another
     user's certificate. lock: the row locked as the first statement of the write and read as committed
     (utils/row_locks.py)"""
-    query = select(UserCertificate).where(UserCertificate.id == certificate_id, UserCertificate.user_id == user_id)
+    query = _certificate_query(user_id, certificate_id)
     row = await lock_first(session, query) if lock else (await session.exec(query)).first()
     if row is None:
         raise CodedError(ErrorCode.CERTIFICATE_NOT_FOUND)
     return row
+
+
+def _certificate_query(user_id: int, certificate_id: int):
+    return select(UserCertificate).where(UserCertificate.id == certificate_id, UserCertificate.user_id == user_id)
 
 
 async def user_certificates(session: AsyncSession, user_id: int,
@@ -377,14 +381,22 @@ async def revoke_certificate(
         revoked_by: int,
         write_audit: WriteAudit,
 ) -> UserCertificate:
-    """Revoke a certificate (final): lock the row and read it again, CodedError certificate_already_revoked when it
-    is revoked; set revoked_at, revoked_by and revocation_reason, end the live sessions bound to it, write the audit
-    row (write_audit), commit. Everything lands in one transaction: a session of the revoked device never outlives
-    the revocation. The CRL is published by the caller after the commit (crl_publisher.publish_crl)."""
+    """Revoke a certificate (final): lock the user row, then the certificate row and read it again, CodedError
+    certificate_already_revoked when it is revoked; set revoked_at, revoked_by and revocation_reason, end the live
+    sessions bound to it, write the audit row (write_audit), commit. Everything lands in one transaction: a session of
+    the revoked device never outlives the revocation. The CRL is published by the caller after the commit
+    (crl_publisher.publish_crl).
+
+    The user row is the first lock, as for every write that ends sessions of the user: a session touch takes it
+    shared (auth/sessions.py touch_session), so it waits for the revocation instead of changing a session row this
+    write reads and then ends (MariaDB error 1020)."""
     # auth.service imports this module (login looks certificates up): imported here to avoid the cycle
     from app.backend.auth.service import AuthService
 
-    row = await get_user_certificate(session, certificate.user_id, certificate.id, lock=True)
+    await lock_first(session, select(User.id).where(User.id == certificate.user_id))
+    row = await lock_row(session, _certificate_query(certificate.user_id, certificate.id))
+    if row is None:
+        raise CodedError(ErrorCode.CERTIFICATE_NOT_FOUND)
     if row.revoked_at is not None:
         raise CodedError(ErrorCode.CERTIFICATE_ALREADY_REVOKED)
     row.revoked_at = _now()

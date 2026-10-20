@@ -7,6 +7,12 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## Corps follow-ups (2026-10-20, branch fix/corps-followups)
 
+### Fixed
+
+- Ending a user's sessions (`POST /users/{user_id}/sessions/end`, deactivation, archive, a new user type) or revoking
+  a certificate while the user was active could answer 500 on MariaDB (error 1020 on `user_sessions`): a session
+  touch now shares the user row lock those writes take first, so it waits for them and finds the session ended.
+
 ### Changed
 
 - `GET /corps/{corps_id}/observation-stats`, `GET /brigades/{brigade_id}/observation-stats` also answer for a unit
