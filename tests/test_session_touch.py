@@ -48,3 +48,65 @@ async def test_a_request_that_read_an_older_activity_changes_nothing(db, session
         moved = (await _stored(session_maker, row.id)).last_activity
         assert await touch_session(slow, stale) is False
     assert (await _stored(session_maker, row.id)).last_activity == moved
+
+
+async def test_an_end_recorded_by_another_request_is_kept(db, session_maker):
+    """Parallel requests of an expired session each recorded its end: the later ones wrote over the row the first
+    one changed (a 500 on MariaDB, 1020) and could overwrite an end recorded in between (a revocation)"""
+    from app.backend.auth.sessions import record_end, session_state
+    from app.backend.enums.general import SessionEndReason, SessionRevokeCause
+    user = await make_user(db)
+    then = datetime.now(timezone.utc) - timedelta(days=2)
+    row = await _row(db, user, then)
+    async with session_maker() as stale_session:
+        stale = (await stale_session.exec(select(UserSession).where(UserSession.id == row.id))).one()
+        async with session_maker() as admin:
+            ended = (await admin.exec(select(UserSession).where(UserSession.id == row.id))).one()
+            ended.ended_at, ended.end_reason = datetime.now(timezone.utc), SessionEndReason.REVOKED.value
+            ended.revoke_cause = SessionRevokeCause.ENDED_BY_ADMIN.value
+            admin.add(ended)
+            await admin.commit()
+        await record_end(stale_session, stale, session_state(stale))
+    stored = await _stored(session_maker, row.id)
+    assert stored.end_reason == SessionEndReason.REVOKED.value
+
+
+async def test_touch_never_moves_an_ended_session_and_updates_the_row_in_memory(db, session_maker):
+    user = await make_user(db)
+    then = datetime.now(timezone.utc) - timedelta(minutes=5)
+    row = await _row(db, user, then)
+    async with session_maker() as session:
+        read = (await session.exec(select(UserSession).where(UserSession.id == row.id))).one()
+        assert await touch_session(session, read) is True
+        assert utc(read.last_activity) > then + timedelta(minutes=4)     # the caller's copy shows the touch
+    async with session_maker() as session:
+        read = (await session.exec(select(UserSession).where(UserSession.id == row.id))).one()
+        async with session_maker() as other:
+            ended = (await other.exec(select(UserSession).where(UserSession.id == row.id))).one()
+            ended.ended_at, ended.end_reason = datetime.now(timezone.utc), "logout"
+            other.add(ended)
+            await other.commit()
+        assert await touch_session(session, read) is False     # read before the logout: never moves an ended row
+
+
+async def test_ending_a_session_of_an_inactive_certificate_twice_keeps_the_first_end(db, session_maker):
+    """Every parallel request of a session whose certificate expired ended the session: the later ones wrote over
+    the row the first one changed (1020 on MariaDB) and logged a second force_logout"""
+    from app.backend.auth.service import AuthService
+    from app.backend.models.audit import AuditLog
+    user = await make_user(db)
+    row = await _row(db, user, datetime.now(timezone.utc) - timedelta(minutes=1))
+    row.certificate_fingerprint_hash = "no-such-certificate"
+    db.add(row)
+    await db.commit()
+    async with session_maker() as first, session_maker() as second:
+        a = (await first.exec(select(UserSession).where(UserSession.id == row.id))).one()
+        b = (await second.exec(select(UserSession).where(UserSession.id == row.id))).one()
+        assert await AuthService.end_session_of_revoked_certificate(first, a, user) is True
+        assert await AuthService.end_session_of_revoked_certificate(second, b, user) is True
+    stored = await _stored(session_maker, row.id)
+    assert stored.end_reason == "revoked" and stored.revoke_cause == "certificate_revoked"
+    async with session_maker() as fresh:
+        logged = (await fresh.exec(select(AuditLog).where(AuditLog.action == "force_logout",
+                                                          AuditLog.session_id == row.id))).all()
+    assert len(logged) == 1

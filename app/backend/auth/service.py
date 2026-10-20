@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from jose import jwt, JWTError
 from passlib.context import CryptContext
 from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlalchemy import update
 from sqlmodel import select, and_
 import secrets
 
@@ -22,6 +23,7 @@ from app.backend.auth.certificates import (
 )
 from app.backend.services.audit import create_audit_log
 from app.backend.services.certificates import active_certificate, certificate_state
+from app.backend.utils.row_locks import start_write
 from app.backend.utils.text import fit_column
 
 # Get authentication logger
@@ -432,7 +434,8 @@ class AuthService:
         return count
 
     @staticmethod
-    async def end_session_of_revoked_certificate(session: AsyncSession, user_session: UserSession, user: User) -> bool:
+    async def end_session_of_revoked_certificate(session: AsyncSession, user_session: UserSession, user: User,
+                                                 begin: bool = True) -> bool:
         """End a live session bound to a certificate that is no active row of the user (revoked, expired, or not
         the user's): revoked, certificate_revoked.
 
@@ -440,12 +443,28 @@ class AuthService:
         revocation and stored its session after it leaves a session bound to a revoked certificate. Called on every
         request and refresh of a bound session (one indexed lookup): True when it ended it (the caller answers
         token_certificate_mismatch). Unbound sessions (development logins) are never ended here.
+
+        One conditional UPDATE (ended_at still empty), a write of its own unless begin=False (the refresh claim
+        began it): parallel requests of the session end it once, the others find it ended and answer the same.
         """
         bound_to = user_session.certificate_fingerprint_hash
         if not bound_to or await active_certificate(session, user.id, bound_to) is not None:
             return False
-        session_lifetimes.end(user_session, SessionEndReason.REVOKED, SessionRevokeCause.CERTIFICATE_REVOKED)
-        session.add(user_session)
+        ended_at = datetime.now(timezone.utc)
+        if begin:
+            await start_write(session)
+        result = await session.exec(
+            update(UserSession)
+            .where(UserSession.id == user_session.id, UserSession.ended_at.is_(None))
+            .values(ended_at=ended_at, end_reason=SessionEndReason.REVOKED.value,
+                    revoke_cause=SessionRevokeCause.CERTIFICATE_REVOKED.value)
+            .execution_options(synchronize_session=False)
+        )
+        if not result.rowcount:          # another request of the session ended it first
+            await session.commit()
+            return True
+        user_session.ended_at, user_session.end_reason = ended_at, SessionEndReason.REVOKED.value
+        user_session.revoke_cause = SessionRevokeCause.CERTIFICATE_REVOKED.value
         await create_audit_log(
             session=session,
             user_id=user.id,

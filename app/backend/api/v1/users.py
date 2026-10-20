@@ -670,7 +670,7 @@ async def end_user_session(
         raise ApiError(ErrorCode.SESSION_NOT_FOUND)
     state = session_lifetimes.session_state(row)
     if state.status is SessionStatus.ENDED:
-        await session_lifetimes.record_end(session, row, state)
+        await session_lifetimes.record_end(session, row, state, begin=False)   # the user is locked: a write began
         if state.end_reason:
             raise ApiError(ErrorCode.SESSION_ALREADY_ENDED, end_reason=state.end_reason.value)
         raise ApiError(ErrorCode.SESSION_ALREADY_ENDED)

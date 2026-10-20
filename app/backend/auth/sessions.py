@@ -84,15 +84,20 @@ async def touch_session(session: AsyncSession, row: UserSession, now: Optional[d
     other on the row instead of updating a row changed after their snapshot (MariaDB error 1020); the later ones
     change nothing. Committed here; False when another request touched the session first."""
     now = now or _now()
+    expires_at = deadline(row, now)
     await start_write(session)
     result = await session.exec(
         update(UserSession)
-        .where(UserSession.id == row.id, UserSession.last_activity <= row.last_activity)
-        .values(last_activity=now, expires_at=deadline(row, now))
+        .where(UserSession.id == row.id, UserSession.last_activity <= row.last_activity,
+               UserSession.ended_at.is_(None))
+        .values(last_activity=now, expires_at=expires_at)
         .execution_options(synchronize_session=False)
     )
     await session.commit()
-    return result.rowcount > 0
+    if result.rowcount == 0:
+        return False
+    row.last_activity, row.expires_at = now, expires_at     # the request's own copy shows the touch
+    return True
 
 
 @dataclass(frozen=True)
@@ -149,12 +154,27 @@ def end(row: UserSession, reason: SessionEndReason, cause: Optional[SessionRevok
     row.revoke_cause = cause.value if cause else None
 
 
-async def record_end(session: AsyncSession, row: UserSession, state: SessionState) -> None:
-    """Write down an end the computation found (expired / idle timeout) at the moment it happened"""
-    if row.ended_at is None and state.status is SessionStatus.ENDED:
-        end(row, state.end_reason, at=state.ends_at)
-        session.add(row)
-        await session.commit()
+async def record_end(session: AsyncSession, row: UserSession, state: SessionState, begin: bool = True) -> None:
+    """Write down an end the computation found (expired / idle timeout) at the moment it happened.
+
+    One conditional UPDATE (ended_at still empty): parallel requests of an expired session find the same end, the
+    first one writes it and the others change nothing, and an end recorded in between (a revocation) is kept.
+    begin=True (a request that only read so far) runs it as a write of its own, after the read transaction (MariaDB
+    error 1020 otherwise); a caller that already holds the row locked passes begin=False. Committed here."""
+    if row.ended_at is not None or state.status is not SessionStatus.ENDED:
+        return
+    ended_at, reason = state.ends_at or _now(), state.end_reason.value if state.end_reason else None
+    if begin:
+        await start_write(session)
+    result = await session.exec(
+        update(UserSession)
+        .where(UserSession.id == row.id, UserSession.ended_at.is_(None))
+        .values(ended_at=ended_at, end_reason=reason, revoke_cause=None)
+        .execution_options(synchronize_session=False)
+    )
+    await session.commit()
+    if result.rowcount:
+        row.ended_at, row.end_reason, row.revoke_cause = ended_at, reason, None
 
 
 def new_refresh_jti() -> str:
@@ -186,8 +206,9 @@ async def claim_refresh(session: AsyncSession, session_id: str, user_id: int, pr
     return next_jti if result.rowcount == 1 else None
 
 
-async def live_session(session: AsyncSession, session_id: str, user_id: int) -> Optional[UserSession]:
-    """The user's session when it is live, else None (an end found by the computation is recorded first)"""
+async def live_session(session: AsyncSession, session_id: str, user_id: int, begin: bool = True) -> Optional[UserSession]:
+    """The user's session when it is live, else None (an end found by the computation is recorded first; begin as
+    for record_end: False when the caller's write already began, the refresh claim)"""
     row = (await session.exec(
         select(UserSession).where(UserSession.id == session_id, UserSession.user_id == user_id)
     )).first()
@@ -196,7 +217,7 @@ async def live_session(session: AsyncSession, session_id: str, user_id: int) -> 
         return None
     state = session_state(row)
     if state.status is SessionStatus.ENDED:
-        await record_end(session, row, state)
+        await record_end(session, row, state, begin=begin)
         _logger.warning(f"Session ended ({state.end_reason.value if state.end_reason else 'unknown'}): "
                         f"session_id={session_id}, user_id={user_id}")
         return None

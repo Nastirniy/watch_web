@@ -198,13 +198,13 @@ async def refresh_token(
             raise ApiError(AuthErrorCode.ACCOUNT_DELETED)
         raise ApiError(AuthErrorCode.ACCOUNT_DEACTIVATED)
 
-    refresh_session = await live_session(session, session_id, user_id)
+    refresh_session = await live_session(session, session_id, user_id, begin=False)   # the claim began the write
     if refresh_session is None:
         raise ApiError(AuthErrorCode.SESSION_EXPIRED)
 
     # A session bound to a certificate that is no active row of the user ends here (a login that raced a
     # revocation, an expired certificate)
-    if await AuthService.end_session_of_revoked_certificate(session, refresh_session, user):
+    if await AuthService.end_session_of_revoked_certificate(session, refresh_session, user, begin=False):
         raise ApiError(AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH)
     if not await certificate_matches(refresh_session, x_ssl_client_fingerprint):
         _logger.warning(f"Refresh token presented with another client certificate: session_id={session_id}, user_id={user_id}")
