@@ -149,3 +149,74 @@ async def test_restore_writes_one_audit_row(client, db, headers, session_maker):
         (audit,) = (await fresh.exec(select(AuditLog).where(
             AuditLog.resource_type == "observation_frequency", AuditLog.action == "restore"))).all()
     assert audit.resource_id == second and audit.new_values["is_deleted"] is False
+
+
+OBSERVATION_ARCHIVE = V1.path(ObservationRoutes.OBSERVATION_ARCHIVE)
+OBSERVATION_RESTORE = V1.path(ObservationRoutes.OBSERVATION_RESTORE)
+
+
+async def _flag(session_maker, observation_id):
+    async with session_maker() as fresh:
+        return (await fresh.get(Observation, observation_id)).is_deleted
+
+
+@pytest.mark.parametrize("archived", [True, False])
+async def test_a_failed_audit_row_leaves_the_observation_flag(client, db, headers, session_maker, monkeypatch, archived):
+    from app.backend.api.v1 import observations as observations_module
+    user, observation, first, second = await _setup(db, session_maker)
+    auth = headers(user)
+    if not archived:
+        done = await client.post(OBSERVATION_ARCHIVE.format(observation_id=observation.id), headers=auth)
+        assert done.status_code == 200, done.text
+    audits_before = await _audit_count(session_maker, "observation")
+
+    monkeypatch.setattr(observations_module, "create_audit_log", _audit_fails)
+    route = OBSERVATION_ARCHIVE if archived else OBSERVATION_RESTORE
+    response = await client.post(route.format(observation_id=observation.id), headers=auth)
+    assert response.status_code == 500 and response.json()["code"] == "internal_error", response.text
+    assert await _flag(session_maker, observation.id) is (not archived)
+    assert await _audit_count(session_maker, "observation") == audits_before
+
+
+async def test_observation_archive_and_restore_write_one_audit_row_each(client, db, headers, session_maker):
+    user, observation, first, second = await _setup(db, session_maker)
+    auth = headers(user)
+    archived = await client.post(OBSERVATION_ARCHIVE.format(observation_id=observation.id), headers=auth)
+    assert archived.status_code == 200, archived.text
+    assert await _flag(session_maker, observation.id) is True
+    restored = await client.post(OBSERVATION_RESTORE.format(observation_id=observation.id), headers=auth)
+    assert restored.status_code == 200, restored.text
+    assert await _flag(session_maker, observation.id) is False
+    async with session_maker() as fresh:
+        for action, flag in (("archive", True), ("restore", False)):
+            (audit,) = (await fresh.exec(select(AuditLog).where(
+                AuditLog.resource_type == "observation", AuditLog.action == action))).all()
+            assert audit.resource_id == observation.id and audit.user_id == user.id
+            assert audit.new_values["is_deleted"] is flag and audit.old_values["is_deleted"] is (not flag)
+
+
+async def test_a_failed_audit_row_stores_no_tag_change(client, db, headers, session_maker, monkeypatch):
+    from app.backend.api.v1 import observations as observations_module
+    from app.backend.models.observation import ObservationTag
+    user, observation, first, second = await _setup(db, session_maker)
+    dictionary = await make_dictionary(db)
+    auth = headers(user)
+
+    async def tags_of():
+        async with session_maker() as fresh:
+            return (await fresh.exec(select(ObservationTag.tag_id).where(
+                ObservationTag.observation_id == observation.id))).all()
+
+    assert await tags_of() == []
+    monkeypatch.setattr(observations_module, "create_audit_log", _audit_fails)
+    response = await client.put(OBSERVATION.format(observation_id=observation.id), headers=auth,
+                                json={"comment": "edited", "tag_ids": [dictionary["tag_id"]]})
+    assert response.status_code == 500 and response.json()["code"] == "internal_error", response.text
+    assert await tags_of() == []
+    async with session_maker() as fresh:
+        assert (await fresh.get(Observation, observation.id)).comment != "edited"
+    monkeypatch.undo()
+    ok = await client.put(OBSERVATION.format(observation_id=observation.id), headers=auth,
+                          json={"tag_ids": [dictionary["tag_id"]]})
+    assert ok.status_code == 200, ok.text
+    assert await tags_of() == [dictionary["tag_id"]]

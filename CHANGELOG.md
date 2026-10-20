@@ -74,8 +74,8 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - `POST /observations/` committed the observation and wrote its audit row in a second transaction: a failure there
   (on MariaDB 1020 from the audit row's foreign key check, a lock wait timeout) answered 500 for a stored observation,
   so a retry created it twice. The audit row is now written in the same transaction: a 500 stores nothing.
-- `PUT /observations/{id}`, `POST /observations/{id}/frequencies`, `PUT /observations/{id}/frequencies/{frequency_id}`
-  and `POST .../frequencies/{frequency_id}/archive` / `restore` committed the change and wrote the audit row in a
+- `PUT /observations/{id}`, `POST /observations/{id}/archive` / `restore`, `POST /observations/{id}/frequencies`,
+  `PUT /observations/{id}/frequencies/{frequency_id}` and `POST .../frequencies/{frequency_id}/archive` / `restore` committed the change and wrote the audit row in a
   second transaction: a failure there (on MariaDB 1020 from the audit row's foreign key check after the update's
   refresh, a lock wait timeout) answered 500 for a stored change with no audit row, and a client retrying the 500 of
   the band create added a second band. Change and audit row are one commit now: a 500 stores nothing. No contract change.

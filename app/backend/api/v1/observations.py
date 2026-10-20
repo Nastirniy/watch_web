@@ -535,7 +535,9 @@ async def _set_observation_archived(
     observation.is_deleted = archived
     observation.updated_at = datetime.now(timezone.utc)
     session.add(observation)
-    await session.commit()
+    # One commit: the flag flip and the audit row stand or fall together (a second transaction answered 500 for a
+    # stored archive / restore, and the retry got 404 / 409)
+    await session.flush()
 
     await create_audit_log(
         session=session,
