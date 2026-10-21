@@ -44,14 +44,17 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   poster job stays held until `UPLOAD_HOLD` runs out. Searches end the request's read transaction before their audit
   row. Status codes and responses are unchanged.
 
-## Bug hunt 2 (branch fix/hunt2)
-
 ### Fixed
 
 - `POST /observations/` runs its write (post lock to commit) once more in a new transaction when the database
   answers a write conflict (MariaDB 1020 `Record has changed since last read` at the foreign key check of the
   creator's users row, or 1213 deadlock); a live run answered 500 for 23 of 160 concurrent creates. Nothing is stored by
   a failed attempt, so the retry cannot duplicate; a second conflict or any other error still answers 500.
+
+## Bug hunt 2 (branch fix/hunt2)
+
+### Fixed
+
 - A datetime whose UTC instant leaves the calendar (`0001-01-01T00:00:00+01:00`, `9999-12-31T23:59:59-00:01`) answered
   500 on every route that takes one (`observed_at` / `disappeared_at` of create, update and mark-disappeared, and every
   `*_from` / `*_to` / `date_from` / `date_to` filter of lists, searches, the report, the stats and `/statistics`). It

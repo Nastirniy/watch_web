@@ -13,7 +13,7 @@ from app.backend.api.v1 import V1
 from app.backend.enums.routes import ObservationRoutes
 from app.backend.models.audit import AuditLog
 from app.backend.models.observation import Observation, ObservationFrequency
-from tests.helpers import make_admin, make_dictionary, make_post, observation_payload
+from tests.helpers import make_admin, make_group, make_dictionary, make_post, observation_payload
 
 CREATE = V1.path(ObservationRoutes.CREATE)
 
@@ -49,15 +49,16 @@ def _transaction_of(seen, marker):
     return seen[begin:end + 1]
 
 
-async def test_a_failed_audit_row_stores_no_observation(client, db, headers, session_maker, monkeypatch):
+async def test_a_failing_audit_row_stores_no_observation(client, db, headers, session_maker, monkeypatch):
     from app.backend.api.v1 import observations as observations_module
     admin = await make_admin(db)
     post = await make_post(db)
     dictionary = await make_dictionary(db)
 
     async def audit_fails(*args, **kwargs):
-        raise OperationalError("INSERT INTO audit_logs ...", {}, Exception("(1020, 'Record has changed since last read')"))
+        raise OperationalError("INSERT INTO audit_logs ...", {}, Exception(1020, "Record has changed since last read"))
 
+    # the audit row fails on both attempts (the conflict is retried once): 500, and neither attempt stored anything
     monkeypatch.setattr(observations_module, "create_audit_log", audit_fails)
     response = await client.post(CREATE, headers=headers(admin),
                                  json=observation_payload(post.id, dictionary["signal_type_id"]))
@@ -126,7 +127,9 @@ async def _counts(session_maker):
 
 async def test_a_conflict_on_the_first_attempt_is_retried(client, db, headers, session_maker, monkeypatch):
     admin = await make_admin(db)
-    post = await make_post(db)
+    corps = await make_group(db, kind="corps")
+    brigade = await make_group(db, parent_id=corps.id, kind="brigade")
+    post = await make_post(db, group_id=brigade.id)
     dictionary = await make_dictionary(db)
     attempts = _fail_audit(monkeypatch, [_conflict(1020)])
     response = await client.post(CREATE, headers=headers(admin),
@@ -135,6 +138,7 @@ async def test_a_conflict_on_the_first_attempt_is_retried(client, db, headers, s
     assert len(attempts) == 2
     observations, bands, units, audits = await _counts(session_maker)
     assert (observations, bands, audits) == (1, 1, 1)
+    assert units == 2  # the corps and the brigade, written once
     async with session_maker() as fresh:
         (audit,) = (await fresh.exec(select(AuditLog).where(AuditLog.resource_type == "observation"))).all()
     assert audit.resource_id == response.json()["id"]
@@ -161,7 +165,7 @@ async def test_two_conflicts_answer_500_and_store_nothing(client, db, headers, s
     assert response.status_code == 500 and response.json()["code"] == "internal_error", response.text
     assert len(attempts) == 2
     observations, bands, units, audits = await _counts(session_maker)
-    assert (observations, bands, units) == (0, 0, 0)
+    assert (observations, bands, units, audits) == (0, 0, 0, 0)
 
 
 async def test_another_database_error_is_not_retried(client, db, headers, session_maker, monkeypatch):
@@ -185,3 +189,59 @@ def test_is_write_conflict_tells_the_two_codes_from_everything_else():
     assert not is_write_conflict(OperationalError("x", {}, Exception()))
     assert not is_write_conflict(IntegrityError("x", {}, Exception(1062, "dup")))
     assert not is_write_conflict(ValueError(1020))
+
+
+def _inject(engine, insert=0, commit=0):
+    """Raise OperationalError at the INSERT of the observation (the flush) or at the COMMIT of the write"""
+    import sqlite3
+    left = {"insert": insert, "commit": commit}
+    audited = []
+
+    def execute(conn, cursor, statement, parameters, context, executemany):
+        folded = " ".join(statement.split())
+        if folded.startswith("INSERT INTO audit_logs"):
+            audited.append(1)
+        if folded.startswith("INSERT INTO observations ") and left["insert"]:
+            left["insert"] -= 1
+            raise OperationalError(folded, parameters, sqlite3.OperationalError(1020, "Record has changed"))
+
+    def commit_hook(conn):
+        if left["commit"] and audited:
+            left["commit"] -= 1
+            raise OperationalError("COMMIT", {}, Exception(1213, "Deadlock found"))
+
+    listeners = (("before_cursor_execute", execute), ("commit", commit_hook))
+    for name, listener in listeners:
+        event.listen(engine.sync_engine, name, listener)
+
+    def stop():
+        for name, listener in listeners:
+            event.remove(engine.sync_engine, name, listener)
+    return stop
+
+
+async def _create_with(client, db, headers, engine, session_maker, **inject):
+    admin = await make_admin(db)
+    post = await make_post(db)
+    dictionary = await make_dictionary(db)
+    stop = _inject(engine, **inject)
+    try:
+        response = await client.post(CREATE, headers=headers(admin),
+                                     json=observation_payload(post.id, dictionary["signal_type_id"]))
+    finally:
+        stop()
+    return response, await _counts(session_maker)
+
+
+async def test_a_conflict_at_the_insert_is_retried(client, db, headers, engine, session_maker):
+    response, (observations, bands, units, audits) = await _create_with(
+        client, db, headers, engine, session_maker, insert=1)
+    assert response.status_code == 200, response.text
+    assert (observations, bands, audits) == (1, 1, 1)
+
+
+async def test_a_conflict_at_the_commit_is_retried(client, db, headers, engine, session_maker):
+    response, (observations, bands, units, audits) = await _create_with(
+        client, db, headers, engine, session_maker, commit=1)
+    assert response.status_code == 200, response.text
+    assert (observations, bands, audits) == (1, 1, 1)
