@@ -2,8 +2,10 @@
 import sqlite3
 from pathlib import Path
 
+from alembic.script import ScriptDirectory
+
 from tests.test_column_bounds import _run_downgrade
-from tests.test_migrations import HEAD, run_migrate
+from tests.test_migrations import HEAD, PROJECT_ROOT, run_migrate
 
 REVISION = "027_scope_group_kinds"
 PREVIOUS = "026_users_no_hot_columns"
@@ -24,7 +26,10 @@ def _tables(db_file: Path) -> set:
 
 
 def test_027_is_in_the_chain():
-    assert REVISION
+    """027 sits on 026 and is an ancestor of the head"""
+    scripts = ScriptDirectory(str(PROJECT_ROOT / "app" / "backend" / "migrations"))
+    assert scripts.get_revision(REVISION).down_revision == PREVIOUS
+    assert REVISION in {script.revision for script in scripts.iterate_revisions(HEAD, "base")}
 
 
 def test_up_down_up_keeps_groups_as_plain_groups(tmp_path):

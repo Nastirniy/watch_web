@@ -16,6 +16,7 @@ where it is (dropping a foreign key never drops its index) and is harmless.
 Guarded with inspector checks: a fresh install is built from the models by 002_sync_schema and has no such foreign
 key; each one is found by constrained column and referred table (its name differs per database) and dropped only
 where it exists. The downgrade creates the three foreign keys again (fk_<table>_<column>), only where missing.
+Every actor id still names a users row (users are never deleted), so the downgrade finds no orphan to refuse.
 
 Revision ID: 028_no_actor_foreign_keys
 Revises: 027_scope_group_kinds
