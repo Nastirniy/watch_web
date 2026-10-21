@@ -8,7 +8,7 @@ class AuditLog(SQLModel, table=True):
     __tablename__ = "audit_logs"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: Optional[int] = Field(default=None, foreign_key="users.id", index=True)
+    user_id: Optional[int] = Field(default=None, index=True)   # who acted; no foreign key (migration 028)
     session_id: Optional[str] = Field(default=None, max_length=128, index=True)
 
     action: str = Field(max_length=100, index=True)

@@ -38,7 +38,7 @@ class UserCertificate(SQLModel, table=True):
     # on our CRL when revoked
     ca_issued: bool = Field(default=False, sa_column_kwargs={"server_default": false(), "nullable": False})
     revoked_at: Optional[datetime] = Field(default=None)
-    revoked_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    revoked_by: Optional[int] = Field(default=None)   # who acted: no foreign key (migration 028)
     revocation_reason: Optional[str] = Field(default=None, max_length=32)   # RevocationReason
     # Directory of the issued package, relative to settings.pki.store_dir; only for issued rows
     files_dir: Optional[str] = Field(default=None, max_length=64)
@@ -46,7 +46,7 @@ class UserCertificate(SQLModel, table=True):
     last_exported_at: Optional[datetime] = Field(default=None)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     # The user who registered it; null for the migration, the seed and the CLI
-    created_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    created_by: Optional[int] = Field(default=None)
 
 
 class CertificateAuthorityState(SQLModel, table=True):

@@ -19,6 +19,12 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ### Changed
 
+- Database: migration `028_no_actor_foreign_keys` drops the foreign keys from `audit_logs.user_id`, `user_certificates.created_by` and
+  `user_certificates.revoked_by` to `users` (columns, values and API unchanged; `user_certificates.user_id` and all other keys stay).
+  The key check locked the actor's users row: two admins acting on each other deadlocked (1213), export against revoke and
+  login against deactivation answered 500 (1020) on MariaDB. Users are never hard-deleted, so nothing is lost. The downgrade
+  creates the keys again.
+
 - A brigade always sits in a corps (and a corps directly under the root): the server refuses to start with a corps or
   brigade anywhere else, archived rows included, and names the ids (`bootstrap/structure.py`, fix in DEPLOYMENT.md,
   Troubleshooting). The API never created such rows.
