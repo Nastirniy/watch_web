@@ -389,6 +389,7 @@ docker compose exec media-worker python -m app.backend.cli.media_tools storyboar
 | Uploads through nginx fail with "temp file not found" | `NGINX_UPLOAD_TEMP` differs from `client_body_temp_path`, or the directory is not mounted into the api container |
 | API cannot connect to MySQL | MySQL not listening on TCP 127.0.0.1, or grants only for the socket user |
 | Files written by containers unreadable by nginx | `MEDIA_UID`/`MEDIA_GID` do not match the owner of `MEDIA_ROOT`, or the share was mounted with restrictive `file_mode` |
+| The API stops at start with "unit structure is broken" | A corps sits under a group or a brigade sits outside a corps (no API route creates one; hand-edited or old data). The message names the ids. Move a brigade into a corps: `UPDATE scope_groups SET parent_id = <corps id>, parent_key = <corps id> WHERE id = <brigade id>;` (a corps goes back under the root: `parent_id = NULL, parent_key = 0`), then start again |
 | nginx 400 for a client certificate, browser certificate errors, 503 on issuing a certificate | see `PKI.md`, section 9 |
 
 ## Without Docker

@@ -82,8 +82,17 @@ async def _migrate_and_seed():
         
         # Always seed initial data
         await seed_database()
+        await _check_unit_structure()
         _logger.info("Database initialization completed successfully")
         
     except Exception as e:
         _logger.error(f"Failed to initialize database: {e}")
         raise
+
+
+async def _check_unit_structure():
+    """A corps or brigade in the wrong place stops the start (bootstrap/structure.py)"""
+    from app.backend.bootstrap.structure import check_unit_structure
+    from app.backend.database import get_session_maker
+    async with (await get_session_maker())() as session:
+        await check_unit_structure(session)

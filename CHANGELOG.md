@@ -17,6 +17,12 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   brigade or group `root_permissions` plus `group_permissions[<parent id>]`. API.md documents the field and how a
   move changes who has access (for the people at the destination).
 
+### Changed
+
+- A brigade always sits in a corps (and a corps directly under the root): the server refuses to start with a corps or
+  brigade anywhere else, archived rows included, and names the ids (`bootstrap/structure.py`, fix in DEPLOYMENT.md,
+  Troubleshooting). The API never created such rows.
+
 ## Bug hunt 2 (branch fix/hunt2)
 
 ### Fixed
@@ -124,8 +130,8 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ### Fixed
 
-- `PATCH /brigades/{brigade_id}` with `corps_id` answered 500 for a brigade sitting directly under the root (older data:
-  the API creates none): the post rights of the move are now checked at the root, 403 `permission_required_for_action`
+- `PATCH /brigades/{brigade_id}` with `corps_id` answered 500 for a brigade sitting directly under the root (a state the
+  server now refuses to start with): the post rights of the move are now checked at the root, 403 `permission_required_for_action`
   (action `move_brigade`) without them, 200 with them.
 
 ## Corps follow-ups (2026-10-20, branch fix/corps-followups)
