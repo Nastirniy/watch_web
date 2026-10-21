@@ -546,7 +546,8 @@ def _own_calls(function: ast.AST):
 
     exits: the call sits in a statement list that is not the function body and in which a return / raise follows
     (an early exit branch: an if / else branch, an except handler, a with-block inside one). A commit there is
-    followed by the exit, never by the audit row of the main path. break / continue do not leave the function."""
+    followed by the exit, never by the audit row of the main path; but not when an audit write follows it in that
+    same branch (commit, audit, return). break / continue do not leave the function."""
     found = []
 
     def expressions(node, exits):
@@ -554,18 +555,22 @@ def _own_calls(function: ast.AST):
             return
         if isinstance(node, ast.Call):
             found.append((node, exits))
+            if exits is not None:
+                exits.append(node)
         for child in ast.iter_child_nodes(node):
             expressions(child, exits)
 
     def block(stmts, exits):
-        leaves = exits or any(isinstance(st, (ast.Return, ast.Raise)) for st in stmts)
+        leaves = exits
+        if leaves is None and any(isinstance(st, (ast.Return, ast.Raise)) for st in stmts):
+            leaves = []                       # collects every call of this exit branch
         for st in stmts:
             statement(st, leaves)
 
     def statement(st, exits):
         if isinstance(st, _SCOPES):
             return
-        inherited = exits and not isinstance(st, (ast.For, ast.AsyncFor, ast.While))
+        inherited = exits if not isinstance(st, (ast.For, ast.AsyncFor, ast.While)) else None
         for _, value in ast.iter_fields(st):
             items = value if isinstance(value, list) else [value]
             if isinstance(value, list) and value and all(isinstance(i, (ast.stmt, ast.ExceptHandler, ast.match_case)) for i in items):
@@ -580,8 +585,11 @@ def _own_calls(function: ast.AST):
                         expressions(item, exits)
 
     for st in function.body:
-        statement(st, False)
-    return sorted(found, key=lambda item: (item[0].lineno, item[0].col_offset))
+        statement(st, None)
+    ordered = sorted(found, key=lambda item: (item[0].lineno, item[0].col_offset))
+    return [(call, branch is not None and not any(
+        _is_audit_write(other) and (other.lineno, other.col_offset) > (call.lineno, call.col_offset)
+        for other in branch)) for call, branch in ordered]
 
 
 def audit_after_commit(source: str, filename: str = "<source>"):
@@ -713,6 +721,37 @@ def test_the_audit_guard_bites_where_the_function_returns():
             "    await create_audit_log(session=s)\n"
             "    await s.commit()\n"
             "    return 1\n"
+        , []),
+        "branch_commit_then_audit": (
+            "async def route(s, x):\n"
+            "    if x:\n"
+            "        await s.commit()\n"
+            "        await create_audit_log(session=s)\n"
+            "        return 1\n"
+            "    return 2\n"
+        , [("route", 4)]),
+        "with_body_commit_then_audit": (
+            "async def route(s):\n"
+            "    async with s.begin():\n"
+            "        await s.commit()\n"
+            "        await create_audit_log(session=s)\n"
+            "        return 1\n"
+        , [("route", 4)]),
+        "try_body_commit_then_audit": (
+            "async def route(s):\n"
+            "    try:\n"
+            "        await s.commit()\n"
+            "        await create_audit_log(session=s)\n"
+            "        return 1\n"
+            "    finally:\n"
+            "        pass\n"
+        , [("route", 4)]),
+        "branch_audit_then_commit": (
+            "async def route(s, x):\n"
+            "    if x:\n"
+            "        await create_audit_log(session=s)\n"
+            "        await s.commit()\n"
+            "        return 1\n"
         , []),
     }
     for name, (source, expected) in samples.items():
