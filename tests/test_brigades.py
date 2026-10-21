@@ -147,6 +147,20 @@ async def test_move_without_post_update_at_the_new_corps_changes_nothing(client,
     assert row.parent_id == c1.id
 
 
+async def test_move_without_post_rights_at_the_old_corps_changes_nothing(client, db, headers):
+    c1 = await make_group(db, kind="corps")
+    c2 = await make_group(db, kind="corps")
+    brigade = await make_group(db, parent_id=c1.id, kind="brigade")
+    user = await make_user(db)
+    await assign(db, user, await make_role(db, [Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_UPDATE]), ROOT)
+    await assign(db, user, await make_role(db, [Permissions.POST_UPDATE, Permissions.POST_VIEW]), Node.group(c2.id))
+    r = await client.patch(_one(brigade.id), json={"corps_id": c2.id}, headers=headers(user))
+    assert r.status_code == 403 and r.json()["code"] == "permission_required_for_action"
+    row = (await db.exec(select(ScopeGroup).where(ScopeGroup.id == brigade.id))).one()
+    await db.refresh(row)
+    assert row.parent_id == c1.id
+
+
 async def test_list_filters(client, db, headers):
     h = headers(await make_admin(db))
     c1 = await make_group(db, kind="corps")

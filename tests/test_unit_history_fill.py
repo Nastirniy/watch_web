@@ -3,7 +3,7 @@ from typing import Dict, List
 
 import pytest
 
-from sqlalchemy import func
+from sqlalchemy import delete, func
 from sqlmodel import select
 
 from app.backend.api.v1 import V1
@@ -102,12 +102,14 @@ async def test_brigade_only_rows_are_history_and_stay(client, db, headers):
     h = headers(await make_admin(db))
     ids = await make_dictionary(db)
     k1 = await make_group(db, kind="corps")
-    b1 = await make_group(db, kind="brigade")
+    b1 = await make_group(db, parent_id=k1.id, kind="brigade")
     post = await make_post(db, group_id=b1.id)
     saved = await _old(client, h, ids, post, 2)
-    assert await _kinds(db, saved[0]) == {"brigade": b1.id}
-    r = await client.patch(V1.path(BrigadeRoutes.BRIGADE_BY_ID, brigade_id=b1.id), json={"corps_id": k1.id}, headers=h)
-    assert r.status_code == 200, r.text
+    assert await _kinds(db, saved[0]) == {"brigade": b1.id, "corps": k1.id}
+    # history recorded with the brigade only (written before the brigade sat in a corps): drop the corps rows
+    await db.exec(delete(ObservationUnit).where(ObservationUnit.group_id == k1.id))
+    await db.commit()
+    assert [await _kinds(db, o) for o in saved] == [{"brigade": b1.id}, {"brigade": b1.id}]
 
     result = await fill_unit_history(db)
 
@@ -203,7 +205,7 @@ async def test_units_as_create_sees_them(client, db, headers):
     ids = await make_dictionary(db)
     k1, b1 = await _structure(db)
     plain = await make_group(db, parent_id=b1.id)
-    b3 = await make_group(db, name="Brigade 3", kind="brigade")
+    b3 = await make_group(db, name="Brigade 3", parent_id=k1.id, kind="brigade")
     in_plain, in_archived = await make_post(db), await make_post(db)
     plain_obs = (await _old(client, h, ids, in_plain, 1))[0]
     archived_obs = (await _old(client, h, ids, in_archived, 1))[0]
@@ -216,7 +218,7 @@ async def test_units_as_create_sees_them(client, db, headers):
     await fill_unit_history(db)
 
     assert await _kinds(db, plain_obs) == {"brigade": b1.id, "corps": k1.id}
-    assert await _kinds(db, archived_obs) == {"brigade": b3.id}
+    assert await _kinds(db, archived_obs) == {"brigade": b3.id, "corps": k1.id}
 
 
 async def test_archived_rows_filled_and_unplaced_posts_skipped(client, db, headers):
