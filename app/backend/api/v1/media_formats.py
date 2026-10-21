@@ -50,10 +50,14 @@ async def _check_conflicts(session: AsyncSession, media_type: str, extensions: L
         raise ApiError(clash[0], **clash[1])
 
 
-async def _commit_content_type(session: AsyncSession, content_type: str) -> None:
-    """Commit; a unique violation on content_type (two requests passed the existence check together) answers
+async def _store_with_audit(session: AsyncSession, row: MediaFormat, content_type: str, *, audit) -> None:
+    """Flush the row, refresh it, write the audit row (`audit()` returns the create_audit_log awaitable) and commit
+    ONCE. A unique violation on content_type (two requests passed the existence check together) answers
     media_format_exists with the row the other request made"""
     try:
+        await session.flush()
+        await session.refresh(row)
+        await audit()
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()
@@ -148,17 +152,13 @@ async def create_media_format(
         action = "create"
 
     session.add(row)
-    await _commit_content_type(session, data.content_type)
-    await session.refresh(row)
-    invalidate_registry_cache()
-
-    await create_audit_log(
+    await _store_with_audit(session, row, data.content_type, audit=lambda: create_audit_log(
         session=session, action=action, resource_type="media_format", resource_id=row.id,
         user_id=current_user.id, old_values=old_values, new_values=row.model_dump(),
         details={"message": f"User {current_user.username} {action}d media format '{row.content_type}'"},
         **client_info(request, auth),
-    )
-    await session.commit()
+    ))
+    invalidate_registry_cache()
     return MediaFormatResponse.model_validate(row)
 
 
@@ -223,17 +223,13 @@ async def update_media_format(
         setattr(row, field_name, value)
     row.updated_at = get_default_timezone_datetime()
     session.add(row)
-    await _commit_content_type(session, content_type)
-    await session.refresh(row)
-    invalidate_registry_cache()
-
-    await create_audit_log(
+    await _store_with_audit(session, row, content_type, audit=lambda: create_audit_log(
         session=session, action="update", resource_type="media_format", resource_id=row.id,
         user_id=current_user.id, old_values=old_values, new_values=row.model_dump(),
         details={"message": f"User {current_user.username} updated media format '{row.content_type}'"},
         **client_info(request, auth),
-    )
-    await session.commit()
+    ))
+    invalidate_registry_cache()
     return MediaFormatResponse.model_validate(row)
 
 

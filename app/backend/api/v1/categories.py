@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from typing import List, Annotated
 from fastapi import APIRouter, Depends, Request, Query
 from sqlalchemy import func
@@ -78,23 +79,22 @@ async def create_category(
     session.add(category)
 
     # Two creates pass the SELECT check together; the unique index decides, the loser is a plain name clash
+    # One transaction: the row, its audit row, one commit
     async with unique_violation_as(session, ErrorCode.CATEGORY_NAME_TAKEN, name=category_data.name):
+        await session.flush()
+        await session.refresh(category)
+        await create_audit_log(
+            session=session,
+            action="create",
+            resource_type="category",
+            resource_id=category.id,
+            user_id=current_user.id,
+            old_values=None,
+            new_values=category.model_dump(),
+            details={"message": f"User {current_user.username} created category '{category.name}'"},
+            **client_info(request, auth)
+        )
         await session.commit()
-    await session.refresh(category)
-
-    # Create audit log
-    await create_audit_log(
-        session=session,
-        action="create",
-        resource_type="category",
-        resource_id=category.id,
-        user_id=current_user.id,
-        old_values=None,
-        new_values=category.model_dump(),
-        details={"message": f"User {current_user.username} created category '{category.name}'"},
-        **client_info(request, auth)
-    )
-    await session.commit()
 
     return category
 
@@ -169,26 +169,24 @@ async def update_category(
 
     session.add(category)
 
-    if "name" in update_data:
-        async with unique_violation_as(session, ErrorCode.CATEGORY_NAME_TAKEN, name=category_data.name):
-            await session.commit()
-    else:
+    # One transaction: the change, its audit row, one commit; only a new name can hit the unique index
+    guard = (unique_violation_as(session, ErrorCode.CATEGORY_NAME_TAKEN, name=category_data.name)
+             if "name" in update_data else nullcontext())
+    async with guard:
+        await session.flush()
+        await session.refresh(category)
+        await create_audit_log(
+            session=session,
+            action="update",
+            resource_type="category",
+            resource_id=category.id,
+            user_id=current_user.id,
+            old_values=old_values,
+            new_values=category.model_dump(),
+            details={"message": f"User {current_user.username} updated category '{category.name}'"},
+            **client_info(request, auth)
+        )
         await session.commit()
-    await session.refresh(category)
-
-    # Create audit log
-    await create_audit_log(
-        session=session,
-        action="update",
-        resource_type="category",
-        resource_id=category.id,
-        user_id=current_user.id,
-        old_values=old_values,
-        new_values=category.model_dump(),
-        details={"message": f"User {current_user.username} updated category '{category.name}'"},
-        **client_info(request, auth)
-    )
-    await session.commit()
 
     return category
 

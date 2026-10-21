@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from typing import List, Annotated
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request, Query
@@ -99,23 +100,22 @@ async def create_signal_type(
     session.add(signal_type)
 
     # Two creates pass the SELECT check together; the unique index decides, the loser is a plain code clash
+    # One transaction: the row, its audit row, one commit
     async with unique_violation_as(session, ErrorCode.SIGNAL_TYPE_CODE_TAKEN, signal_type_code=signal_type_data.code):
+        await session.flush()
+        await session.refresh(signal_type)
+        await create_audit_log(
+            session=session,
+            action="create",
+            resource_type="signal_type",
+            resource_id=signal_type.id,
+            user_id=current_user.id,
+            old_values=None,
+            new_values=signal_type.model_dump(),
+            details={"message": f"User {current_user.username} created signal type '{signal_type.name}' ({signal_type.code})"},
+            **client_info(request, auth)
+        )
         await session.commit()
-    await session.refresh(signal_type)
-
-    # Create audit log
-    await create_audit_log(
-        session=session,
-        action="create",
-        resource_type="signal_type",
-        resource_id=signal_type.id,
-        user_id=current_user.id,
-        old_values=None,
-        new_values=signal_type.model_dump(),
-        details={"message": f"User {current_user.username} created signal type '{signal_type.name}' ({signal_type.code})"},
-        **client_info(request, auth)
-    )
-    await session.commit()
 
     return signal_type
 
@@ -204,26 +204,24 @@ async def update_signal_type(
 
     session.add(signal_type)
 
-    if "code" in update_data:
-        async with unique_violation_as(session, ErrorCode.SIGNAL_TYPE_CODE_TAKEN, signal_type_code=signal_type_data.code):
-            await session.commit()
-    else:
+    # One transaction: the change, its audit row, one commit; only a new code can hit the unique index
+    guard = (unique_violation_as(session, ErrorCode.SIGNAL_TYPE_CODE_TAKEN, signal_type_code=signal_type_data.code)
+             if "code" in update_data else nullcontext())
+    async with guard:
+        await session.flush()
+        await session.refresh(signal_type)
+        await create_audit_log(
+            session=session,
+            action="update",
+            resource_type="signal_type",
+            resource_id=signal_type.id,
+            user_id=current_user.id,
+            old_values=old_values,
+            new_values=signal_type.model_dump(),
+            details={"message": f"User {current_user.username} updated signal type '{signal_type.name}'"},
+            **client_info(request, auth)
+        )
         await session.commit()
-    await session.refresh(signal_type)
-
-    # Create audit log
-    await create_audit_log(
-        session=session,
-        action="update",
-        resource_type="signal_type",
-        resource_id=signal_type.id,
-        user_id=current_user.id,
-        old_values=old_values,
-        new_values=signal_type.model_dump(),
-        details={"message": f"User {current_user.username} updated signal type '{signal_type.name}'"},
-        **client_info(request, auth)
-    )
-    await session.commit()
 
     return signal_type
 

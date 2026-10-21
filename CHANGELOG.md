@@ -22,6 +22,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - A brigade always sits in a corps (and a corps directly under the root): the server refuses to start with a corps or
   brigade anywhere else, archived rows included, and names the ids (`bootstrap/structure.py`, fix in DEPLOYMENT.md,
   Troubleshooting). The API never created such rows.
+- Creating and updating a category, signal type, tag or media format is one transaction: the change and its audit row are
+  committed together. A failing audit write used to answer 500 for a stored change and lose the audit row; now it
+  answers 500 and stores nothing. The responses and the 409 `*_taken` / `media_format_exists` answers are unchanged.
 
 ## Bug hunt 2 (branch fix/hunt2)
 

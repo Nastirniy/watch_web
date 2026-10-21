@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from typing import List, Annotated
 from fastapi import APIRouter, Depends, Request, Query
 from sqlalchemy import func
@@ -73,23 +74,22 @@ async def create_tag(
     session.add(tag)
 
     # Two creates pass the SELECT check together; the unique index decides, the loser is a plain name clash
+    # One transaction: the row, its audit row, one commit
     async with unique_violation_as(session, ErrorCode.TAG_NAME_TAKEN, name=tag_data.name):
+        await session.flush()
+        await session.refresh(tag)
+        await create_audit_log(
+            session=session,
+            action="create",
+            resource_type="tag",
+            resource_id=tag.id,
+            user_id=current_user.id,
+            old_values=None,
+            new_values=tag.model_dump(),
+            details={"message": f"User {current_user.username} created tag '{tag.name}'"},
+            **client_info(request, auth)
+        )
         await session.commit()
-    await session.refresh(tag)
-
-    # Create audit log
-    await create_audit_log(
-        session=session,
-        action="create",
-        resource_type="tag",
-        resource_id=tag.id,
-        user_id=current_user.id,
-        old_values=None,
-        new_values=tag.model_dump(),
-        details={"message": f"User {current_user.username} created tag '{tag.name}'"},
-        **client_info(request, auth)
-    )
-    await session.commit()
 
     return TagResponse.model_validate(tag)
 
@@ -164,26 +164,24 @@ async def update_tag(
 
     session.add(tag)
 
-    if "name" in update_data:
-        async with unique_violation_as(session, ErrorCode.TAG_NAME_TAKEN, name=tag_data.name):
-            await session.commit()
-    else:
+    # One transaction: the change, its audit row, one commit; only a new name can hit the unique index
+    guard = (unique_violation_as(session, ErrorCode.TAG_NAME_TAKEN, name=tag_data.name)
+             if "name" in update_data else nullcontext())
+    async with guard:
+        await session.flush()
+        await session.refresh(tag)
+        await create_audit_log(
+            session=session,
+            action="update",
+            resource_type="tag",
+            resource_id=tag.id,
+            user_id=current_user.id,
+            old_values=old_values,
+            new_values=tag.model_dump(),
+            details={"message": f"User {current_user.username} updated tag '{tag.name}'"},
+            **client_info(request, auth)
+        )
         await session.commit()
-    await session.refresh(tag)
-
-    # Create audit log
-    await create_audit_log(
-        session=session,
-        action="update",
-        resource_type="tag",
-        resource_id=tag.id,
-        user_id=current_user.id,
-        old_values=old_values,
-        new_values=tag.model_dump(),
-        details={"message": f"User {current_user.username} updated tag '{tag.name}'"},
-        **client_info(request, auth)
-    )
-    await session.commit()
 
     return TagResponse.model_validate(tag)
 
