@@ -93,12 +93,12 @@ async def create_corps(
 
     corps = ScopeGroup(name=data.name, description=data.description, parent_id=None, parent_key=0, kind=CORPS.value)
     session.add(corps)
+    # The audit row joins the change: one commit (the name index is hit at the flush)
     async with unique_violation_as(session, ErrorCode.SCOPE_GROUP_NAME_TAKEN):
+        await session.flush()
+        await session.refresh(corps)
+        await audit_group(request, session, auth, "create", corps, None)
         await session.commit()
-    await session.refresh(corps)
-
-    await audit_group(request, session, auth, "create", corps, None)
-    await session.commit()
     return corps_to_response(corps, auth)
 
 
@@ -151,12 +151,12 @@ async def update_corps(
         setattr(corps, key, value)
     corps.updated_at = datetime.now(timezone.utc)
     session.add(corps)
+    # The audit row joins the change: one commit (the name index is hit at the flush)
     async with unique_violation_as(session, ErrorCode.SCOPE_GROUP_NAME_TAKEN):
+        await session.flush()
+        await session.refresh(corps)
+        await audit_group(request, session, auth, "update", corps, old_values)
         await session.commit()
-    await session.refresh(corps)
-
-    await audit_group(request, session, auth, "update", corps, old_values)
-    await session.commit()
     return corps_to_response(corps, auth)
 
 

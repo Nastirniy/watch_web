@@ -115,12 +115,12 @@ async def create_brigade(
     brigade = ScopeGroup(name=data.name, description=data.description, parent_id=data.corps_id,
                          parent_key=data.corps_id, kind=BRIGADE.value)
     session.add(brigade)
+    # The audit row joins the change: one commit (the name index is hit at the flush)
     async with unique_violation_as(session, ErrorCode.SCOPE_GROUP_NAME_TAKEN):
+        await session.flush()
+        await session.refresh(brigade)
+        await audit_group(request, session, auth, "create", brigade, None)
         await session.commit()
-    await session.refresh(brigade)
-
-    await audit_group(request, session, auth, "create", brigade, None)
-    await session.commit()
     return brigade_to_response(brigade, auth)
 
 
@@ -200,12 +200,12 @@ async def update_brigade(
     brigade.parent_key = new_corps
     brigade.updated_at = datetime.now(timezone.utc)
     session.add(brigade)
+    # The audit row joins the change: one commit (the name index is hit at the flush)
     async with unique_violation_as(session, ErrorCode.SCOPE_GROUP_NAME_TAKEN):
+        await session.flush()
+        await session.refresh(brigade)
+        await audit_group(request, session, auth, "update", brigade, old_values)
         await session.commit()
-    await session.refresh(brigade)
-
-    await audit_group(request, session, auth, "update", brigade, old_values)
-    await session.commit()
     return brigade_to_response(brigade, await _fresh(session, auth))   # a move changed what the brigade holds
 
 

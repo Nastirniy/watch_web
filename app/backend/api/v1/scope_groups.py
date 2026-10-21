@@ -134,12 +134,12 @@ async def create_scope_group(
         name=data.name, parent_id=data.parent_id, parent_key=data.parent_id or 0, description=data.description,
     )
     session.add(group)
+    # The audit row joins the change: one commit (the name index is hit at the flush)
     async with unique_violation_as(session, ErrorCode.SCOPE_GROUP_NAME_TAKEN):
+        await session.flush()
+        await session.refresh(group)
+        await audit_group(request, session, auth, "create", group, None)
         await session.commit()
-    await session.refresh(group)
-
-    await audit_group(request, session, auth, "create", group, None)
-    await session.commit()
     return ScopeGroupResponse.model_validate(group)
 
 
@@ -251,12 +251,12 @@ async def update_scope_group(
     group.parent_key = group.parent_id or 0
     group.updated_at = datetime.now(timezone.utc)
     session.add(group)
+    # The audit row joins the change: one commit (the name index is hit at the flush)
     async with unique_violation_as(session, ErrorCode.SCOPE_GROUP_NAME_TAKEN):
+        await session.flush()
+        await session.refresh(group)
+        await audit_group(request, session, auth, "update", group, old_values)
         await session.commit()
-    await session.refresh(group)
-
-    await audit_group(request, session, auth, "update", group, old_values)
-    await session.commit()
     return ScopeGroupResponse.model_validate(group)
 
 

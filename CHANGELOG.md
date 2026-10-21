@@ -28,6 +28,8 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - Creating and updating a post, creating, updating and cloning a role, granting and revoking a role permission and
   creating a user are one transaction too: the change and its audit row are committed together (500 stores nothing).
   Responses and the 409 answers (`post_code_taken`, `role_name_taken`, `username_taken`) are unchanged.
+- Creating and updating (rename, move) a scope group, a corps or a brigade are one transaction too: the change and its
+  audit row are committed together. Responses and `scope_group_name_taken` are unchanged.
 
 ## Bug hunt 2 (branch fix/hunt2)
 
