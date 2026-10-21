@@ -255,7 +255,8 @@ its permission covering the group's parent, the root for a corps or a root plain
 | a plain group | the plain groups inside it; not the group itself |
 
 A move (`PATCH` with a new `corps_id` / `parent_id`) needs `scope_group.view` and `scope_group.update` covering the old
-and the new parent (the current `corps_id` / `parent_id` sent back is no move). Creating at the root (a corps, a root plain group) or
+and the new parent (the current `corps_id` / `parent_id` sent back is no move). A rename without a move needs `scope_group.view` at the
+parent too (the root for a corps or a root group), checked before the name: 403, never 409. Creating at the root (a corps, a root plain group) or
 moving a group to the root also needs `scope_group.view` at the root (X.view AND X.create / X.update where it acts),
 checked before the name: a holder of `scope_group.create` at the root who cannot see it gets 403, never 409.
 A refusal is 403 `permission_required_for_action` with `action` `create_corps`, `update_corps`, `archive_corps`,

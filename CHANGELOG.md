@@ -73,12 +73,29 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `certificate_not_recognized`, as the login already declares. No new problem code.
 - `POST /observations/` committed the observation and wrote its audit row in a second transaction: a failure there
   (on MariaDB 1020 from the audit row's foreign key check, a lock wait timeout) answered 500 for a stored observation,
-  so a retry created it twice. The audit row is now written in the same transaction: a 500 stores nothing.
+  so a retry created it twice. The audit row is now written in the same transaction: a 500 stores nothing. The
+  merged write can still answer 500 (1020 on the actor's `users` row through the audit row's foreign key), but now
+  before anything is stored, so a retry is safe.
 - `PUT /observations/{id}`, `POST /observations/{id}/archive` / `restore`, `POST /observations/{id}/frequencies`,
   `PUT /observations/{id}/frequencies/{frequency_id}` and `POST .../frequencies/{frequency_id}/archive` / `restore` committed the change and wrote the audit row in a
   second transaction: a failure there (on MariaDB 1020 from the audit row's foreign key check after the update's
   refresh, a lock wait timeout) answered 500 for a stored change with no audit row, and a client retrying the 500 of
-  the band create added a second band. Change and audit row are one commit now: a 500 stores nothing. No contract change.
+  the band create added a second band. Change and audit row are one commit now: a 500 stores nothing. The merged write
+  can still answer 500 (1020 on the actor's `users` row through the audit row's foreign key), but now before anything
+  is stored, so a retry is safe. No contract change.
+- `POST /auth/login`: the certificate is read again after the user lock as committed, not from the copy the request's
+  session still held from the authentication: a revocation committed just before the lock answers 401
+  `certificate_revoked` instead of a session bound to a revoked certificate.
+- `POST /auth/refresh` that met an account deactivated at its token claim twice, and active again at the end of the
+  second attempt, answered 401 `account_deactivated` for an active account. It now answers 401 `session_expired`
+  (declared); `account_deactivated` / `account_deleted` stay for an account that is inactive or archived as committed.
+- Renaming without a move: `PATCH /corps/{id}`, `PATCH /scope-groups/{id}` (no new `parent_id`) and
+  `PATCH /brigades/{id}` (no new `corps_id`) with a `name` check `scope_group.view` at the parent (the root for a corps
+  or a root group) next to `scope_group.update`, before the name check: a caller with update at the parent and view only
+  at the unit got 409 `scope_group_name_taken` for names it could not see. It now gets 403
+  `permission_required_for_action` (`update_corps` / `update_scope_group` / `update_brigade`, missing
+  `scope_group.view`). A change that leaves the name alone needs no view at the parent. No new problem code; the three
+  operation descriptions in `api-contract/v1/openapi.json` say it.
 
 ## Unit history fill (2026-10-20, branch feat/unit-history-fill)
 

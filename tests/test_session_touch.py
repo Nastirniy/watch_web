@@ -772,3 +772,91 @@ def test_the_account_locks_select_columns_only(monkeypatch):
         assert "LOCK IN SHARE MODE" in sql and "FOR UPDATE" not in sql, sql
         assert "user_sessions" not in sql and sql.count("SELECT") == 1, sql
         assert "is_active" in sql and "is_deleted" in sql, sql
+
+
+async def test_a_login_reads_the_certificate_as_committed_when_the_session_still_holds_it(
+        client, db, headers, session_maker, monkeypatch):
+    """The certificate authenticate_pki loaded stays in the request session's identity map while something holds it
+    (expire_on_commit=False): the re-read after the user lock must overwrite it (populate_existing), or a revocation
+    committed before the lock goes unseen and the login stores a session bound to a revoked certificate"""
+    from app.backend.api.v1 import V1
+    from app.backend.auth.certificates import hash_data
+    from app.backend.auth.service import AuthService
+    from app.backend.auth.sessions import live_clause
+    from app.backend.enums.routes import AuthRoutes
+    from app.backend.models.user_certificate import UserCertificate
+    from tests.test_pki_login import nginx_headers
+    user_id, cert = await _pki_user(client, db, headers, monkeypatch, "stalecert", 0x4E32)
+    held = []
+    authenticate = AuthService.authenticate_pki
+
+    async def authenticate_and_hold(session, *args, **kwargs):
+        result = await authenticate(session, *args, **kwargs)
+        held.extend((await session.exec(select(UserCertificate).where(UserCertificate.user_id == user_id))).all())
+        return result
+
+    monkeypatch.setattr(AuthService, "authenticate_pki", staticmethod(authenticate_and_hold))
+
+    async def change():
+        async with session_maker() as other:
+            fingerprint_hash = await hash_data(nginx_headers(cert)["X-SSL-Client-Fingerprint"])
+            row = (await other.exec(select(UserCertificate).where(
+                UserCertificate.fingerprint_hash == fingerprint_hash))).one()
+            row.revoked_at = datetime.now(timezone.utc)
+            other.add(row)
+            await other.commit()
+
+    _before_the_session_is_stored(monkeypatch, change)
+    response = await client.post(V1.path(AuthRoutes.LOGIN), headers=nginx_headers(cert))
+    async with session_maker() as fresh:
+        live = (await fresh.exec(select(UserSession).where(UserSession.user_id == user_id, live_clause()))).all()
+    assert held, "the stale copy has to be held by the session"
+    assert response.status_code == 401 and response.json()["code"] == "certificate_revoked", response.text
+    assert live == []
+
+
+async def test_a_refresh_that_met_a_reactivated_account_twice_answers_session_expired(client, db, session_maker,
+                                                                                      monkeypatch):
+    """The refresh runs again once when the account was reactivated between its rollback and the lock of the end.
+    The account flapped again before the second attempt and was active once more at its end: the answer is not
+    account_deactivated (the account is active as committed), it is session_expired, declared on refresh."""
+    from app.backend.api.v1 import V1
+    from app.backend.api.v1 import auth as auth_routes
+    from app.backend.auth import sessions
+    from app.backend.auth.service import AuthService
+    from app.backend.enums.routes import AuthRoutes
+    from app.backend.models.user import User
+    user = await make_user(db)
+    row = await AuthService.create_session(db, user)
+    refresh = AuthService.session_tokens(user.id, row)[1]
+    await _deactivate(db, user)
+
+    def set_active(value):
+        async def change():
+            async with session_maker() as other:
+                stored = (await other.exec(select(User).where(User.id == user.id))).one()
+                stored.is_active = value
+                other.add(stored)
+                await other.commit()
+        return change
+
+    writes, ends = [], []
+    claim_write, end_lock = auth_routes.begin_session_write, sessions.begin_account_session_write
+
+    async def refresh_write(session, user_id):
+        writes.append(user_id)
+        if len(writes) == 2:
+            await set_active(False)()            # deactivated again before the second attempt's lock
+        return await claim_write(session, user_id)
+
+    async def end_write(session, user_id):
+        ends.append(user_id)
+        await set_active(True)()                 # reactivated before the end's lock, both times
+        return await end_lock(session, user_id)
+
+    monkeypatch.setattr(auth_routes, "begin_session_write", refresh_write)
+    monkeypatch.setattr(sessions, "begin_account_session_write", end_write)
+    response = await client.post(V1.path(AuthRoutes.REFRESH), json={"refresh_token": refresh})
+    assert (len(writes), len(ends)) == (2, 2)
+    assert response.status_code == 401 and response.json()["code"] == "session_expired", response.text
+    assert await _ended_and_logged(session_maker, user.id) == ([], [])

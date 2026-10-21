@@ -155,7 +155,8 @@ async def update_brigade(
 ):
     """Rename, describe or move a brigade; only the fields sent change. Archived, another kind of group, or outside
     the caller's scope_group.view: 404. scope_group.update must cover its corps (403 permission_required_for_action,
-    action update_brigade): a holder at the brigade does not manage the brigade itself. A move (corps_id other than
+    action update_brigade): a holder at the brigade does not manage the brigade itself. A new name without a move also
+    needs scope_group.view covering the corps (same answer): the name is checked against its brigades. A move (corps_id other than
     its corps; its own corps sent back is no move and answers as without it) needs
     scope_group.view and scope_group.update covering the old and the new corps and, as it takes every post of the brigade along, post.view
     and post.update covering both (403 permission_required_for_action, action move_brigade), answered before the
@@ -179,6 +180,10 @@ async def update_brigade(
     for corps_id in ((brigade.parent_id, new_corps) if moving else (brigade.parent_id,)):
         AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_UPDATE, parent_location(corps_id),
                                           "move_brigade" if moving else "update_brigade")
+    if "name" in update_data and not moving:
+        # The name is checked against the brigades of the corps (409): scope_group.view at the corps as well
+        AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_VIEW, parent_location(brigade.parent_id),
+                                          "update_brigade")
     if moving:
         for corps_id in (brigade.parent_id, new_corps):
             for permission in (Permissions.POST_UPDATE, Permissions.POST_VIEW):

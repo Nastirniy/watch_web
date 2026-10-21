@@ -193,7 +193,7 @@ class AuthService:
             certificate = (await session.exec(select(UserCertificate).where(
                 UserCertificate.user_id == user_id,
                 UserCertificate.fingerprint_hash == user_session.certificate_fingerprint_hash,
-            ))).first()
+            ).execution_options(populate_existing=True))).first()   # authenticate_pki's copy may still be held
             state = certificate_state(certificate) if certificate is not None else None
             if state is not CertificateState.ACTIVE:
                 _logger.warning(f"Login with a certificate that stopped being active during the login refused: "

@@ -218,7 +218,8 @@ async def update_scope_group(
     A group cannot move into its own subtree, and the moved subtree must still fit 6 levels. Archived, or outside
     the caller's scope_group.view (the group or the new parent): 404. scope_group.update must cover the parent of the
     group (the root for a group directly under it), otherwise 403 permission_required_for_action (action
-    update_scope_group): a holder at a group manages the groups inside it, not the group itself. A move needs
+    update_scope_group): a holder at a group manages the groups inside it, not the group itself. A new name without a
+    move also needs scope_group.view covering that parent (same answer), the name is checked against it. A move needs
     scope_group.view and scope_group.update covering the old and the new parent location (the root for a group
     directly under it) and, as it takes every post below the group along, post.update and post.view covering both (the group or above it; the root for a group directly under it),
     otherwise 403 permission_required_for_action (action move_scope_group), answered before the existence of the new
@@ -237,6 +238,10 @@ async def update_scope_group(
                                    old_parent_id=group.parent_id)
     else:
         AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_UPDATE, parent_node(group), "update_scope_group")
+        if "name" in update_data:
+            # The name is checked against the names beside the group (409): view at that parent as well
+            AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_VIEW, parent_node(group),
+                                              "update_scope_group")
     if ("parent_id" in update_data or "name" in update_data) and await name_taken(
             session, new_name, new_parent, exclude_id=group.id):
         raise ApiError(ErrorCode.SCOPE_GROUP_NAME_TAKEN)

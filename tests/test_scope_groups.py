@@ -248,8 +248,11 @@ async def test_group_writes_need_scope_group_view_at_the_group(client, db, heade
 
     created = await client.post(ROOT, json={"name": "Under East", "parent_id": east.id}, headers=h)
     assert created.status_code == 200, created.text
+    # A new name is checked against the names beside the group: scope_group.view at its parent (the root) too
     renamed = await client.patch(_group(east.id), json={"name": "East 2"}, headers=h)
-    assert renamed.status_code == 200, renamed.text
+    assert renamed.status_code == 403 and renamed.json()["code"] == "permission_required_for_action", renamed.text
+    described = await client.patch(_group(east.id), json={"description": "East front"}, headers=h)
+    assert described.status_code == 200, described.text
 
 
 @pytest.mark.parametrize("group_id", [0, -1])

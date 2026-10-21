@@ -511,3 +511,76 @@ async def test_moving_a_brigade_needs_scope_group_view_at_the_old_corps(client, 
     sighted = await _holder(db, [posts, *sees, ([Permissions.SCOPE_GROUP_VIEW], Node.group(corps.id))])
     r = await client.patch(url, json={"corps_id": other.id}, headers=headers(sighted))
     assert r.status_code == 200 and r.json()["corps_id"] == other.id, r.text
+
+
+# ----------------------------------------------------------------- bug hunt 2 (rename: view at the parent)
+async def test_renaming_a_corps_needs_scope_group_view_at_the_root_before_the_name_check(client, db, headers):
+    """A rename is checked against the names beside the unit (409 is an oracle on them): update at the parent and
+    view only at the unit itself -> 403 update_corps (missing scope_group.view), also for a taken name; a change that
+    leaves the name alone needs no view at the parent"""
+    corps = await make_group(db, "Corps A", kind="corps")
+    taken = await make_group(db, "Corps B", kind="corps")
+    url = V1.path(CorpsRoutes.CORPS_BY_ID, corps_id=corps.id)
+    grants = [([Permissions.SCOPE_GROUP_UPDATE], ROOT), ([Permissions.SCOPE_GROUP_VIEW], Node.group(corps.id))]
+
+    blind = await _holder(db, grants)
+    for name in ("Corps C", taken.name):
+        _missing_view(await client.patch(url, json={"name": name}, headers=headers(blind)), "update_corps")
+    await db.refresh(corps)
+    assert corps.name == "Corps A"
+    r = await client.patch(url, json={"description": "only the text"}, headers=headers(blind))
+    assert r.status_code == 200, r.text
+
+    sighted = await _holder(db, [*grants, ([Permissions.SCOPE_GROUP_VIEW], ROOT)])
+    r = await client.patch(url, json={"name": taken.name}, headers=headers(sighted))
+    assert r.status_code == 409 and r.json()["code"] == "scope_group_name_taken", r.text
+    r = await client.patch(url, json={"name": "Corps C"}, headers=headers(sighted))
+    assert r.status_code == 200 and r.json()["name"] == "Corps C", r.text
+
+
+@pytest.mark.parametrize("under_root", [True, False])
+async def test_renaming_a_group_in_place_needs_scope_group_view_at_its_parent(client, db, headers, under_root):
+    east = await make_group(db, "East")
+    parent_id = None if under_root else east.id
+    group = await make_group(db, "Kharkiv", parent_id=parent_id)
+    taken = await make_group(db, "Lviv", parent_id=parent_id)
+    url = V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=group.id)
+    parent = ROOT if under_root else Node.group(east.id)
+    grants = [([Permissions.SCOPE_GROUP_UPDATE], ROOT), ([Permissions.SCOPE_GROUP_VIEW], Node.group(group.id))]
+
+    blind = await _holder(db, grants)
+    for name in ("Poltava", taken.name):
+        _missing_view(await client.patch(url, json={"name": name}, headers=headers(blind)), "update_scope_group")
+    await db.refresh(group)
+    assert group.name == "Kharkiv"
+    r = await client.patch(url, json={"description": "only the text"}, headers=headers(blind))
+    assert r.status_code == 200, r.text
+
+    sighted = await _holder(db, [*grants, ([Permissions.SCOPE_GROUP_VIEW], parent)])
+    r = await client.patch(url, json={"name": taken.name}, headers=headers(sighted))
+    assert r.status_code == 409 and r.json()["code"] == "scope_group_name_taken", r.text
+    r = await client.patch(url, json={"name": "Poltava"}, headers=headers(sighted))
+    assert r.status_code == 200 and r.json()["name"] == "Poltava", r.text
+
+
+async def test_renaming_a_brigade_needs_scope_group_view_at_its_corps_before_the_name_check(client, db, headers):
+    corps = await make_group(db, "Corps A", kind="corps")
+    brigade = await make_group(db, "Brigade 1", parent_id=corps.id, kind="brigade")
+    taken = await make_group(db, "Brigade 2", parent_id=corps.id, kind="brigade")
+    url = V1.path(BrigadeRoutes.BRIGADE_BY_ID, brigade_id=brigade.id)
+    grants = [([Permissions.SCOPE_GROUP_UPDATE], Node.group(corps.id)),
+              ([Permissions.SCOPE_GROUP_VIEW], Node.group(brigade.id))]
+
+    blind = await _holder(db, grants)
+    for name in ("Brigade 3", taken.name):
+        _missing_view(await client.patch(url, json={"name": name}, headers=headers(blind)), "update_brigade")
+    await db.refresh(brigade)
+    assert brigade.name == "Brigade 1"
+    r = await client.patch(url, json={"description": "only the text"}, headers=headers(blind))
+    assert r.status_code == 200, r.text
+
+    sighted = await _holder(db, [*grants, ([Permissions.SCOPE_GROUP_VIEW], Node.group(corps.id))])
+    r = await client.patch(url, json={"name": taken.name}, headers=headers(sighted))
+    assert r.status_code == 409 and r.json()["code"] == "scope_group_name_taken", r.text
+    r = await client.patch(url, json={"name": "Brigade 3"}, headers=headers(sighted))
+    assert r.status_code == 200 and r.json()["name"] == "Brigade 3", r.text

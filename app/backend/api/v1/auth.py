@@ -213,11 +213,16 @@ async def refresh_token(
         )).first()
         if user is None:
             raise ApiError(AuthErrorCode.ACCOUNT_NOT_FOUND)
-        if user.is_deleted or not user.is_active or attempt == 2:
+        if user.is_deleted or not user.is_active:
             _logger.warning(f"Refresh attempt for inactive account: user_id={user_id}, sessions ended={ended}")
             if user.is_deleted:
                 raise ApiError(AuthErrorCode.ACCOUNT_DELETED)
             raise ApiError(AuthErrorCode.ACCOUNT_DEACTIVATED)
+        if attempt == 2:
+            # Active again as committed, but twice inactive at the claim: the account changes faster than the
+            # refresh can follow. Nothing was refreshed; the client signs in again (never account_*, it is active)
+            _logger.warning(f"Refresh gave up, the account kept changing: user_id={user_id}")
+            raise ApiError(AuthErrorCode.SESSION_EXPIRED)
         _logger.info(f"Account reactivated during a refresh, refreshing again: user_id={user_id}")
 
     refresh_session = await live_session(session, session_id, user_id, begin=False)   # the claim began the write

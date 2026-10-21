@@ -134,10 +134,15 @@ async def update_corps(
 ):
     """Rename or describe a corps; only the fields sent change. Archived, another kind of group, or outside the
     caller's scope_group.view: 404. scope_group.update must cover the parent of the corps, the root (403
-    permission_required_for_action, action update_corps): a holder at the corps manages its brigades, not the corps."""
+    permission_required_for_action, action update_corps): a holder at the corps manages its brigades, not the corps.
+    A new name also needs scope_group.view covering the root (same answer): the name is checked against the root."""
     corps = await get_unit(session, auth, CORPS, corps_id, lock=True)
     AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_UPDATE, parent_node(corps), "update_corps")
     update_data = data.model_dump(exclude_unset=True)
+    if "name" in update_data:
+        # The name is checked against the names beside the corps (409): scope_group.view at the root as well, or the
+        # answer tells which root names exist
+        AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_VIEW, parent_node(corps), "update_corps")
     old_values = corps.model_dump()
     if "name" in update_data and await name_taken(session, update_data["name"], None, exclude_id=corps.id):
         raise ApiError(ErrorCode.SCOPE_GROUP_NAME_TAKEN)
