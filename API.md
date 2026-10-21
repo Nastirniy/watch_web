@@ -263,8 +263,9 @@ checked before the name: a holder of `scope_group.create` at the root who cannot
 A refusal is 403 `permission_required_for_action` with `action` `create_corps`, `update_corps`, `archive_corps`,
 `restore_corps` (the same with `brigade` and `scope_group`), `move_brigade` or `move_scope_group`; a group outside the
 caller's `scope_group.view` answers 404 first. Show the buttons of a group when the permission is in effect at its
-parent: for a corps (parent: the root) that is `root_permissions`, for a brigade or a plain group `root_permissions` plus
-`group_permissions[<parent id>]` (the corps of a brigade, the group a plain group sits in).
+parent: for a corps (parent: the root) or a plain group directly under the root that is `root_permissions` only (no parent entry), for a
+brigade or a plain group inside another group `root_permissions` plus `group_permissions[<parent id>]` (the corps of a
+brigade, the group a plain group sits in).
 
 A move is an access change for the people at the destination: whoever holds a role at the new corps, brigade or group
 gains it over the moved posts and their home users, and loses nothing it had at the old place except what it held

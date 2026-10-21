@@ -75,8 +75,8 @@ async def log_search(
     results_count: int
 ) -> None:
     """Log search to audit; like every audit entry, a failure to write it fails the request. The results are read:
-    the read transaction the request opened ends first, so the audit INSERT (its foreign key check of the caller's
-    users row) does not run at the end of a read view as old as the request (1020 on MariaDB)"""
+    the read transaction the request opened ends first, so the audit INSERT runs in a fresh write transaction
+    and not at the end of the read view of the search, as old as the request (1020 on MariaDB)"""
     await start_write(session)
     await create_audit_log(
         session=session,

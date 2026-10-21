@@ -50,3 +50,24 @@ async def test_check_raises_naming_the_row_and_the_fix(db):
     assert str(brigade.id) in message and "brigade" in message
     assert "no API route creates" in message
     assert "UPDATE scope_groups SET parent_id" in message and "DEPLOYMENT.md" in message
+
+
+async def test_startup_stops_on_a_misplaced_unit(db, session_maker, monkeypatch):
+    """_migrate_and_seed runs the check after seeding: a brigade without a corps stops the start"""
+    from alembic import command
+    from app.backend.bootstrap import startup
+    from app.backend import database
+
+    async def _session_maker():
+        return session_maker
+
+    async def _no_seed():
+        return None
+
+    monkeypatch.setattr(command, "upgrade", lambda *args, **kwargs: None)
+    monkeypatch.setattr(startup, "seed_database", _no_seed)
+    monkeypatch.setattr(database, "get_session_maker", _session_maker)
+    await startup._migrate_and_seed()    # a correct (empty) structure starts
+    await make_group(db, kind="brigade")
+    with pytest.raises(RuntimeError):
+        await startup._migrate_and_seed()

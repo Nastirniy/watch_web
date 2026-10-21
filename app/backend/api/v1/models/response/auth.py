@@ -33,7 +33,8 @@ class AuthorizationInfo(PlainTextModel):
     group_permissions: Dict[str, List[str]] = Field(
         description="Group id -> the permissions the assignments at groups put in effect at that group, for every "
                     "group they reach. In effect at a group = root_permissions plus its entry. Unit management acts "
-                    "at the parent: a corps is managed with root_permissions, a brigade or group with "
+                    "at the parent: a corps or a group directly under the root is managed with "
+                    "root_permissions only, a brigade or a group inside another group with "
                     "root_permissions plus the entry of its parent")
 
 

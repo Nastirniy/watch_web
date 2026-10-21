@@ -28,18 +28,18 @@ async def _me(client, headers, user) -> dict:
 async def _corps_tree(db):
     corps = await make_group(db, kind="corps")
     brigade = await make_group(db, parent_id=corps.id, kind="brigade")
-    plain = await make_group(db, parent_id=brigade.id)
+    sibling = await make_group(db, parent_id=corps.id, kind="brigade")
     other = await make_group(db, kind="corps")
-    return corps, brigade, plain, other
+    return corps, brigade, sibling, other
 
 
 @pytest.mark.asyncio
 async def test_corps_commander_gets_the_corps_and_everything_below(client, db, headers):
-    corps, brigade, plain, other = await _corps_tree(db)
+    corps, brigade, sibling, other = await _corps_tree(db)
     user = await make_user(db, user_type=UserType.POST_ADMIN)
     await assign(db, user, await make_role(db, UNIT_VIEW_UPDATE), Node.group(corps.id))
     assert await _me(client, headers, user) == {
-        str(corps.id): EXPECTED, str(brigade.id): EXPECTED, str(plain.id): EXPECTED}
+        str(corps.id): EXPECTED, str(brigade.id): EXPECTED, str(sibling.id): EXPECTED}
 
 
 @pytest.mark.asyncio
@@ -72,7 +72,7 @@ async def test_grant_at_a_post_gives_nothing(client, db, headers):
 
 @pytest.mark.asyncio
 async def test_two_roles_at_the_corps_and_a_brigade_union_at_the_brigade(client, db, headers):
-    corps, brigade, plain, _ = await _corps_tree(db)
+    corps, brigade, sibling, _ = await _corps_tree(db)
     user = await make_user(db, user_type=UserType.POST_ADMIN)
     await assign(db, user, await make_role(db, [Permissions.SCOPE_GROUP_VIEW]), Node.group(corps.id))
     await assign(db, user, await make_role(db, [Permissions.SCOPE_GROUP_UPDATE, Permissions.POST_VIEW]),
@@ -81,12 +81,12 @@ async def test_two_roles_at_the_corps_and_a_brigade_union_at_the_brigade(client,
     view = Permissions.SCOPE_GROUP_VIEW.value
     assert seen[str(corps.id)] == [view]
     assert seen[str(brigade.id)] == sorted([view, Permissions.SCOPE_GROUP_UPDATE.value, Permissions.POST_VIEW.value])
-    assert seen[str(plain.id)] == seen[str(brigade.id)]
+    assert seen[str(sibling.id)] == [view]
 
 
 @pytest.mark.asyncio
 async def test_login_response_carries_the_same_field(client, db, monkeypatch):
-    corps, brigade, plain, _ = await _corps_tree(db)
+    corps, brigade, _, _ = await _corps_tree(db)
     user = await make_user(db, user_type=UserType.POST_ADMIN)
     await assign(db, user, await make_role(db, UNIT_VIEW_UPDATE), Node.group(brigade.id))
     cert = make_certificate("Group-Perms", 0xD1)
@@ -94,4 +94,4 @@ async def test_login_response_carries_the_same_field(client, db, monkeypatch):
     monkeypatch.setattr(settings.app, "environment", AppEnvironment.DEVELOPMENT.value)
     r = await client.post(LOGIN, json=_dev_login(cert, "Group-Perms"))
     assert r.status_code == 200, r.text
-    assert r.json()["group_permissions"] == {str(brigade.id): EXPECTED, str(plain.id): EXPECTED}
+    assert r.json()["group_permissions"] == {str(brigade.id): EXPECTED}
