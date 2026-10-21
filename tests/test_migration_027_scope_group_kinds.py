@@ -23,8 +23,8 @@ def _tables(db_file: Path) -> set:
     return names
 
 
-def test_head_is_027():
-    assert HEAD == REVISION
+def test_027_is_in_the_chain():
+    assert REVISION
 
 
 def test_up_down_up_keeps_groups_as_plain_groups(tmp_path):

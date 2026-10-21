@@ -512,7 +512,12 @@ async def test_a_resumable_complete_releases_its_poster_hold(client, db, headers
 
 # --- static guard: no audit row after a commit --------------------------------------------------------------------
 
-AUDIT_WRITERS = {"create_audit_log", "audit_group"}
+# Wrappers of create_audit_log: observations._audit_frequency, search.log_search, user_certificates._audit (builds the
+# WriteAudit callback), scope_group_helper.audit_group
+AUDIT_WRITERS = {"create_audit_log", "audit_group", "_audit_frequency", "log_search", "_audit"}
+# A call passing one of these keywords hands a callable that writes the audit row to a service (posts._store_post,
+# media_formats._store_with_audit, uploads.abort_session, certificates.*): the audit row is written by that call.
+AUDIT_CALLBACK_KEYWORDS = {"audit", "record", "write_audit"}
 # Scanned: api/ (the routes), services/ and auth/ (a service or AuthService could commit and then audit just as well).
 GUARDED_DIRS = ("api", "services", "auth")
 # "relative/path.py:function" -> why a commit before the audit row is by design
@@ -520,6 +525,7 @@ ALLOWED_AUDIT_AFTER_COMMIT: Dict[str, str] = {
     "services/unit_history.py:fill_unit_history": "CLI command, not a route: the fill commits per chunk of rows on "
                                                   "purpose (it can be huge) and writes one summary audit row at the end",
 }
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
 
 
 def _call_name(node: ast.Call) -> Optional[str]:
@@ -531,30 +537,50 @@ def _call_name(node: ast.Call) -> Optional[str]:
     return None
 
 
+def _is_audit_write(call: ast.Call) -> bool:
+    return _call_name(call) in AUDIT_WRITERS or any(k.arg in AUDIT_CALLBACK_KEYWORDS for k in call.keywords)
+
+
 def _own_calls(function: ast.AST):
-    """(call, leaves) in the body of one function in source order, without the calls of nested functions and classes.
-    leaves: the call sits in a block that ends in return / raise / break / continue, so nothing after the block runs
-    after it (an early exit that commits and returns before the audit row of the main path)."""
+    """(call, exits) of one function in source order, without nested functions, lambdas and classes.
+
+    exits: the call sits in a statement list that is not the function body and in which a return / raise follows
+    (an early exit branch: an if / else branch, an except handler, a with-block inside one). A commit there is
+    followed by the exit, never by the audit row of the main path. break / continue do not leave the function."""
     found = []
-    leaving = (ast.Return, ast.Raise, ast.Break, ast.Continue)
 
-    def walk(node, leaves):
-        for field, value in ast.iter_fields(node):
+    def expressions(node, exits):
+        if isinstance(node, _SCOPES):
+            return
+        if isinstance(node, ast.Call):
+            found.append((node, exits))
+        for child in ast.iter_child_nodes(node):
+            expressions(child, exits)
+
+    def block(stmts, exits):
+        leaves = exits or any(isinstance(st, (ast.Return, ast.Raise)) for st in stmts)
+        for st in stmts:
+            statement(st, leaves)
+
+    def statement(st, exits):
+        if isinstance(st, _SCOPES):
+            return
+        inherited = exits and not isinstance(st, (ast.For, ast.AsyncFor, ast.While))
+        for _, value in ast.iter_fields(st):
             items = value if isinstance(value, list) else [value]
-            block_leaves = leaves or (
-                isinstance(value, list) and node.__class__.__name__ not in ("Call",) and bool(value)
-                and isinstance(value[-1], leaving)
-            )
-            for child in items:
-                if not isinstance(child, ast.AST):
-                    continue
-                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
-                    continue
-                if isinstance(child, ast.Call):
-                    found.append((child, block_leaves))
-                walk(child, block_leaves)
+            if isinstance(value, list) and value and all(isinstance(i, (ast.stmt, ast.ExceptHandler, ast.match_case)) for i in items):
+                if all(isinstance(i, ast.stmt) for i in items):
+                    block(items, inherited)
+                else:
+                    for item in items:
+                        block(item.body, inherited)
+            else:
+                for item in items:
+                    if isinstance(item, ast.AST) and not isinstance(item, ast.stmt):
+                        expressions(item, exits)
 
-    walk(function, False)
+    for st in function.body:
+        statement(st, False)
     return sorted(found, key=lambda item: (item[0].lineno, item[0].col_offset))
 
 
@@ -569,10 +595,9 @@ def audit_after_commit(source: str, filename: str = "<source>"):
             continue
         committed_at = None
         for call, leaves in _own_calls(function):
-            name = _call_name(call)
-            if name == "commit" and committed_at is None and not leaves:
+            if _call_name(call) == "commit" and committed_at is None and not leaves:
                 committed_at = call.lineno
-            elif name in AUDIT_WRITERS and committed_at is not None:
+            elif _is_audit_write(call) and committed_at is not None:
                 problems.append((function.name, call.lineno))
     return problems
 
@@ -627,3 +652,68 @@ def test_the_audit_guard_bites():
         "    await create_audit_log(session=session)\n"
     )
     assert audit_after_commit(branch_then_audit) == [("route", 4)]
+
+
+def test_the_audit_guard_bites_where_the_function_returns():
+    samples = {
+        "ends_in_return": (
+            "async def route(s):\n"
+            "    await s.commit()\n"
+            "    await create_audit_log(session=s)\n"
+            "    return 1\n"
+        , [('route', 3)]),
+        "wrapper": (
+            "async def route(s):\n"
+            "    await s.commit()\n"
+            "    await _audit_frequency(s)\n"
+            "    return 1\n"
+        , [('route', 3)]),
+        "callback": (
+            "async def route(s):\n"
+            "    await s.commit()\n"
+            "    await store(s, audit=lambda: 1)\n"
+            "    return 1\n"
+        , [('route', 3)]),
+        "loop_break": (
+            "async def route(s, rows):\n"
+            "    for r in rows:\n"
+            "        if r:\n"
+            "            await s.commit()\n"
+            "            break\n"
+            "    await create_audit_log(session=s)\n"
+        , [('route', 6)]),
+        "try_except_return": (
+            "async def route(s):\n"
+            "    try:\n"
+            "        await s.commit()\n"
+            "    except OSError:\n"
+            "        return 1\n"
+            "    await create_audit_log(session=s)\n"
+        , [('route', 6)]),
+        "auth_style": (
+            "async def route(s, done):\n"
+            "    if done:\n"
+            "        await s.commit()\n"
+            "        return False\n"
+            "    await create_audit_log(session=s)\n"
+            "    await s.commit()\n"
+            "    return True\n"
+        , []),
+        "else_branch_exit": (
+            "async def route(s, done):\n"
+            "    if done:\n"
+            "        pass\n"
+            "    else:\n"
+            "        await s.commit()\n"
+            "        raise ValueError()\n"
+            "    await create_audit_log(session=s)\n"
+        , []),
+        "audit_first": (
+            "async def route(s):\n"
+            "    await create_audit_log(session=s)\n"
+            "    await s.commit()\n"
+            "    return 1\n"
+        , []),
+    }
+    for name, (source, expected) in samples.items():
+        assert audit_after_commit(source) == expected, name
