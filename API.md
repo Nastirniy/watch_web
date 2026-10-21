@@ -175,6 +175,7 @@ The login, the refresh and `GET /api/v1/auth/me` carry what the interface is bui
 | `permissions` | Permissions held at some node (an assignment on an archived post or at an archived group counts nowhere): the menu (an entry whose route the user can call somewhere). |
 | `root_permissions` | Permissions held at the root: in effect at every post. |
 | `post_permissions` | `{"7": ["observation.create", ...]}`: per post (key: the post id as a string), the permissions that assignments at groups and at the post put in effect there, for every post they reach. |
+| `group_permissions` | `{"3": ["scope_group.update", ...]}`: per group (key: the group id as a string), the permissions that assignments at groups put in effect there (the group of the assignment and every group below it, archived ones too), for every group they reach; assignments at the root and at posts are not in it, an assignment at an archived group reaches nothing. In effect at a group = `root_permissions` plus its entry. |
 | `assignments` | The user's assignments, as `GET /users/{user_id}/assignments` lists them. |
 | `post_id` | Home post: membership (who manages the user); it grants nothing by itself. |
 
@@ -262,7 +263,13 @@ checked before the name: a holder of `scope_group.create` at the root who cannot
 A refusal is 403 `permission_required_for_action` with `action` `create_corps`, `update_corps`, `archive_corps`,
 `restore_corps` (the same with `brigade` and `scope_group`), `move_brigade` or `move_scope_group`; a group outside the
 caller's `scope_group.view` answers 404 first. Show the buttons of a group when the permission is in effect at its
-parent.
+parent: for a corps (parent: the root) that is `root_permissions`, for a brigade or a plain group `root_permissions` plus
+`group_permissions[<parent id>]` (the corps of a brigade, the group a plain group sits in).
+
+A move is an access change for the people at the destination: whoever holds a role at the new corps, brigade or group
+gains it over the moved posts and their home users, and loses nothing it had at the old place except what it held
+there; restoring a post or group makes the assignments made at it apply again. Who may move is decided by the
+mover's own rights only.
 
 - Where each kind sits: a corps directly under the root, a brigade directly in a corps, a plain group under the root
   or another plain group. The kind is fixed at create (`POST /corps/`, `POST /brigades/`; `POST /scope-groups/`

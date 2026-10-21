@@ -33674,6 +33674,17 @@
             "title": "Post Permissions",
             "description": "Post id -> the permissions the assignments at groups and posts put in effect at that post, for every post they reach (an assignment on an archived post stops applying there, a group's keep applying to its archived posts). In effect at a post = root_permissions plus its entry"
           },
+          "group_permissions": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Group Permissions",
+            "description": "Group id -> the permissions the assignments at groups put in effect at that group, for every group they reach. In effect at a group = root_permissions plus its entry. Unit management acts at the parent: a corps is managed with root_permissions, a brigade or group with root_permissions plus the entry of its parent"
+          },
           "access_token": {
             "type": "string",
             "title": "Access Token"
@@ -33708,6 +33719,7 @@
           "assignments",
           "root_permissions",
           "post_permissions",
+          "group_permissions",
           "access_token",
           "refresh_token",
           "expires_in",
@@ -45874,6 +45886,17 @@
             "title": "Post Permissions",
             "description": "Post id -> the permissions the assignments at groups and posts put in effect at that post, for every post they reach (an assignment on an archived post stops applying there, a group's keep applying to its archived posts). In effect at a post = root_permissions plus its entry"
           },
+          "group_permissions": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Group Permissions",
+            "description": "Group id -> the permissions the assignments at groups put in effect at that group, for every group they reach. In effect at a group = root_permissions plus its entry. Unit management acts at the parent: a corps is managed with root_permissions, a brigade or group with root_permissions plus the entry of its parent"
+          },
           "id": {
             "type": "integer",
             "title": "Id"
@@ -45946,6 +45969,7 @@
           "assignments",
           "root_permissions",
           "post_permissions",
+          "group_permissions",
           "id",
           "username",
           "is_active",

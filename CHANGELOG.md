@@ -5,6 +5,18 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Bug hunt 2 follow-ups
+
+### Added
+
+- `group_permissions` in the authorization info of the login, the refresh and `GET /auth/me`: `{"3": ["scope_group.update", ...]}`,
+  per group (key: the group id as a string) the permissions the assignments at groups put in effect there (the group
+  of the assignment and every group below it, archived ones included; an assignment at an archived group reaches
+  nothing; assignments at the root and at posts are not in it). In effect at a group = `root_permissions` plus its
+  entry. Web: unit management acts at the parent, so the buttons of a corps read `root_permissions`, those of a
+  brigade or group `root_permissions` plus `group_permissions[<parent id>]`. API.md documents the field and how a
+  move changes who has access (for the people at the destination).
+
 ## Bug hunt 2 (branch fix/hunt2)
 
 ### Fixed

@@ -30,6 +30,11 @@ class AuthorizationInfo(PlainTextModel):
         description="Post id -> the permissions the assignments at groups and posts put in effect at that post, for "
                     "every post they reach (an assignment on an archived post stops applying there, a group's keep "
                     "applying to its archived posts). In effect at a post = root_permissions plus its entry")
+    group_permissions: Dict[str, List[str]] = Field(
+        description="Group id -> the permissions the assignments at groups put in effect at that group, for every "
+                    "group they reach. In effect at a group = root_permissions plus its entry. Unit management acts "
+                    "at the parent: a corps is managed with root_permissions, a brigade or group with "
+                    "root_permissions plus the entry of its parent")
 
 
 class LoginResponse(AuthorizationInfo):
@@ -114,6 +119,7 @@ def _authorization_fields(auth: AuthContext, assignments: Iterable[AssignmentVie
         "assignments": [AssignmentResponse.model_validate(view, from_attributes=True) for view in assignments],
         "root_permissions": sorted(auth.root_permissions),
         "post_permissions": {str(post_id): sorted(held) for post_id, held in auth.post_permissions().items()},
+        "group_permissions": {str(group_id): sorted(held) for group_id, held in auth.group_permissions().items()},
     }
 
 

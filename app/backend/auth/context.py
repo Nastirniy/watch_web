@@ -106,6 +106,21 @@ class AuthContext:
         entries = {post_id: self._held_at(post_id, below_root) for post_id in sorted(reached)}
         return {post_id: held for post_id, held in entries.items() if held}
 
+    def group_permissions(self) -> Dict[int, FrozenSet[str]]:
+        """group id -> the permissions the grants at groups put in effect at that group: the grant's group and every
+        group below it, archived descendants included (like covers), for every group they reach. In effect at a group
+        = root_permissions plus its entry. A grant at an archived group reaches nothing; grants at the root and at
+        posts are left out, and so are empty entries."""
+        at_groups = [grant for grant in self.grants
+                     if grant.node.kind == "group" and grant.permissions and not self.tree.is_archived(grant.node)]
+        entries: Dict[int, FrozenSet[str]] = {}
+        for group_id in sorted(self.tree.group_parent):
+            node = Node.group(group_id)
+            held = frozenset().union(*(grant.permissions for grant in at_groups if self.tree.contains(grant.node, node)))
+            if held:
+                entries[group_id] = held
+        return entries
+
     def covers(self, permission: Union[Permissions, str], node: Node) -> bool:
         """The node lies inside a subtree where the permission is held (delegation). A grant at an archived node
         covers nothing."""
