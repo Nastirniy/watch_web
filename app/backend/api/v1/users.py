@@ -210,10 +210,9 @@ async def create_user(
                 await session.rollback()
                 raise ApiError.from_coded(exc)
         certificate_id = certificate_row.id if certificate_row is not None else None
-        await session.commit()
         await session.refresh(user)
 
-        # Create audit log
+        # The audit row joins the same transaction: one commit
         await create_audit_log(
             session=session,
             action="create",

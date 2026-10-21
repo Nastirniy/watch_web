@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from typing import List, Annotated
 from fastapi import APIRouter, Depends, status, Request, Query, Path
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -109,21 +110,20 @@ async def create_role(
         else:
             _logger.info(f"User {current_user.username} created role {role.name}")
 
+        # One transaction: the role, its permissions, its audit row
+        await session.flush()
+        await session.refresh(role)
+        await create_audit_log(
+            session=session,
+            action="create",
+            resource_type="role",
+            resource_id=role.id,
+            user_id=current_user.id,
+            new_values=role.model_dump(),
+            details={"message": f"User {current_user.username} created new role '{role.name}'"},
+            **client_info(request, auth)
+        )
         await session.commit()
-    await session.refresh(role)
-
-    # Create audit log
-    await create_audit_log(
-        session=session,
-        action="create",
-        resource_type="role",
-        resource_id=role.id,
-        user_id=current_user.id,
-        new_values=role.model_dump(),
-        details={"message": f"User {current_user.username} created new role '{role.name}'"},
-        **client_info(request, auth)
-    )
-    await session.commit()
 
     return await _role_response(session, role)
 
@@ -245,27 +245,24 @@ async def update_role(
     else:
         _logger.info(f"User {current_user.username} updated role {role.name}")
 
-    if role_update.name is not None:
-        # Two renames to one name pass check_role_name_exists together; the unique index decides
-        async with unique_violation_as(session, ErrorCode.ROLE_NAME_TAKEN):
-            await session.commit()
-    else:
+    # One transaction: the change, its audit row, one commit. Two renames to one name pass check_role_name_exists
+    # together; the unique index decides, and only a rename can hit it
+    guard = unique_violation_as(session, ErrorCode.ROLE_NAME_TAKEN) if role_update.name is not None else nullcontext()
+    async with guard:
+        await session.flush()
+        await session.refresh(role)
+        await create_audit_log(
+            session=session,
+            action="update",
+            resource_type="role",
+            resource_id=role.id,
+            user_id=current_user.id,
+            old_values=old_values,
+            new_values=role.model_dump(),
+            details={"message": f"User {current_user.username} updated role '{role.name}'"},
+            **client_info(request, auth)
+        )
         await session.commit()
-    await session.refresh(role)
-
-    # Create audit log
-    await create_audit_log(
-        session=session,
-        action="update",
-        resource_type="role",
-        resource_id=role.id,
-        user_id=current_user.id,
-        old_values=old_values,
-        new_values=role.model_dump(),
-        details={"message": f"User {current_user.username} updated role '{role.name}'"},
-        **client_info(request, auth)
-    )
-    await session.commit()
 
     return await _role_response(session, role)
 
@@ -398,23 +395,22 @@ async def clone_role(
         grants = await session.exec(select(RolePermission.permission_id).where(RolePermission.role_id == source_id))
         for permission_id in grants.all():
             session.add(RolePermission(role_id=role.id, permission_id=permission_id))
+        await session.flush()
+        await session.refresh(role)
+        await create_audit_log(
+            session=session,
+            action="create",
+            resource_type="role",
+            resource_id=role.id,
+            user_id=current_user.id,
+            new_values=role.model_dump(),
+            details={
+                "message": f"User {current_user.username} cloned role {source_id} as '{role.name}'",
+                "cloned_from": source_id,
+            },
+            **client_info(request, auth)
+        )
         await session.commit()
-    await session.refresh(role)
-
-    await create_audit_log(
-        session=session,
-        action="create",
-        resource_type="role",
-        resource_id=role.id,
-        user_id=current_user.id,
-        new_values=role.model_dump(),
-        details={
-            "message": f"User {current_user.username} cloned role {source_id} as '{role.name}'",
-            "cloned_from": source_id,
-        },
-        **client_info(request, auth)
-    )
-    await session.commit()
     _logger.info(f"User {current_user.username} cloned role {source_id} as {role.name}")
     return role_to_response(role, names)
 
@@ -593,14 +589,8 @@ async def add_role_permission(
         role.updated_at = datetime.now(timezone.utc)
         session.add(role)
         try:
-            await session.commit()
-        except IntegrityError as exc:
-            # A concurrent request granted it between the check and the insert: the PUT is idempotent, so answer
-            # as if the permission had been there (the other request wrote the audit row)
-            await session.rollback()
-            if not is_unique_violation(exc):
-                raise
-        else:
+            # One transaction: the grant and its audit row
+            await session.flush()
             await create_audit_log(
                 session=session,
                 action="update",
@@ -612,6 +602,13 @@ async def add_role_permission(
                 **client_info(request, auth)
             )
             await session.commit()
+        except IntegrityError as exc:
+            # A concurrent request granted it between the check and the insert: the PUT is idempotent, so answer
+            # as if the permission had been there (that request wrote the audit row; the rollback drops ours)
+            await session.rollback()
+            if not is_unique_violation(exc):
+                raise
+        else:
             _logger.info(f"User {actor_name} granted {permission_name} to role {role_name}")
 
     return await _role_permissions(session, role_id)
@@ -651,7 +648,6 @@ async def remove_role_permission(
     await session.delete(row)
     role.updated_at = datetime.now(timezone.utc)
     session.add(role)
-    await session.commit()
     await create_audit_log(
         session=session,
         action="update",

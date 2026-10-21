@@ -15,11 +15,16 @@ from sqlalchemy.exc import OperationalError
 from sqlmodel import select
 
 from app.backend.api.v1 import V1
-from app.backend.enums.routes import CategoryRoutes, MediaFormatRoutes, SignalTypeRoutes, TagRoutes
+from app.backend.enums.routes import (
+    CategoryRoutes, MediaFormatRoutes, PostRoutes, RoleRoutes, SignalTypeRoutes, TagRoutes, UserRoutes,
+)
 from app.backend.models.audit import AuditLog
 from app.backend.models.media_format import MediaFormat
 from app.backend.models.observation import Category, SignalType, Tag
-from tests.helpers import make_admin, make_dictionary, make_post
+from app.backend.models.post import Post
+from app.backend.models.role import Permission, Role
+from app.backend.models.user import User
+from tests.helpers import make_admin, make_dictionary, make_post, make_role
 
 
 async def _audit_fails(*args, **kwargs):
@@ -30,14 +35,17 @@ async def _audit_fails(*args, **kwargs):
 class Case:
     """module: api.v1 module whose create_audit_log is replaced; model/resource_type/action: what is stored;
     request(client, headers, user, ids) -> response; ids: the rows of the scene by name;
-    row_id(ids, response) -> id of the audited row"""
+    target: None for a create (the rows of model are counted), else the name in ids of the row an update changes;
+    row_id(ids, body) -> id of the audited row, only when it is not body["id"] (new_values then is no row dump);
+    status: the success status of the route"""
     module: str
     model: Any
     resource_type: str
     action: str
     request: Callable[..., Awaitable[Any]]
-    # None: a create (the row is counted); name of ids: the row that is updated
     target: Optional[str] = None
+    row_id: Optional[Callable[[Dict[str, Any], Any], int]] = None
+    status: int = 200
 
 
 async def _scene(db) -> Dict[str, Any]:
@@ -50,7 +58,13 @@ async def _scene(db) -> Dict[str, Any]:
     db.add(fmt)
     await db.commit()
     await db.refresh(fmt)
-    return {"user": user, **ids, "other_category_id": other["category_id"], "format_id": fmt.id}
+    role = await make_role(db, ["tag.view"])
+    empty_role = await make_role(db, [])
+    permissions = {p.name: p.id for p in (await db.exec(select(Permission).where(
+        Permission.name.in_(["tag.view", "tag.create"])))).all()}
+    return {"user": user, **ids, "other_category_id": other["category_id"], "format_id": fmt.id,
+            "post_id": (await make_post(db)).id, "role_id": role.id, "empty_role_id": empty_role.id,
+            "view_permission_id": permissions["tag.view"], "create_permission_id": permissions["tag.create"]}
 
 
 def _category_create(client, headers, user, ids):
@@ -95,6 +109,45 @@ def _format_update(client, headers, user, ids):
                       json={"label": "Renamed format"})
 
 
+def _post_create(client, headers, user, ids):
+    return client.post(V1.path(PostRoutes.ROOT), headers=headers(user), json={"name": "New post", "code": "NEWPOST"})
+
+
+def _post_update(client, headers, user, ids):
+    return client.put(V1.path(PostRoutes.POST_BY_ID, post_id=ids["post_id"]), headers=headers(user),
+                      json={"name": "Renamed post"})
+
+
+def _role_create(client, headers, user, ids):
+    return client.post(V1.path(RoleRoutes.ROOT), headers=headers(user),
+                       json={"name": "new_role", "display_name": "New role", "permission_ids": [ids["view_permission_id"]]})
+
+
+def _role_update(client, headers, user, ids):
+    return client.patch(V1.path(RoleRoutes.ROLE_BY_ID, role_id=ids["role_id"]), headers=headers(user),
+                        json={"name": "renamed_role", "permission_ids": [ids["create_permission_id"]]})
+
+
+def _role_clone(client, headers, user, ids):
+    return client.post(V1.path(RoleRoutes.ROLE_CLONE, role_id=ids["role_id"]), headers=headers(user),
+                       json={"name": "cloned_role", "display_name": "Cloned role"})
+
+
+def _permission_add(client, headers, user, ids):
+    return client.put(V1.path(RoleRoutes.ROLE_PERMISSION_BY_ID, role_id=ids["empty_role_id"],
+                              permission_id=ids["view_permission_id"]), headers=headers(user))
+
+
+def _permission_remove(client, headers, user, ids):
+    return client.delete(V1.path(RoleRoutes.ROLE_PERMISSION_BY_ID, role_id=ids["role_id"],
+                                 permission_id=ids["view_permission_id"]), headers=headers(user))
+
+
+def _user_create(client, headers, user, ids):
+    return client.post(V1.path(UserRoutes.ROOT), headers=headers(user),
+                       data={"username": "newuser", "username_alias": "New", "user_type": "viewer"})
+
+
 WRITES = {
     "category_create": Case("categories", Category, "category", "create", _category_create),
     "category_update": Case("categories", Category, "category", "update", _category_update, "category_id"),
@@ -105,6 +158,16 @@ WRITES = {
     "tag_update": Case("tags", Tag, "tag", "update", _tag_update, "tag_id"),
     "media_format_create": Case("media_formats", MediaFormat, "media_format", "create", _format_create),
     "media_format_update": Case("media_formats", MediaFormat, "media_format", "update", _format_update, "format_id"),
+    "post_create": Case("posts", Post, "post", "create", _post_create),
+    "post_update": Case("posts", Post, "post", "update", _post_update, "post_id"),
+    "role_create": Case("roles", Role, "role", "create", _role_create, status=201),
+    "role_update": Case("roles", Role, "role", "update", _role_update, "role_id"),
+    "role_clone": Case("roles", Role, "role", "create", _role_clone, status=201),
+    "role_permission_add": Case("roles", Role, "role", "update", _permission_add, "empty_role_id",
+                                row_id=lambda ids, body: ids["empty_role_id"]),
+    "role_permission_remove": Case("roles", Role, "role", "update", _permission_remove, "role_id",
+                                   row_id=lambda ids, body: ids["role_id"]),
+    "user_create": Case("users", User, "user", "create", _user_create),
 }
 
 
@@ -146,17 +209,19 @@ async def test_the_change_and_one_audit_row_are_stored(client, db, headers, sess
     before = await _stored(session_maker, case, ids)
 
     response = await case.request(client, headers, ids["user"], ids)
-    assert response.status_code == 200, response.text
+    assert response.status_code == case.status, response.text
     body = response.json()
+    audited = case.row_id(ids, body) if case.row_id else body["id"]
 
     after = await _stored(session_maker, case, ids)
     assert after != before
     async with session_maker() as fresh:
         (audit,) = (await fresh.exec(select(AuditLog).where(
             AuditLog.resource_type == case.resource_type, AuditLog.action == case.action,
-            AuditLog.resource_id == body["id"]))).all()
+            AuditLog.resource_id == audited))).all()
     assert audit.user_id == ids["user"].id
-    assert audit.new_values["id"] == body["id"]
+    if case.row_id is None:
+        assert audit.new_values["id"] == audited
     if case.target is None:
         assert audit.old_values is None
     else:

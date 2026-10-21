@@ -48,9 +48,13 @@ def _code_taken(code: str, exclude_post_id: Optional[int] = None):
     return query
 
 
-async def _commit_post(session: AsyncSession) -> None:
-    """Commit a post write; a code taken by a concurrent request after the check hits the unique index"""
+async def _store_post(session: AsyncSession, post: Post, audit) -> None:
+    """Flush the post, refresh it, write the audit row (`audit()` returns the create_audit_log awaitable) and commit
+    ONCE; a code taken by a concurrent request after the check hits the unique index"""
     try:
+        await session.flush()
+        await session.refresh(post)
+        await audit()
         await session.commit()
     except IntegrityError as e:
         await session.rollback()
@@ -127,11 +131,7 @@ async def create_post(
 
     post = Post(**post_data.model_dump())
     session.add(post)
-    await _commit_post(session)
-    await session.refresh(post)
-
-    # Create audit log
-    await create_audit_log(
+    await _store_post(session, post, audit=lambda: create_audit_log(
         session=session,
         action="create",
         resource_type="post",
@@ -140,8 +140,7 @@ async def create_post(
         new_values=post.model_dump(),
         details={"message": f"User {current_user.username} created new post '{post.name}' ({post.code})"},
         **client_info(request, auth)
-    )
-    await session.commit()
+    ))
 
     return await _post_response(session, auth, post)
 
@@ -274,11 +273,7 @@ async def update_post(
     post.updated_at = datetime.now(timezone.utc)
 
     session.add(post)
-    await _commit_post(session)
-    await session.refresh(post)
-
-    # Create audit log
-    await create_audit_log(
+    await _store_post(session, post, audit=lambda: create_audit_log(
         session=session,
         action="update",
         resource_type="post",
@@ -288,8 +283,7 @@ async def update_post(
         new_values=post.model_dump(),
         details={"message": f"User {current_user.username} updated post '{post.name}'"},
         **client_info(request, auth)
-    )
-    await session.commit()
+    ))
 
     return await _post_response(session, auth, post)
 

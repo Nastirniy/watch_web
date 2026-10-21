@@ -25,6 +25,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - Creating and updating a category, signal type, tag or media format is one transaction: the change and its audit row are
   committed together. A failing audit write used to answer 500 for a stored change and lose the audit row; now it
   answers 500 and stores nothing. The responses and the 409 `*_taken` / `media_format_exists` answers are unchanged.
+- Creating and updating a post, creating, updating and cloning a role, granting and revoking a role permission and
+  creating a user are one transaction too: the change and its audit row are committed together (500 stores nothing).
+  Responses and the 409 answers (`post_code_taken`, `role_name_taken`, `username_taken`) are unchanged.
 
 ## Bug hunt 2 (branch fix/hunt2)
 
