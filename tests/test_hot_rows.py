@@ -93,10 +93,11 @@ async def test_last_login_at_is_the_latest_login_session(client, db, headers):
 
 @pytest.mark.asyncio
 async def test_upload_writes_its_media_row_as_the_worker_left_it(client, db, headers, session_maker, monkeypatch, tmp_path):
-    """The worker may claim the poster of a new video as soon as the file is in storage, while the upload request still
-    probes it. The request then wrote a media_files row read before that claim: error 1020 on MariaDB (1 complete of 8
-    answered 500 in the video stress test of 2026-10-19). It locks the row after probing and writes the committed
-    copy: the audit row records the worker's claim."""
+    """A worker could claim the poster of a new video while the upload request still probed it. The request then wrote
+    a media_files row read before that claim: error 1020 on MariaDB (1 complete of 8 answered 500 in the video stress
+    test of 2026-10-19). The hold now lasts until the request's last transaction, so only a hold that ran out (a
+    request stalled for jobs.UPLOAD_HOLD) lets a worker in: the request locks the row after probing and writes the
+    committed copy, the audit row records the worker's claim."""
     from app.backend.api.shared.helpers import upload_helper
     from app.backend.config import settings
     from app.backend.models.audit import AuditLog
@@ -111,8 +112,10 @@ async def test_upload_writes_its_media_row_as_the_worker_left_it(client, db, hea
     reset_media_manager()
 
     async def probe_while_the_worker_claims(media_file):
+        later = datetime.now(timezone.utc) + jobs.UPLOAD_HOLD + timedelta(seconds=1)
         async with session_maker() as worker:
-            assert await jobs.claim_next_poster(worker, "w1", lease_seconds=300) is not None
+            assert await jobs.claim_next_poster(worker, "w1") is None, "held while the request probes"
+            assert await jobs.claim_next_poster(worker, "w1", lease_seconds=300, now=later) is not None
         return {"duration_seconds": 3.0}
 
     monkeypatch.setattr(upload_helper, "_probe_headers", probe_while_the_worker_claims)

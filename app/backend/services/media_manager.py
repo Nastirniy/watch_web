@@ -17,7 +17,7 @@ import aiofiles.os
 from pydantic import BaseModel, field_validator
 
 from app.backend.models.media import MediaFile
-from app.backend.services.media.jobs import enqueue_poster, release_poster_hold
+from app.backend.services.media.jobs import enqueue_poster
 from app.backend.services.media.formats import UnsupportedMediaFormat, FileTooLarge
 from app.backend.services.media.probe import image_dimensions
 from app.backend.enums.general import MediaType
@@ -517,6 +517,10 @@ class MediaManager:
         The file is never loaded entirely into memory -- hash is computed by streaming,
         MIME type is detected from the first 8KB, and the file is moved (not copied)
         to its final storage location.
+
+        Commits the new row before the move (a file in storage always has its row) and deletes it again when the
+        move fails. A new video row keeps its poster hold (enqueue_poster): the caller releases it once the file is
+        in storage, in its last transaction with the audit row of the upload (record_upload).
         """
         upload_session_id = str(uuid.uuid4())
 
@@ -608,14 +612,14 @@ class MediaManager:
                 media_file.width, media_file.height = dimensions
 
             # Video posters are extracted by the media worker; queue in the creating transaction, held until the
-            # file is in storage (released below, in the commit after the move)
+            # file is in storage: the caller releases the hold (release_poster_hold) in its transaction after the
+            # move, the one that writes the audit row of the upload (record_upload)
             enqueue_poster(media_file)
 
             session.add(media_file)
-            await session.commit()
-            await session.refresh(media_file)
+            await session.flush()
 
-            # -- Generate final filename with DB id --
+            # -- Generate final filename with DB id; the row is committed once, with it, before the move --
             md5_hash = hashlib.md5(safe_filename.encode()).hexdigest()[:16]
             stored_filename = f"{media_file.id}_{md5_hash}{file_ext}"
             full_file_path = organized_dir / stored_filename
@@ -637,11 +641,6 @@ class MediaManager:
                 if isinstance(e, OSError):
                     raise CodedError(ErrorCode.MEDIA_STORE_FAILED) from e
                 raise
-
-            if media_file.is_video:
-                # The file is in storage: the worker may take the poster job from now on
-                await release_poster_hold(session, media_file.id)
-                await session.refresh(media_file)
 
             if self.enable_deduplication:
                 self._hash_cache[file_hash] = media_file.id

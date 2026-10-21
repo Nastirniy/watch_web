@@ -12,22 +12,29 @@ from typing import Any, Awaitable, Callable, Dict, Optional
 import pytest
 from sqlalchemy import func
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import object_session
 from sqlmodel import select
 
-from app.backend.api.v1 import V1
+from app.backend.api.shared.helpers import upload_helper
+from app.backend.api.v1 import V1, media_uploads, search
+from app.backend.config import settings
 from app.backend.enums.routes import (
-    BrigadeRoutes, CategoryRoutes, CorpsRoutes, MediaFormatRoutes, PostRoutes, RoleRoutes, ScopeGroupRoutes,
-    SignalTypeRoutes, TagRoutes, UserRoutes,
+    BrigadeRoutes, CategoryRoutes, CorpsRoutes, MediaFormatRoutes, MediaRoutes, PostRoutes, RoleRoutes,
+    ScopeGroupRoutes, SearchRoutes, SignalTypeRoutes, TagRoutes, UserRoutes,
 )
 from app.backend.models.audit import AuditLog
+from app.backend.models.media import MediaFile
 from app.backend.models.media_format import MediaFormat
+from app.backend.models.upload_session import UploadSession
+from app.backend.services.media.manager import reset_media_manager
 from app.backend.models.observation import Category, SignalType, Tag
 from app.backend.models.post import Post
 from app.backend.models.role import Permission, Role
 from app.backend.models.scope_group import ScopeGroup
 from app.backend.models.user_certificate import UserCertificate
 from app.backend.models.user import User
-from tests.helpers import make_admin, make_dictionary, make_group, make_post, make_role
+from tests.helpers import make_admin, make_dictionary, make_group, make_observation, make_post, make_role, make_user
+from tests.test_poster_jobs import MP4_BYTES
 from tests.test_username_validation import make_certificate
 
 
@@ -308,3 +315,154 @@ async def test_a_failed_audit_row_stores_no_user_and_no_certificate(client, db, 
         files={"certificate": ("cert.pem", make_certificate("cn-atomic"), "application/x-pem-file")})
     assert response.status_code == 500 and response.json()["code"] == "internal_error", response.text
     assert await counts() == before
+
+
+# ---------------------------------------------------------------------------------------------------- media writes
+# These routes do not fit a Case: an upload session is audited with resource_id None, and an upload stores a file,
+# which no transaction can take back.
+
+@pytest.fixture
+def storage(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings.storage, "upload_path", str(tmp_path))
+    monkeypatch.setattr(settings.storage, "temp_path", str(tmp_path / "_tmp"))
+    reset_media_manager()
+    yield tmp_path
+    reset_media_manager()
+
+
+async def _media_scene(db):
+    post = await make_post(db)
+    ids = await make_dictionary(db)
+    user = await make_user(db, perms=["media.view", "media.create"], post_id=post.id)
+    observation = await make_observation(db, user, post, ids["signal_type_id"])
+    return user, observation
+
+
+def _open_session(client, headers, user, observation):
+    return client.post(V1.path(MediaRoutes.UPLOADS), headers=headers(user), json={
+        "observation_id": observation.id, "media_type": "image", "original_filename": "photo.png",
+        "expected_size": 100, "content_type": "image/png"})
+
+
+async def _open_upload_session(client, headers, user, observation, storage):
+    """An open session with a part file of 10 bytes"""
+    created = await _open_session(client, headers, user, observation)
+    assert created.status_code == 201, created.text
+    upload_id = created.json()["id"]
+    part = storage / "_tmp" / "uploads" / f"{upload_id}.part"
+    part.parent.mkdir(parents=True, exist_ok=True)
+    part.write_bytes(b"x" * 10)
+    return upload_id, part
+
+
+async def _audit_rows(session_maker, resource_type, action):
+    async with session_maker() as fresh:
+        return (await fresh.exec(select(AuditLog).where(
+            AuditLog.resource_type == resource_type, AuditLog.action == action))).all()
+
+
+async def test_a_failed_audit_row_opens_no_upload_session(client, db, headers, session_maker, monkeypatch, storage):
+    user, observation = await _media_scene(db)
+    monkeypatch.setattr(media_uploads, "create_audit_log", _audit_fails)
+    response = await _open_session(client, headers, user, observation)
+    assert response.status_code == 500 and response.json()["code"] == "internal_error", response.text
+    async with session_maker() as fresh:
+        assert (await fresh.exec(select(func.count()).select_from(UploadSession))).one() == 0
+    assert await _audit_rows(session_maker, "upload_session", "create") == []
+
+
+async def test_an_upload_session_and_its_audit_row_are_stored(client, db, headers, session_maker, storage):
+    user, observation = await _media_scene(db)
+    upload_id, _ = await _open_upload_session(client, headers, user, observation, storage)
+    (audit,) = await _audit_rows(session_maker, "upload_session", "create")
+    assert audit.new_values["upload_id"] == upload_id and audit.user_id == user.id
+
+
+async def test_a_failed_audit_row_aborts_no_upload_session(client, db, headers, session_maker, monkeypatch, storage):
+    """The abort and its audit row commit together; the part file is removed only after that commit"""
+    user, observation = await _media_scene(db)
+    upload_id, part = await _open_upload_session(client, headers, user, observation, storage)
+    monkeypatch.setattr(media_uploads, "create_audit_log", _audit_fails)
+    response = await client.post(V1.path(MediaRoutes.UPLOAD_SESSION_ABORT, upload_id=upload_id), headers=headers(user))
+    assert response.status_code == 500 and response.json()["code"] == "internal_error", response.text
+    async with session_maker() as fresh:
+        row = await fresh.get(UploadSession, upload_id)
+    assert (row.status, row.error, row.writer_token) == ("open", None, None)
+    assert part.read_bytes() == b"x" * 10, "the received bytes stay with the open session"
+    assert await _audit_rows(session_maker, "upload_session", "abort") == []
+
+
+async def test_an_abort_and_its_audit_row_are_stored(client, db, headers, session_maker, storage):
+    user, observation = await _media_scene(db)
+    upload_id, part = await _open_upload_session(client, headers, user, observation, storage)
+    response = await client.post(V1.path(MediaRoutes.UPLOAD_SESSION_ABORT, upload_id=upload_id), headers=headers(user))
+    assert response.status_code == 200 and response.json()["status"] == "aborted", response.text
+    assert not part.exists()
+    (audit,) = await _audit_rows(session_maker, "upload_session", "abort")
+    assert audit.details["upload_id"] == upload_id
+
+
+def _upload_video(client, headers, user, observation):
+    return client.post(
+        V1.path(MediaRoutes.UPLOAD), data={"observation_id": observation.id, "media_type": "video"},
+        files={"file": ("clip.mp4", MP4_BYTES, "video/mp4")}, headers=headers(user))
+
+
+def _probe_outside_a_transaction(monkeypatch, seen):
+    """ffprobe stand-in: records whether the request session held a transaction (a read view) while it ran"""
+    async def probe(media_file):
+        seen.append(object_session(media_file).in_transaction())
+        return {"duration_seconds": 3.0}
+
+    monkeypatch.setattr(upload_helper, "_probe_headers", probe)
+
+
+async def test_a_failed_audit_row_keeps_the_poster_hold_of_an_upload(client, db, headers, session_maker, monkeypatch, storage):
+    """The file is stored (a move cannot be rolled back) and its row stays, but the poster hold release, the probed
+    metadata and the audit row commit together: none of them is stored. The hold runs out after UPLOAD_HOLD and the
+    worker takes the poster then."""
+    user, observation = await _media_scene(db)
+    seen = []
+    _probe_outside_a_transaction(monkeypatch, seen)
+    monkeypatch.setattr(upload_helper, "create_audit_log", _audit_fails)
+    response = await _upload_video(client, headers, user, observation)
+    assert response.status_code == 500 and response.json()["code"] == "internal_error", response.text
+    async with session_maker() as fresh:
+        (row,) = (await fresh.exec(select(MediaFile).where(MediaFile.observation_id == observation.id))).all()
+    assert row.resolve_path(storage).exists()
+    assert (row.poster_status, row.poster_attempts) == ("pending", 0)
+    assert row.poster_locked_until is not None, "still held"
+    assert row.duration_seconds is None
+    assert await _audit_rows(session_maker, "media", "create") == []
+    assert seen == [False]
+
+
+async def test_an_upload_releases_its_poster_hold_with_its_audit_row(client, db, headers, session_maker, monkeypatch, storage):
+    user, observation = await _media_scene(db)
+    seen = []
+    _probe_outside_a_transaction(monkeypatch, seen)
+    response = await _upload_video(client, headers, user, observation)
+    assert response.status_code == 200, response.text
+    assert seen == [False], "no read view of the request lives across the probe"
+    async with session_maker() as fresh:
+        row = await fresh.get(MediaFile, response.json()["media_file_id"])
+    assert (row.poster_status, row.poster_locked_until, row.duration_seconds) == ("pending", None, 3.0)
+    (audit,) = await _audit_rows(session_maker, "media", "create")
+    assert audit.resource_id == row.id
+    assert audit.new_values["poster_locked_until"] is None and audit.new_values["duration_seconds"] == 3.0
+
+
+async def test_search_writes_its_audit_row_in_a_new_transaction(client, db, headers, monkeypatch):
+    """The audit row of a search is not written at the end of the read view the request opened (L3)"""
+    user = await make_admin(db)
+    real = search.create_audit_log
+    seen = []
+
+    async def audit(**kwargs):
+        seen.append(kwargs["session"].in_transaction())
+        return await real(**kwargs)
+
+    monkeypatch.setattr(search, "create_audit_log", audit)
+    response = await client.get(V1.path(SearchRoutes.TAGS), headers=headers(user))
+    assert response.status_code == 200, response.text
+    assert seen == [False]

@@ -170,7 +170,12 @@ async def test_a_video_is_claimable_only_after_its_file_is_in_storage(db, sessio
 
     assert seen == {"thumbnail_status": "pending", "claims": [None, None]}, "the client sees pending, no worker claims"
     row = await _reload(db, media_id)
-    assert (row.poster_status, row.poster_locked_until, row.thumbnail_status) == ("pending", None, "pending")
+    assert (row.poster_status, row.thumbnail_status) == ("pending", "pending")
+    assert row.poster_locked_until is not None, "the caller releases the hold, with the audit row of the upload"
+    assert await jobs.claim_next_poster(db, "w1") is None
+
+    await jobs.release_poster_hold(db, media_id)
+    assert (await _reload(db, media_id)).poster_locked_until is None
     claimed = await jobs.claim_next_poster(db, "w1")
     assert claimed.id == media_id and claimed.poster_attempts == 1
     assert claimed.resolve_path(manager.storage_path).read_bytes() == MP4_BYTES

@@ -204,9 +204,9 @@ async def create_upload_session(
         declared_content_type=formats.normalise_content_type(body.content_type), expected_sha256=body.sha256,
     )
     session.add(row)
-    await session.commit()
+    await session.flush()
     await session.refresh(row)
-
+    # The session and its audit row in one transaction
     await create_audit_log(
         session=session, action="create", resource_type="upload_session", resource_id=None,
         user_id=auth.user.id, new_values={"upload_id": row.id, "expected_size": row.expected_size, "media_type": row.media_type},
@@ -504,13 +504,15 @@ async def abort_upload_session(
     session while a complete stores its file (409)."""
     row = await _owned_session(session, auth, upload_id, lock=True)
     if row.status in (uploads.STATUS_OPEN, uploads.STATUS_COMPLETING):
-        if await uploads.abort_session(session, row, storage_root()):
+        async def audit() -> None:
             await create_audit_log(
                 session=session, action="abort", resource_type="upload_session", resource_id=None,
                 user_id=auth.user.id, details={"message": f"User {auth.user.username} aborted upload session {row.id} at {row.received_bytes}/{row.expected_size} bytes", "upload_id": row.id},
                 **client_info(request, auth),
             )
-            await session.commit()
+
+        # The abort and its audit row in one transaction; the part file is removed after it committed
+        await uploads.abort_session(session, row, storage_root(), record=audit)
         row = await uploads.get_session_row(session, upload_id)
     if row.status == uploads.STATUS_COMPLETING:
         raise _completing(row)

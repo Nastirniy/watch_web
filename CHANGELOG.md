@@ -30,6 +30,13 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   Responses and the 409 answers (`post_code_taken`, `role_name_taken`, `username_taken`) are unchanged.
 - Creating and updating (rename, move) a scope group, a corps or a brigade are one transaction too: the change and its
   audit row are committed together. Responses and `scope_group_name_taken` are unchanged.
+- Media writes: opening an upload session (`POST /media/uploads`) and aborting one commit the change and its audit row
+  together (the part file is deleted after that commit); an upload (`/media/upload`, `/media/nginx-upload`,
+  `/media/uploads/{id}/complete`) writes its probed metadata, the release of the poster hold and its audit row in one
+  last transaction, begun with the row lock, with ffprobe run outside any transaction (the new row is committed once,
+  before the move, instead of twice). When that transaction fails the file and its row stay (500, as before) but the
+  poster job stays held until `UPLOAD_HOLD` runs out. Searches end the request's read transaction before their audit
+  row. Status codes and responses are unchanged.
 
 ## Bug hunt 2 (branch fix/hunt2)
 

@@ -25,7 +25,7 @@ from app.backend.api.shared.helpers.post_helper import ensure_post_not_archived
 from app.backend.enums.errors import ErrorCode
 from app.backend.errors.problems import ApiError
 from app.backend.errors.coded import CodedError
-from app.backend.utils.row_locks import lock_first
+from app.backend.utils.row_locks import lock_first, start_write
 
 _logger = get_api_logger()
 
@@ -102,22 +102,36 @@ async def record_upload(
     background_tasks: BackgroundTasks,
     transport: str,
 ) -> MediaFile:
-    """Probe video/audio headers, audit, commit and pre-warm the medium thumbnail of a stored file"""
+    """The last transaction of an upload, once the file is in storage: probed video/audio metadata, the release of
+    the poster hold and the audit row, committed together; then the medium thumbnail is pre-warmed.
+
+    The probe runs before that transaction and outside any other: the row is read and the read transaction ended
+    first, so no read view lives across ffprobe (seconds for a video), and the write begins with the row lock.
+    When this transaction fails (500), the file and its row stay stored (a move cannot be rolled back) without
+    metadata and audit row, and the poster job stays held: the hold runs out after jobs.UPLOAD_HOLD and the worker
+    takes the poster like any other (it probes the metadata too; `reconcile-posters` and `probe-missing` repair
+    the rest)."""
     media_file = (await session.exec(select(MediaFile).where(MediaFile.id == media_file_id))).one()
+    await start_write(session)
     metadata = None
     if media_file.media_type in (MediaType.VIDEO.value, MediaType.AUDIO.value):
         metadata = await _probe_headers(media_file)
 
-    # The worker may claim the poster of the row as soon as the file is in storage, during the probe: the write
-    # begins with the row lock, on the committed copy (a row read before the claim is refused on MariaDB, 1020)
+    # The write begins with the row lock, on the committed copy: a worker may have claimed the poster meanwhile (a
+    # hold that ran out, a duplicate whose own upload released it); a row read before the claim is refused on
+    # MariaDB, 1020
     media_file = await lock_first(session, select(MediaFile).where(MediaFile.id == media_file_id))
     if metadata is not None:
         for field_name, value in metadata.items():
             setattr(media_file, field_name, value)
-        if media_file.is_video and has_no_video_stream(metadata):
+    if media_file.is_video:
+        await session.flush()
+        if metadata and has_no_video_stream(metadata):
             # Only audio in a video upload: no poster or storyboard can exist, the worker never tries
-            await jobs.mark_poster_unsupported(session, media_file.id)
-            await session.refresh(media_file)
+            await jobs.mark_poster_unsupported(session, media_file.id, commit=False)
+        # The file is in storage: the worker may take the poster job once this transaction commits
+        await jobs.release_poster_hold(session, media_file.id, commit=False)
+        await session.refresh(media_file)
 
     await create_audit_log(
         session=session, action="create", resource_type="media", resource_id=media_file_id,

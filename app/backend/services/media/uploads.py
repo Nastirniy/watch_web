@@ -30,7 +30,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import AsyncIterator, Dict, Iterable, List, Optional
+from typing import AsyncIterator, Awaitable, Callable, Dict, Iterable, List, Optional
 
 import aiofiles
 import aiofiles.os
@@ -177,15 +177,17 @@ def _holds_completion(token: str):
     return (UploadSession.status == STATUS_COMPLETING) & (UploadSession.writer_token == token)
 
 
-async def _update(session: AsyncSession, upload_id: str, now: datetime, *conditions, **values) -> bool:
-    """One conditional UPDATE of the session row, committed; True when the row matched"""
+async def _update(session: AsyncSession, upload_id: str, now: datetime, *conditions, commit: bool = True, **values) -> bool:
+    """One conditional UPDATE of the session row, committed (commit=False: the caller commits); True when the row
+    matched"""
     result = await session.execute(
         update(UploadSession)
         .execution_options(synchronize_session=False)
         .where(UploadSession.id == upload_id, *conditions)
         .values(updated_at=now, last_activity_at=now, **values)
     )
-    await session.commit()
+    if commit:
+        await session.commit()
     return result.rowcount == 1
 
 
@@ -347,18 +349,25 @@ async def completed_media(session: AsyncSession, row: UploadSession) -> MediaFil
 async def abort_session(
     session: AsyncSession, row: UploadSession, storage_root: Path,
     code: Optional[ErrorCode] = None, token: Optional[str] = None,
+    record: Optional[Callable[[], Awaitable[None]]] = None,
 ) -> bool:
     """End the session as aborted and delete its part file.
 
     `code` is the problem that ended it (None: the client gave up). With a token only while that claim (a chunk
     writer or the completion) holds the session; without, when it is open or its completion claim went stale.
-    False when the session was in neither state; nothing is changed then.
+    False when the session was in neither state; nothing is changed then. `record` (the caller's audit row) runs
+    when the session matched, in the transaction of the abort: both commit together or not at all. The part file is
+    deleted only after that commit.
     """
     now = utcnow()
     held = (UploadSession.writer_token == token) & UploadSession.status.in_((STATUS_OPEN, STATUS_COMPLETING)) \
         if token else _endable(now)
-    if not await _update(session, row.id, now, held, status=STATUS_ABORTED, error=code.value if code else None,
-                         writer_token=None, writer_since=None):
+    aborted = await _update(session, row.id, now, held, commit=False, status=STATUS_ABORTED,
+                            error=code.value if code else None, writer_token=None, writer_since=None)
+    if aborted and record is not None:
+        await record()
+    await session.commit()
+    if not aborted:
         return False
     await remove_part(row, storage_root)
     return True

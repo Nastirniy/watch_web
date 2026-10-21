@@ -24,6 +24,7 @@ from app.backend.models.media import MediaFile
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.services.audit import create_audit_log
 from app.backend.services.units import observation_units_filter, unit_filter_of
+from app.backend.utils.row_locks import start_write
 
 # Filter params
 from app.backend.api.v1.models.query.observations import ObservationFilterParams
@@ -73,7 +74,10 @@ async def log_search(
     params: Dict,
     results_count: int
 ) -> None:
-    """Log search to audit; like every audit entry, a failure to write it fails the request"""
+    """Log search to audit; like every audit entry, a failure to write it fails the request. The results are read:
+    the read transaction the request opened ends first, so the audit INSERT (its foreign key check of the caller's
+    users row) does not run at the end of a read view as old as the request (1020 on MariaDB)"""
+    await start_write(session)
     await create_audit_log(
         session=session,
         user_id=auth.user.id,

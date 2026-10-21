@@ -32,8 +32,9 @@ from app.backend.models.observation import Observation
 from app.backend.models.worker import WorkerHeartbeat
 
 # Longer than any move of an upload into storage (a rename, or a copy across filesystems of the largest file).
-# Released in the commit after the move; it runs out only when the API stopped before that commit, and the worker
-# then takes the row like any other (a file that never arrived fails as missing).
+# Released in the upload's last transaction, after the move, with its audit row (record_upload in
+# api/shared/helpers/upload_helper.py); it runs out only when the API stopped before that commit or the commit failed,
+# and the worker then takes the row like any other (a file that never arrived fails as missing).
 UPLOAD_HOLD = timedelta(hours=1)
 
 # Error of a job whose last attempt ended with its worker (killed, out of memory, the host restarted); posters and
@@ -65,8 +66,9 @@ def enqueue_poster(media: MediaFile) -> None:
         media.poster_generated_at = None
 
 
-async def release_poster_hold(session: AsyncSession, media_id: int) -> None:
-    """The file of a new video is in storage: workers may claim its poster job from now on (commits).
+async def release_poster_hold(session: AsyncSession, media_id: int, commit: bool = True) -> None:
+    """The file of a new video is in storage: workers may claim its poster job from now on (commits; commit=False
+    leaves the UPDATE to the caller's transaction, the upload's last one with its audit row).
 
     Only the untouched hold is released; a job a worker took after the hold ran out goes on as it is.
     """
@@ -80,7 +82,8 @@ async def release_poster_hold(session: AsyncSession, media_id: int) -> None:
         )
         .values(poster_locked_until=None)
     )
-    await session.commit()
+    if commit:
+        await session.commit()
 
 
 def _expired(now: datetime):
@@ -193,13 +196,14 @@ async def complete_poster(
 
 
 async def mark_poster_unsupported(
-    session: AsyncSession, media_id: int, worker: Optional[str] = None, metadata: Optional[Dict] = None
+    session: AsyncSession, media_id: int, worker: Optional[str] = None, metadata: Optional[Dict] = None,
+    commit: bool = True,
 ) -> bool:
     """No poster can exist: a probe found no video stream in the file. Unsupported rows are never claimed.
 
     Without worker it replaces a pending job (the upload that probed the file); a job a worker already claimed
     belongs to that worker. With worker it ends the job this worker holds, storing what its probe found.
-    False when the job is not in that state.
+    False when the job is not in that state. Commits; commit=False leaves it to the caller's transaction.
     """
     if worker is None:
         owned = (MediaFile.poster_status == PosterStatus.PENDING.value,)
@@ -211,7 +215,8 @@ async def mark_poster_unsupported(
         .where(MediaFile.id == media_id, *owned)
         .values(poster_status=PosterStatus.UNSUPPORTED.value, poster_locked_until=None, poster_error=None, **(metadata or {}))
     )
-    await session.commit()
+    if commit:
+        await session.commit()
     return result.rowcount == 1
 
 
