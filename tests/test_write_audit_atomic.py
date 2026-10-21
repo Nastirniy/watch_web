@@ -6,7 +6,9 @@ wait timeout; a lost connection) answered 500 for a stored change and lost the a
 
 Add a route to WRITES (one Case): a route module name, how to build the scene, the request and what to read back.
 Every Case runs two tests: a failing create_audit_log stores nothing, and the happy path stores one audit row."""
+import ast
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 import pytest
@@ -466,3 +468,162 @@ async def test_search_writes_its_audit_row_in_a_new_transaction(client, db, head
     response = await client.get(V1.path(SearchRoutes.TAGS), headers=headers(user))
     assert response.status_code == 200, response.text
     assert seen == [False]
+
+
+async def test_a_nginx_upload_releases_its_poster_hold(client, db, headers, session_maker, monkeypatch, storage, tmp_path):
+    user, observation = await _media_scene(db)
+    _probe_outside_a_transaction(monkeypatch, [])
+    temp_dir = tmp_path / "nginx_uploads"
+    temp_dir.mkdir()
+    monkeypatch.setattr(settings.storage, "enable_nginx", True)
+    monkeypatch.setattr(settings.storage, "nginx_upload_temp_path", str(temp_dir))
+    temp_file = temp_dir / "0000000001"
+    temp_file.write_bytes(MP4_BYTES)
+    response = await client.post(
+        V1.path(MediaRoutes.NGINX_UPLOAD), params={"observation_id": observation.id, "media_type": "video"},
+        headers={"X-File-Name": str(temp_file), "X-Original-Filename": "clip.mp4", "Content-Type": "video/mp4",
+                 **headers(user)},
+        content=b"",
+    )
+    assert response.status_code in (200, 201), response.text
+    async with session_maker() as fresh:
+        row = await fresh.get(MediaFile, response.json()["media_file_id"])
+    assert (row.poster_status, row.poster_locked_until) == ("pending", None)
+
+
+async def test_a_resumable_complete_releases_its_poster_hold(client, db, headers, session_maker, monkeypatch, storage):
+    user, observation = await _media_scene(db)
+    _probe_outside_a_transaction(monkeypatch, [])
+    created = await client.post(V1.path(MediaRoutes.UPLOADS), headers=headers(user), json={
+        "observation_id": observation.id, "media_type": "video", "original_filename": "clip.mp4",
+        "expected_size": len(MP4_BYTES), "content_type": "video/mp4"})
+    assert created.status_code == 201, created.text
+    upload_id = created.json()["id"]
+    sent = await client.patch(
+        V1.path(MediaRoutes.UPLOAD_SESSION, upload_id=upload_id), content=MP4_BYTES,
+        headers={"Content-Type": "application/offset+octet-stream", "Upload-Offset": "0", **headers(user)})
+    assert sent.status_code == 204, sent.text
+    done = await client.post(V1.path(MediaRoutes.UPLOAD_SESSION_COMPLETE, upload_id=upload_id), headers=headers(user))
+    assert done.status_code == 200, done.text
+    async with session_maker() as fresh:
+        row = await fresh.get(MediaFile, done.json()["media_file_id"])
+    assert (row.poster_status, row.poster_locked_until) == ("pending", None)
+
+
+# --- static guard: no audit row after a commit --------------------------------------------------------------------
+
+AUDIT_WRITERS = {"create_audit_log", "audit_group"}
+# Scanned: api/ (the routes), services/ and auth/ (a service or AuthService could commit and then audit just as well).
+GUARDED_DIRS = ("api", "services", "auth")
+# "relative/path.py:function" -> why a commit before the audit row is by design
+ALLOWED_AUDIT_AFTER_COMMIT: Dict[str, str] = {
+    "services/unit_history.py:fill_unit_history": "CLI command, not a route: the fill commits per chunk of rows on "
+                                                  "purpose (it can be huge) and writes one summary audit row at the end",
+}
+
+
+def _call_name(node: ast.Call) -> Optional[str]:
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+def _own_calls(function: ast.AST):
+    """(call, leaves) in the body of one function in source order, without the calls of nested functions and classes.
+    leaves: the call sits in a block that ends in return / raise / break / continue, so nothing after the block runs
+    after it (an early exit that commits and returns before the audit row of the main path)."""
+    found = []
+    leaving = (ast.Return, ast.Raise, ast.Break, ast.Continue)
+
+    def walk(node, leaves):
+        for field, value in ast.iter_fields(node):
+            items = value if isinstance(value, list) else [value]
+            block_leaves = leaves or (
+                isinstance(value, list) and node.__class__.__name__ not in ("Call",) and bool(value)
+                and isinstance(value[-1], leaving)
+            )
+            for child in items:
+                if not isinstance(child, ast.AST):
+                    continue
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                    continue
+                if isinstance(child, ast.Call):
+                    found.append((child, block_leaves))
+                walk(child, block_leaves)
+
+    walk(function, False)
+    return sorted(found, key=lambda item: (item[0].lineno, item[0].col_offset))
+
+
+def audit_after_commit(source: str, filename: str = "<source>"):
+    """(function, line) of every audit-writing call that follows a .commit() call in the same function body.
+
+    Static: a helper that commits inside (a service called before the audit row) is not seen here; the runtime Cases
+    of WRITES cover those, because a failing create_audit_log must leave no change behind."""
+    problems = []
+    for function in ast.walk(ast.parse(source, filename)):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        committed_at = None
+        for call, leaves in _own_calls(function):
+            name = _call_name(call)
+            if name == "commit" and committed_at is None and not leaves:
+                committed_at = call.lineno
+            elif name in AUDIT_WRITERS and committed_at is not None:
+                problems.append((function.name, call.lineno))
+    return problems
+
+
+def test_no_audit_after_commit():
+    root = Path(__file__).resolve().parent.parent / "app" / "backend"
+    found = []
+    for directory in GUARDED_DIRS:
+        for path in sorted((root / directory).rglob("*.py")):
+            relative = path.relative_to(root).as_posix()
+            for function, line in audit_after_commit(path.read_text(encoding="utf-8"), relative):
+                if f"{relative}:{function}" not in ALLOWED_AUDIT_AFTER_COMMIT:
+                    found.append(f"{relative}:{function}:{line}")
+    assert not found, "audit row written after a commit (one transaction, or add a reasoned allowlist entry): " + ", ".join(found)
+
+
+def test_the_audit_guard_bites():
+    broken = (
+        "async def route(session):\n"
+        "    await session.commit()\n"
+        "    await create_audit_log(session=session)\n"
+    )
+    assert audit_after_commit(broken) == [("route", 3)]
+    grouped = "async def route(session):\n    await session.commit()\n    await audit_group(session)\n"
+    assert audit_after_commit(grouped) == [("route", 3)]
+    good = (
+        "async def route(session):\n"
+        "    await create_audit_log(session=session)\n"
+        "    await session.commit()\n"
+    )
+    assert audit_after_commit(good) == []
+    nested = (
+        "async def route(session):\n"
+        "    async def inner():\n"
+        "        await create_audit_log(session=session)\n"
+        "    await session.commit()\n"
+    )
+    assert audit_after_commit(nested) == []
+    early_exit = (
+        "async def route(session, done):\n"
+        "    if done:\n"
+        "        await session.commit()\n"
+        "        return False\n"
+        "    await create_audit_log(session=session)\n"
+        "    await session.commit()\n"
+    )
+    assert audit_after_commit(early_exit) == []
+    branch_then_audit = (
+        "async def route(session, done):\n"
+        "    if done:\n"
+        "        await session.commit()\n"
+        "    await create_audit_log(session=session)\n"
+    )
+    assert audit_after_commit(branch_then_audit) == [("route", 4)]
