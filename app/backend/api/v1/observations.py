@@ -5,6 +5,7 @@ from fastapi.responses import Response
 from loguru import logger
 from sqlalchemy.orm import selectinload
 from sqlalchemy import or_
+from sqlalchemy.exc import OperationalError
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -19,6 +20,7 @@ from app.backend.auth.access_control import AccessControlService
 from app.backend.enums.general import Permissions, ObservationStatus, ObservationReportType
 from app.backend.enums.routes import ObservationRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
+from app.backend.api.shared.helpers.db_errors import is_write_conflict
 from app.backend.services.scope_groups import UNIT_KINDS
 from app.backend.services.units import (current_units_of_group, observation_unit_labels, observation_unit_rows,
                                         observation_units_any, observation_units_filter, unit_labels, visible_unit_ids)
@@ -164,72 +166,92 @@ async def create_observation(
     AccessControlService.check_post(auth, Permissions.OBSERVATION_VIEW, observation_data.post_id, "observation")
     AccessControlService.check_post(auth, Permissions.OBSERVATION_CREATE, observation_data.post_id, "observation")
 
-    # A shared lock on the post first (the write begins with it): creates at one post run side by side, an archive of
-    # the post or of a unit above it waits for them, and a create after it sees the archived post. Without it the
-    # insert met a post row archived after the request's snapshot (MariaDB 1020, a 500). A post the request's tree does
-    # not know is not locked (no gap lock on a row that may not exist): it is read and answers 404.
-    of_post = select(Post).where(Post.id == observation_data.post_id)
-    if observation_data.post_id in auth.tree.post_group:
-        post = await lock_first(session, of_post, shared=True)
-    else:
-        post = (await session.exec(of_post)).first()
-    if not post:
-        raise ApiError(ErrorCode.POST_NOT_FOUND, post_id=observation_data.post_id)
-    refuse_archived_post(post)
+    # Values of the caller and the request read once: a rollback expires every loaded object
+    user_id = current_user.id
+    username = current_user.username
+    audit_client = client_info(request, auth)
 
-    # Validate signal_type exists and is active
-    signal_type_result = await session.exec(
-        select(SignalType).where(
-            SignalType.id == observation_data.signal_type_id,
-            SignalType.is_deleted == False
+    async def write() -> int:
+        """The whole write, from the post lock to the commit: nothing of it survives a rollback, so it can run again"""
+        # A shared lock on the post first (the write begins with it): creates at one post run side by side, an archive of
+        # the post or of a unit above it waits for them, and a create after it sees the archived post. Without it the
+        # insert met a post row archived after the request's snapshot (MariaDB 1020, a 500). A post the request's tree does
+        # not know is not locked (no gap lock on a row that may not exist): it is read and answers 404.
+        of_post = select(Post).where(Post.id == observation_data.post_id)
+        if observation_data.post_id in auth.tree.post_group:
+            post = await lock_first(session, of_post, shared=True)
+        else:
+            post = (await session.exec(of_post)).first()
+        if not post:
+            raise ApiError(ErrorCode.POST_NOT_FOUND, post_id=observation_data.post_id)
+        refuse_archived_post(post)
+
+        # Validate signal_type exists and is active
+        signal_type_result = await session.exec(
+            select(SignalType).where(
+                SignalType.id == observation_data.signal_type_id,
+                SignalType.is_deleted == False
+            )
         )
-    )
-    signal_type = signal_type_result.first()
-    if not signal_type:
-        raise ApiError(ErrorCode.SIGNAL_TYPE_NOT_FOUND, signal_type_id=observation_data.signal_type_id)
-    if not signal_type.is_active:
-        raise ApiError(ErrorCode.SIGNAL_TYPE_INACTIVE, signal_type_name=signal_type.name)
+        signal_type = signal_type_result.first()
+        if not signal_type:
+            raise ApiError(ErrorCode.SIGNAL_TYPE_NOT_FOUND, signal_type_id=observation_data.signal_type_id)
+        if not signal_type.is_active:
+            raise ApiError(ErrorCode.SIGNAL_TYPE_INACTIVE, signal_type_name=signal_type.name)
 
-    # Validate and get tags if provided
-    tags = []
-    if observation_data.tag_ids:
-        tags = await _validate_and_get_tags(session, observation_data.tag_ids)
+        # Validate and get tags if provided
+        tags = []
+        if observation_data.tag_ids:
+            tags = await _validate_and_get_tags(session, observation_data.tag_ids)
 
-    observation = Observation(
-        post_id=observation_data.post_id,
-        signal_type_id=observation_data.signal_type_id,
-        observed_at=observation_data.observed_at,
-        duration_seconds=observation_data.duration_seconds,
-        comment=observation_data.comment,
-        confidence_level=observation_data.confidence_level,
-        user_id=current_user.id,
-        tags=tags,
-        all_frequencies=frequency_rows(observation_data.frequencies),
-    )
+        observation = Observation(
+            post_id=observation_data.post_id,
+            signal_type_id=observation_data.signal_type_id,
+            observed_at=observation_data.observed_at,
+            duration_seconds=observation_data.duration_seconds,
+            comment=observation_data.comment,
+            confidence_level=observation_data.confidence_level,
+            user_id=user_id,
+            tags=tags,
+            all_frequencies=frequency_rows(observation_data.frequencies),
+        )
 
-    session.add(observation)
-    await session.flush()
-    # The units the post sits in now, recorded once with the observation (services/units.py). Read from the database
-    # after the post lock, not from the tree of the request: a unit added or a group moved since the tree was loaded
-    # is in the history row. A brigade move does not lock its posts, so a move between the post lock and this read can
-    # still be missed (accepted, rare)
-    units = await current_units_of_group(session, post.group_id)
-    session.add_all(observation_unit_rows(units, observation.id, observation.created_at))
-    # The audit row in the same transaction as the observation (one commit): a failure before it stores neither, so
-    # the client never gets a 500 for an observation that exists (a retry would create it twice)
-    await create_audit_log(
-        session=session,
-        action="create",
-        resource_type="observation",
-        resource_id=observation.id,
-        user_id=current_user.id,
-        new_values=observation_audit_values(observation),
-        details={"message": f"User {current_user.username} created new observation #{observation.id}"},
-        **client_info(request, auth)
-    )
-    await session.commit()
+        session.add(observation)
+        await session.flush()
+        # The units the post sits in now, recorded once with the observation (services/units.py). Read from the database
+        # after the post lock, not from the tree of the request: a unit added or a group moved since the tree was loaded
+        # is in the history row. A brigade move does not lock its posts, so a move between the post lock and this read can
+        # still be missed (accepted, rare)
+        units = await current_units_of_group(session, post.group_id)
+        session.add_all(observation_unit_rows(units, observation.id, observation.created_at))
+        # The audit row in the same transaction as the observation (one commit): a failure before it stores neither, so
+        # the client never gets a 500 for an observation that exists (a retry would create it twice)
+        await create_audit_log(
+            session=session,
+            action="create",
+            resource_type="observation",
+            resource_id=observation.id,
+            user_id=user_id,
+            new_values=observation_audit_values(observation),
+            details={"message": f"User {username} created new observation #{observation.id}"},
+            **audit_client
+        )
+        await session.commit()
+        return observation.id
 
-    return await _load_observation_response(session, observation.id)
+    # A write conflict (MariaDB 1020 / 1213: a row the insert checks changed after the read view, e.g. the creator's
+    # users row edited by an administrator) stored nothing; the write runs once more in a new transaction. A second
+    # conflict, or any other error, propagates (global 500).
+    try:
+        observation_id = await write()
+    except OperationalError as exc:
+        if not is_write_conflict(exc):
+            raise
+        await session.rollback()
+        logger.warning("observation create: write conflict (database error {}), retrying once", exc.orig.args[0])
+        observation_id = await write()
+
+    return await _load_observation_response(session, observation_id)
 
 
 @router.put(

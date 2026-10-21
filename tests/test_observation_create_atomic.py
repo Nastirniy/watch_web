@@ -91,3 +91,97 @@ async def test_the_audit_row_is_committed_with_the_observation(client, db, heade
     assert audit.new_values["id"] == created["id"] and audit.new_values["post_id"] == post.id
     (band,) = audit.new_values["frequencies"]
     assert band["id"] == created["frequencies"][0]["id"] and float(band["frequency_min"]) == 100.0
+
+
+# --- a write conflict (MariaDB 1020 / 1213) is retried once ---------------------------------------------------------
+
+def _conflict(code, text="Record has changed since last read"):
+    return OperationalError("INSERT INTO observations ...", {}, Exception(code, text))
+
+
+def _fail_audit(monkeypatch, errors):
+    """The audit row of the create raises the given errors one after another, then works; returns the attempt log"""
+    from app.backend.api.v1 import observations as observations_module
+    real = observations_module.create_audit_log
+    attempts = []
+
+    async def audit(*args, **kwargs):
+        attempts.append(1)
+        if len(attempts) <= len(errors):
+            raise errors[len(attempts) - 1]
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(observations_module, "create_audit_log", audit)
+    return attempts
+
+
+async def _counts(session_maker):
+    from app.backend.models.observation_unit import ObservationUnit
+    async with session_maker() as fresh:
+        counts = []
+        for model in (Observation, ObservationFrequency, ObservationUnit, AuditLog):
+            counts.append((await fresh.exec(select(func.count()).select_from(model))).one())
+        return tuple(counts)
+
+
+async def test_a_conflict_on_the_first_attempt_is_retried(client, db, headers, session_maker, monkeypatch):
+    admin = await make_admin(db)
+    post = await make_post(db)
+    dictionary = await make_dictionary(db)
+    attempts = _fail_audit(monkeypatch, [_conflict(1020)])
+    response = await client.post(CREATE, headers=headers(admin),
+                                 json=observation_payload(post.id, dictionary["signal_type_id"]))
+    assert response.status_code == 200, response.text
+    assert len(attempts) == 2
+    observations, bands, units, audits = await _counts(session_maker)
+    assert (observations, bands, audits) == (1, 1, 1)
+    async with session_maker() as fresh:
+        (audit,) = (await fresh.exec(select(AuditLog).where(AuditLog.resource_type == "observation"))).all()
+    assert audit.resource_id == response.json()["id"]
+
+
+async def test_a_deadlock_is_retried_too(client, db, headers, session_maker, monkeypatch):
+    admin = await make_admin(db)
+    post = await make_post(db)
+    dictionary = await make_dictionary(db)
+    attempts = _fail_audit(monkeypatch, [_conflict(1213, "Deadlock found")])
+    response = await client.post(CREATE, headers=headers(admin),
+                                 json=observation_payload(post.id, dictionary["signal_type_id"]))
+    assert response.status_code == 200, response.text
+    assert len(attempts) == 2
+
+
+async def test_two_conflicts_answer_500_and_store_nothing(client, db, headers, session_maker, monkeypatch):
+    admin = await make_admin(db)
+    post = await make_post(db)
+    dictionary = await make_dictionary(db)
+    attempts = _fail_audit(monkeypatch, [_conflict(1020), _conflict(1020)])
+    response = await client.post(CREATE, headers=headers(admin),
+                                 json=observation_payload(post.id, dictionary["signal_type_id"]))
+    assert response.status_code == 500 and response.json()["code"] == "internal_error", response.text
+    assert len(attempts) == 2
+    observations, bands, units, audits = await _counts(session_maker)
+    assert (observations, bands, units) == (0, 0, 0)
+
+
+async def test_another_database_error_is_not_retried(client, db, headers, session_maker, monkeypatch):
+    admin = await make_admin(db)
+    post = await make_post(db)
+    dictionary = await make_dictionary(db)
+    attempts = _fail_audit(monkeypatch, [_conflict(2013, "Lost connection")])
+    response = await client.post(CREATE, headers=headers(admin),
+                                 json=observation_payload(post.id, dictionary["signal_type_id"]))
+    assert response.status_code == 500 and response.json()["code"] == "internal_error", response.text
+    assert len(attempts) == 1
+    assert (await _counts(session_maker))[0] == 0
+
+
+def test_is_write_conflict_tells_the_two_codes_from_everything_else():
+    from sqlalchemy.exc import IntegrityError
+    from app.backend.api.shared.helpers.db_errors import is_write_conflict
+    assert is_write_conflict(_conflict(1020)) and is_write_conflict(_conflict(1213))
+    assert not is_write_conflict(_conflict(2013))
+    assert not is_write_conflict(OperationalError("x", {}, Exception("(1020, 'text only')")))
+    assert not is_write_conflict(OperationalError("x", {}, Exception()))
+    assert not is_write_conflict(IntegrityError("x", {}, Exception(1062, "dup")))
+    assert not is_write_conflict(ValueError(1020))
