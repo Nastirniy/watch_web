@@ -106,7 +106,7 @@ async def test_brigade_only_rows_are_history_and_stay(client, db, headers):
     post = await make_post(db, group_id=b1.id)
     saved = await _old(client, h, ids, post, 2)
     assert await _kinds(db, saved[0]) == {"brigade": b1.id, "corps": k1.id}
-    # history recorded with the brigade only (written before the brigade sat in a corps): drop the corps rows
+    # an observation that has any unit row is history, also a partial one: keep only the brigade rows
     await db.exec(delete(ObservationUnit).where(ObservationUnit.group_id == k1.id))
     await db.commit()
     assert [await _kinds(db, o) for o in saved] == [{"brigade": b1.id}, {"brigade": b1.id}]
