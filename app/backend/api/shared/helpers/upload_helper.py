@@ -109,8 +109,8 @@ async def record_upload(
     first, so no read view lives across ffprobe (seconds for a video), and the write begins with the row lock.
     When this transaction fails (500), the file and its row stay stored (a move cannot be rolled back) without
     metadata and audit row, and the poster job stays held: the hold runs out after jobs.UPLOAD_HOLD and the worker
-    takes the poster like any other (it probes the metadata too; `reconcile-posters` and `probe-missing` repair
-    the rest)."""
+    takes the poster like any other (it probes the metadata too; `media_tools probe-missing` fills metadata of
+    other media types)."""
     media_file = (await session.exec(select(MediaFile).where(MediaFile.id == media_file_id))).one()
     await start_write(session)
     metadata = None
