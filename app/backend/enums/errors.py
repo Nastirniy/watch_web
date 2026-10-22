@@ -361,6 +361,12 @@ class ErrorCode(ProblemType):
         "The period, with its default start and its buckets in the time zone, must lie inside the years 1 to 9999"))
     UNKNOWN_TIME_ZONE = ("unknown_time_zone", problem(400, "Unknown time zone", "Unknown time zone: {time_zone}", time_zone=str))
 
+    # ---------------------------------------------------------------- database backups (status only)
+    # backup.dir is not set: the server makes no backups this API knows of
+    BACKUPS_NOT_CONFIGURED = ("backups_not_configured", problem(503, "Backups not configured"))
+    # backup.dir is set but cannot be read (share not mounted, permissions); the path is in the log only
+    BACKUP_DIRECTORY_UNAVAILABLE = ("backup_directory_unavailable", problem(503, "Backup directory unavailable"))
+
     # ---------------------------------------------------------------- media files
     MEDIA_NOT_FOUND = ("media_not_found", problem(404, "Media file not found"))
     MEDIA_NOT_ARCHIVED = ("media_not_archived", problem(409, "Media file is not archived"))
