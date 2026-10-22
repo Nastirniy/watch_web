@@ -74,7 +74,8 @@ UNSUPPORTED_OBJECTS = sa.text("""
     UNION ALL SELECT CONCAT(LOWER(ROUTINE_TYPE), ' ', ROUTINE_NAME) FROM information_schema.ROUTINES
         WHERE ROUTINE_SCHEMA = :schema
     UNION ALL SELECT CONCAT('event ', EVENT_NAME) FROM information_schema.EVENTS WHERE EVENT_SCHEMA = :schema
-    UNION ALL SELECT CONCAT(LOWER(TABLE_TYPE), ' ', TABLE_NAME, ' (', COALESCE(ENGINE, '-'), ')')
+    UNION ALL SELECT CONCAT(IF(TABLE_TYPE = 'BASE TABLE', 'table', LOWER(TABLE_TYPE)), ' ', TABLE_NAME,
+                            ' (', COALESCE(ENGINE, '-'), ')')
         FROM information_schema.TABLES
         WHERE TABLE_SCHEMA = :schema AND TABLE_TYPE <> 'VIEW'
           AND NOT (TABLE_TYPE = 'BASE TABLE' AND ENGINE = 'InnoDB')
