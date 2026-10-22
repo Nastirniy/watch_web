@@ -17,7 +17,7 @@ from app.backend.services.backups.restore import (
     RestoreRefused, code_head, known_revisions, plan_restore, prune_kept_schemas, restore_backup, undo_restore,
     verify_backup,
 )
-from app.backend.services.backups.schemas import KeptSchema, kept_name, parse_kept, rename_statement
+from app.backend.services.backups.schemas import KeptSchema, kept_name, parse_kept, raise_statements, rename_statement
 
 UTC = timezone.utc
 NOW = datetime(2026, 10, 22, 12, 0, 0, tzinfo=UTC)
@@ -90,6 +90,10 @@ class FakeBackend:
         self._call("user_differences", outgoing, incoming)
         return [(1, "u1", "is_active True->False")]
 
+    def bump_auto_increment(self, outgoing, incoming):
+        self._call("bump_auto_increment", outgoing, incoming)
+        return 4
+
     def swap(self, db, live, incoming, source, keep_as):
         self._call("swap", tuple(live), tuple(incoming), source, keep_as)
 
@@ -150,10 +154,13 @@ def test_restore_order(cfg):
     result = restore(cfg, backend)
     assert names(backend) == [
         "unsupported_objects", "other_connections", "drop_schema", "create_schema", "load_dump", "list_tables",
-        "revision", "carry_over", "user_differences", "create_schema", "list_tables", "swap", "drop_schema", "audit",
+        "revision", "carry_over", "user_differences", "bump_auto_increment", "create_schema", "list_tables", "swap",
+        "drop_schema", "audit",
     ]
     calls = dict((c[0], c[1:]) for c in backend.calls if c[0] in ("load_dump", "carry_over", "swap", "audit"))
     assert calls["load_dump"] == ("dump.sql.gz", "db_restore")
+    assert ("bump_auto_increment", "db", "db_restore") in backend.calls
+    assert result.ids_raised == 4
     assert calls["carry_over"] == ("db", "db_restore")
     assert calls["swap"] == (("alembic_version", "users", "later_table"), TABLES, "db_restore",
                              "db_before_20261022_120000")
@@ -161,7 +168,7 @@ def test_restore_order(cfg):
     assert backend.audits[0] == {
         "backup_id": manifest.id, "label": "scheduled", "backup_revision": REVISION,
         "kept_schema": "db_before_20261022_120000", "revocations": 1, "certificates_added": 2,
-        "orphans_skipped": 0, "crl_number": 7, "sessions_ended": 3,
+        "orphans_skipped": 0, "crl_number": 7, "sessions_ended": 3, "ids_raised": 4,
     }
     assert result.kept_schema == "db_before_20261022_120000"
     assert result.carry == CARRY
@@ -280,6 +287,9 @@ def test_undo_picks_newest_kept(cfg):
     swap = next(c for c in backend.calls if c[0] == "swap")
     assert swap[3:] == (NEWER.name, "db_before_20261022_120000")
     assert ("carry_over", "db", NEWER.name) in backend.calls
+    order = names(backend)
+    assert order.index("carry_over") < order.index("bump_auto_increment") < order.index("swap")
+    assert ("bump_auto_increment", "db", NEWER.name) in backend.calls
     assert backend.calls[-2:] == [("drop_schema", NEWER.name), ("audit", "db", "undo_restore")]
     assert backend.audits[0]["source_schema"] == NEWER.name
     assert result.kept_schema == "db_before_20261022_120000"
@@ -379,3 +389,12 @@ def test_undo_keeps_both_schemas_on_a_swap_error_after_the_server_renamed(cfg):
     with pytest.raises(RuntimeError):
         undo_restore(cfg, DB, None, backend=backend, now=lambda: NOW)
     assert not any(c[0] == "drop_schema" for c in backend.calls)
+
+
+def test_raise_statements():
+    """Only tables both sides have, only where the outgoing side is further on (spec 8.1)"""
+    assert raise_statements("db_restore", {"a": 10, "b": 5, "only_out": 3, "we`ird": 7},
+                            {"a": 4, "b": 9, "only_in": 2, "we`ird": 1}) == [
+        "ALTER TABLE `db_restore`.`a` AUTO_INCREMENT = 10",
+        "ALTER TABLE `db_restore`.`we``ird` AUTO_INCREMENT = 7",
+    ]

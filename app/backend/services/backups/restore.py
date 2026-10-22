@@ -36,8 +36,9 @@ from app.backend.services.backups.failures import BackupFailure
 from app.backend.services.backups.locking import writer_lock
 from app.backend.services.backups.manifest import Manifest, ManifestError, read_manifest
 from app.backend.services.backups.schemas import (
-    LIST_TABLES, OTHER_CONNECTIONS, SCHEMA_CHARSET, UNSUPPORTED_OBJECTS, KeptSchema, is_droppable, kept_name,
-    kept_pattern, kept_schemas_query, parse_kept, quote, rename_statement, staging_name, verify_name,
+    AUTO_INCREMENTS, LIST_TABLES, OTHER_CONNECTIONS, SCHEMA_CHARSET, UNSUPPORTED_OBJECTS, KeptSchema, is_droppable,
+    kept_name, kept_pattern, kept_schemas_query, parse_kept, quote, raise_statements, rename_statement,
+    staging_name, verify_name,
 )
 
 ALEMBIC_INI = Path(__file__).resolve().parents[4] / "alembic.ini"
@@ -77,6 +78,7 @@ class RestoreResult:
     kept_schema: str
     carry: CarryOverResult
     user_differences: list
+    ids_raised: int = 0          # tables whose AUTO_INCREMENT was raised past the replaced data
 
 
 @dataclass(frozen=True)
@@ -98,6 +100,7 @@ class RestoreBackend(Protocol):
     def revision(self, schema: str) -> Optional[str]: ...
     def carry_over(self, outgoing: str, incoming: str, now: datetime, skip_orphans: bool) -> CarryOverResult: ...
     def user_differences(self, outgoing: str, incoming: str) -> list: ...
+    def bump_auto_increment(self, outgoing: str, incoming: str) -> int: ...
     def swap(self, db: str, live: list[str], incoming: list[str], source: str, keep_as: str) -> None: ...
     def audit(self, schema: str, action: str, details: dict) -> None: ...
     def kept_schemas(self, db: str) -> list[KeptSchema]: ...
@@ -206,6 +209,21 @@ class MariaDbBackend:
         with self.engine.connect() as conn:
             return user_state_differences(conn, outgoing, incoming)
 
+    def _next_ids(self, conn, schema: str) -> dict:
+        """The next id of every table with an auto-increment column: AUTO_INCREMENT, at least MAX(column) + 1"""
+        result = {}
+        for table, auto, column in conn.execute(AUTO_INCREMENTS, {"schema": schema}).all():
+            highest = conn.exec_driver_sql(f"SELECT MAX({quote(column)}) FROM {quote(schema)}.{quote(table)}").scalar()
+            result[table] = max(int(auto or 1), int(highest or 0) + 1)
+        return result
+
+    def bump_auto_increment(self, outgoing: str, incoming: str) -> int:
+        with self.engine.begin() as conn:
+            statements = raise_statements(incoming, self._next_ids(conn, outgoing), self._next_ids(conn, incoming))
+            for statement in statements:
+                conn.exec_driver_sql(statement)
+        return len(statements)
+
     def swap(self, db: str, live: list[str], incoming: list[str], source: str, keep_as: str) -> None:
         with self.engine.begin() as conn:
             # wait at most a minute for the metadata locks (the default is a day): a stuck connection fails the
@@ -306,10 +324,10 @@ def _drop_if_empty(backend: RestoreBackend, schema: str) -> None:
         _logger.error(f"Backups: {schema} holds tables after a failed swap; left in place (check, then undo-restore)")
 
 
-def _details(carry: CarryOverResult, keep_as: str) -> dict:
+def _details(carry: CarryOverResult, keep_as: str, ids_raised: int) -> dict:
     return {"kept_schema": keep_as, "revocations": carry.revocations, "certificates_added": carry.certificates_added,
             "orphans_skipped": len(carry.orphan_serials), "crl_number": carry.crl_number,
-            "sessions_ended": carry.sessions_ended}
+            "sessions_ended": carry.sessions_ended, "ids_raised": ids_raised}
 
 
 def restore_backup(cfg: BackupConfig, db: DatabaseConfig, ref: str, *, backend: RestoreBackend,
@@ -330,6 +348,7 @@ def restore_backup(cfg: BackupConfig, db: DatabaseConfig, ref: str, *, backend: 
                 raise BackupFailure("load_failed")
             carry = _carry(backend, db.name, staging, now(), skip_orphans)
             differences = backend.user_differences(db.name, staging)
+            ids_raised = backend.bump_auto_increment(db.name, staging)
             name = kept_name(db.name, now())
             backend.create_schema(name)
             keep_as = name      # only a schema this run created is ever dropped below
@@ -342,9 +361,10 @@ def restore_backup(cfg: BackupConfig, db: DatabaseConfig, ref: str, *, backend: 
                     _drop_if_empty(backend, keep_as)
         backend.drop_schema(staging)
         backend.audit(db.name, "restore", {"backup_id": manifest.id, "label": manifest.label.value,
-                                           "backup_revision": manifest.migration_revision, **_details(carry, keep_as)})
+                                           "backup_revision": manifest.migration_revision,
+                                           **_details(carry, keep_as, ids_raised)})
         _logger.info(f"Backups: restored {manifest.id}; the replaced tables are kept in {keep_as}")
-        return RestoreResult(kept_schema=keep_as, carry=carry, user_differences=differences)
+        return RestoreResult(kept_schema=keep_as, carry=carry, user_differences=differences, ids_raised=ids_raised)
 
 
 def undo_restore(cfg: BackupConfig, db: DatabaseConfig, schema: Optional[str], *, backend: RestoreBackend,
@@ -363,6 +383,7 @@ def undo_restore(cfg: BackupConfig, db: DatabaseConfig, schema: Optional[str], *
         _guard(backend, db.name, force_connections)
         carry = _carry(backend, db.name, source, now(), skip_orphans)
         differences = backend.user_differences(db.name, source)
+        ids_raised = backend.bump_auto_increment(db.name, source)
         keep_as = kept_name(db.name, now())
         backend.create_schema(keep_as)
         try:
@@ -371,9 +392,9 @@ def undo_restore(cfg: BackupConfig, db: DatabaseConfig, schema: Optional[str], *
             _drop_if_empty(backend, keep_as)
             raise
         backend.drop_schema(source)
-        backend.audit(db.name, "undo_restore", {"source_schema": source, **_details(carry, keep_as)})
+        backend.audit(db.name, "undo_restore", {"source_schema": source, **_details(carry, keep_as, ids_raised)})
         _logger.info(f"Backups: swapped {source} back in; the replaced tables are kept in {keep_as}")
-        return RestoreResult(kept_schema=keep_as, carry=carry, user_differences=differences)
+        return RestoreResult(kept_schema=keep_as, carry=carry, user_differences=differences, ids_raised=ids_raised)
 
 
 def prune_kept_schemas(cfg: BackupConfig, db: DatabaseConfig, *, backend: RestoreBackend, now: datetime,

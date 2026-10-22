@@ -53,6 +53,21 @@ def rename_statement(db: str, live: Sequence[str], incoming: Sequence[str], sour
     return "RENAME TABLE " + ", ".join(moves)
 
 
+def raise_statements(incoming: str, outgoing_next: dict, incoming_next: dict) -> list[str]:
+    """ALTER TABLE ... AUTO_INCREMENT for every table both schemas have where the outgoing side would give out a
+    higher id: after the swap no id of the replaced data is handed out again (spec 8.1)"""
+    return [f"ALTER TABLE {quote(incoming)}.{quote(table)} AUTO_INCREMENT = {int(outgoing_next[table])}"
+            for table in sorted(outgoing_next)
+            if table in incoming_next and int(outgoing_next[table]) > int(incoming_next[table])]
+
+
+# The auto-increment column of every table of a schema with its next value
+AUTO_INCREMENTS = sa.text(
+    "SELECT t.TABLE_NAME, t.AUTO_INCREMENT, c.COLUMN_NAME FROM information_schema.TABLES t "
+    "JOIN information_schema.COLUMNS c ON c.TABLE_SCHEMA = t.TABLE_SCHEMA AND c.TABLE_NAME = t.TABLE_NAME "
+    "WHERE t.TABLE_SCHEMA = :schema AND t.TABLE_TYPE = 'BASE TABLE' AND c.EXTRA LIKE '%auto_increment%'")
+
+
 UNSUPPORTED_OBJECTS = sa.text("""
     SELECT CONCAT('view ', TABLE_NAME) FROM information_schema.VIEWS WHERE TABLE_SCHEMA = :schema
     UNION ALL SELECT CONCAT('trigger ', TRIGGER_NAME) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = :schema

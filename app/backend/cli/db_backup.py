@@ -157,7 +157,8 @@ def _report(result: RestoreResult) -> None:
     carry = result.carry
     print(f"the replaced tables are kept in {result.kept_schema} (undo-restore swaps them back)")
     print(f"carried over: {carry.revocations} revocation(s), {carry.certificates_added} certificate(s) added as "
-          f"revoked, CRL number {carry.crl_number}, {carry.sessions_ended} session(s) ended")
+          f"revoked, CRL number {carry.crl_number}, {carry.sessions_ended} session(s) ended, "
+          f"{result.ids_raised} id counter(s) raised past the replaced data")
     for serial in carry.orphan_serials:
         print(f"NOT carried over (user missing in the backup), revoke by hand: certificate {serial}")
     for user_id, username, change in result.user_differences:
