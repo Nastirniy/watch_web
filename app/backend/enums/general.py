@@ -257,6 +257,13 @@ class ExportJobType(Enum):
     STATISTICS_REPORT = "statistics_report"
 
 
+class BackupLabel(str, Enum):
+    """Why a database backup was made (the suffix of its id, services/backups/manifest.py)"""
+    SCHEDULED = "scheduled"      # the systemd timer; retention by day, week and month
+    MANUAL = "manual"            # an operator; retention by age (backup.keep_manual_days)
+    PRE_UPGRADE = "pre-upgrade"  # before an upgrade (DEPLOYMENT.md); retention by age
+
+
 class ExportJobStatus(Enum):
     PENDING = "pending"
     PROCESSING = "processing"

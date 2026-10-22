@@ -382,6 +382,29 @@ class ReportConfig(BaseModel):
     max_rows: PositiveInt = 20000
 
 
+class BackupConfig(BaseModel):
+    """Database backups: MYSETTINGS_BACKUP__* (docs/superpowers/specs/2026-10-22-db-backups-design.md, BACKUPS.md).
+
+    Backups are configured when dir is set. The db-backup tool service writes dir and copy_dir; the API only reads
+    them (status in GET /database/backups and /health).
+    """
+    dir: str = ""                   # the backup folders (<id>/dump.sql.gz + manifest.json)
+    copy_dir: str = ""              # optional off-host copy (a mounted share), same retention
+    stale_after_hours: PositiveInt = 26   # the newest good backup older than this is stale
+    # Retention of scheduled backups: the newest of each of the last N days, ISO weeks and months
+    keep_daily: int = Field(default=7, ge=0)
+    keep_weekly: int = Field(default=4, ge=0)
+    keep_monthly: int = Field(default=6, ge=0)
+    keep_manual_days: int = Field(default=90, ge=0)     # manual and pre-upgrade backups
+    keep_previous_days: int = Field(default=7, ge=0)    # <db>_before_* schemas a restore keeps for undo
+    # create refuses when the free space is below the last backup's size x 1.5 plus this
+    min_free_mb: int = Field(default=512, ge=0)
+    dump_timeout_seconds: PositiveInt = 3600            # a dump or a load running longer is killed
+
+    def is_configured(self) -> bool:
+        return bool(self.dir)
+
+
 def _warn_unknown_settings(values: dict, fields: dict, prefix: str = "") -> None:
     """A key that no settings model declares is ignored: a setting that was removed or renamed, or a typo.
     Say so at startup instead of running silently with the default (logging is not set up yet: print)."""
@@ -408,6 +431,7 @@ class Settings(BaseSettings):
     health: HealthConfig = Field(default_factory=HealthConfig)
     pki: PkiConfig = Field(default_factory=PkiConfig)
     reports: ReportConfig = Field(default_factory=ReportConfig)
+    backup: BackupConfig = Field(default_factory=BackupConfig)
 
     def __init__(self, **kwargs):
         # Load from TOML first
