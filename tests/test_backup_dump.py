@@ -175,8 +175,8 @@ def test_copy_corrupted_fails_but_keeps_local(tmp_path, fakes, monkeypatch):
     (tmp_path / "share").mkdir()
     real_copy = dump_module._copy_file
 
-    def corrupting(src: Path, dst: Path) -> None:
-        real_copy(src, dst)
+    def corrupting(src: Path, dst: Path, *mode) -> None:
+        real_copy(src, dst, *mode)
         if dst.name.endswith(".gz"):
             dst.write_bytes(b"broken")
 
@@ -225,11 +225,18 @@ def test_prune_dry_run_deletes_nothing(tmp_path):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX permissions")
-def test_modes(cfg, fakes):
+def test_modes(tmp_path, fakes):
+    """The api reads manifests through the backup group; only the backup user reads a dump (password hashes)"""
     os.umask(0o022)
+    cfg = BackupConfig(dir=str(tmp_path / "backups"), copy_dir=str(tmp_path / "share"))
+    (tmp_path / "share").mkdir()
     result = run(cfg, fakes)
-    folder = Path(cfg.dir) / result.manifest.id
-    assert folder.stat().st_mode & 0o777 == 0o700
-    assert (folder / "dump.sql.gz").stat().st_mode & 0o777 == 0o600
-    assert (folder / "manifest.json").stat().st_mode & 0o777 == 0o600
-    assert Path(cfg.dir).stat().st_mode & 0o777 == 0o700
+    for root in (Path(cfg.dir), tmp_path / "share"):
+        folder = root / result.manifest.id
+        assert folder.stat().st_mode & 0o777 == 0o750
+        assert (folder / "dump.sql.gz").stat().st_mode & 0o777 == 0o600
+        assert (folder / "manifest.json").stat().st_mode & 0o777 == 0o640
+    assert Path(cfg.dir).stat().st_mode & 0o777 == 0o750
+    assert (Path(cfg.dir) / ".state").stat().st_mode & 0o777 == 0o750
+    assert (Path(cfg.dir) / ".state" / "last-run.json").stat().st_mode & 0o777 == 0o640
+    assert (Path(cfg.dir) / ".state" / "lock").stat().st_mode & 0o777 == 0o600

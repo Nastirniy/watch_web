@@ -234,7 +234,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    os.umask(0o077)
+    os.umask(0o027)   # folders 0750, manifests 0640 (the api reads them through the backup group), dumps 0600
     args = _parser().parse_args(argv)
     if not settings.backup.is_configured():
         print("backups are not configured (MYSETTINGS_BACKUP__DIR)", file=sys.stderr)

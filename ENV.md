@@ -267,7 +267,7 @@ Optional: backups are configured when `MYSETTINGS_BACKUP__DIR` is set; the API t
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MYSETTINGS_BACKUP__DIR` | *(empty)* | The backup folders, `<id>/dump.sql.gz` + `manifest.json` (`BACKUP_DIR`, 0700, owned by `MEDIA_UID`) |
+| `MYSETTINGS_BACKUP__DIR` | *(empty)* | The backup folders, `<id>/dump.sql.gz` + `manifest.json` (`BACKUP_DIR`, 0750, `BACKUP_UID:BACKUP_GID`) |
 | `MYSETTINGS_BACKUP__COPY_DIR` | *(empty)* | Off-host copy of every backup (a mounted share), same retention |
 | `MYSETTINGS_BACKUP__STALE_AFTER_HOURS` | `26` | The newest good backup older than this is stale: `/health` degraded, `stale` in `GET /database/backups` |
 | `MYSETTINGS_BACKUP__KEEP_DAILY` | `7` | Scheduled backups: the newest of each of the last N days |
@@ -280,7 +280,8 @@ Optional: backups are configured when `MYSETTINGS_BACKUP__DIR` is set; the API t
 
 Compose variables of `.env`: `COMPOSE_FILE=docker-compose.yml:docker-compose.backup.yml` (plus
 `:docker-compose.backup-copy.yml` with a share, plus `:docker-compose.pki.yml` with PKI), `BACKUP_DIR`,
-`BACKUP_COPY_DIR`.
+`BACKUP_COPY_DIR`, `BACKUP_UID` / `BACKUP_GID` (a user and group of their own: the tool runs as them, the api joins
+the group; never `MEDIA_UID` / `MEDIA_GID`, often the nginx user).
 
 ---
 

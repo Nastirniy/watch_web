@@ -44,12 +44,15 @@ The newest backup is never deleted, whatever its age. Retention runs after every
 
 ## Setup
 
-1. Create the directory on the host. It must be outside the project directory (the build context), mode 0700, and
-   owned by `MEDIA_UID`. Backups hold password and token hashes: the nginx user, which may share `MEDIA_GID`, must
-   never read them.
+1. Create a user and a group of their own, and the directory outside the project directory (the build context).
+   Backups hold password and token hashes. `MEDIA_UID` / `MEDIA_GID` are often the nginx user itself
+   (`www-data`), so never use them here. The tool runs as `BACKUP_UID:BACKUP_GID`, and the api joins `BACKUP_GID`
+   to read the folders (0750) and manifests (0640), never a dump (0600).
 
    ```bash
-   sudo install -d -m 0700 -o "$MEDIA_UID" -g "$MEDIA_GID" /srv/watch_web/backups
+   sudo groupadd --system watch-web-backup
+   sudo useradd --system --no-create-home --shell /usr/sbin/nologin -g watch-web-backup watch-web-backup
+   sudo install -d -m 0750 -o watch-web-backup -g watch-web-backup /srv/watch_web/backups
    ```
 
 2. Grant the application database user what the tool needs, besides its own database:
@@ -67,6 +70,8 @@ The newest backup is never deleted, whatever its age. Retention runs after every
    ```bash
    COMPOSE_FILE=docker-compose.yml:docker-compose.backup.yml          # + :docker-compose.pki.yml with PKI
    BACKUP_DIR=/srv/watch_web/backups
+   BACKUP_UID=<id -u watch-web-backup>
+   BACKUP_GID=<getent group watch-web-backup | cut -d: -f3>
    ```
 
 4. Rebuild and restart the api: `docker compose build api && docker compose up -d api`. The image now has the
@@ -92,7 +97,8 @@ The newest backup is never deleted, whatever its age. Retention runs after every
 ### Off-host copy
 
 A backup on the same disk is lost with the disk. In production, mount a network share (NFS or SMB, ideally
-encrypted and on another machine) on the host before docker starts, then:
+encrypted and on another machine) on the host before docker starts, with a directory writable by
+`watch-web-backup` and readable by its group, then:
 
 ```bash
 COMPOSE_FILE=docker-compose.yml:docker-compose.backup.yml:docker-compose.backup-copy.yml

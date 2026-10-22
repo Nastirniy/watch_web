@@ -2,14 +2,17 @@
 #
 # An override file, off by default, so docker-compose.yml works without BACKUP_DIR. Enable it in .env:
 #   COMPOSE_FILE=docker-compose.yml:docker-compose.backup.yml          (add :docker-compose.pki.yml if used)
-#   BACKUP_DIR=/srv/watch_web/backups    # host directory (0700, owned by MEDIA_UID), same path in the containers
+#   BACKUP_DIR=/srv/watch_web/backups    # host directory (0750, BACKUP_UID:BACKUP_GID), same path in the containers
+#   BACKUP_UID=...                       # a user of its own that writes the backups (`id -u watch-web-backup`)
+#   BACKUP_GID=...                       # its group; only the api container joins it (`getent group watch-web-backup`)
 # An off-host copy (a mounted share) is a second override: docker-compose.backup-copy.yml.
 #
 # db-backup never starts with `up` (profile tools): the systemd timer and the operator run it with
 #   docker compose run --rm db-backup create --label scheduled
 # It writes BACKUP_DIR and reaches MySQL / MariaDB on 127.0.0.1 with the credentials of .env; the API only reads
-# BACKUP_DIR (GET /database/backups, /health). Backups hold password and token hashes: folders 0700, files 0600,
-# never readable by the nginx user (which may share MEDIA_GID). No media mount: the tool backs up the database only.
+# BACKUP_DIR (GET /database/backups, /health) as a member of BACKUP_GID: folders 0750, manifests 0640, dumps 0600.
+# Backups hold password and token hashes: never MEDIA_UID / MEDIA_GID, which is often the nginx user itself
+# (www-data). No media mount: the tool backs up the database only.
 
 services:
   db-backup:
@@ -19,7 +22,7 @@ services:
     profiles: ["tools"]
     network_mode: host
     env_file: .env
-    user: "${MEDIA_UID:-10001}:${MEDIA_GID:-10001}"
+    user: "${BACKUP_UID:?set BACKUP_UID in .env}:${BACKUP_GID:?set BACKUP_GID in .env}"
     entrypoint: ["python", "-m", "app.backend.cli.db_backup"]
     environment:
       MYSETTINGS_BACKUP__DIR: ${BACKUP_DIR:?set BACKUP_DIR in .env}
@@ -30,6 +33,9 @@ services:
       options: { max-size: "50m", max-file: "5" }
 
   api:
+    # reads the folders and manifests (0750 / 0640) through the backup group, never a dump (0600)
+    group_add:
+      - "${BACKUP_GID:?set BACKUP_GID in .env}"
     environment:
       MYSETTINGS_BACKUP__DIR: ${BACKUP_DIR:?set BACKUP_DIR in .env}
     volumes:

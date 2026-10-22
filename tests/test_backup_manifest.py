@@ -79,4 +79,4 @@ def test_manifest_mode(tmp_path):
     folder = tmp_path / manifest.id
     folder.mkdir()
     write_manifest(folder, manifest)
-    assert (folder / MANIFEST_FILE).stat().st_mode & 0o777 == 0o600
+    assert (folder / MANIFEST_FILE).stat().st_mode & 0o777 == 0o640

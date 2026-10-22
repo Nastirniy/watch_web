@@ -17,7 +17,7 @@ from loguru import logger
 from app.backend.config import BackupConfig
 from app.backend.enums.errors import ErrorCode
 from app.backend.errors.coded import CodedError
-from app.backend.services.backups.manifest import Manifest, ManifestError, read_manifest
+from app.backend.services.backups.manifest import DIR_MODE, SHARED_MODE, Manifest, ManifestError, read_manifest
 
 STATE_DIR = ".state"
 LAST_RUN_FILE = "last-run.json"
@@ -78,16 +78,17 @@ class Catalog:
 
 def write_last_run(directory: Path, run: LastRun) -> None:
     state = directory / STATE_DIR
-    state.mkdir(mode=0o700, exist_ok=True)
+    state.mkdir(mode=DIR_MODE, exist_ok=True)
     data = {
         "outcome": run.outcome, "started_at": run.started_at.astimezone(timezone.utc).isoformat(),
         "finished_at": run.finished_at.astimezone(timezone.utc).isoformat(), "error_code": run.error_code,
         "backup_id": run.backup_id,
     }
     tmp = state / (LAST_RUN_FILE + ".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, SHARED_MODE)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(data, f)
+    os.chmod(tmp, SHARED_MODE)
     os.replace(tmp, state / LAST_RUN_FILE)
 
 

@@ -6,6 +6,7 @@ from typing import Iterator
 
 from app.backend.services.backups.catalog import STATE_DIR
 from app.backend.services.backups.failures import BackupFailure
+from app.backend.services.backups.manifest import DIR_MODE, PRIVATE_MODE
 
 LOCK_FILE = "lock"
 
@@ -40,8 +41,8 @@ else:
 def writer_lock(directory: Path) -> Iterator[None]:
     """Hold the lock of directory; BackupFailure("busy") at once when another command holds it"""
     state = directory / STATE_DIR
-    state.mkdir(mode=0o700, parents=True, exist_ok=True)
-    fd = os.open(state / LOCK_FILE, os.O_RDWR | os.O_CREAT, 0o600)
+    state.mkdir(mode=DIR_MODE, parents=True, exist_ok=True)
+    fd = os.open(state / LOCK_FILE, os.O_RDWR | os.O_CREAT, PRIVATE_MODE)
     try:
         if not _try_lock(fd):
             raise BackupFailure("busy")

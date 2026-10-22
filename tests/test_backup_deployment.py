@@ -31,6 +31,14 @@ def test_backup_dir_writable_for_tool_readonly_for_api():
         assert BACKUP[service]["environment"]["MYSETTINGS_BACKUP__DIR"] == "${BACKUP_DIR:?set BACKUP_DIR in .env}"
 
 
+def test_tool_runs_as_its_own_user_and_the_api_joins_its_group():
+    """Backups hold password and token hashes: never MEDIA_UID / MEDIA_GID, which may be the nginx user
+    (www-data); the api reads the manifests through BACKUP_GID"""
+    assert BACKUP["db-backup"]["user"] == "${BACKUP_UID:?set BACKUP_UID in .env}:${BACKUP_GID:?set BACKUP_GID in .env}"
+    assert BACKUP["api"]["group_add"] == ["${BACKUP_GID:?set BACKUP_GID in .env}"]
+    assert "MEDIA_UID" not in BACKUP["db-backup"]["user"] and "MEDIA_GID" not in BACKUP["db-backup"]["user"]
+
+
 def test_no_media_mount_on_tool():
     assert not any("MEDIA_ROOT" in volume for volume in BACKUP["db-backup"]["volumes"])
 
@@ -67,4 +75,5 @@ def test_env_md_lists_backup_settings():
 def test_env_example_names_the_backup_variables():
     example = (ROOT / ".env.example").read_text(encoding="utf-8")
     assert "BACKUP_DIR=" in example and "BACKUP_COPY_DIR=" in example
+    assert "BACKUP_UID=" in example and "BACKUP_GID=" in example
     assert "docker-compose.backup.yml" in example

@@ -28,7 +28,8 @@ from app.backend.services.backups.client_tools import ClientTools, defaults_file
 from app.backend.services.backups.failures import BackupFailure
 from app.backend.services.backups.locking import writer_lock
 from app.backend.services.backups.manifest import (
-    DUMP_FILE, FORMAT_VERSION, MANIFEST_FILE, Manifest, backup_id, read_manifest, write_manifest,
+    DIR_MODE, DUMP_FILE, FORMAT_VERSION, MANIFEST_FILE, PRIVATE_MODE, SHARED_MODE, Manifest, backup_id,
+    read_manifest, write_manifest,
 )
 from app.backend.services.backups.retention import RetentionRules, select_to_delete
 
@@ -110,7 +111,7 @@ def _dump(tools: ClientTools, db: DatabaseConfig, target: Path, timeout_seconds:
         timer = threading.Timer(timeout_seconds, kill)
         timer.start()
         try:
-            fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, PRIVATE_MODE)
             with os.fdopen(fd, "wb") as raw:
                 hashing = _HashingWriter(raw)
                 with gzip.GzipFile(fileobj=hashing, mode="wb", compresslevel=6, mtime=0) as compressed:
@@ -168,9 +169,14 @@ def _check_space(directory: Path, cfg: BackupConfig) -> None:
         raise BackupFailure("no_space")
 
 
-def _copy_file(src: Path, dst: Path) -> None:
+def _new_dir(path: Path) -> None:
+    path.mkdir(mode=DIR_MODE)
+    os.chmod(path, DIR_MODE)
+
+
+def _copy_file(src: Path, dst: Path, mode: int = PRIVATE_MODE) -> None:
     shutil.copyfile(src, dst)
-    os.chmod(dst, 0o600)
+    os.chmod(dst, mode)
 
 
 def _sha256_of(path: Path) -> str:
@@ -187,9 +193,9 @@ def _copy(folder: Path, copy_dir: Path, manifest: Manifest) -> None:
     try:
         if tmp.exists():
             shutil.rmtree(tmp)
-        tmp.mkdir(mode=0o700)
+        _new_dir(tmp)
         _copy_file(folder / manifest.file, tmp / manifest.file)
-        _copy_file(folder / MANIFEST_FILE, tmp / MANIFEST_FILE)
+        _copy_file(folder / MANIFEST_FILE, tmp / MANIFEST_FILE, SHARED_MODE)
         if _sha256_of(tmp / manifest.file) != manifest.sha256:
             _logger.error(f"Backups: the copy of {manifest.id} in copy_dir does not match its checksum")
             raise BackupFailure("copy_failed")
@@ -228,7 +234,9 @@ def create_backup(cfg: BackupConfig, db: DatabaseConfig, label: BackupLabel, *, 
                   now: Callable[[], datetime] = utcnow, tools: Optional[ClientTools] = None,
                   object_guard: Optional[Callable[[], list]] = None) -> CreateResult:
     directory = Path(cfg.dir)
-    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if not directory.exists():
+        directory.mkdir(parents=True)
+        os.chmod(directory, DIR_MODE)
     with writer_lock(directory):
         started = now()
         try:
@@ -256,7 +264,7 @@ def _create(cfg, db, label, started, copy, now, tools, object_guard) -> CreateRe
     tools = tools or find_tools()
     backup = backup_id(started, label)
     tmp = directory / f"{TMP_PREFIX}{backup}"
-    tmp.mkdir(mode=0o700)
+    _new_dir(tmp)
     try:
         facts = _dump(tools, db, tmp / DUMP_FILE, cfg.dump_timeout_seconds)
         version = facts.server_version

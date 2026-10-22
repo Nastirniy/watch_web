@@ -9,6 +9,11 @@ from typing import Optional
 from app.backend.enums.general import BackupLabel
 
 FORMAT_VERSION = 1
+# Modes: the backup user writes, the api reads folders and manifests through the backup group, a dump (password and
+# token hashes) is readable by the backup user only
+DIR_MODE = 0o750
+SHARED_MODE = 0o640
+PRIVATE_MODE = 0o600
 MANIFEST_FILE = "manifest.json"
 DUMP_FILE = "dump.sql.gz"
 
@@ -54,14 +59,16 @@ def _to_json(manifest: Manifest) -> dict:
 
 
 def write_manifest(folder: Path, manifest: Manifest) -> None:
-    """Write folder/manifest.json through a .tmp file and os.replace (0600)"""
+    """Write folder/manifest.json through a .tmp file and os.replace (0640: the api reads it through the backup
+    group)"""
     target = folder / MANIFEST_FILE
     tmp = folder / (MANIFEST_FILE + ".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, SHARED_MODE)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(_to_json(manifest), f, indent=2)
         f.flush()
         os.fsync(f.fileno())
+    os.chmod(tmp, SHARED_MODE)
     os.replace(tmp, target)
 
 
