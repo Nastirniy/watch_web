@@ -166,6 +166,8 @@ docker compose stop api media-worker
 docker compose run --rm db-backup restore <id>           # shows the plan, asks for "yes"
 docker compose up -d
 docker compose exec api python -m app.backend.cli.pki crl   # with PKI: publish the CRL now
+docker compose exec api python -m app.backend.cli.restore_reconcile           # dry run: files without rows
+docker compose exec api python -m app.backend.cli.restore_reconcile --apply   # move them aside
 ```
 
 What `restore` does:
@@ -216,13 +218,17 @@ Refusals (exit 3):
 
 ## What a rollback does not bring back
 
-- **Media files:** files uploaded after the backup stay in `MEDIA_ROOT` without rows (nothing points to them).
-  Rows of the backup whose files were removed later point to missing files (archiving never removes files, so this
-  only happens after manual deletion). Back up `MEDIA_ROOT` with the host's file backup, at the same time as the
-  database.
-- **PKI:** the CA key, the issued packages and the CRL file live in `PKI_DIR` (PKI.md, offline encrypted backup of
-  `private/`). Issued `.p12` folders of certificates created after the backup stay on disk; their rows come back as
-  revoked.
+- **Media files:** files uploaded after the backup have no rows. `restore_reconcile` (api container, dry run
+  first) finds them and, with `--apply`, moves them to `MEDIA_ROOT/_orphaned/<time>/<same path>`: nothing serves
+  them there, and an operator can bring one back by hand. It deletes posters and storyboards of ids without a row
+  (they are rebuilt from the original), moves back an original a row names again (an undo after an `--apply`), and
+  lists rows whose original is missing (only after manual deletion: archiving never removes files). Files younger
+  than 10 minutes and `_tmp` are never touched. One audit row (`reconcile`) per `--apply`.
+- **PKI:** the CA key and the CRL file live in `PKI_DIR` (PKI.md, offline encrypted backup of `private/`). Package
+  folders of certificates no row names (made after the backup for users the backup lacks) hold private keys:
+  `restore_reconcile --apply` moves them to `PKI_DIR/issued/.quarantine/<time>/`; delete them once checked.
+- **Ids:** the restore raises every id counter past the replaced data, so the moved files and folders never meet a
+  new row with the same id.
 - **Sessions:** everyone logs in again.
 - **Users:** a user deactivated or archived after the backup is active again in the restored data. The restore lists
   such users; deactivate them again if needed.

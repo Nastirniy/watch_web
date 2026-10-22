@@ -13,6 +13,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   handed out twice (derived posters and storyboards, the thumbnail cache and certificate folders are keyed by id).
 - Users created after the backup who have a certificate come back archived (inactive, no roles), so their
   certificates return revoked and go on the CRL; the refusal `orphan_certificates` and `--force-orphans` are gone.
+- Tooling: `python -m app.backend.cli.restore_reconcile [--apply]` (api container) after a restore: media files
+  without rows to `_orphaned/<time>/`, certificate packages without rows to `issued/.quarantine/<time>/`, derived
+  files of ids without rows deleted, originals named again moved back; audit action `reconcile`.
 
 ### Added
 

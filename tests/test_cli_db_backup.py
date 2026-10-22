@@ -168,6 +168,7 @@ def test_restore_with_flags(restore_calls, capsys):
     assert "radio_monitoring_before_20261022_120000" in out
     assert "anna" in out and "is_active True->False" in out
     assert "user 12 newbie: added archived" in out
+    assert "docker compose exec api python -m app.backend.cli.restore_reconcile" in out
     assert "docker compose up -d" in out
 
 

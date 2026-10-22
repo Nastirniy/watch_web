@@ -166,7 +166,8 @@ def _report(result: RestoreResult) -> None:
     print("next: docker compose up -d")
     # the tool service has no PKI settings of its own: name the step for servers with PKI either way
     print("next, with PKI: docker compose exec api python -m app.backend.cli.pki crl (publish the CRL now)")
-    print("note: media files uploaded after the backup stay on disk without rows (BACKUPS.md)")
+    print("next: docker compose exec api python -m app.backend.cli.restore_reconcile (dry run; then --apply): media "
+          "files and certificate packages without rows are moved aside")
 
 
 def cmd_restore(args) -> int:
