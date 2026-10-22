@@ -105,6 +105,10 @@ COMPOSE_FILE=docker-compose.yml:docker-compose.backup.yml:docker-compose.backup-
 BACKUP_COPY_DIR=/mnt/backup-share/watch_web
 ```
 
+Mount the share with `soft` and a timeout (NFS: `soft,timeo=50,retrans=2`), so a share that stops answering
+fails reads instead of blocking them. The api reads the catalog with a 5 s limit either way and answers
+`backup_directory_unavailable` (503); `/health` turns degraded.
+
 How the copy works:
 - Every `create` copies the new backup there through `.tmp-<id>/`, checks the checksum from the copy, then renames
   it. A failed copy keeps the local backup, records `copy_failed` and exits 1.
@@ -187,6 +191,10 @@ What `restore` does:
 6. It writes an audit row (`restore`, resource `database`) and prints the next steps, the carry-over counts, and the
    users whose active or archived state differs between the replaced data and the backup. Those users are left as
    restored: decide on them yourself.
+
+Undo does not bring back certificates issued after the backup. The restore revoked them (step 4), and that
+revocation is final: an undo keeps them revoked, and their users need new certificates. Choose the backup with care
+before restoring.
 
 Undo: stop api and media-worker, run `undo-restore`, start them again. The kept schema is swapped back with the same
 carry-over: a revocation made after the restore survives the undo. The replaced tables are kept again, so an undo

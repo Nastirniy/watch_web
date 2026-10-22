@@ -1,6 +1,5 @@
 """Database and backup status, read-only. Backups are made and restored on the host by cli/db_backup.py (the
 db-backup tool service, BACKUPS.md); the API only reads the backup directories (mounted read-only)."""
-import asyncio
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
@@ -19,7 +18,7 @@ from app.backend.enums.routes import DatabaseRoutes
 from app.backend.errors.coded import CodedError
 from app.backend.errors.openapi import GUARDED, problems
 from app.backend.errors.problems import ApiError
-from app.backend.services.backups.catalog import load_catalog
+from app.backend.services.backups.catalog import load_catalog_async
 from app.backend.services.backups.schemas import kept_pattern, kept_schemas_query, parse_kept
 from app.backend.services.database_status import database_status
 
@@ -56,7 +55,7 @@ async def get_database_backups(
     """The backups in the backup directory, newest first, whether each has an off-host copy, the summary (newest
     good backup, stale, the last run) and the schemas a restore kept for undo"""
     try:
-        catalog = await asyncio.to_thread(load_catalog, settings.backup, datetime.now(timezone.utc))
+        catalog = await load_catalog_async(settings.backup, datetime.now(timezone.utc))
     except CodedError as exc:
         raise ApiError.from_coded(exc)
     summary = catalog.summary

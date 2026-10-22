@@ -95,3 +95,30 @@ async def test_backups_needs_permission(client, db, headers, tmp_path, monkeypat
 @pytest.mark.parametrize("name", ["database.view", "backup.view"])
 def test_permissions_are_system_level(name):
     assert permission_level(name) == PermissionLevel.SYSTEM
+
+
+async def test_a_hung_share_answers_503_without_blocking(client, db, headers, tmp_path, monkeypatch):
+    """A hard NFS mount that stops answering: the catalog read times out on its own thread (review)"""
+    import threading
+    import time
+    from app.backend.services.backups import catalog
+    monkeypatch.setattr(settings.backup, "dir", str(tmp_path))
+    monkeypatch.setattr(catalog, "CATALOG_TIMEOUT_SECONDS", 0.3)
+    release = threading.Event()
+    real_scan = catalog.scan
+
+    def hung_scan(folder):
+        release.wait(10)
+        return real_scan(folder)
+
+    monkeypatch.setattr(catalog, "scan", hung_scan)
+    admin = await make_admin(db)
+    try:
+        started = time.monotonic()
+        first = await client.get(BACKUPS, headers=headers(admin))
+        second = await client.get(BACKUPS, headers=headers(admin))
+        assert (first.status_code, second.status_code) == (503, 503)
+        assert first.json()["code"] == "backup_directory_unavailable"
+        assert time.monotonic() - started < 3
+    finally:
+        release.set()

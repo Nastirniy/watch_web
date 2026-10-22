@@ -14,7 +14,7 @@ from app.backend.config import settings
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.pki.authority import CaCheckError, load_ca_certificate
 from app.backend.errors.coded import CodedError
-from app.backend.services.backups.catalog import load_catalog
+from app.backend.services.backups.catalog import load_catalog_async
 from app.backend.services.crl_publisher import crl_status
 from app.backend.services.signer_client import SignerRefused, SignerUnavailable, signer_client
 from app.backend.utils.validators import ResponseDatetime
@@ -269,14 +269,14 @@ async def check_pki_health(session: AsyncSession) -> Optional[PkiHealthModel]:
         crl_stale=status.stale, signer_available=signer_available)
 
 
-def check_backups_health() -> Optional[BackupsHealthModel]:
+async def check_backups_health() -> Optional[BackupsHealthModel]:
     """The backups part of /health, None when settings.backup is not configured (reads files only)"""
     if not settings.backup.is_configured():
         return None
     try:
-        catalog = load_catalog(settings.backup, datetime.now(timezone.utc))
+        catalog = await load_catalog_async(settings.backup, datetime.now(timezone.utc))
     except CodedError:
-        # backup_directory_unavailable: load_catalog logged the cause
+        # backup_directory_unavailable (unreadable or not answering): logged where it was found
         return BackupsHealthModel(status=ServiceHealthStatus.DEGRADED.value, last_success_at=None, stale=True,
                                   last_run_outcome=None)
     summary = catalog.summary

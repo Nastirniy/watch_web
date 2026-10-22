@@ -4,9 +4,11 @@ A folder is a backup when its manifest is valid; .tmp-* folders are runs in prog
 the last run (last-run.json) and the lock. A folder with a damaged manifest is reported as incomplete, never as an
 error of the whole catalog.
 """
+import asyncio
 import json
 import os
 import shutil
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +26,12 @@ LAST_RUN_FILE = "last-run.json"
 TMP_PREFIX = ".tmp-"
 
 _logger = logger.bind(module="backups")
+
+# The API reads the catalog on a thread of its own with a timeout: a hard network mount that stops answering blocks
+# that thread, never the default executor (uploads, certificate issuing); one read is in flight at a time
+CATALOG_TIMEOUT_SECONDS = 5.0
+_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="backup-catalog")
+_in_flight: Optional[tuple[tuple, Future]] = None   # ((dir, copy_dir), the read)
 
 
 @dataclass(frozen=True)
@@ -163,3 +171,18 @@ def load_catalog(cfg: BackupConfig, now: datetime) -> Catalog:
                        missing=0 if copies is None else sum(1 for e in entries if e.copied is False)),
     )
     return Catalog(entries=entries, incomplete=tuple(incomplete), summary=summary)
+
+
+async def load_catalog_async(cfg: BackupConfig, now: datetime) -> Catalog:
+    """load_catalog for the API and /health; a read that takes longer than CATALOG_TIMEOUT_SECONDS (a hung share)
+    is backup_directory_unavailable, and the next call waits for the same read instead of starting another"""
+    global _in_flight
+    key = (cfg.dir, cfg.copy_dir)
+    if _in_flight is None or _in_flight[1].done() or _in_flight[0] != key:
+        _in_flight = (key, _executor.submit(lambda: load_catalog(cfg, now)))
+    try:
+        return await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(_in_flight[1])), CATALOG_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        _logger.error(f"Backups: reading {cfg.dir} / {cfg.copy_dir or '-'} took longer than "
+                      f"{CATALOG_TIMEOUT_SECONDS} s (a share that does not answer?)")
+        raise CodedError(ErrorCode.BACKUP_DIRECTORY_UNAVAILABLE)

@@ -70,7 +70,7 @@ async def health_check(
 
         # After the gather: the two checks above share the session, this one uses it alone
         pki_health = await check_pki_health(session)
-        backups_health = await asyncio.to_thread(check_backups_health)
+        backups_health = await check_backups_health()
 
         # Determine overall status
         overall_status = ServiceHealthStatus.HEALTHY.value
