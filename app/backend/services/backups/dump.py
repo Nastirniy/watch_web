@@ -40,7 +40,8 @@ CARRY = 64 * 1024          # text kept across chunk borders for the line pattern
 STDERR_LOG_LIMIT = 2000
 
 _CREATE_TABLE = re.compile(r"^CREATE TABLE `((?:[^`]|``)+)`", re.MULTILINE)
-_REVISION = re.compile(r"^INSERT INTO `alembic_version` VALUES \('([^']+)'\);", re.MULTILINE)
+# mariadb-dump 11.8 puts the rows on the line after VALUES; older dumps keep them on the same line
+_REVISION = re.compile(r"^INSERT INTO `alembic_version` VALUES\s*\('([^']+)'\);", re.MULTILINE)
 _SERVER_VERSION = re.compile(r"^-- Server version\t(\S+)", re.MULTILINE)
 
 _logger = logger.bind(module="backups")

@@ -240,3 +240,14 @@ def test_modes(tmp_path, fakes):
     assert (Path(cfg.dir) / ".state").stat().st_mode & 0o777 == 0o750
     assert (Path(cfg.dir) / ".state" / "last-run.json").stat().st_mode & 0o777 == 0o640
     assert (Path(cfg.dir) / ".state" / "lock").stat().st_mode & 0o777 == 0o600
+
+
+def test_revision_when_the_row_is_on_its_own_line(cfg, fakes):
+    """mariadb-dump 11.8 writes INSERT ... VALUES on one line and the rows on the next (seen live)"""
+    fakes.dump.configure(body=(
+        "-- Server version\t11.8.6-MariaDB-5ubuntu0.1 from Ubuntu\n"
+        "CREATE TABLE `alembic_version` (\n  `version_num` varchar(32) NOT NULL\n) ENGINE=InnoDB;\n"
+        "INSERT INTO `alembic_version` VALUES\n('028_no_actor_foreign_keys');\n"))
+    manifest = run(cfg, fakes).manifest
+    assert manifest.migration_revision == "028_no_actor_foreign_keys"
+    assert manifest.server_version == "11.8.6-MariaDB-5ubuntu0.1"
