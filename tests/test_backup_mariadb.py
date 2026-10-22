@@ -318,3 +318,107 @@ def test_r12_undo_chain(cfg, edge, backend):
     time.sleep(1.1)
     undo_restore(cfg, edge, None, backend=backend)
     assert q("SELECT username_alias FROM users WHERE id = 1") == [("Іван",)]
+
+
+
+def _account(prefix: str):
+    """A database account the runner created for these tests (WW_TEST_<PREFIX>_USER / _PASSWORD), or skip"""
+    user, password = os.environ.get(f"WW_TEST_{prefix}_USER"), os.environ.get(f"WW_TEST_{prefix}_PASSWORD")
+    if not user or password is None:
+        pytest.skip(f"needs the {prefix.lower()} test account (created by the E2 runner)")
+    from app.backend.config import DatabaseConfig
+    return DatabaseConfig(**{**_db().model_dump(), "user": user, "password": password})
+
+
+def _backend_for(db):
+    from app.backend.services.backups.client_tools import find_tools
+    from app.backend.services.backups.restore import MariaDbBackend
+    return MariaDbBackend(db, find_tools(), timeout_seconds=600, lock_wait_seconds=3)
+
+
+def _password_seen_in_processes(password: str) -> bool:
+    """In the arguments or the environment of a client tool (this test process holds it on purpose)"""
+    for proc in Path("/proc").iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            if b"mariadb" not in (proc / "cmdline").read_bytes():
+                continue
+        except OSError:
+            continue
+        for name in ("cmdline", "environ"):
+            try:
+                if password.encode("utf-8") in (proc / name).read_bytes():
+                    return True
+            except OSError:
+                continue
+    return False
+
+
+def test_c7_a_password_with_special_characters(cfg, edge):
+    """C7: quotes, backslash, #, ;, spaces, $, backtick and Cyrillic in the password: dump, deep verify and
+    restore work, and the password never shows in a process's arguments or environment"""
+    from app.backend.enums.general import BackupLabel
+    from app.backend.services.backups.dump import create_backup
+    from app.backend.services.backups.restore import restore_backup, verify_backup
+    db = _account("SPECIAL")
+    special = _backend_for(db)
+    q("CREATE TABLE edge_bulk (id INT AUTO_INCREMENT PRIMARY KEY, pad CHAR(200)) ENGINE=InnoDB")
+    q(f"INSERT INTO edge_bulk (pad) SELECT REPEAT('x', 200) FROM seq_1_to_{BIG_ROWS}")
+    seen, done = [], threading.Event()
+
+    def watch():
+        while not done.is_set():
+            seen.append(_password_seen_in_processes(db.password))
+
+    watcher = threading.Thread(target=watch)
+    watcher.start()
+    try:
+        manifest = create_backup(cfg, db, BackupLabel.MANUAL, tools=special.tools).manifest
+        result = verify_backup(cfg, db, manifest.id, deep=True, backend=special, skip_space_check=True)
+    finally:
+        done.set()
+        watcher.join()
+    assert seen and not any(seen)      # watched while the tools ran
+    assert (result.tables_ok, result.revision_ok) == (True, True)
+    restore_backup(cfg, db, manifest.id, backend=special, skip_space_check=True)
+    assert q("SELECT COUNT(*) FROM edge_bulk")[0][0] == BIG_ROWS
+
+
+def test_c8_without_a_grant_on_the_staging_schemas(cfg, edge):
+    """C8: an account with rights on the database only: the backup works, a restore is refused (no_grant) before
+    anything changes"""
+    from app.backend.enums.general import BackupLabel
+    from app.backend.services.backups.dump import create_backup
+    from app.backend.services.backups.restore import RestoreRefused, restore_backup
+    db = _account("NOGRANT")
+    limited = _backend_for(db)
+    manifest = create_backup(cfg, db, BackupLabel.MANUAL, tools=limited.tools).manifest
+    q("UPDATE users SET username_alias = 'changed' WHERE id = 1")
+    with pytest.raises(RestoreRefused) as exc:
+        restore_backup(cfg, db, manifest.id, backend=limited, skip_space_check=True)
+    assert exc.value.code == "no_grant"
+    assert q("SELECT username_alias FROM users WHERE id = 1") == [("changed",)]
+
+
+def test_c8_without_process_the_same_account_is_still_counted(cfg, edge):
+    """C8: without PROCESS an account sees only its own connections: the api and the worker use the same account,
+    so they are still counted (connections of other accounts are not: BACKUPS.md asks for PROCESS)"""
+    from app.backend.enums.general import BackupLabel
+    from app.backend.services.backups.dump import create_backup
+    from app.backend.services.backups.restore import RestoreRefused, restore_backup, sync_engine
+    db = _account("NOPROC")
+    limited = _backend_for(db)
+    manifest = create_backup(cfg, db, BackupLabel.MANUAL, tools=limited.tools).manifest
+    same = sync_engine(db).connect()
+    try:
+        with pytest.raises(RestoreRefused) as exc:
+            restore_backup(cfg, db, manifest.id, backend=limited, skip_space_check=True)
+        assert exc.value.code == "connections"
+    finally:
+        same.close()
+    other = _engine().connect()
+    try:
+        assert limited.other_connections(EDGE) == 0
+    finally:
+        other.close()
