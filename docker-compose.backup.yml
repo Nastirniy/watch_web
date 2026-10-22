@@ -1,0 +1,36 @@
+# Database backups: the db-backup tool service and the API's read-only view of the backups (BACKUPS.md).
+#
+# An override file, off by default, so docker-compose.yml works without BACKUP_DIR. Enable it in .env:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.backup.yml          (add :docker-compose.pki.yml if used)
+#   BACKUP_DIR=/srv/watch_web/backups    # host directory (0700, owned by MEDIA_UID), same path in the containers
+# An off-host copy (a mounted share) is a second override: docker-compose.backup-copy.yml.
+#
+# db-backup never starts with `up` (profile tools): the systemd timer and the operator run it with
+#   docker compose run --rm db-backup create --label scheduled
+# It writes BACKUP_DIR and reaches MySQL / MariaDB on 127.0.0.1 with the credentials of .env; the API only reads
+# BACKUP_DIR (GET /database/backups, /health). Backups hold password and token hashes: folders 0700, files 0600,
+# never readable by the nginx user (which may share MEDIA_GID). No media mount: the tool backs up the database only.
+
+services:
+  db-backup:
+    image: watch-web
+    # built by the api service (or loaded with `docker load` on air-gapped servers): never pulled from a registry
+    pull_policy: never
+    profiles: ["tools"]
+    network_mode: host
+    env_file: .env
+    user: "${MEDIA_UID:-10001}:${MEDIA_GID:-10001}"
+    entrypoint: ["python", "-m", "app.backend.cli.db_backup"]
+    environment:
+      MYSETTINGS_BACKUP__DIR: ${BACKUP_DIR:?set BACKUP_DIR in .env}
+    volumes:
+      - ${BACKUP_DIR}:${BACKUP_DIR}
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "5" }
+
+  api:
+    environment:
+      MYSETTINGS_BACKUP__DIR: ${BACKUP_DIR:?set BACKUP_DIR in .env}
+    volumes:
+      - ${BACKUP_DIR}:${BACKUP_DIR}:ro

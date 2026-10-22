@@ -1,0 +1,12 @@
+# Started by watch-web-db-backup.timer: one database backup in the db-backup tool service (BACKUPS.md).
+# A failed run leaves last-run.json failed: /health turns degraded and GET /database/backups shows the error code.
+[Unit]
+Description=Back up the watch_web database
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# edit: the directory with docker-compose.yml and .env (COMPOSE_FILE names docker-compose.backup.yml)
+WorkingDirectory=/opt/watch_web
+ExecStart=/usr/bin/docker compose run --rm -T db-backup create --label scheduled

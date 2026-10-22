@@ -114,6 +114,10 @@ nginx is the control point for user certificates. `ssl_verify_client on` makes e
 
 The containers connect to `MYSETTINGS_DATABASE__HOST=127.0.0.1` over the host network, so MySQL only needs to listen on TCP `127.0.0.1:3306` (the default) and the application user needs `'radio_user'@'127.0.0.1'` or `'radio_user'@'localhost'` grants over TCP. A socket-only MySQL (`skip-networking`) does not work from a container.
 
+## Database backups
+
+`docker-compose.backup.yml` adds the `db-backup` tool service (`mariadb-dump` in the `watch-web` image, run by `deploy/systemd/watch-web-db-backup.timer`) and mounts `BACKUP_DIR` read-only into the api; `docker-compose.backup-copy.yml` adds an off-host copy on a mounted share. Setup, the restore runbook and what a rollback does not bring back: `BACKUPS.md`. The database user needs `ALL` on `` `radio\_monitoring\_%`.* `` (staging and kept schemas) and `PROCESS`.
+
 ## Application containers
 
 ```bash
@@ -130,7 +134,7 @@ Key and salt: `python3 -c "import secrets; print(secrets.token_hex(32))"` twice.
 
 Air-gapped hosts: build on a connected machine, `docker save watch-web ghcr.io/imgproxy/imgproxy:v3 | gzip > images.tgz`, copy, `docker load`. Nothing is downloaded at runtime. `pki-signer` runs the same `watch-web` image and is never pulled (`pull_policy: never`).
 
-Upgrades: `docker compose build api && docker compose up -d api media-worker`. The API runs migrations on start; start the worker after the API has finished the first start. Upgrading to authorization v2: run the report on a copy first (see "Upgrading to authorization v2" below). Upgrading to PKI client certificates: the order of steps is in "Upgrading to PKI client certificates" below. Upgrading to storyboards with `MYSETTINGS_STORAGE__POSTER__CONCURRENCY=1`: see the upgrade note under "Storyboards" (the worker refuses to start until the concurrency is 2 or storyboards are off).
+Upgrades: back up first, `docker compose run --rm db-backup create --label pre-upgrade` (BACKUPS.md; it rolls back with `restore` if the upgrade goes wrong), then `docker compose build api && docker compose up -d api media-worker`. The API runs migrations on start; start the worker after the API has finished the first start. Upgrading to authorization v2: run the report on a copy first (see "Upgrading to authorization v2" below). Upgrading to PKI client certificates: the order of steps is in "Upgrading to PKI client certificates" below. Upgrading to storyboards with `MYSETTINGS_STORAGE__POSTER__CONCURRENCY=1`: see the upgrade note under "Storyboards" (the worker refuses to start until the concurrency is 2 or storyboards are off).
 
 Upgrading to corps and brigades (migration 027): the API adds `scope_groups.kind` (every existing group becomes a plain group, `group`) and the table `observation_units` on start; nothing else to run. nginx needs no change (the routes live under `/api/`). Observations created before the upgrade have no recorded corps or brigade (none existed). Downgrade: `python -m app.backend.cli.migrations_manager downgrade 026_users_no_hot_columns` drops the column and the table: corps and brigades stay as plain scope groups with their posts, the recorded units are lost.
 

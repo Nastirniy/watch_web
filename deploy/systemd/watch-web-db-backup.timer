@@ -1,0 +1,12 @@
+# A database backup every night; a run missed while the server was off runs at the next boot (Persistent).
+# Every 6 hours instead: OnCalendar=*-*-* 00/6:15:00 and MYSETTINGS_BACKUP__STALE_AFTER_HOURS=8 (BACKUPS.md).
+[Unit]
+Description=Back up the watch_web database daily
+
+[Timer]
+OnCalendar=*-*-* 03:15
+Persistent=true
+RandomizedDelaySec=15m
+
+[Install]
+WantedBy=timers.target

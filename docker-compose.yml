@@ -16,6 +16,8 @@
 #
 # PKI client certificates (signer container, API mounts): docker-compose.pki.yml, enabled through COMPOSE_FILE in
 # .env (see .env.example and PKI.md). Without it this file runs as it is.
+# Database backups (db-backup tool service, read-only mounts on the API): docker-compose.backup.yml and, for an
+# off-host copy, docker-compose.backup-copy.yml, also through COMPOSE_FILE (BACKUPS.md).
 #
 # Air-gapped servers: `docker save watch-web ghcr.io/imgproxy/imgproxy:v3 | gzip > images.tgz`, then `docker load`.
 

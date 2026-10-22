@@ -1,0 +1,18 @@
+# Off-host copy of the database backups (BACKUPS.md): every backup is copied to BACKUP_COPY_DIR, a mounted network
+# share (NFS / SMB), and retention runs there too. Needs docker-compose.backup.yml; enable both in .env:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.backup.yml:docker-compose.backup-copy.yml
+#   BACKUP_COPY_DIR=/mnt/backup-share/watch_web    # mounted on the host before docker starts
+# A separate file because compose cannot mount a volume only when a variable is set.
+
+services:
+  db-backup:
+    environment:
+      MYSETTINGS_BACKUP__COPY_DIR: ${BACKUP_COPY_DIR:?set BACKUP_COPY_DIR in .env}
+    volumes:
+      - ${BACKUP_COPY_DIR}:${BACKUP_COPY_DIR}
+
+  api:
+    environment:
+      MYSETTINGS_BACKUP__COPY_DIR: ${BACKUP_COPY_DIR:?set BACKUP_COPY_DIR in .env}
+    volumes:
+      - ${BACKUP_COPY_DIR}:${BACKUP_COPY_DIR}:ro

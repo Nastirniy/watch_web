@@ -259,6 +259,29 @@ The signer never reads `.env`. Its settings are `SIGNER_*` in `signer.env` (from
 `SIGNER_CA_CERT_PATH`, `SIGNER_CA_KEY_PATH` (required), `SIGNER_CA_KEY_PASSWORD` (empty: unencrypted key),
 `SIGNER_SOCKET_PATH` (required), `SIGNER_MAX_VALIDITY_DAYS` (`730`), `SIGNER_MAX_CRL_DAYS` (`31`).
 
+## Database backups
+
+Optional: backups are configured when `MYSETTINGS_BACKUP__DIR` is set; the API then refuses to start if the directory
+(or the copy directory) cannot be read. With Docker, `docker-compose.backup.yml` sets `DIR` from `BACKUP_DIR` and
+`docker-compose.backup-copy.yml` sets `COPY_DIR` from `BACKUP_COPY_DIR`; do not set them in `.env`. Guide: `BACKUPS.md`.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MYSETTINGS_BACKUP__DIR` | *(empty)* | The backup folders, `<id>/dump.sql.gz` + `manifest.json` (`BACKUP_DIR`, 0700, owned by `MEDIA_UID`) |
+| `MYSETTINGS_BACKUP__COPY_DIR` | *(empty)* | Off-host copy of every backup (a mounted share), same retention |
+| `MYSETTINGS_BACKUP__STALE_AFTER_HOURS` | `26` | The newest good backup older than this is stale: `/health` degraded, `stale` in `GET /database/backups` |
+| `MYSETTINGS_BACKUP__KEEP_DAILY` | `7` | Scheduled backups: the newest of each of the last N days |
+| `MYSETTINGS_BACKUP__KEEP_WEEKLY` | `4` | Scheduled backups: the newest of each of the last N ISO weeks |
+| `MYSETTINGS_BACKUP__KEEP_MONTHLY` | `6` | Scheduled backups: the newest of each of the last N months |
+| `MYSETTINGS_BACKUP__KEEP_MANUAL_DAYS` | `90` | `manual` and `pre-upgrade` backups are kept this many days; the newest backup is never deleted |
+| `MYSETTINGS_BACKUP__KEEP_PREVIOUS_DAYS` | `7` | `<db>_before_*` schemas a restore kept for `undo-restore`; `prune` drops older ones |
+| `MYSETTINGS_BACKUP__MIN_FREE_MB` | `512` | `create` refuses (`no_space`) when the free space is below 1.5 x the last backup plus this |
+| `MYSETTINGS_BACKUP__DUMP_TIMEOUT_SECONDS` | `3600` | A dump or a load running longer is killed (`timeout`) |
+
+Compose variables of `.env`: `COMPOSE_FILE=docker-compose.yml:docker-compose.backup.yml` (plus
+`:docker-compose.backup-copy.yml` with a share, plus `:docker-compose.pki.yml` with PKI), `BACKUP_DIR`,
+`BACKUP_COPY_DIR`.
+
 ---
 
 ## Minimal production `.env` example
