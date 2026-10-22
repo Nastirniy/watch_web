@@ -192,12 +192,10 @@ def test_restore_refused_lists_orphans(configured, monkeypatch, capsys):
     assert "refused: orphan_certificates" in err and "abc1" in err and "abc2" in err
 
 
-def test_restore_prints_crl_step_only_with_pki(restore_calls, capsys, monkeypatch):
+def test_restore_always_names_the_crl_step(restore_calls, capsys):
+    """The tool service has no PKI settings (seen live): the step is printed for servers with PKI either way"""
     run(["restore", "latest", "--yes"])
-    assert "app.backend.cli.pki crl" not in capsys.readouterr().out
-    monkeypatch.setattr(type(settings.pki), "is_configured", lambda self: True)
-    run(["restore", "latest", "--yes"])
-    assert "app.backend.cli.pki crl" in capsys.readouterr().out
+    assert "with PKI: docker compose exec api python -m app.backend.cli.pki crl" in capsys.readouterr().out
 
 
 def test_undo_restore(configured, monkeypatch, capsys):

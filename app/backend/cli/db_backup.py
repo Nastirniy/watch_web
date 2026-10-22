@@ -161,8 +161,8 @@ def _report(result: RestoreResult) -> None:
     for user_id, username, change in result.user_differences:
         print(f"user {user_id} {username}: {change} (left as restored)")
     print("next: docker compose up -d")
-    if settings.pki.is_configured():
-        print("next: docker compose exec api python -m app.backend.cli.pki crl")
+    # the tool service has no PKI settings of its own: name the step for servers with PKI either way
+    print("next, with PKI: docker compose exec api python -m app.backend.cli.pki crl (publish the CRL now)")
     print("note: media files uploaded after the backup stay on disk without rows (BACKUPS.md)")
 
 
