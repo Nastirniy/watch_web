@@ -31,7 +31,7 @@ from app.backend.services.backups.carry_over import (
     CarryOverResult, CarryOverUnsupported, OrphanCertificates, carry_over, user_state_differences,
 )
 from app.backend.services.backups.catalog import scan
-from app.backend.services.backups.client_tools import ClientTools, defaults_file
+from app.backend.services.backups.client_tools import ClientTools, child_env, defaults_file
 from app.backend.services.backups.failures import BackupFailure
 from app.backend.services.backups.locking import writer_lock
 from app.backend.services.backups.manifest import Manifest, ManifestError, read_manifest
@@ -156,7 +156,8 @@ class MariaDbBackend:
         with defaults_file(self.db) as credentials, tempfile.TemporaryFile() as stderr:
             command = [self.tools.client, f"--defaults-extra-file={credentials}", "--default-character-set=utf8mb4",
                        schema]
-            process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=stderr)
+            process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=stderr,
+                                       env=child_env())
             timed_out = threading.Event()
 
             def kill():

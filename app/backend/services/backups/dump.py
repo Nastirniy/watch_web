@@ -24,7 +24,7 @@ from loguru import logger
 from app.backend.config import BackupConfig, DatabaseConfig
 from app.backend.enums.general import BackupLabel
 from app.backend.services.backups.catalog import TMP_PREFIX, LastRun, scan, write_last_run
-from app.backend.services.backups.client_tools import ClientTools, defaults_file, find_tools
+from app.backend.services.backups.client_tools import ClientTools, child_env, defaults_file, find_tools
 from app.backend.services.backups.failures import BackupFailure
 from app.backend.services.backups.locking import writer_lock
 from app.backend.services.backups.manifest import (
@@ -102,7 +102,8 @@ def _dump(tools: ClientTools, db: DatabaseConfig, target: Path, timeout_seconds:
     facts = _DumpFacts(tables=[])
     with defaults_file(db) as credentials, tempfile.TemporaryFile() as stderr:
         command = [tools.dump, f"--defaults-extra-file={credentials}", *DUMP_ARGS, db.name]
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=stderr, stdin=subprocess.DEVNULL)
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=stderr, stdin=subprocess.DEVNULL,
+                                   env=child_env())
         timed_out = threading.Event()
 
         def kill():
@@ -146,7 +147,8 @@ def _dump(tools: ClientTools, db: DatabaseConfig, target: Path, timeout_seconds:
 
 def _tool_version(tools: ClientTools) -> str:
     try:
-        result = subprocess.run([tools.dump, "--version"], capture_output=True, timeout=30, stdin=subprocess.DEVNULL)
+        result = subprocess.run([tools.dump, "--version"], capture_output=True, timeout=30, stdin=subprocess.DEVNULL,
+                                env=child_env())
     except (OSError, subprocess.TimeoutExpired):
         return Path(tools.dump).name
     lines = result.stdout.decode("utf-8", errors="replace").strip().splitlines()

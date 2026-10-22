@@ -31,6 +31,16 @@ def find_tools() -> ClientTools:
     raise BackupFailure("tools_missing")
 
 
+# What the client tools need from the environment; never the rest (the container's environment holds .env)
+_CHILD_ENV = ("PATH", "HOME", "LANG", "LC_ALL", "TZ", "TMPDIR",
+              "SYSTEMROOT", "COMSPEC", "PATHEXT", "TEMP", "TMP")    # the last ones: Windows development
+
+
+def child_env() -> dict:
+    """The environment of a client tool: the basics only, no setting, password or key"""
+    return {key: os.environ[key] for key in _CHILD_ENV if key in os.environ}
+
+
 def _quoted(value: str) -> str:
     """An option file value: double quotes, backslash and quote escaped"""
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'

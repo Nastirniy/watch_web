@@ -251,3 +251,21 @@ def test_revision_when_the_row_is_on_its_own_line(cfg, fakes):
     manifest = run(cfg, fakes).manifest
     assert manifest.migration_revision == "028_no_actor_foreign_keys"
     assert manifest.server_version == "11.8.6-MariaDB-5ubuntu0.1"
+
+
+def test_child_gets_no_settings_from_the_environment(cfg, fakes, monkeypatch):
+    """The container's environment holds .env (database password, secret key): the dump tool gets none of it"""
+    monkeypatch.setenv("MYSETTINGS_DATABASE__PASSWORD", "env-secret-pw")
+    monkeypatch.setenv("MYSETTINGS_SECURITY__SECRET_KEY", "env-secret-key")
+    run(cfg, fakes)
+    (record,) = fakes.dump.records()
+    assert not any(key.startswith("MYSETTINGS_") for key in record["env"])
+    assert not any("env-secret" in value for value in record["env"].values())
+
+
+def test_child_env_keeps_only_the_basics(monkeypatch):
+    from app.backend.services.backups.client_tools import child_env
+    monkeypatch.setenv("MYSETTINGS_DATABASE__PASSWORD", "x")
+    monkeypatch.setenv("PATH", "/usr/bin")
+    env = child_env()
+    assert env["PATH"] == "/usr/bin" and "MYSETTINGS_DATABASE__PASSWORD" not in env
