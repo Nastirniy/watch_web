@@ -29206,6 +29206,232 @@
           }
         ]
       }
+    },
+    "/api/v1/database/status": {
+      "get": {
+        "tags": [
+          "DATABASE"
+        ],
+        "summary": "Get Database Status",
+        "description": "The database server (version, uptime, connections) and the schema (migration revision, size, tables)",
+        "operationId": "get_database_status",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseStatusResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`: Insufficient permissions",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/database/backups": {
+      "get": {
+        "tags": [
+          "DATABASE"
+        ],
+        "summary": "Get Database Backups",
+        "description": "The backups in the backup directory, newest first, whether each has an off-host copy, the summary (newest\ngood backup, stale, the last run) and the schemas a restore kept for undo",
+        "operationId": "get_database_backups",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupsResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`: Insufficient permissions",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`backup_directory_unavailable`: Backup directory unavailable; `backups_not_configured`: Backups not configured",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/BackupDirectoryUnavailableProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BackupsNotConfiguredProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "backup_directory_unavailable": "#/components/schemas/BackupDirectoryUnavailableProblem",
+                      "backups_not_configured": "#/components/schemas/BackupsNotConfiguredProblem"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -29609,6 +29835,421 @@
           "is_deleted"
         ],
         "title": "AssignmentRole"
+      },
+      "BackupCopyResponse": {
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "title": "Configured",
+            "description": "An off-host copy directory is set"
+          },
+          "reachable": {
+            "type": "boolean",
+            "title": "Reachable",
+            "description": "The copy directory can be read"
+          },
+          "missing": {
+            "type": "integer",
+            "title": "Missing",
+            "description": "Backups without a valid copy"
+          }
+        },
+        "type": "object",
+        "required": [
+          "configured",
+          "reachable",
+          "missing"
+        ],
+        "title": "BackupCopyResponse"
+      },
+      "BackupDirectoryUnavailableProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Backup directory unavailable",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 503,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Backup directory unavailable"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "backup_directory_unavailable",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "BackupDirectoryUnavailableProblem",
+        "description": "Backup directory unavailable (HTTP 503). Problem type backup_directory_unavailable.",
+        "examples": [
+          {
+            "code": "backup_directory_unavailable",
+            "detail": "Backup directory unavailable",
+            "instance": "/api/v1/...",
+            "status": 503,
+            "title": "Backup directory unavailable",
+            "type": "https://example.org/problems/backup_directory_unavailable"
+          }
+        ]
+      },
+      "BackupLastRunResponse": {
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "title": "Outcome",
+            "description": "ok or failed"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At",
+            "description": "When the run ended"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code",
+            "description": "Why it failed (no_space, dump_failed, timeout, copy_failed, ...); null when ok"
+          }
+        },
+        "type": "object",
+        "required": [
+          "outcome",
+          "at"
+        ],
+        "title": "BackupLastRunResponse"
+      },
+      "BackupResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "UTC start time and label, e.g. 20261022T031500Z-scheduled"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "scheduled, manual or pre-upgrade"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "duration_seconds": {
+            "type": "integer",
+            "title": "Duration Seconds"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          },
+          "sha256": {
+            "type": "string",
+            "title": "Sha256",
+            "description": "SHA-256 of the compressed dump"
+          },
+          "migration_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Migration Revision",
+            "description": "Alembic revision of the data in the backup"
+          },
+          "copied": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Copied",
+            "description": "A valid copy exists in the copy directory; null without one"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "started_at",
+          "duration_seconds",
+          "size_bytes",
+          "sha256"
+        ],
+        "title": "BackupResponse"
+      },
+      "BackupSummaryResponse": {
+        "properties": {
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At",
+            "description": "End of the newest complete backup"
+          },
+          "last_success_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success Id",
+            "description": "Id of the newest complete backup"
+          },
+          "age_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age Seconds",
+            "description": "Seconds since last_success_at"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale",
+            "description": "No complete backup newer than stale_after_hours"
+          },
+          "stale_after_hours": {
+            "type": "integer",
+            "title": "Stale After Hours"
+          },
+          "last_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BackupLastRunResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Outcome of the last backup run"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "Complete backups"
+          },
+          "total_size_bytes": {
+            "type": "integer",
+            "title": "Total Size Bytes"
+          },
+          "free_bytes": {
+            "type": "integer",
+            "title": "Free Bytes",
+            "description": "Free space in the backup directory"
+          },
+          "copy": {
+            "$ref": "#/components/schemas/BackupCopyResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stale",
+          "stale_after_hours",
+          "count",
+          "total_size_bytes",
+          "free_bytes",
+          "copy"
+        ],
+        "title": "BackupSummaryResponse"
+      },
+      "BackupsHealthModel": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "healthy, or degraded: no good backup for backup.stale_after_hours, the last run failed, the newest backup has no off-host copy (with a copy directory), or the backup directory cannot be read"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At",
+            "description": "End of the newest complete backup"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale",
+            "description": "No complete backup newer than backup.stale_after_hours"
+          },
+          "last_run_outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run Outcome",
+            "description": "ok or failed: the last backup run"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "stale"
+        ],
+        "title": "BackupsHealthModel",
+        "description": "Database backups (only when settings.backup is configured)"
+      },
+      "BackupsNotConfiguredProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Backups not configured",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 503,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Backups not configured"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "backups_not_configured",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "BackupsNotConfiguredProblem",
+        "description": "Backups not configured (HTTP 503). Problem type backups_not_configured.",
+        "examples": [
+          {
+            "code": "backups_not_configured",
+            "detail": "Backups not configured",
+            "instance": "/api/v1/...",
+            "status": 503,
+            "title": "Backups not configured",
+            "type": "https://example.org/problems/backups_not_configured"
+          }
+        ]
+      },
+      "BackupsResponse": {
+        "properties": {
+          "summary": {
+            "$ref": "#/components/schemas/BackupSummaryResponse"
+          },
+          "backups": {
+            "items": {
+              "$ref": "#/components/schemas/BackupResponse"
+            },
+            "type": "array",
+            "title": "Backups",
+            "description": "Newest first"
+          },
+          "previous_states": {
+            "items": {
+              "$ref": "#/components/schemas/PreviousStateResponse"
+            },
+            "type": "array",
+            "title": "Previous States",
+            "description": "Kept schemas, oldest first"
+          }
+        },
+        "type": "object",
+        "required": [
+          "summary",
+          "backups",
+          "previous_states"
+        ],
+        "title": "BackupsResponse"
       },
       "Body_upload_complete_file": {
         "properties": {
@@ -32315,6 +32956,133 @@
         "title": "DatabaseHealthModel",
         "description": "Database health check response model"
       },
+      "DatabaseSchemaResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Database (schema) name"
+          },
+          "migration_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Migration Revision",
+            "description": "Alembic revision of the database"
+          },
+          "code_revision": {
+            "type": "string",
+            "title": "Code Revision",
+            "description": "Newest Alembic revision this version of the application knows"
+          },
+          "up_to_date": {
+            "type": "boolean",
+            "title": "Up To Date",
+            "description": "migration_revision equals code_revision"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes",
+            "description": "Data and indexes of every table"
+          },
+          "tables": {
+            "items": {
+              "$ref": "#/components/schemas/DatabaseTableResponse"
+            },
+            "type": "array",
+            "title": "Tables",
+            "description": "Largest first"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "code_revision",
+          "up_to_date",
+          "tables"
+        ],
+        "title": "DatabaseSchemaResponse"
+      },
+      "DatabaseServerResponse": {
+        "properties": {
+          "product": {
+            "type": "string",
+            "title": "Product",
+            "description": "mariadb, mysql or sqlite"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "description": "Server version string"
+          },
+          "uptime_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uptime Seconds",
+            "description": "Seconds since the server started; null on sqlite"
+          },
+          "threads_connected": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threads Connected",
+            "description": "Open connections now"
+          },
+          "max_used_connections": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Used Connections",
+            "description": "Most connections open at once since the start"
+          },
+          "max_connections": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Connections",
+            "description": "Connection limit of the server"
+          }
+        },
+        "type": "object",
+        "required": [
+          "product",
+          "version"
+        ],
+        "title": "DatabaseServerResponse"
+      },
       "DatabaseStatsModel": {
         "properties": {
           "active_users": {
@@ -32347,6 +33115,71 @@
         ],
         "title": "DatabaseStatsModel",
         "description": "Database statistics model"
+      },
+      "DatabaseStatusResponse": {
+        "properties": {
+          "server": {
+            "$ref": "#/components/schemas/DatabaseServerResponse"
+          },
+          "schema": {
+            "$ref": "#/components/schemas/DatabaseSchemaResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "server",
+          "schema"
+        ],
+        "title": "DatabaseStatusResponse"
+      },
+      "DatabaseTableResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "rows_estimate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rows Estimate",
+            "description": "Estimated rows (InnoDB statistics, not an exact count)"
+          },
+          "data_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Bytes",
+            "description": "Size of the rows"
+          },
+          "index_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index Bytes",
+            "description": "Size of the indexes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "DatabaseTableResponse"
       },
       "ExcessAssignment": {
         "properties": {
@@ -33042,6 +33875,17 @@
               }
             ],
             "description": "Client certificate authority; only when configured"
+          },
+          "backups": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BackupsHealthModel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Database backups; only when configured"
           }
         },
         "type": "object",
@@ -39418,6 +40262,31 @@
         "title": "PosterStatusResponse",
         "description": "Queue depth by poster status plus every worker's last heartbeat"
       },
+      "PreviousStateResponse": {
+        "properties": {
+          "schema": {
+            "type": "string",
+            "title": "Schema",
+            "description": "Schema holding the tables a restore replaced (undo-restore brings them back)"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "schema",
+          "created_at",
+          "size_bytes"
+        ],
+        "title": "PreviousStateResponse"
+      },
       "RangeNotSatisfiableProblem": {
         "properties": {
           "type": {
@@ -42188,7 +43057,8 @@
           "certificate_changed",
           "ended_by_admin",
           "user_type_changed",
-          "certificate_revoked"
+          "certificate_revoked",
+          "database_restored"
         ],
         "title": "SessionRevokeCause",
         "description": "What made the server revoke a session; the account itself may stay as it is"

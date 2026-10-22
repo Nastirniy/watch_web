@@ -5,6 +5,26 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Database backups
+
+### Added
+
+- `GET /api/v1/database/status` (`database.view`): the database server (product, version, uptime, connections) and
+  the schema (migration revision of the database and of the code, size, tables with estimated rows and sizes).
+- `GET /api/v1/database/backups` (`backup.view`): the backups in `backup.dir` newest first, the summary (newest good
+  backup, age, `stale`, outcome of the last run, sizes, free space, off-host copy) and the schemas a restore kept for
+  undo. Problems `backups_not_configured` (503, `backup.dir` not set) and `backup_directory_unavailable` (503).
+- Permissions `database.view` and `backup.view`, system level (assignable only at the root); the built-in admin role
+  gets them at the next start (seeding). No other user type may hold them.
+- `SessionRevokeCause` `database_restored`: sessions of a restored backup are ended by the restore (BACKUPS.md).
+- `/health` has a `backups` part when backups are configured (`status`, `last_success_at`, `stale`,
+  `last_run_outcome`): degraded when no good backup is newer than `backup.stale_after_hours`, the last run failed,
+  the newest backup has no off-host copy (with `backup.copy_dir`) or the directory cannot be read. The API refuses to
+  start when `backup.dir` / `backup.copy_dir` is set but not a readable directory.
+- Tooling (no API change): `python -m app.backend.cli.db_backup` (create, list, verify, restore, undo-restore,
+  prune, status) in the `db-backup` tool service (`docker-compose.backup.yml`, `docker-compose.backup-copy.yml`),
+  `deploy/systemd/watch-web-db-backup.{service,timer}`, `mariadb-client` in the image; guide `BACKUPS.md`.
+
 ## Bug hunt 2 follow-ups
 
 ### Added

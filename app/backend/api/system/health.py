@@ -10,6 +10,7 @@ from app.backend.enums.routes import SystemRoutes
 from app.backend.utils.datetime_utils import get_current_time_in_timezone
 from app.backend.api.system.health_checks import (
     HealthResponse,
+    check_backups_health,
     check_database_health,
     check_pki_health,
     check_services_health,
@@ -69,11 +70,13 @@ async def health_check(
 
         # After the gather: the two checks above share the session, this one uses it alone
         pki_health = await check_pki_health(session)
+        backups_health = await asyncio.to_thread(check_backups_health)
 
         # Determine overall status
         overall_status = ServiceHealthStatus.HEALTHY.value
         if db_health.status != ServiceHealthStatus.HEALTHY.value or (
-                pki_health is not None and pki_health.status != ServiceHealthStatus.HEALTHY.value):
+                pki_health is not None and pki_health.status != ServiceHealthStatus.HEALTHY.value) or (
+                backups_health is not None and backups_health.status != ServiceHealthStatus.HEALTHY.value):
             overall_status = ServiceHealthStatus.DEGRADED.value
 
         return HealthResponse(
@@ -85,6 +88,7 @@ async def health_check(
             database=db_health,
             services=services_health,
             pki=pki_health,
+            backups=backups_health,
         )
 
     except Exception as e:

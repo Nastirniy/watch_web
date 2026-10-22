@@ -3,6 +3,7 @@ from fastapi import FastAPI
 
 from app.backend.config import settings
 from app.backend.utils.logging_config import setup_logging, get_logger, get_main_logger
+from app.backend.bootstrap.backups import check_backup_config
 from app.backend.bootstrap.deployment import check_deployment
 from app.backend.bootstrap.pki import check_pki_settings, publish_crl_at_startup
 from app.backend.bootstrap.startup import initialize_database_with_migrations
@@ -67,6 +68,7 @@ async def lifespan(app: FastAPI):
     try:
         check_deployment(settings)
         check_pki_settings(settings.pki)
+        check_backup_config(settings.backup)
         _logger.info("Starting application...")
         await initialize_database_with_migrations()
         await publish_crl_at_startup()

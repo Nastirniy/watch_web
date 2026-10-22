@@ -13,6 +13,8 @@ from app.backend.models.observation import Observation
 from app.backend.config import settings
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.pki.authority import CaCheckError, load_ca_certificate
+from app.backend.errors.coded import CodedError
+from app.backend.services.backups.catalog import load_catalog
 from app.backend.services.crl_publisher import crl_status
 from app.backend.services.signer_client import SignerRefused, SignerUnavailable, signer_client
 from app.backend.utils.validators import ResponseDatetime
@@ -61,6 +63,16 @@ class PkiHealthModel(BaseModel):
     signer_available: bool = Field(..., description="The signing service answers")
 
 
+class BackupsHealthModel(BaseModel):
+    """Database backups (only when settings.backup is configured)"""
+    status: str = Field(..., description="healthy, or degraded: no good backup for backup.stale_after_hours, the last "
+                                         "run failed, the newest backup has no off-host copy (with a copy "
+                                         "directory), or the backup directory cannot be read")
+    last_success_at: Optional[ResponseDatetime] = Field(None, description="End of the newest complete backup")
+    stale: bool = Field(..., description="No complete backup newer than backup.stale_after_hours")
+    last_run_outcome: Optional[str] = Field(None, description="ok or failed: the last backup run")
+
+
 class HealthResponse(BaseModel):
     """Main health check response model"""
     status: str = Field(..., description="Overall system status")
@@ -71,6 +83,7 @@ class HealthResponse(BaseModel):
     database: DatabaseHealthModel = Field(..., description="Database health information")
     services: ServicesHealthModel = Field(..., description="Services health information")
     pki: Optional[PkiHealthModel] = Field(None, description="Client certificate authority; only when configured")
+    backups: Optional[BackupsHealthModel] = Field(None, description="Database backups; only when configured")
 
 
 # Rate limiting for health endpoint
@@ -254,3 +267,22 @@ async def check_pki_health(session: AsyncSession) -> Optional[PkiHealthModel]:
         status=(ServiceHealthStatus.HEALTHY if healthy else ServiceHealthStatus.DEGRADED).value,
         ca_expires_in_days=ca_expires_in_days, crl_next_update_in_days=next_update_in_days,
         crl_stale=status.stale, signer_available=signer_available)
+
+
+def check_backups_health() -> Optional[BackupsHealthModel]:
+    """The backups part of /health, None when settings.backup is not configured (reads files only)"""
+    if not settings.backup.is_configured():
+        return None
+    try:
+        catalog = load_catalog(settings.backup, datetime.now(timezone.utc))
+    except CodedError:
+        # backup_directory_unavailable: load_catalog logged the cause
+        return BackupsHealthModel(status=ServiceHealthStatus.DEGRADED.value, last_success_at=None, stale=True,
+                                  last_run_outcome=None)
+    summary = catalog.summary
+    outcome = None if summary.last_run is None else summary.last_run.outcome
+    newest_not_copied = bool(catalog.entries) and catalog.entries[0].copied is not True and summary.copy.configured
+    healthy = not summary.stale and outcome != "failed" and not newest_not_copied
+    return BackupsHealthModel(
+        status=(ServiceHealthStatus.HEALTHY if healthy else ServiceHealthStatus.DEGRADED).value,
+        last_success_at=summary.last_success_at, stale=summary.stale, last_run_outcome=outcome)

@@ -61,6 +61,8 @@ PERMISSION_META = {
     "certificate.create": ("Видача сертифікатів", "Дозволяє видавати нові клієнтські сертифікати користувачам і реєструвати файли сертифікатів"),
     "certificate.revoke": ("Відкликання сертифікатів", "Дозволяє відкликати клієнтські сертифікати користувачів. Відкликання остаточне: сертифікат більше не дає входу і потрапляє до списку відкликаних (CRL)"),
     "certificate.export": ("Повторне завантаження сертифікатів", "Дозволяє повторно завантажити збережений пакет виданого сертифіката (.p12 і пароль). Кожне завантаження записується в журнал аудиту"),
+    "database.view": ("Перегляд стану бази даних", "Дозволяє переглядати стан сервера бази даних: версію, з'єднання, розмір і таблиці, ревізію міграцій"),
+    "backup.view": ("Перегляд резервних копій", "Дозволяє переглядати резервні копії бази даних, час останньої успішної копії, копії на іншому сховищі та збережені стани після відновлення"),
 }
 
 # Permissions assignable only at the root of the scope tree; every other permission is scoped
@@ -72,6 +74,7 @@ _SYSTEM_PERMISSIONS = frozenset({
     "media_format.create", "media_format.update", "media_format.archive",
     "media.monitor", "audit.view",
     "certificate.export",
+    "database.view", "backup.view",
 })
 
 PERMISSION_LEVELS: Dict[str, PermissionLevel] = {

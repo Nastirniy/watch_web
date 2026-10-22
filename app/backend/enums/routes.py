@@ -317,6 +317,17 @@ class CertificateRoutes(str, Enum):
         return "CERTIFICATES"
 
 
+class DatabaseRoutes(str, Enum):
+    """Database and backup status (read-only; backups are made and restored by cli/db_backup.py)"""
+    BASE = "/database"
+    STATUS = "/status"
+    BACKUPS = "/backups"
+
+    @staticmethod
+    def tag() -> str:
+        return "DATABASE"
+
+
 class SignerRoutes(str, Enum):
     """Paths of the signing service (a separate app on a Unix socket, not part of the main app)"""
     SIGN_CLIENT = "/sign/client"
@@ -346,3 +357,4 @@ class Routes:
     SIGNAL_TYPES = SignalTypeRoutes
     TAGS = TagRoutes
     SEARCH = SearchRoutes
+    DATABASE = DatabaseRoutes

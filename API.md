@@ -419,6 +419,24 @@ revoking the old one.
 Field codes inside `validation_error`: `certificate_label_invalid` (the label), `validity_days_too_long` (param
 `max_days`).
 
+## Database and backups (status only)
+
+A page for administrators. Backups are made, checked and restored on the server (`BACKUPS.md`); the API only
+reports. Both permissions are system permissions (assignable only at the root); only the `admin` user type holds them.
+
+| Operation | Permissions | Purpose |
+|-----------|-------------|---------|
+| `GET /api/v1/database/status` | `database.view` | Server (`product`, `version`, uptime, connections) and schema (`migration_revision` against `code_revision`, `up_to_date`, size, tables largest first with estimated rows) |
+| `GET /api/v1/database/backups` | `backup.view` | `summary` (newest good backup, `age_seconds`, `stale`, `last_run`, sizes, free space, off-host `copy`), `backups` newest first (`copied`: has a valid off-host copy, null without one), `previous_states` (what a restore kept for undo) |
+
+- Show a warning when `summary.stale` is true (no good backup for `stale_after_hours`), when `last_run.outcome` is
+  `failed` (`last_run.error_code`: `no_space`, `dump_failed`, `timeout`, `copy_failed`, `unsupported_objects`,
+  `tools_missing`, `busy`, `error`), and when `summary.copy.configured` and the newest backup has `copied: false`.
+- 503 `backups_not_configured`: the server makes no backups this API knows of (hide the page or say so). 503
+  `backup_directory_unavailable`: the directory cannot be read (a share is not mounted); retry later.
+- Values the database does not give (sqlite in development) are null; `rows_estimate` is InnoDB's estimate, not a
+  count.
+
 ## Responses that are not JSON
 
 | Operation | Response |

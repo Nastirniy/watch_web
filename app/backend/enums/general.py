@@ -90,6 +90,10 @@ class Permissions(Enum):
     CERTIFICATE_REVOKE = "certificate.revoke"
     CERTIFICATE_EXPORT = "certificate.export"
 
+    # Database and backups (read-only status; system permissions)
+    DATABASE_VIEW = "database.view"
+    BACKUP_VIEW = "backup.view"
+
 
 class PermissionLevel(str, Enum):
     """Where a permission can be assigned: system only at the root of the scope tree, scoped at any node"""
