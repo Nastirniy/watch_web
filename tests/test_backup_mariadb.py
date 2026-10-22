@@ -342,7 +342,7 @@ def _password_seen_in_processes(password: str) -> bool:
         if not proc.name.isdigit():
             continue
         try:
-            program = (proc / "cmdline").read_bytes().split(b" ")[0].rsplit(b"/", 1)[-1]
+            program = (proc / "cmdline").read_bytes().split(bytes(1))[0].rsplit(b"/", 1)[-1]
         except OSError:
             continue
         if program not in (b"mariadb", b"mariadb-dump"):
