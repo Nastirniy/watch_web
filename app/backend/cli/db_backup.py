@@ -25,6 +25,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Optional
 
 from sqlalchemy.exc import OperationalError
@@ -35,6 +36,7 @@ from app.backend.services.backups.catalog import load_catalog
 from app.backend.services.backups.client_tools import find_tools
 from app.backend.services.backups.dump import create_backup, prune
 from app.backend.services.backups.failures import BackupFailure
+from app.backend.services.backups.locking import writer_lock
 from app.backend.services.backups.restore import (
     MariaDbBackend, RestoreRefused, RestoreResult, plan_restore, prune_kept_schemas, restore_backup, undo_restore,
     verify_backup,
@@ -195,11 +197,13 @@ def cmd_undo(args) -> int:
 def cmd_prune(args) -> int:
     now = _now()
     verb = "would delete" if args.dry_run else "deleted"
-    for backup in prune(settings.backup, now, dry_run=args.dry_run):
-        print(f"{verb} backup {backup}")
-    for schema in prune_kept_schemas(settings.backup, settings.database, backend=_backend(), now=now,
-                                     dry_run=args.dry_run):
-        print(f"{verb} kept schema {schema}")
+    # one writer at a time: a restore or a create must not lose the schema or folder it is working on
+    with writer_lock(Path(settings.backup.dir)):
+        for backup in prune(settings.backup, now, dry_run=args.dry_run):
+            print(f"{verb} backup {backup}")
+        for schema in prune_kept_schemas(settings.backup, settings.database, backend=_backend(), now=now,
+                                         dry_run=args.dry_run):
+            print(f"{verb} kept schema {schema}")
     return EXIT_OK
 
 

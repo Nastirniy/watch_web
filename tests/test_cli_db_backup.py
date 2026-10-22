@@ -235,3 +235,14 @@ def test_output_has_no_password(configured, monkeypatch, capsys):
         run(argv)
         captured = capsys.readouterr()
         assert "pw-that-must-not-leak" not in captured.out + captured.err
+
+
+def test_prune_takes_the_lock(configured, monkeypatch, capsys):
+    """A prune beside a restore must not drop the schema the restore just filled (review)"""
+    from app.backend.services.backups.locking import writer_lock
+    monkeypatch.setattr(db_backup, "prune", lambda cfg, now, dry_run: [])
+    monkeypatch.setattr(db_backup, "prune_kept_schemas", lambda cfg, db, backend, now, dry_run: [])
+    with writer_lock(configured):
+        assert run(["prune"]) == 3
+    assert capsys.readouterr().err.strip() == "refused: busy"
+    assert run(["prune"]) == 0
