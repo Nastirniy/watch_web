@@ -170,3 +170,18 @@ def test_user_state_differences(conn):
     add_user(conn, 3, "incoming")
     assert user_state_differences(conn, None, "incoming") == [
         (1, "u1", "is_active True->False"), (2, "u2", "is_deleted True->False")]
+
+
+def test_crl_state_row_follows_the_newer_number(conn):
+    """The dates of the newer CRL come with its number (seen live: /health reported a stale CRL after an undo)"""
+    published = datetime(2026, 10, 22, 11, 0, 0)
+    conn.execute(sa.insert(t("certificate_authority_state")).values(
+        id=1, crl_number=12, this_update=published, next_update=published + timedelta(days=7), published_at=published,
+        revoked_count=5))
+    conn.execute(sa.insert(t("certificate_authority_state", "incoming")).values(
+        id=1, crl_number=9, this_update=EARLIER, next_update=EARLIER + timedelta(days=7), published_at=EARLIER,
+        revoked_count=2))
+    carry_over(conn, None, "incoming", NOW, skip_orphans=False)
+    row = conn.execute(sa.select(t("certificate_authority_state", "incoming"))).mappings().one()
+    assert (row.crl_number, row.this_update, row.next_update, row.published_at, row.revoked_count) == (
+        12, published, published + timedelta(days=7), published, 5)

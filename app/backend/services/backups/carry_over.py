@@ -83,12 +83,17 @@ def carry_over(conn: sa.Connection, outgoing: Optional[str], incoming: Optional[
         conn.execute(sa.insert(in_certs).values(**values))
         added += 1
 
+    # The CRL state of the newer number, with its dates: /health compares revocations with published_at
     out_ca, in_ca = _table(CertificateAuthorityState, outgoing), _table(CertificateAuthorityState, incoming)
-    out_number = conn.execute(sa.select(sa.func.max(out_ca.c.crl_number))).scalar() or 0
+    out_state = conn.execute(sa.select(out_ca).order_by(out_ca.c.crl_number.desc())).mappings().first()
     in_number = conn.execute(sa.select(sa.func.max(in_ca.c.crl_number))).scalar()
+    out_number = out_state["crl_number"] if out_state else 0
     crl_number = max(out_number, in_number or 0)
     if in_number is not None and out_number > in_number:
-        conn.execute(sa.update(in_ca).values(crl_number=out_number))
+        conn.execute(sa.update(in_ca).values(
+            crl_number=out_state["crl_number"], this_update=out_state["this_update"],
+            next_update=out_state["next_update"], published_at=out_state["published_at"],
+            revoked_count=out_state["revoked_count"]))
 
     sessions = _table(UserSession, incoming)
     ended = conn.execute(sa.update(sessions).where(sessions.c.ended_at.is_(None)).values(
