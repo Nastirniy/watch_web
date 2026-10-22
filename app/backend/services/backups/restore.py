@@ -16,7 +16,7 @@ import tempfile
 import threading
 import zlib
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Optional, Protocol
@@ -357,6 +357,18 @@ def undo_restore(cfg: BackupConfig, db: DatabaseConfig, schema: Optional[str], *
         backend.audit(db.name, "undo_restore", {"source_schema": source, **_details(carry, keep_as)})
         _logger.info(f"Backups: swapped {source} back in; the replaced tables are kept in {keep_as}")
         return RestoreResult(kept_schema=keep_as, carry=carry, user_differences=differences)
+
+
+def prune_kept_schemas(cfg: BackupConfig, db: DatabaseConfig, *, backend: RestoreBackend, now: datetime,
+                       dry_run: bool = False) -> list[str]:
+    """Drop the kept <db>_before_* schemas older than keep_previous_days; their names, oldest first"""
+    oldest = now - timedelta(days=cfg.keep_previous_days)
+    doomed = [k.name for k in backend.kept_schemas(db.name) if k.created_at < oldest]
+    if not dry_run:
+        for schema in doomed:
+            backend.drop_schema(schema)
+            _logger.info(f"Backups: dropped kept schema {schema} (older than {cfg.keep_previous_days} days)")
+    return doomed
 
 
 def verify_backup(cfg: BackupConfig, db: DatabaseConfig, ref: str, *, deep: bool,

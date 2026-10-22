@@ -14,7 +14,8 @@ from app.backend.services.backups.failures import BackupFailure
 from app.backend.services.backups.locking import writer_lock
 from app.backend.services.backups.manifest import FORMAT_VERSION, Manifest, backup_id, write_manifest
 from app.backend.services.backups.restore import (
-    RestoreRefused, code_head, known_revisions, plan_restore, restore_backup, undo_restore, verify_backup,
+    RestoreRefused, code_head, known_revisions, plan_restore, prune_kept_schemas, restore_backup, undo_restore,
+    verify_backup,
 )
 from app.backend.services.backups.schemas import KeptSchema, kept_name, parse_kept, rename_statement
 
@@ -316,3 +317,14 @@ def test_verify_deep(cfg):
 def test_known_revisions_has_head():
     assert code_head() in known_revisions()
     assert REVISION in known_revisions() and "001_relativize_media_paths" in known_revisions()
+
+
+def test_prune_kept_schemas(cfg):
+    Path(cfg.dir).mkdir()
+    now = datetime(2026, 10, 28, 10, 0, 1, tzinfo=UTC)   # OLDER is 8 days old, NEWER 7 days and 1 second
+    backend = FakeBackend(kept=[OLDER, NEWER])
+    assert prune_kept_schemas(cfg, DB, backend=backend, now=now, dry_run=True) == [OLDER.name, NEWER.name]
+    assert "drop_schema" not in names(backend)
+    assert prune_kept_schemas(BackupConfig(dir=cfg.dir, keep_previous_days=8), DB, backend=backend, now=now) == \
+        [OLDER.name]
+    assert backend.calls[-1] == ("drop_schema", OLDER.name)
