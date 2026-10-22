@@ -248,6 +248,8 @@ class SessionRevokeCause(str, Enum):
     ENDED_BY_ADMIN = "ended_by_admin"
     USER_TYPE_CHANGED = "user_type_changed"      # the web must not keep showing the pages of the old type
     CERTIFICATE_REVOKED = "certificate_revoked"  # the certificate of the session is no active row of the user
+    # The database was restored from a backup (cli/db_backup.py): the sessions of the backup do not come back
+    DATABASE_RESTORED = "database_restored"
 
 
 class ExportJobType(Enum):
