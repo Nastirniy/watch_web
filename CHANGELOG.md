@@ -9,6 +9,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ### Changed
 
+- `GET /database/backups`, `/health` and the tool treat a backup folder whose manifest has a value of the wrong type, or
+  whose dump file is missing, as incomplete (no longer listed, never a 500); a bad `last-run.json` is ignored. A
+  backup made in the same second as the previous one waits for the next second instead of failing with `error`.
 - A restore refuses a backup of another database (`other_database`), checks the free space of the MariaDB datadir
   first (`no_space`, `space_unknown`, `--skip-space-check`; setting `backup.datadir`, compose `DB_DATADIR`), checks
   the connections again right before the swap and carries over a second time there.
