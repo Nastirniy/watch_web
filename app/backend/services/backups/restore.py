@@ -28,7 +28,7 @@ from sqlalchemy.pool import NullPool
 from app.backend.config import BackupConfig, DatabaseConfig
 from app.backend.models.audit import AuditLog
 from app.backend.services.backups.carry_over import (
-    CarryOverResult, OrphanCertificates, carry_over, user_state_differences,
+    CarryOverResult, CarryOverUnsupported, OrphanCertificates, carry_over, user_state_differences,
 )
 from app.backend.services.backups.catalog import scan
 from app.backend.services.backups.client_tools import ClientTools, defaults_file
@@ -54,7 +54,7 @@ def utcnow() -> datetime:
 
 class RestoreRefused(Exception):
     """Nothing was changed. code: not_found, checksum_mismatch, unknown_revision, unsupported_objects, connections,
-    orphan_certificates (serials), nothing_to_undo"""
+    orphan_certificates (serials), nothing_to_undo, backup_too_old (no table to carry revocations into)"""
 
     def __init__(self, code: str, serials: tuple[str, ...] = ()):
         super().__init__(code)
@@ -207,6 +207,9 @@ class MariaDbBackend:
 
     def swap(self, db: str, live: list[str], incoming: list[str], source: str, keep_as: str) -> None:
         with self.engine.begin() as conn:
+            # wait at most a minute for the metadata locks (the default is a day): a stuck connection fails the
+            # swap instead of holding it while the operator gives up on the command
+            conn.exec_driver_sql("SET SESSION lock_wait_timeout = 60")
             conn.exec_driver_sql(rename_statement(db, live, incoming, source, keep_as))
 
     def audit(self, schema: str, action: str, details: dict) -> None:
@@ -288,6 +291,18 @@ def _carry(backend: RestoreBackend, db: str, incoming: str, now: datetime, skip_
         return backend.carry_over(db, incoming, now, skip_orphans)
     except OrphanCertificates as exc:
         raise RestoreRefused("orphan_certificates", serials=exc.serials)
+    except CarryOverUnsupported as exc:
+        _logger.error(f"Backups: cannot carry the final state over: {exc}")
+        raise RestoreRefused("backup_too_old")
+
+
+def _drop_if_empty(backend: RestoreBackend, schema: str) -> None:
+    """Drop a kept schema this run created, only while it holds no table: a swap that failed on the client may have
+    completed on the server, and the kept schema then holds the only copy of the replaced data"""
+    if not backend.list_tables(schema):
+        backend.drop_schema(schema)
+    else:
+        _logger.error(f"Backups: {schema} holds tables after a failed swap; left in place (check, then undo-restore)")
 
 
 def _details(carry: CarryOverResult, keep_as: str) -> dict:
@@ -314,15 +329,16 @@ def restore_backup(cfg: BackupConfig, db: DatabaseConfig, ref: str, *, backend: 
                 raise BackupFailure("load_failed")
             carry = _carry(backend, db.name, staging, now(), skip_orphans)
             differences = backend.user_differences(db.name, staging)
-            keep_as = kept_name(db.name, now())
-            backend.create_schema(keep_as)
+            name = kept_name(db.name, now())
+            backend.create_schema(name)
+            keep_as = name      # only a schema this run created is ever dropped below
             backend.swap(db.name, backend.list_tables(db.name), tables, staging, keep_as)
             swapped = True
         finally:
             if not swapped:
                 backend.drop_schema(staging)
                 if keep_as is not None:
-                    backend.drop_schema(keep_as)
+                    _drop_if_empty(backend, keep_as)
         backend.drop_schema(staging)
         backend.audit(db.name, "restore", {"backup_id": manifest.id, "label": manifest.label.value,
                                            "backup_revision": manifest.migration_revision, **_details(carry, keep_as)})
@@ -351,7 +367,7 @@ def undo_restore(cfg: BackupConfig, db: DatabaseConfig, schema: Optional[str], *
         try:
             backend.swap(db.name, backend.list_tables(db.name), backend.list_tables(source), source, keep_as)
         except BaseException:
-            backend.drop_schema(keep_as)
+            _drop_if_empty(backend, keep_as)
             raise
         backend.drop_schema(source)
         backend.audit(db.name, "undo_restore", {"source_schema": source, **_details(carry, keep_as)})

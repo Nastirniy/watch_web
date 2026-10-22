@@ -9,7 +9,7 @@ import pytest
 
 from app.backend.config import BackupConfig, DatabaseConfig
 from app.backend.enums.general import BackupLabel
-from app.backend.services.backups.carry_over import CarryOverResult, OrphanCertificates
+from app.backend.services.backups.carry_over import CarryOverResult, CarryOverUnsupported, OrphanCertificates
 from app.backend.services.backups.failures import BackupFailure
 from app.backend.services.backups.locking import writer_lock
 from app.backend.services.backups.manifest import FORMAT_VERSION, Manifest, backup_id, write_manifest
@@ -39,6 +39,8 @@ class FakeBackend:
         self.staging_tables = list(staging_tables)
         self.staging_revision = staging_revision
         self.audits = []
+        self.tables_of = {}          # schema -> tables, overriding the defaults (e.g. a kept schema after a swap)
+        self.existing = set()        # schemas create_schema refuses (already there)
 
     def _call(self, name, *args):
         self.calls.append((name, *args))
@@ -55,6 +57,8 @@ class FakeBackend:
 
     def create_schema(self, schema):
         self._call("create_schema", schema)
+        if schema in self.existing:
+            raise RuntimeError(f"{schema} exists")
 
     def drop_schema(self, schema):
         self._call("drop_schema", schema)
@@ -64,6 +68,10 @@ class FakeBackend:
 
     def list_tables(self, schema):
         self._call("list_tables", schema)
+        if schema in self.tables_of:
+            return self.tables_of[schema]
+        if schema.startswith("db_before_"):
+            return []        # a kept schema created by this run, before any swap
         return self.live_tables if schema == "db" else self.staging_tables
 
     def revision(self, schema):
@@ -74,6 +82,8 @@ class FakeBackend:
         self._call("carry_over", outgoing, incoming)
         if self.fail_on == "orphans" and not skip_orphans:
             raise OrphanCertificates(("abc",))
+        if self.fail_on == "too_old":
+            raise CarryOverUnsupported("user_certificates")
         return CARRY
 
     def user_differences(self, outgoing, incoming):
@@ -208,8 +218,10 @@ def test_failure_after_load_drops_staging(cfg):
     backend = FakeBackend(fail_on="swap")
     with pytest.raises(RuntimeError):
         restore(cfg, backend)
-    assert names(backend)[-3:] == ["swap", "drop_schema", "drop_schema"]
-    assert {c[1] for c in backend.calls[-2:]} == {"db_restore", "db_before_20261022_120000"}
+    assert backend.calls[-4:] == [backend.calls[-4], ("drop_schema", "db_restore"),
+                                  ("list_tables", "db_before_20261022_120000"),
+                                  ("drop_schema", "db_before_20261022_120000")]
+    assert backend.calls[-4][0] == "swap"
     assert "audit" not in names(backend)
 
 
@@ -328,3 +340,42 @@ def test_prune_kept_schemas(cfg):
     assert prune_kept_schemas(BackupConfig(dir=cfg.dir, keep_previous_days=8), DB, backend=backend, now=now) == \
         [OLDER.name]
     assert backend.calls[-1] == ("drop_schema", OLDER.name)
+
+
+def test_backup_too_old_for_the_carry_over(cfg):
+    put_backup(Path(cfg.dir))
+    backend = FakeBackend(fail_on="too_old")
+    with pytest.raises(RestoreRefused) as exc:
+        restore(cfg, backend)
+    assert exc.value.code == "backup_too_old"
+    assert backend.calls[-1] == ("drop_schema", "db_restore")
+
+
+def test_kept_schema_survives_a_swap_error_after_the_server_renamed(cfg):
+    """The RENAME may complete on the server although the client got an error (lost connection, Ctrl-C while it
+    waited on a lock): the kept schema then holds the only copy of the replaced data and must not be dropped"""
+    put_backup(Path(cfg.dir))
+    backend = FakeBackend(fail_on="swap")
+    backend.tables_of["db_before_20261022_120000"] = ["alembic_version", "users", "later_table"]
+    with pytest.raises(RuntimeError):
+        restore(cfg, backend)
+    assert ("drop_schema", "db_before_20261022_120000") not in backend.calls
+
+
+def test_an_existing_kept_schema_is_never_dropped(cfg):
+    put_backup(Path(cfg.dir))
+    backend = FakeBackend()
+    backend.existing.add("db_before_20261022_120000")
+    with pytest.raises(RuntimeError):
+        restore(cfg, backend)
+    assert ("drop_schema", "db_before_20261022_120000") not in backend.calls
+    assert backend.calls[-1] == ("drop_schema", "db_restore")
+
+
+def test_undo_keeps_both_schemas_on_a_swap_error_after_the_server_renamed(cfg):
+    Path(cfg.dir).mkdir()
+    backend = FakeBackend(kept=[NEWER], fail_on="swap")
+    backend.tables_of["db_before_20261022_120000"] = ["users"]
+    with pytest.raises(RuntimeError):
+        undo_restore(cfg, DB, None, backend=backend, now=lambda: NOW)
+    assert not any(c[0] == "drop_schema" for c in backend.calls)

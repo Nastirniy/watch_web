@@ -11,7 +11,7 @@ from sqlmodel import SQLModel
 
 import app.backend.models  # noqa: F401  (every table on SQLModel.metadata)
 from app.backend.services.backups.carry_over import (
-    OrphanCertificates, carry_over, user_state_differences,
+    CarryOverUnsupported, OrphanCertificates, carry_over, user_state_differences,
 )
 
 NOW = datetime(2026, 10, 22, 12, 0, 0, tzinfo=timezone.utc)
@@ -185,3 +185,42 @@ def test_crl_state_row_follows_the_newer_number(conn):
     row = conn.execute(sa.select(t("certificate_authority_state", "incoming"))).mappings().one()
     assert (row.crl_number, row.this_update, row.next_update, row.published_at, row.revoked_count) == (
         12, published, published + timedelta(days=7), published, 5)
+
+
+def _older_incoming(conn):
+    """Tables of the incoming schema as an older migration left them: user_certificates without the export
+    columns, user_sessions with is_active instead of ended_at / end_reason / revoke_cause"""
+    conn.exec_driver_sql("DROP TABLE incoming.user_certificates")
+    conn.exec_driver_sql(
+        "CREATE TABLE incoming.user_certificates (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, source VARCHAR(16), "
+        "label VARCHAR(64), serial VARCHAR(64), fingerprint_hash VARCHAR(64) NOT NULL, cn_hash VARCHAR(64), "
+        "cn_hash_scheme SMALLINT, serial_hash VARCHAR(64), ca_issued BOOLEAN, revoked_at DATETIME, revoked_by INTEGER, "
+        "revocation_reason VARCHAR(32), files_dir VARCHAR(64), created_at DATETIME)")
+    conn.exec_driver_sql("DROP TABLE incoming.user_sessions")
+    conn.exec_driver_sql(
+        "CREATE TABLE incoming.user_sessions (id VARCHAR(128) PRIMARY KEY, user_id INTEGER NOT NULL, "
+        "last_activity DATETIME, expires_at DATETIME, is_active BOOLEAN, created_at DATETIME)")
+
+
+def test_restore_into_an_older_schema(conn):
+    """A backup from before a migration that changed these tables (review: Unknown column on MariaDB)"""
+    _older_incoming(conn)
+    both_users(conn, 1)
+    add_cert(conn, 10, 1, "fp10", revoked_at=EARLIER, revocation_reason="key_compromise")
+    conn.exec_driver_sql("INSERT INTO incoming.user_certificates (id, user_id, fingerprint_hash) VALUES (10, 1, 'fp10')")
+    add_cert(conn, 11, 1, "fp11", export_count=3)
+    conn.exec_driver_sql("INSERT INTO incoming.user_sessions (id, user_id, is_active) VALUES ('a', 1, 1), ('b', 1, 0)")
+    result = carry_over(conn, None, "incoming", NOW, skip_orphans=False)
+    assert (result.revocations, result.certificates_added, result.sessions_ended) == (1, 1, 1)
+    rows = conn.exec_driver_sql(
+        "SELECT fingerprint_hash, revocation_reason FROM incoming.user_certificates ORDER BY id").all()
+    assert rows == [("fp10", "key_compromise"), ("fp11", "cessation_of_operation")]
+    assert conn.exec_driver_sql("SELECT id FROM incoming.user_sessions WHERE is_active").all() == []
+
+
+def test_backup_without_a_certificates_table_is_refused(conn):
+    conn.exec_driver_sql("DROP TABLE incoming.user_certificates")
+    both_users(conn, 1)
+    add_cert(conn, 10, 1, "fp10", revoked_at=EARLIER, revocation_reason="key_compromise")
+    with pytest.raises(CarryOverUnsupported):
+        carry_over(conn, None, "incoming", NOW, skip_orphans=False)
