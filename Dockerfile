@@ -13,8 +13,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # ffmpeg: video poster extraction (media worker)
 # libmagic1: MIME detection on upload (python-magic)
+# mariadb-client: mariadb-dump and mariadb for the db-backup tool service (BACKUPS.md)
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg libmagic1 \
+    && apt-get install -y --no-install-recommends ffmpeg libmagic1 mariadb-client \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /srv/app
