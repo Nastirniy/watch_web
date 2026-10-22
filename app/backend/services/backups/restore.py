@@ -11,6 +11,7 @@ mariadb client), the tests use a recording fake.
 import gzip
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -44,6 +45,13 @@ from app.backend.services.backups.schemas import (
 )
 
 ALEMBIC_INI = Path(__file__).resolve().parents[4] / "alembic.ini"
+# A line of a dump that would leave the schema it is loaded into, or run a client command (shell, files, another
+# connection). mariadb-dump never writes one for a single database (values are escaped onto one line), so such a
+# line means a dump made with --databases or by hand: the load stops (unsafe_dump)
+_UNSAFE = re.compile(
+    r"^[ \t]*(?:USE\b|CONNECT\b|SYSTEM\b|SOURCE\b|\\|(?:CREATE|DROP|ALTER)[ \t]+(?:DATABASE|SCHEMA)\b)",
+    re.MULTILINE | re.IGNORECASE)
+CARRY = 64 * 1024
 AUDIT_RESOURCE = "database"
 CHUNK = 1024 * 1024
 STDERR_LOG_LIMIT = 2000
@@ -116,6 +124,15 @@ def _script():
     return ScriptDirectory.from_config(Config(str(ALEMBIC_INI)))
 
 
+def unsafe_statement(text: str) -> Optional[str]:
+    """The first line of text that would leave the staging schema or run a client command, None when there is none"""
+    match = _UNSAFE.search(text)
+    if match is None:
+        return None
+    end = text.find("\n", match.start())
+    return text[match.start():end if end >= 0 else len(text)][:80]
+
+
 def known_revisions() -> set[str]:
     return {revision.revision for revision in _script().walk_revisions()}
 
@@ -164,8 +181,10 @@ class MariaDbBackend:
 
     def load_dump(self, path: Path, schema: str) -> None:
         with defaults_file(self.db) as credentials, tempfile.TemporaryFile() as stderr:
+            # --one-database: statements for any other database are skipped; --sandbox (MariaDB): no shell or file
+            # commands of the client
             command = [self.tools.client, f"--defaults-extra-file={credentials}", "--default-character-set=utf8mb4",
-                       schema]
+                       "--one-database", *(["--sandbox"] if self.tools.product == "mariadb" else []), schema]
             process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=stderr,
                                        env=child_env())
             timed_out = threading.Event()
@@ -176,10 +195,19 @@ class MariaDbBackend:
 
             timer = threading.Timer(self.timeout_seconds, kill)
             timer.start()
+            unsafe = None
             try:
                 with gzip.open(path, "rb") as dump:
+                    carry = ""
                     for block in iter(lambda: dump.read(CHUNK), b""):
+                        text = carry + block.decode("utf-8", errors="replace")
+                        unsafe = unsafe_statement(text)
+                        if unsafe is not None:
+                            break
+                        carry = text[-CARRY:]
                         process.stdin.write(block)
+                if unsafe is not None:
+                    process.kill()
                 process.stdin.close()
                 exit_code = process.wait()
             except (BrokenPipeError, OSError, EOFError, zlib.error) as exc:
@@ -190,6 +218,9 @@ class MariaDbBackend:
                 if process.poll() is None:
                     process.kill()
                     process.wait()
+            if unsafe is not None:
+                _logger.error(f"Backups: {path.parent.name} leaves the schema it is loaded into ({unsafe!r}): refused")
+                raise BackupFailure("unsafe_dump")
             if timed_out.is_set():
                 raise BackupFailure("timeout")
             if exit_code != 0:
