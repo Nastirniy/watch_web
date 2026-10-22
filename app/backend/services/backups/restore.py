@@ -25,6 +25,7 @@ from typing import Callable, Optional, Protocol
 
 import sqlalchemy as sa
 from loguru import logger
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.pool import NullPool
 
 from app.backend.config import BackupConfig, DatabaseConfig
@@ -64,8 +65,8 @@ def utcnow() -> datetime:
 
 class RestoreRefused(Exception):
     """Nothing was changed. code: not_found, checksum_mismatch, unknown_revision, other_database, unsupported_objects,
-    connections, no_space / space_unknown (the datadir), nothing_to_undo, backup_too_old (no table to carry
-    revocations into)"""
+    connections, no_space / space_unknown (the datadir), no_grant (no right on the staging, verify or kept
+    schemas), nothing_to_undo, backup_too_old (no table to carry revocations into)"""
 
     def __init__(self, code: str):
         super().__init__(code)
@@ -172,6 +173,27 @@ def sync_engine(db: DatabaseConfig) -> sa.Engine:
     return sa.create_engine(url, poolclass=NullPool)
 
 
+# Access denied to a database / to a table: the account lacks the grant on the staging and kept schemas
+_ACCESS_DENIED = frozenset({1044, 1142})
+
+
+class _granted:
+    """Turn an access-denied error of a schema statement into RestoreRefused("no_grant") (BACKUPS.md, grants)"""
+
+    def __init__(self, schema: str):
+        self.schema = schema
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, kind, exc, tb):
+        if isinstance(exc, OperationalError) and exc.orig is not None and exc.orig.args \
+                and exc.orig.args[0] in _ACCESS_DENIED:
+            _logger.error(f"Backups: no grant on {self.schema} (GRANT ALL ON `<db>\\_%`.*, BACKUPS.md)")
+            raise RestoreRefused("no_grant") from None
+        return False
+
+
 class MariaDbBackend:
     """The database steps on MariaDB (MySQL 8 too): a sync engine as the app user and the client binary"""
 
@@ -196,14 +218,14 @@ class MariaDbBackend:
             return int(conn.execute(SCHEMA_SIZE, {"schema": schema}).scalar() or 0)
 
     def create_schema(self, schema: str) -> None:
-        with self.engine.begin() as conn:
+        with _granted(schema), self.engine.begin() as conn:
             charset, collation = conn.execute(SCHEMA_CHARSET, {"schema": self.db.name}).one()
             conn.exec_driver_sql(f"CREATE DATABASE {quote(schema)} CHARACTER SET {charset} COLLATE {collation}")
 
     def drop_schema(self, schema: str) -> None:
         if not is_droppable(self.db.name, schema):
             raise ValueError(f"refusing to drop schema {schema}")
-        with self.engine.begin() as conn:
+        with _granted(schema), self.engine.begin() as conn:
             conn.exec_driver_sql(f"DROP DATABASE IF EXISTS {quote(schema)}")
 
     def load_dump(self, path: Path, schema: str) -> None:

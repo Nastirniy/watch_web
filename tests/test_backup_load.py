@@ -11,6 +11,21 @@ from tests.backup_fakes import DUMP_BODY, Fakes
 DB = DatabaseConfig(name="radio_monitoring", user="u", password="p")
 
 
+def test_access_denied_on_a_schema_is_no_grant():
+    """A 1044 from DROP / CREATE DATABASE on the staging schema is the refusal no_grant (C8, seen on MariaDB)"""
+    from sqlalchemy.exc import OperationalError
+    from app.backend.services.backups.restore import RestoreRefused, _granted
+    denied = OperationalError("DROP DATABASE", {}, Exception(1044, "Access denied"))
+    with pytest.raises(RestoreRefused) as exc:
+        with _granted("radio_monitoring_restore"):
+            raise denied
+    assert exc.value.code == "no_grant"
+    other = OperationalError("DROP DATABASE", {}, Exception(2013, "Lost connection"))
+    with pytest.raises(OperationalError):
+        with _granted("radio_monitoring_restore"):
+            raise other
+
+
 @pytest.mark.parametrize("line", [
     "USE `radio_monitoring`;", "use radio_monitoring", "  USE x;", "CREATE DATABASE `x`;", "create schema y;",
     "DROP DATABASE radio_monitoring;", "ALTER DATABASE x CHARACTER SET utf8;", "\\u radio_monitoring",

@@ -218,6 +218,7 @@ Refusals (exit 3):
 | `unknown_revision` | the backup is newer than this version of the code |
 | `connections` | other connections use the database (checked at the start and again before the swap) |
 | `other_database` | the backup is of another database |
+| `no_grant` | the database account lacks the grant on the staging and kept schemas (`radio\_monitoring\_%`, Setup step 2) |
 | `no_space` / `space_unknown` | the MariaDB datadir lacks the room for the copy / cannot be checked |
 | `unsupported_objects` | the database holds objects the swap cannot move |
 | `nothing_to_undo` | no kept schema to swap back |

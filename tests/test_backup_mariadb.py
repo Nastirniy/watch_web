@@ -356,8 +356,9 @@ def _password_seen_in_processes(password: str) -> bool:
 
 
 def test_c7_a_password_with_special_characters(cfg, edge):
-    """C7: quotes, backslash, #, ;, spaces, $, backtick and Cyrillic in the password: dump, deep verify and
-    restore work, and the password never shows in a process's arguments or environment"""
+    """C7: quotes, backslash, #, ;, spaces, $ and backtick in the password: dump, deep verify and restore work, and
+    the password never shows in a process's arguments or environment. Not Cyrillic: PyMySQL sends the password
+    latin-1 encoded, so no part of the application can use one (ENV.md)"""
     from app.backend.enums.general import BackupLabel
     from app.backend.services.backups.dump import create_backup
     from app.backend.services.backups.restore import restore_backup, verify_backup
