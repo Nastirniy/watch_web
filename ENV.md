@@ -277,11 +277,13 @@ Optional: backups are configured when `MYSETTINGS_BACKUP__DIR` is set; the API t
 | `MYSETTINGS_BACKUP__KEEP_PREVIOUS_DAYS` | `7` | `<db>_before_*` schemas a restore kept for `undo-restore`; `prune` drops older ones |
 | `MYSETTINGS_BACKUP__MIN_FREE_MB` | `512` | `create` refuses (`no_space`) when the free space is below 1.5 x the last backup plus this |
 | `MYSETTINGS_BACKUP__DUMP_TIMEOUT_SECONDS` | `3600` | A dump or a load running longer is killed (`timeout`) |
+| `MYSETTINGS_BACKUP__DATADIR` | *(empty)* | The MariaDB data directory as the tool sees it (compose: `DB_DATADIR`, default `/var/lib/mysql`, read-only). `restore` and `verify --deep` load a copy there and refuse (`no_space`) when it lacks 1.2 x the database plus `MIN_FREE_MB`; empty or unreadable: `space_unknown` unless `--skip-space-check` |
 
 Compose variables of `.env`: `COMPOSE_FILE=docker-compose.yml:docker-compose.backup.yml` (plus
 `:docker-compose.backup-copy.yml` with a share, plus `:docker-compose.pki.yml` with PKI), `BACKUP_DIR`,
 `BACKUP_COPY_DIR`, `BACKUP_UID` / `BACKUP_GID` (a user and group of their own: the tool runs as them, the api joins
-the group; never `MEDIA_UID` / `MEDIA_GID`, often the nginx user).
+the group; never `MEDIA_UID` / `MEDIA_GID`, often the nginx user), `DB_DATADIR` (MariaDB's `@@datadir`, when it is
+not `/var/lib/mysql`).
 
 ---
 

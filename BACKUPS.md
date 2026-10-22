@@ -172,9 +172,11 @@ docker compose exec api python -m app.backend.cli.restore_reconcile --apply   # 
 
 What `restore` does:
 
-1. It checks the checksum, and that this version of the code knows the backup's migration revision. A backup newer
-   than the code is refused (`unknown_revision`); an older one is fine, because the api migrates forward when it
-   starts.
+1. It checks the checksum, that the backup is of this database (`other_database`), and that this version of the
+   code knows the backup's migration revision. A backup newer than the code is refused (`unknown_revision`); an
+   older one is fine, because the api migrates forward when it starts. It checks the free space of the MariaDB
+   datadir (`DB_DATADIR`, mounted read-only): the copy needs about 1.2 x the database; a full datadir stops the live
+   server too (`no_space`; `space_unknown` when the datadir cannot be checked; `--skip-space-check` overrides).
 2. It refuses while other connections use the database (`connections`). Stop api and media-worker first.
    `--force-connections` exists for a stuck connection you have checked.
 3. It loads the backup into `<db>_restore` and checks its tables and revision against the manifest. The live
@@ -185,6 +187,8 @@ What `restore` does:
      CRL still lists them.
    - **CRL number:** it never goes backwards.
    - **Sessions:** every session of the backup is ended (`database_restored`), so users log in again.
+   - **Right before the swap** the connections are checked again (`connections` if a client connected during the
+     load) and the carry-over runs a second time, so a revocation made during the load is not lost.
    - **Users created after the backup** who have a certificate come back archived (`is_deleted`, inactive, no
      roles, no post the backup lacks; a username taken meanwhile gets `~<id>`), so their certificates can come back
      revoked and go on the CRL. An administrator can restore such a user and give it roles again.
@@ -212,7 +216,9 @@ Refusals (exit 3):
 | `not_found` | no such backup |
 | `checksum_mismatch` | the file does not match its manifest |
 | `unknown_revision` | the backup is newer than this version of the code |
-| `connections` | other connections use the database |
+| `connections` | other connections use the database (checked at the start and again before the swap) |
+| `other_database` | the backup is of another database |
+| `no_space` / `space_unknown` | the MariaDB datadir lacks the room for the copy / cannot be checked |
 | `unsupported_objects` | the database holds objects the swap cannot move |
 | `nothing_to_undo` | no kept schema to swap back |
 

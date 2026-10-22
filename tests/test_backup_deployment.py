@@ -25,7 +25,7 @@ def test_tool_service_only_on_demand():
 
 
 def test_backup_dir_writable_for_tool_readonly_for_api():
-    assert BACKUP["db-backup"]["volumes"] == ["${BACKUP_DIR}:${BACKUP_DIR}"]
+    assert BACKUP["db-backup"]["volumes"][0] == "${BACKUP_DIR}:${BACKUP_DIR}"
     assert BACKUP["api"]["volumes"] == ["${BACKUP_DIR}:${BACKUP_DIR}:ro"]
     for service in ("db-backup", "api"):
         assert BACKUP[service]["environment"]["MYSETTINGS_BACKUP__DIR"] == "${BACKUP_DIR:?set BACKUP_DIR in .env}"
@@ -77,3 +77,11 @@ def test_env_example_names_the_backup_variables():
     assert "BACKUP_DIR=" in example and "BACKUP_COPY_DIR=" in example
     assert "BACKUP_UID=" in example and "BACKUP_GID=" in example
     assert "docker-compose.backup.yml" in example
+
+
+def test_tool_sees_the_datadir_read_only_for_the_space_check():
+    """restore and verify --deep load a copy into the MariaDB datadir: the tool checks its free space (edge plan S1)"""
+    tool = BACKUP["db-backup"]
+    assert "${DB_DATADIR:-/var/lib/mysql}:${DB_DATADIR:-/var/lib/mysql}:ro" in tool["volumes"]
+    assert tool["environment"]["MYSETTINGS_BACKUP__DATADIR"] == "${DB_DATADIR:-/var/lib/mysql}"
+    assert not any("DATADIR" in volume for volume in BACKUP["api"]["volumes"])

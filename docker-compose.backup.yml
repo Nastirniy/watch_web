@@ -26,8 +26,12 @@ services:
     entrypoint: ["python", "-m", "app.backend.cli.db_backup"]
     environment:
       MYSETTINGS_BACKUP__DIR: ${BACKUP_DIR:?set BACKUP_DIR in .env}
+      MYSETTINGS_BACKUP__DATADIR: ${DB_DATADIR:-/var/lib/mysql}
     volumes:
       - ${BACKUP_DIR}:${BACKUP_DIR}
+      # read-only, for the free-space check before restore / verify --deep load a copy there (the files stay
+      # unreadable: the datadir is 0700 mysql; statvfs needs only the mount point)
+      - ${DB_DATADIR:-/var/lib/mysql}:${DB_DATADIR:-/var/lib/mysql}:ro
     logging:
       driver: json-file
       options: { max-size: "50m", max-file: "5" }
