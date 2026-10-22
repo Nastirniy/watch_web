@@ -257,3 +257,26 @@ def test_backup_without_a_certificates_table_is_refused(conn):
     add_cert(conn, 10, 1, "fp10", revoked_at=EARLIER, revocation_reason="key_compromise")
     with pytest.raises(CarryOverUnsupported):
         carry_over(conn, None, "incoming", NOW)
+
+
+def test_placeholder_username_clash_ignores_case(conn):
+    """MariaDB's unique index compares usernames without case: Ivan and ivan clash (review)"""
+    add_user(conn, 5)
+    conn.execute(sa.insert(t("users", "incoming")).values(
+        id=6, username="U5", username_alias="other", is_active=True, user_type="viewer", is_deleted=False,
+        created_at=EARLIER, updated_at=EARLIER))
+    add_cert(conn, 43, 5, "fp43")
+    assert carry_over(conn, None, "incoming", NOW).users_added == ((5, "u5~5"),)
+
+
+def test_placeholder_username_stays_within_the_column(conn):
+    long_name = "x" * 255
+    conn.execute(sa.insert(t("users")).values(
+        id=7, username=long_name, username_alias="L", is_active=True, user_type="viewer", is_deleted=False,
+        created_at=EARLIER, updated_at=EARLIER))
+    conn.execute(sa.insert(t("users", "incoming")).values(
+        id=8, username=long_name, username_alias="other", is_active=True, user_type="viewer", is_deleted=False,
+        created_at=EARLIER, updated_at=EARLIER))
+    add_cert(conn, 44, 7, "fp44")
+    ((user_id, username),) = carry_over(conn, None, "incoming", NOW).users_added
+    assert user_id == 7 and len(username) <= 255 and username.endswith("~7")

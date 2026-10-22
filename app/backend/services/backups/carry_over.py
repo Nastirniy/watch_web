@@ -59,6 +59,26 @@ def _naive_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
+USERNAME_MAX = 255
+
+
+def _name_key(name: str) -> str:
+    """How MariaDB's unique index compares usernames (the column collation): case and trailing spaces ignored"""
+    return name.casefold().rstrip()
+
+
+def _free_name(name: str, user_id: int, taken: set) -> str:
+    """name, or name~<id> (~<id>-2, ...) cut to the column width, the first one no other user holds"""
+    if _name_key(name) not in taken:
+        return name
+    for n in range(1, 1000):
+        suffix = f"~{user_id}" if n == 1 else f"~{user_id}-{n}"
+        candidate = name[:USERNAME_MAX - len(suffix)] + suffix
+        if _name_key(candidate) not in taken:
+            return candidate
+    raise ValueError(f"no free username for user {user_id}")
+
+
 def _add_placeholders(conn: sa.Connection, outgoing: Optional[str], incoming: Optional[str],
                       user_ids: set[int]) -> tuple[tuple[int, str], ...]:
     """Insert the users of user_ids from the outgoing data as archived placeholders (spec 8.2): no roles, no post
@@ -68,7 +88,7 @@ def _add_placeholders(conn: sa.Connection, outgoing: Optional[str], incoming: Op
     out_users, in_users = _reflect(conn, USERS, outgoing), _reflect(conn, USERS, incoming)
     posts = _reflect(conn, POSTS, incoming)
     post_ids = set() if posts is None else set(conn.execute(sa.select(posts.c.id)).scalars())
-    taken = set(conn.execute(sa.select(in_users.c.username)).scalars())
+    taken = {_name_key(name) for name in conn.execute(sa.select(in_users.c.username)).scalars()}
     added = []
     for row in conn.execute(sa.select(out_users).where(out_users.c.id.in_(sorted(user_ids)))
                             .order_by(out_users.c.id)).mappings():
@@ -76,9 +96,8 @@ def _add_placeholders(conn: sa.Connection, outgoing: Optional[str], incoming: Op
         values.update(_only(in_users, {"is_active": False, "is_deleted": True}))
         if values.get("post_id") is not None and values["post_id"] not in post_ids:
             values["post_id"] = None
-        if values["username"] in taken:
-            values["username"] = f"{values['username']}~{row['id']}"
-        taken.add(values["username"])
+        values["username"] = _free_name(values["username"], row["id"], taken)
+        taken.add(_name_key(values["username"]))
         conn.execute(sa.insert(in_users).values(**values))
         added.append((row["id"], values["username"]))
     return tuple(added)
