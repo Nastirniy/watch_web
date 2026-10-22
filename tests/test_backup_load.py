@@ -60,3 +60,35 @@ def test_load_refuses_a_dump_that_switches_database(tmp_path, backend):
     assert exc.value.code == "unsafe_dump" and exc.value.refused is True
     records = fakes.client.records()
     assert not records or "DROP TABLE IF EXISTS `users`" not in (records[0]["stdin"] or "")
+
+
+@pytest.mark.parametrize("chunk", [7, 16, 31, 64])
+def test_a_block_border_inside_a_line_is_no_statement(tmp_path, backend, monkeypatch, chunk):
+    """Seen live: a block that starts inside a row (an escaped quote of a JSON value) is not a client command"""
+    from app.backend.services.backups import restore
+    monkeypatch.setattr(restore, "CHUNK", chunk)
+    row = 'INSERT INTO `t` VALUES (1,\'{\\"page_size\\": 50, \\"sort\\": \\"asc\\"}\'),(2,\'USE x\');\n'
+    fakes, real = backend
+    real.load_dump(dump_file(tmp_path, DUMP_BODY + row * 20), "radio_monitoring_restore")
+    (record,) = fakes.client.records()
+    assert record["stdin"].endswith(row)
+
+
+def test_an_unsafe_line_after_many_blocks_is_found(tmp_path, backend, monkeypatch):
+    from app.backend.services.backups import restore
+    monkeypatch.setattr(restore, "CHUNK", 16)
+    with pytest.raises(BackupFailure) as exc:
+        real = backend[1]
+        real.load_dump(dump_file(tmp_path, DUMP_BODY * 3 + "USE `radio_monitoring`;\n"), "radio_monitoring_restore")
+    assert exc.value.code == "unsafe_dump"
+
+
+def test_an_unsafe_last_line_never_reaches_the_client(tmp_path, backend, monkeypatch):
+    """The last line has no newline: it is checked before it is handed on"""
+    from app.backend.services.backups import restore
+    monkeypatch.setattr(restore, "CHUNK", 1024 * 1024)
+    fakes, real = backend
+    with pytest.raises(BackupFailure):
+        real.load_dump(dump_file(tmp_path, DUMP_BODY + "\\! touch /tmp/pwned"), "radio_monitoring_restore")
+    records = fakes.client.records()
+    assert not records or "pwned" not in (records[0]["stdin"] or "")

@@ -51,7 +51,6 @@ ALEMBIC_INI = Path(__file__).resolve().parents[4] / "alembic.ini"
 _UNSAFE = re.compile(
     r"^[ \t]*(?:USE\b|CONNECT\b|SYSTEM\b|SOURCE\b|\\|(?:CREATE|DROP|ALTER)[ \t]+(?:DATABASE|SCHEMA)\b)",
     re.MULTILINE | re.IGNORECASE)
-CARRY = 64 * 1024
 AUDIT_RESOURCE = "database"
 CHUNK = 1024 * 1024
 STDERR_LOG_LIMIT = 2000
@@ -133,6 +132,32 @@ def unsafe_statement(text: str) -> Optional[str]:
     return text[match.start():end if end >= 0 else len(text)][:80]
 
 
+class _CheckedLines:
+    """The dump in whole lines, each checked before it is handed on: a block may end (and the next one start) inside
+    a line, where a value may begin with a backslash; the unfinished last line waits for the next block"""
+
+    def __init__(self):
+        self.pending = b""
+        self.unsafe: Optional[str] = None
+
+    def take(self, block: bytes) -> bytes:
+        """The checked whole lines up to the end of block (b"" once an unsafe line was found)"""
+        data = self.pending + block
+        cut = data.rfind(b"\n") + 1
+        self.pending, lines = data[cut:], data[:cut]
+        return self._checked(lines)
+
+    def rest(self) -> bytes:
+        """The checked last line, at the end of the dump"""
+        lines, self.pending = self.pending, b""
+        return self._checked(lines)
+
+    def _checked(self, lines: bytes) -> bytes:
+        if self.unsafe is None and lines:
+            self.unsafe = unsafe_statement(lines.decode("utf-8", errors="replace"))
+        return b"" if self.unsafe is not None else lines
+
+
 def known_revisions() -> set[str]:
     return {revision.revision for revision in _script().walk_revisions()}
 
@@ -198,14 +223,14 @@ class MariaDbBackend:
             unsafe = None
             try:
                 with gzip.open(path, "rb") as dump:
-                    carry = ""
+                    lines = _CheckedLines()
                     for block in iter(lambda: dump.read(CHUNK), b""):
-                        text = carry + block.decode("utf-8", errors="replace")
-                        unsafe = unsafe_statement(text)
-                        if unsafe is not None:
+                        process.stdin.write(lines.take(block))
+                        if lines.unsafe is not None:
                             break
-                        carry = text[-CARRY:]
-                        process.stdin.write(block)
+                    else:
+                        process.stdin.write(lines.rest())
+                    unsafe = lines.unsafe
                 if unsafe is not None:
                     process.kill()
                 process.stdin.close()
