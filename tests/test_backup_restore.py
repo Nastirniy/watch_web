@@ -39,6 +39,7 @@ class FakeBackend:
         self.staging_tables = list(staging_tables)
         self.staging_revision = staging_revision
         self.audits = []
+        self.size = 1000
         self.tables_of = {}          # schema -> tables, overriding the defaults (e.g. a kept schema after a swap)
         self.existing = set()        # schemas create_schema refuses (already there)
 
@@ -53,7 +54,13 @@ class FakeBackend:
 
     def other_connections(self, schema):
         self._call("other_connections", schema)
+        if isinstance(self.connections, list):
+            return self.connections.pop(0) if len(self.connections) > 1 else self.connections[0]
         return self.connections
+
+    def schema_size(self, schema):
+        self._call("schema_size", schema)
+        return self.size
 
     def create_schema(self, schema):
         self._call("create_schema", schema)
@@ -79,7 +86,12 @@ class FakeBackend:
         return REVISION if schema == "db" else self.staging_revision
 
     def carry_over(self, outgoing, incoming, now):
+        """CARRY on the first pass; a second pass finds nothing new (carry_over is idempotent)"""
+        first = not any(c[0] == "carry_over" for c in self.calls)
         self._call("carry_over", outgoing, incoming)
+        if not first:
+            return CarryOverResult(revocations=0, certificates_added=0, users_added=(), crl_number=7,
+                                   sessions_ended=0)
         if self.fail_on == "too_old":
             raise CarryOverUnsupported("user_certificates")
         return CARRY
@@ -104,12 +116,12 @@ class FakeBackend:
         return self.kept
 
 
-def put_backup(directory: Path, revision=REVISION, body=b"-- dump\n") -> Manifest:
+def put_backup(directory: Path, revision=REVISION, body=b"-- dump\n", database="db") -> Manifest:
     started = datetime(2026, 10, 21, 3, 15, 0, tzinfo=UTC)
     data = gzip.compress(body)
     manifest = Manifest(
         format_version=FORMAT_VERSION, id=backup_id(started, BackupLabel.SCHEDULED), label=BackupLabel.SCHEDULED,
-        started_at=started, finished_at=started, database="db", server_product="mariadb", server_version="11.8",
+        started_at=started, finished_at=started, database=database, server_product="mariadb", server_version="11.8",
         dump_tool="d", migration_revision=revision, tables=TABLES, file="dump.sql.gz", size_bytes=len(data),
         sha256=hashlib.sha256(data).hexdigest(),
     )
@@ -126,6 +138,7 @@ def cfg(tmp_path):
 
 
 def restore(cfg, backend, ref="latest", **kw):
+    kw.setdefault("skip_space_check", True)
     return restore_backup(cfg, DB, ref, backend=backend, now=lambda: NOW, **kw)
 
 
@@ -152,10 +165,11 @@ def test_restore_order(cfg):
     result = restore(cfg, backend)
     assert names(backend) == [
         "unsupported_objects", "other_connections", "drop_schema", "create_schema", "load_dump", "list_tables",
-        "revision", "carry_over", "user_differences", "bump_auto_increment", "create_schema", "list_tables", "swap",
-        "drop_schema", "audit",
+        "revision", "carry_over", "user_differences", "other_connections", "carry_over", "bump_auto_increment",
+        "create_schema", "list_tables", "swap", "drop_schema", "audit",
     ]
     calls = dict((c[0], c[1:]) for c in backend.calls if c[0] in ("load_dump", "carry_over", "swap", "audit"))
+    assert [c for c in backend.calls if c[0] == "carry_over"] == [("carry_over", "db", "db_restore")] * 2
     assert calls["load_dump"] == ("dump.sql.gz", "db_restore")
     assert ("bump_auto_increment", "db", "db_restore") in backend.calls
     assert result.ids_raised == 4
@@ -309,18 +323,18 @@ def test_verify_detects_a_broken_gzip(cfg):
     path = Path(cfg.dir) / manifest.id / "dump.sql.gz"
     broken = path.read_bytes()[:-6]
     path.write_bytes(broken)
-    result = verify_backup(cfg, DB, manifest.id, deep=True, backend=FakeBackend())
+    result = verify_backup(cfg, DB, manifest.id, deep=True, backend=FakeBackend(), skip_space_check=True)
     assert result.checksum_ok is False and result.gzip_ok is False and result.tables_ok is None
 
 
 def test_verify_deep(cfg):
     put_backup(Path(cfg.dir))
     backend = FakeBackend()
-    result = verify_backup(cfg, DB, "latest", deep=True, backend=backend)
+    result = verify_backup(cfg, DB, "latest", deep=True, backend=backend, skip_space_check=True)
     assert (result.checksum_ok, result.gzip_ok, result.tables_ok, result.revision_ok) == (True, True, True, True)
     assert backend.calls[0] == ("drop_schema", "db_verify") and backend.calls[-1] == ("drop_schema", "db_verify")
     missing = FakeBackend(staging_tables=("users",))
-    assert verify_backup(cfg, DB, "latest", deep=True, backend=missing).tables_ok is False
+    assert verify_backup(cfg, DB, "latest", deep=True, backend=missing, skip_space_check=True).tables_ok is False
     assert missing.calls[-1] == ("drop_schema", "db_verify")
 
 
@@ -386,3 +400,66 @@ def test_raise_statements():
         "ALTER TABLE `db_restore`.`a` AUTO_INCREMENT = 10",
         "ALTER TABLE `db_restore`.`we``ird` AUTO_INCREMENT = 7",
     ]
+
+
+def test_backup_of_another_database_refused(cfg):
+    """S6: a manifest of another database is never restored into this one"""
+    put_backup(Path(cfg.dir), database="other_db")
+    backend = FakeBackend()
+    with pytest.raises(RestoreRefused) as exc:
+        restore(cfg, backend)
+    assert exc.value.code == "other_database" and backend.calls == []
+
+
+def test_connection_during_the_load_refuses_before_the_swap(cfg):
+    """S5: a client that connects while the backup loads could write a revocation the first carry-over missed"""
+    put_backup(Path(cfg.dir))
+    backend = FakeBackend(connections=[0, 1])
+    with pytest.raises(RestoreRefused) as exc:
+        restore(cfg, backend)
+    assert exc.value.code == "connections"
+    assert "swap" not in names(backend) and backend.calls[-1] == ("drop_schema", "db_restore")
+
+
+def test_second_carry_over_runs_right_before_the_swap(cfg):
+    put_backup(Path(cfg.dir))
+    backend = FakeBackend()
+    restore(cfg, backend)
+    order = names(backend)
+    last_carry = len(order) - 1 - order[::-1].index("carry_over")
+    assert order.index("load_dump") < order.index("carry_over") < last_carry < order.index("swap")
+
+
+def test_no_space_in_the_datadir_refused(tmp_path, monkeypatch):
+    """S1: the staging schema needs about the size of the database in the MariaDB datadir"""
+    import shutil
+    from collections import namedtuple
+    datadir = tmp_path / "mysql"
+    datadir.mkdir()
+    cfg = BackupConfig(dir=str(tmp_path / "backups"), datadir=str(datadir), min_free_mb=0)
+    put_backup(Path(cfg.dir))
+    usage = namedtuple("usage", "total used free")
+    monkeypatch.setattr(shutil, "disk_usage", lambda path: usage(10 ** 12, 0, 1100))
+    backend = FakeBackend()
+    with pytest.raises(RestoreRefused) as exc:
+        restore_backup(cfg, DB, "latest", backend=backend, now=lambda: NOW)
+    assert exc.value.code == "no_space"
+    assert "create_schema" not in names(backend)
+    monkeypatch.setattr(shutil, "disk_usage", lambda path: usage(10 ** 12, 0, 1300))
+    restore_backup(cfg, DB, "latest", backend=FakeBackend(), now=lambda: NOW)
+
+
+def test_space_unknown_without_a_datadir(cfg):
+    put_backup(Path(cfg.dir))
+    backend = FakeBackend()
+    with pytest.raises(RestoreRefused) as exc:
+        restore_backup(cfg, DB, "latest", backend=backend, now=lambda: NOW)
+    assert exc.value.code == "space_unknown" and "create_schema" not in names(backend)
+    restore_backup(cfg, DB, "latest", backend=FakeBackend(), now=lambda: NOW, skip_space_check=True)
+
+
+def test_deep_verify_checks_the_space_too(cfg):
+    put_backup(Path(cfg.dir))
+    with pytest.raises(RestoreRefused) as exc:
+        verify_backup(cfg, DB, "latest", deep=True, backend=FakeBackend())
+    assert exc.value.code == "space_unknown"

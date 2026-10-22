@@ -145,8 +145,8 @@ def restore_calls(configured, monkeypatch):
     calls = []
     monkeypatch.setattr(db_backup, "plan_restore", lambda cfg, db, ref, backend: PLAN)
 
-    def fake_restore(cfg, db, ref, *, backend, force_connections):
-        calls.append((ref, force_connections))
+    def fake_restore(cfg, db, ref, *, backend, force_connections, skip_space_check):
+        calls.append((ref, force_connections, skip_space_check))
         return RESULT
 
     monkeypatch.setattr(db_backup, "restore_backup", fake_restore)
@@ -158,12 +158,12 @@ def test_restore_needs_yes(restore_calls, capsys):
     assert "aborted" in capsys.readouterr().err
     assert restore_calls == []
     assert run(["restore", "latest"], stdin="yes\n") == 0
-    assert restore_calls == [("latest", False)]
+    assert restore_calls == [("latest", False, False)]
 
 
 def test_restore_with_flags(restore_calls, capsys):
-    assert run(["restore", "20261022T031500Z-scheduled", "--yes", "--force-connections"]) == 0
-    assert restore_calls == [("20261022T031500Z-scheduled", True)]
+    assert run(["restore", "20261022T031500Z-scheduled", "--yes", "--force-connections", "--skip-space-check"]) == 0
+    assert restore_calls == [("20261022T031500Z-scheduled", True, True)]
     out = capsys.readouterr().out
     assert "radio_monitoring_before_20261022_120000" in out
     assert "anna" in out and "is_active True->False" in out
@@ -227,7 +227,7 @@ def test_prune(configured, monkeypatch, capsys):
 
 def test_verify(configured, monkeypatch, capsys):
     from app.backend.services.backups.restore import VerifyResult
-    monkeypatch.setattr(db_backup, "verify_backup", lambda cfg, db, ref, deep, backend: VerifyResult(
+    monkeypatch.setattr(db_backup, "verify_backup", lambda cfg, db, ref, deep, backend, skip_space_check: VerifyResult(
         backup_id="x", checksum_ok=True, gzip_ok=True, tables_ok=False, revision_ok=True))
     assert run(["verify", "latest", "--deep"]) == 1
     assert "tables: mismatch" in capsys.readouterr().out
@@ -252,3 +252,14 @@ def test_prune_takes_the_lock(configured, monkeypatch, capsys):
         assert run(["prune"]) == 3
     assert capsys.readouterr().err.strip() == "refused: busy"
     assert run(["prune"]) == 0
+
+
+def test_space_refusal_is_exit_3(configured, monkeypatch, capsys):
+    monkeypatch.setattr(db_backup, "plan_restore", lambda cfg, db, ref, backend: PLAN)
+
+    def refused(*args, **kw):
+        raise RestoreRefused("space_unknown")
+
+    monkeypatch.setattr(db_backup, "restore_backup", refused)
+    assert run(["restore", "latest", "--yes"]) == 3
+    assert "refused: space_unknown" in capsys.readouterr().err

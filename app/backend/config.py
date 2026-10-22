@@ -400,6 +400,9 @@ class BackupConfig(BaseModel):
     # create refuses when the free space is below the last backup's size x 1.5 plus this
     min_free_mb: int = Field(default=512, ge=0)
     dump_timeout_seconds: PositiveInt = 3600            # a dump or a load running longer is killed
+    # The MariaDB data directory as the tool sees it (a read-only mount): restore and verify --deep load a copy of
+    # the database there and refuse when it lacks the space; empty: they refuse unless --skip-space-check
+    datadir: str = ""
 
     def is_configured(self) -> bool:
         return bool(self.dir)

@@ -11,6 +11,7 @@ mariadb client), the tests use a recording fake.
 import gzip
 import hashlib
 import os
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -36,7 +37,8 @@ from app.backend.services.backups.failures import BackupFailure
 from app.backend.services.backups.locking import writer_lock
 from app.backend.services.backups.manifest import Manifest, ManifestError, read_manifest
 from app.backend.services.backups.schemas import (
-    AUTO_INCREMENTS, LIST_TABLES, OTHER_CONNECTIONS, SCHEMA_CHARSET, UNSUPPORTED_OBJECTS, KeptSchema, is_droppable,
+    AUTO_INCREMENTS, LIST_TABLES, OTHER_CONNECTIONS, SCHEMA_CHARSET, SCHEMA_SIZE, UNSUPPORTED_OBJECTS, KeptSchema,
+    is_droppable,
     kept_name, kept_pattern, kept_schemas_query, parse_kept, quote, raise_statements, rename_statement,
     staging_name, verify_name,
 )
@@ -54,8 +56,9 @@ def utcnow() -> datetime:
 
 
 class RestoreRefused(Exception):
-    """Nothing was changed. code: not_found, checksum_mismatch, unknown_revision, unsupported_objects, connections,
-    nothing_to_undo, backup_too_old (no table to carry revocations into)"""
+    """Nothing was changed. code: not_found, checksum_mismatch, unknown_revision, other_database, unsupported_objects,
+    connections, no_space / space_unknown (the datadir), nothing_to_undo, backup_too_old (no table to carry
+    revocations into)"""
 
     def __init__(self, code: str):
         super().__init__(code)
@@ -92,6 +95,7 @@ class VerifyResult:
 class RestoreBackend(Protocol):
     def unsupported_objects(self, schema: str) -> list[str]: ...
     def other_connections(self, schema: str) -> int: ...
+    def schema_size(self, schema: str) -> int: ...
     def create_schema(self, schema: str) -> None: ...
     def drop_schema(self, schema: str) -> None: ...
     def load_dump(self, path: Path, schema: str) -> None: ...
@@ -142,6 +146,10 @@ class MariaDbBackend:
     def other_connections(self, schema: str) -> int:
         with self.engine.connect() as conn:
             return int(conn.execute(OTHER_CONNECTIONS, {"schema": schema}).scalar() or 0)
+
+    def schema_size(self, schema: str) -> int:
+        with self.engine.connect() as conn:
+            return int(conn.execute(SCHEMA_SIZE, {"schema": schema}).scalar() or 0)
 
     def create_schema(self, schema: str) -> None:
         with self.engine.begin() as conn:
@@ -279,8 +287,11 @@ def _find(cfg: BackupConfig, ref: str) -> tuple[Path, Manifest]:
         raise RestoreRefused("not_found")
 
 
-def _checked(cfg: BackupConfig, ref: str) -> tuple[Path, Manifest]:
+def _checked(cfg: BackupConfig, ref: str, db: DatabaseConfig) -> tuple[Path, Manifest]:
     folder, manifest = _find(cfg, ref)
+    if manifest.database != db.name:
+        _logger.error(f"Backups: {manifest.id} is a backup of {manifest.database}, not of {db.name}")
+        raise RestoreRefused("other_database")
     if _sha256_of(folder / manifest.file) != manifest.sha256:
         raise RestoreRefused("checksum_mismatch")
     if manifest.migration_revision not in known_revisions():
@@ -297,8 +308,30 @@ def _guard(backend: RestoreBackend, db: str, force_connections: bool) -> None:
         raise RestoreRefused("connections")
 
 
+# The staging copy needs about the size of the database again, plus some room
+SPACE_FACTOR = 1.2
+
+
+def _check_space(cfg: BackupConfig, backend: RestoreBackend, db: DatabaseConfig, skip: bool) -> None:
+    """Refuse a load the MariaDB datadir has no room for: a full datadir stops the live server too"""
+    if skip:
+        _logger.warning("Backups: free space in the MariaDB datadir not checked (--skip-space-check)")
+        return
+    if not cfg.datadir:
+        raise RestoreRefused("space_unknown")
+    try:
+        free = shutil.disk_usage(cfg.datadir).free
+    except OSError as exc:
+        _logger.error(f"Backups: datadir {cfg.datadir} not usable for the space check ({type(exc).__name__})")
+        raise RestoreRefused("space_unknown")
+    need = int(backend.schema_size(db.name) * SPACE_FACTOR) + cfg.min_free_mb * 2 ** 20
+    if free < need:
+        _logger.error(f"Backups: {free} bytes free in the MariaDB datadir, {need} needed for the copy")
+        raise RestoreRefused("no_space")
+
+
 def plan_restore(cfg: BackupConfig, db: DatabaseConfig, ref: str, *, backend: RestoreBackend) -> RestorePlan:
-    _, manifest = _checked(cfg, ref)
+    _, manifest = _checked(cfg, ref, db)
     return RestorePlan(backup_id=manifest.id, label=manifest.label.value, started_at=manifest.started_at,
                        backup_revision=manifest.migration_revision, live_revision=backend.revision(db.name),
                        other_connections=backend.other_connections(db.name))
@@ -310,6 +343,15 @@ def _carry(backend: RestoreBackend, db: str, incoming: str, now: datetime) -> Ca
     except CarryOverUnsupported as exc:
         _logger.error(f"Backups: cannot carry the final state over: {exc}")
         raise RestoreRefused("backup_too_old")
+
+
+def _merge(first: CarryOverResult, second: CarryOverResult) -> CarryOverResult:
+    """The two carry-over passes as one result"""
+    return CarryOverResult(revocations=first.revocations + second.revocations,
+                           certificates_added=first.certificates_added + second.certificates_added,
+                           users_added=first.users_added + second.users_added,
+                           crl_number=max(first.crl_number, second.crl_number),
+                           sessions_ended=first.sessions_ended + second.sessions_ended)
 
 
 def _drop_if_empty(backend: RestoreBackend, schema: str) -> None:
@@ -328,11 +370,12 @@ def _details(carry: CarryOverResult, keep_as: str, ids_raised: int) -> dict:
 
 
 def restore_backup(cfg: BackupConfig, db: DatabaseConfig, ref: str, *, backend: RestoreBackend,
-                   force_connections: bool = False,
+                   force_connections: bool = False, skip_space_check: bool = False,
                    now: Callable[[], datetime] = utcnow) -> RestoreResult:
     with writer_lock(Path(cfg.dir)):
-        folder, manifest = _checked(cfg, ref)
+        folder, manifest = _checked(cfg, ref, db)
         _guard(backend, db.name, force_connections)
+        _check_space(cfg, backend, db, skip_space_check)
         staging = staging_name(db.name)
         backend.drop_schema(staging)
         backend.create_schema(staging)
@@ -345,6 +388,11 @@ def restore_backup(cfg: BackupConfig, db: DatabaseConfig, ref: str, *, backend: 
                 raise BackupFailure("load_failed")
             carry = _carry(backend, db.name, staging, now())
             differences = backend.user_differences(db.name, staging)
+            # The load took minutes: a client that connected meanwhile may have revoked a certificate. Check again and
+            # carry over again (idempotent) right before the swap, so the window is the swap itself
+            if not force_connections and backend.other_connections(db.name) > 0:
+                raise RestoreRefused("connections")
+            carry = _merge(carry, _carry(backend, db.name, staging, now()))
             ids_raised = backend.bump_auto_increment(db.name, staging)
             name = kept_name(db.name, now())
             backend.create_schema(name)
@@ -407,7 +455,7 @@ def prune_kept_schemas(cfg: BackupConfig, db: DatabaseConfig, *, backend: Restor
 
 
 def verify_backup(cfg: BackupConfig, db: DatabaseConfig, ref: str, *, deep: bool,
-                  backend: Optional[RestoreBackend] = None) -> VerifyResult:
+                  backend: Optional[RestoreBackend] = None, skip_space_check: bool = False) -> VerifyResult:
     folder, manifest = _find(cfg, ref)
     path = folder / manifest.file
     checksum_ok = _sha256_of(path) == manifest.sha256
@@ -416,6 +464,7 @@ def verify_backup(cfg: BackupConfig, db: DatabaseConfig, ref: str, *, deep: bool
         return VerifyResult(backup_id=manifest.id, checksum_ok=checksum_ok, gzip_ok=gzip_ok, tables_ok=None,
                             revision_ok=None)
     scratch = verify_name(db.name)
+    _check_space(cfg, backend, db, skip_space_check)
     with writer_lock(Path(cfg.dir)):
         backend.drop_schema(scratch)
         try:

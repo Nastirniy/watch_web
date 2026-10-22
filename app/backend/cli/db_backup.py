@@ -6,9 +6,9 @@ Usage:
     python -m app.backend.cli.db_backup create [--label manual|pre-upgrade|scheduled] [--no-copy]
         # dump the database into backup.dir (and copy_dir), then apply retention; prints the id
     python -m app.backend.cli.db_backup list [--json]           # backups, newest first; incomplete folders
-    python -m app.backend.cli.db_backup verify <id|latest> [--deep]
+    python -m app.backend.cli.db_backup verify <id|latest> [--deep] [--skip-space-check]
         # checksum and gzip; --deep also loads it into <db>_verify and compares tables and revision
-    python -m app.backend.cli.db_backup restore <id|latest> [--yes] [--force-connections]
+    python -m app.backend.cli.db_backup restore <id|latest> [--yes] [--force-connections] [--skip-space-check]
         # roll the database back to a backup; the replaced tables stay in <db>_before_<time>
     python -m app.backend.cli.db_backup undo-restore [<schema>] [--yes] [--force-connections]
         # swap the newest (or the named) <db>_before_* schema back in
@@ -140,7 +140,7 @@ def cmd_status(args) -> int:
 
 def cmd_verify(args) -> int:
     result = verify_backup(settings.backup, settings.database, args.ref, deep=args.deep,
-                           backend=_backend() if args.deep else None)
+                           backend=_backend() if args.deep else None, skip_space_check=args.skip_space_check)
     words = {True: "ok", False: "mismatch", None: "not checked"}
     print(f"{result.backup_id}: checksum: {words[result.checksum_ok]}, gzip: {words[result.gzip_ok]}, "
           f"tables: {words[result.tables_ok]}, revision: {words[result.revision_ok]}")
@@ -181,7 +181,7 @@ def cmd_restore(args) -> int:
             print("aborted", file=sys.stderr)
             return EXIT_REFUSED
     _report(restore_backup(settings.backup, settings.database, args.ref, backend=backend,
-                           force_connections=args.force_connections))
+                           force_connections=args.force_connections, skip_space_check=args.skip_space_check))
     return EXIT_OK
 
 
@@ -223,9 +223,13 @@ def _parser() -> argparse.ArgumentParser:
     verify = commands.add_parser("verify")
     verify.add_argument("ref")
     verify.add_argument("--deep", action="store_true")
+    verify.add_argument("--skip-space-check", action="store_true",
+                        help="load without checking the free space in the MariaDB datadir (backup.datadir)")
     verify.set_defaults(handler=cmd_verify)
     restore = commands.add_parser("restore")
     restore.add_argument("ref")
+    restore.add_argument("--skip-space-check", action="store_true",
+                         help="load without checking the free space in the MariaDB datadir (backup.datadir)")
     undo = commands.add_parser("undo-restore")
     undo.add_argument("schema", nargs="?")
     for command, handler in ((restore, cmd_restore), (undo, cmd_undo)):
