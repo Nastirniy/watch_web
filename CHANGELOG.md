@@ -12,6 +12,8 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - A restore refuses a backup of another database (`other_database`), checks the free space of the MariaDB datadir
   first (`no_space`, `space_unknown`, `--skip-space-check`; setting `backup.datadir`, compose `DB_DATADIR`), checks
   the connections again right before the swap and carries over a second time there.
+- `restore` and `verify --deep` load with `--one-database` (and `--sandbox` on MariaDB) and refuse a dump that
+  switches or creates a database or runs a client command (`unsafe_dump`).
 - A restore (and an undo) raises the id counter (`AUTO_INCREMENT`) of every table past the replaced data: no id is
   handed out twice (derived posters and storyboards, the thumbnail cache and certificate folders are keyed by id).
 - Users created after the backup who have a certificate come back archived (inactive, no roles), so their
