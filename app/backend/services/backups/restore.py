@@ -175,10 +175,12 @@ def sync_engine(db: DatabaseConfig) -> sa.Engine:
 class MariaDbBackend:
     """The database steps on MariaDB (MySQL 8 too): a sync engine as the app user and the client binary"""
 
-    def __init__(self, db: DatabaseConfig, tools: ClientTools, timeout_seconds: int, engine: sa.Engine = None):
+    def __init__(self, db: DatabaseConfig, tools: ClientTools, timeout_seconds: int, engine: sa.Engine = None,
+                 lock_wait_seconds: int = 60):
         self.db = db
         self.tools = tools
         self.timeout_seconds = timeout_seconds
+        self.lock_wait_seconds = int(lock_wait_seconds)
         self.engine = engine or sync_engine(db)
 
     def unsupported_objects(self, schema: str) -> list[str]:
@@ -289,9 +291,9 @@ class MariaDbBackend:
 
     def swap(self, db: str, live: list[str], incoming: list[str], source: str, keep_as: str) -> None:
         with self.engine.begin() as conn:
-            # wait at most a minute for the metadata locks (the default is a day): a stuck connection fails the
-            # swap instead of holding it while the operator gives up on the command
-            conn.exec_driver_sql("SET SESSION lock_wait_timeout = 60")
+            # wait at most lock_wait_seconds (a minute) for the metadata locks (the default is a day): a stuck
+            # connection fails the swap instead of holding it while the operator gives up on the command
+            conn.exec_driver_sql(f"SET SESSION lock_wait_timeout = {self.lock_wait_seconds}")
             conn.exec_driver_sql(rename_statement(db, live, incoming, source, keep_as))
 
     def audit(self, schema: str, action: str, details: dict) -> None:
