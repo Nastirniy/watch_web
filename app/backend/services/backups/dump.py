@@ -243,6 +243,14 @@ def create_backup(cfg: BackupConfig, db: DatabaseConfig, label: BackupLabel, *, 
     with writer_lock(directory):
         started = now()
         try:
+            # ids are per second: a run right after another (the timer, then an operator) waits for the next one
+            for _ in range(3):
+                if not (directory / backup_id(started, label)).exists():
+                    break
+                time.sleep(1)
+                started = now()
+            else:
+                raise BackupFailure("busy")
             result = _create(cfg, db, label, started, copy, now, tools, object_guard)
         except BackupFailure as exc:
             write_last_run(directory, LastRun(outcome="failed", started_at=started, finished_at=now(),

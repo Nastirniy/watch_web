@@ -198,6 +198,7 @@ def put(directory: Path, started: datetime, label=BackupLabel.SCHEDULED) -> str:
     )
     folder = directory / manifest.id
     folder.mkdir(parents=True)
+    (folder / "dump.sql.gz").write_bytes(b"x")
     write_manifest(folder, manifest)
     return manifest.id
 

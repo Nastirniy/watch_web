@@ -19,7 +19,9 @@ from loguru import logger
 from app.backend.config import BackupConfig
 from app.backend.enums.errors import ErrorCode
 from app.backend.errors.coded import CodedError
-from app.backend.services.backups.manifest import DIR_MODE, SHARED_MODE, Manifest, ManifestError, read_manifest
+from app.backend.services.backups.manifest import (
+    DIR_MODE, SHARED_MODE, Manifest, ManifestError, read_manifest, require_dump,
+)
 
 STATE_DIR = ".state"
 LAST_RUN_FILE = "last-run.json"
@@ -104,10 +106,12 @@ def read_last_run(directory: Path) -> Optional[LastRun]:
     path = directory / STATE_DIR / LAST_RUN_FILE
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
+        outcome, error_code, backup = data["outcome"], data["error_code"], data["backup_id"]
+        if outcome not in ("ok", "failed") or not all(v is None or isinstance(v, str) for v in (error_code, backup)):
+            raise ValueError("bad value")
         return LastRun(
-            outcome=str(data["outcome"]), started_at=datetime.fromisoformat(data["started_at"]),
-            finished_at=datetime.fromisoformat(data["finished_at"]), error_code=data["error_code"],
-            backup_id=data["backup_id"],
+            outcome=outcome, started_at=datetime.fromisoformat(data["started_at"]),
+            finished_at=datetime.fromisoformat(data["finished_at"]), error_code=error_code, backup_id=backup,
         )
     except FileNotFoundError:
         return None
@@ -123,7 +127,7 @@ def scan(folder: Path) -> tuple[list[Manifest], list[Incomplete]]:
         if child.name.startswith(".") or not child.is_dir():
             continue
         try:
-            manifests.append(read_manifest(child))
+            manifests.append(require_dump(child, read_manifest(child)))
         except ManifestError as exc:
             incomplete.append(Incomplete(name=child.name, reason=exc.reason))
     return manifests, incomplete

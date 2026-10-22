@@ -108,6 +108,7 @@ def test_list_json(configured, capsys):
     older, newer = manifest(STARTED - timedelta(days=1)), manifest()
     for m in (older, newer):
         (configured / m.id).mkdir()
+        (configured / m.id / "dump.sql.gz").write_bytes(b"x")
         write_manifest(configured / m.id, m)
     (configured / "20261020T000000Z-manual").mkdir()
     assert run(["list", "--json"]) == 0
@@ -120,6 +121,7 @@ def test_list_json(configured, capsys):
 def test_list_text(configured, capsys):
     m = manifest()
     (configured / m.id).mkdir()
+    (configured / m.id / "dump.sql.gz").write_bytes(b"x")
     write_manifest(configured / m.id, m)
     assert run(["list"]) == 0
     out = capsys.readouterr().out

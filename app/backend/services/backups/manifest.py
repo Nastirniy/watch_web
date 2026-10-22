@@ -1,6 +1,7 @@
 """The manifest of a backup folder: written last, never changed; a folder without a valid one is no backup"""
 import json
 import os
+import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -72,6 +73,15 @@ def write_manifest(folder: Path, manifest: Manifest) -> None:
     os.replace(tmp, target)
 
 
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _text(value, name: str) -> str:
+    if not isinstance(value, str):
+        raise ManifestError(f"manifest {name} is not text")
+    return value
+
+
 def _utc(value: str) -> datetime:
     parsed = datetime.fromisoformat(value)
     if parsed.tzinfo is None:
@@ -96,13 +106,26 @@ def read_manifest(folder: Path) -> Manifest:
     if data.get("format_version") != FORMAT_VERSION:
         raise ManifestError(f"unknown manifest format {data.get('format_version')!r}")
     try:
+        # a hand-edited manifest of the wrong types is no backup: every value is checked, nothing converted
+        revision = data["migration_revision"]
+        tables, size = data["tables"], data["size_bytes"]
+        if revision is not None and not isinstance(revision, str):
+            raise ManifestError("manifest migration_revision is not text")
+        if not isinstance(tables, list) or not all(isinstance(t, str) for t in tables):
+            raise ManifestError("manifest tables is not a list of names")
+        if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+            raise ManifestError("manifest size_bytes is not a size")
+        sha256 = _text(data["sha256"], "sha256")
+        if not _SHA256.match(sha256):
+            raise ManifestError("manifest sha256 is not a SHA-256")
         manifest = Manifest(
-            format_version=data["format_version"], id=str(data["id"]), label=BackupLabel(data["label"]),
-            started_at=_utc(data["started_at"]), finished_at=_utc(data["finished_at"]),
-            database=str(data["database"]), server_product=str(data["server_product"]),
-            server_version=str(data["server_version"]), dump_tool=str(data["dump_tool"]),
-            migration_revision=data["migration_revision"], tables=tuple(str(t) for t in data["tables"]),
-            file=str(data["file"]), size_bytes=int(data["size_bytes"]), sha256=str(data["sha256"]),
+            format_version=data["format_version"], id=_text(data["id"], "id"), label=BackupLabel(data["label"]),
+            started_at=_utc(_text(data["started_at"], "started_at")),
+            finished_at=_utc(_text(data["finished_at"], "finished_at")),
+            database=_text(data["database"], "database"), server_product=_text(data["server_product"], "server_product"),
+            server_version=_text(data["server_version"], "server_version"),
+            dump_tool=_text(data["dump_tool"], "dump_tool"), migration_revision=revision, tables=tuple(tables),
+            file=_text(data["file"], "file"), size_bytes=size, sha256=sha256,
         )
     except KeyError as exc:
         raise ManifestError(f"manifest misses {exc.args[0]}")
@@ -110,4 +133,13 @@ def read_manifest(folder: Path) -> Manifest:
         raise ManifestError("manifest has a bad value")
     if manifest.id != folder.name:
         raise ManifestError("manifest of another folder")
+    if "/" in manifest.file or "\\" in manifest.file:
+        raise ManifestError("manifest file is not a name")
+    return manifest
+
+
+def require_dump(folder: Path, manifest: Manifest) -> Manifest:
+    """The manifest of a folder that also holds its dump; ManifestError otherwise"""
+    if not (folder / manifest.file).is_file():
+        raise ManifestError("dump file missing")
     return manifest

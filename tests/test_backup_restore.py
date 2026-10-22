@@ -166,7 +166,7 @@ def test_restore_order(cfg):
     assert names(backend) == [
         "unsupported_objects", "other_connections", "drop_schema", "create_schema", "load_dump", "list_tables",
         "revision", "carry_over", "user_differences", "other_connections", "carry_over", "bump_auto_increment",
-        "create_schema", "list_tables", "swap", "drop_schema", "audit",
+        "kept_schemas", "create_schema", "list_tables", "swap", "drop_schema", "audit",
     ]
     calls = dict((c[0], c[1:]) for c in backend.calls if c[0] in ("load_dump", "carry_over", "swap", "audit"))
     assert [c for c in backend.calls if c[0] == "carry_over"] == [("carry_over", "db", "db_restore")] * 2

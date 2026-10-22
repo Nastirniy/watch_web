@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 import zlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -37,7 +38,7 @@ from app.backend.services.backups.catalog import scan
 from app.backend.services.backups.client_tools import ClientTools, child_env, defaults_file
 from app.backend.services.backups.failures import BackupFailure
 from app.backend.services.backups.locking import writer_lock
-from app.backend.services.backups.manifest import Manifest, ManifestError, read_manifest
+from app.backend.services.backups.manifest import Manifest, ManifestError, read_manifest, require_dump
 from app.backend.services.backups.schemas import (
     AUTO_INCREMENTS, LIST_TABLES, OTHER_CONNECTIONS, SCHEMA_CHARSET, SCHEMA_SIZE, UNSUPPORTED_OBJECTS, KeptSchema,
     is_droppable,
@@ -361,7 +362,7 @@ def _find(cfg: BackupConfig, ref: str) -> tuple[Path, Manifest]:
     if "/" in ref or "\\" in ref or ref.startswith(".") or not folder.is_dir():
         raise RestoreRefused("not_found")
     try:
-        return folder, read_manifest(folder)
+        return folder, require_dump(folder, read_manifest(folder))
     except ManifestError as exc:
         _logger.error(f"Backups: {ref}: {exc.reason}")
         raise RestoreRefused("not_found")
@@ -434,6 +435,17 @@ def _merge(first: CarryOverResult, second: CarryOverResult) -> CarryOverResult:
                            sessions_ended=first.sessions_ended + second.sessions_ended)
 
 
+def _free_kept_name(backend: RestoreBackend, db: str, now: Callable[[], datetime]) -> str:
+    """kept_name of now, waiting a second when a kept schema of this second exists (names are per second)"""
+    existing = {kept.name for kept in backend.kept_schemas(db)}
+    for _ in range(3):
+        name = kept_name(db, now())
+        if name not in existing:
+            return name
+        time.sleep(1)
+    raise BackupFailure("busy")
+
+
 def _drop_if_empty(backend: RestoreBackend, schema: str) -> None:
     """Drop a kept schema this run created, only while it holds no table: a swap that failed on the client may have
     completed on the server, and the kept schema then holds the only copy of the replaced data"""
@@ -474,7 +486,7 @@ def restore_backup(cfg: BackupConfig, db: DatabaseConfig, ref: str, *, backend: 
                 raise RestoreRefused("connections")
             carry = _merge(carry, _carry(backend, db.name, staging, now()))
             ids_raised = backend.bump_auto_increment(db.name, staging)
-            name = kept_name(db.name, now())
+            name = _free_kept_name(backend, db.name, now)
             backend.create_schema(name)
             keep_as = name      # only a schema this run created is ever dropped below
             backend.swap(db.name, backend.list_tables(db.name), tables, staging, keep_as)
@@ -509,7 +521,7 @@ def undo_restore(cfg: BackupConfig, db: DatabaseConfig, schema: Optional[str], *
         carry = _carry(backend, db.name, source, now())
         differences = backend.user_differences(db.name, source)
         ids_raised = backend.bump_auto_increment(db.name, source)
-        keep_as = kept_name(db.name, now())
+        keep_as = _free_kept_name(backend, db.name, now)
         backend.create_schema(keep_as)
         try:
             backend.swap(db.name, backend.list_tables(db.name), backend.list_tables(source), source, keep_as)

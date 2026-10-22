@@ -117,7 +117,11 @@ def parse_kept(db: str, rows: Iterable[tuple]) -> list[KeptSchema]:
     kept = []
     for name, size in rows:
         match = pattern.match(name)
-        if match:
+        if not match:
+            continue
+        try:
             created = datetime.strptime(match.group(1), KEPT_FORMAT).replace(tzinfo=timezone.utc)
-            kept.append(KeptSchema(name=name, created_at=created, size_bytes=int(size or 0)))
+        except ValueError:           # named like a kept schema, but no date (made by hand): not ours
+            continue
+        kept.append(KeptSchema(name=name, created_at=created, size_bytes=int(size or 0)))
     return sorted(kept, key=lambda k: k.created_at)

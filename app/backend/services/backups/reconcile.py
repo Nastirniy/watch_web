@@ -25,6 +25,13 @@ from app.backend.models.user_certificate import UserCertificate
 ORPHANED_DIR = "_orphaned"
 QUARANTINE_DIR = ".quarantine"
 SKIPPED_TOP = frozenset({"_derived", "_tmp", ORPHANED_DIR})
+# Never ours at any level: hidden files and in-flight copies (.tmp-...), NAS snapshot / index / recycle folders
+SKIPPED_PREFIXES = (".", "@", "#")
+SKIPPED_NAMES = frozenset({"lost+found"})
+
+
+def _ours(name: str) -> bool:
+    return not name.startswith(SKIPPED_PREFIXES) and name not in SKIPPED_NAMES
 MIN_AGE_SECONDS = 600
 
 _logger = logger.bind(module="backups")
@@ -45,16 +52,21 @@ def _stamp(now: datetime) -> str:
 
 
 def _old(path: Path, now: datetime) -> bool:
-    return path.stat().st_mtime <= now.timestamp() - MIN_AGE_SECONDS
+    """Older than MIN_AGE_SECONDS; a file gone meanwhile or a broken symlink is not (it is left alone)"""
+    try:
+        return path.stat().st_mtime <= now.timestamp() - MIN_AGE_SECONDS
+    except FileNotFoundError:
+        return False
 
 
 def _media_files(root: Path, now: datetime):
     """Relative paths of the old enough files of the media directory, outside _derived, _tmp and _orphaned"""
     for current, dirs, files in os.walk(root):
         here = Path(current)
-        if here == root:
-            dirs[:] = [d for d in dirs if d not in SKIPPED_TOP]
+        dirs[:] = [d for d in dirs if _ours(d) and not (here == root and d in SKIPPED_TOP)]
         for name in files:
+            if not _ours(name):
+                continue
             path = here / name
             if _old(path, now):
                 yield path.relative_to(root).as_posix()

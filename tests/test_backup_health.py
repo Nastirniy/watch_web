@@ -24,6 +24,7 @@ def put(directory, hours_ago: float, sha="ab" * 32) -> Manifest:
         dump_tool="d", migration_revision="028", tables=("t",), file="dump.sql.gz", size_bytes=1, sha256=sha,
     )
     (directory / manifest.id).mkdir(parents=True)
+    (directory / manifest.id / "dump.sql.gz").write_bytes(b"x")
     write_manifest(directory / manifest.id, manifest)
     return manifest
 
