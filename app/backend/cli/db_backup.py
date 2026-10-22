@@ -8,9 +8,9 @@ Usage:
     python -m app.backend.cli.db_backup list [--json]           # backups, newest first; incomplete folders
     python -m app.backend.cli.db_backup verify <id|latest> [--deep]
         # checksum and gzip; --deep also loads it into <db>_verify and compares tables and revision
-    python -m app.backend.cli.db_backup restore <id|latest> [--yes] [--force-connections] [--force-orphans]
+    python -m app.backend.cli.db_backup restore <id|latest> [--yes] [--force-connections]
         # roll the database back to a backup; the replaced tables stay in <db>_before_<time>
-    python -m app.backend.cli.db_backup undo-restore [<schema>] [--yes] [--force-connections] [--force-orphans]
+    python -m app.backend.cli.db_backup undo-restore [<schema>] [--yes] [--force-connections]
         # swap the newest (or the named) <db>_before_* schema back in
     python -m app.backend.cli.db_backup prune [--dry-run]       # retention, and kept schemas past keep_previous_days
     python -m app.backend.cli.db_backup status [--json]         # what GET /database/backups reports
@@ -159,8 +159,8 @@ def _report(result: RestoreResult) -> None:
     print(f"carried over: {carry.revocations} revocation(s), {carry.certificates_added} certificate(s) added as "
           f"revoked, CRL number {carry.crl_number}, {carry.sessions_ended} session(s) ended, "
           f"{result.ids_raised} id counter(s) raised past the replaced data")
-    for serial in carry.orphan_serials:
-        print(f"NOT carried over (user missing in the backup), revoke by hand: certificate {serial}")
+    for user_id, username in carry.users_added:
+        print(f"user {user_id} {username}: added archived (created after the backup; its certificates revoked)")
     for user_id, username, change in result.user_differences:
         print(f"user {user_id} {username}: {change} (left as restored)")
     print("next: docker compose up -d")
@@ -180,7 +180,7 @@ def cmd_restore(args) -> int:
             print("aborted", file=sys.stderr)
             return EXIT_REFUSED
     _report(restore_backup(settings.backup, settings.database, args.ref, backend=backend,
-                           force_connections=args.force_connections, skip_orphans=args.force_orphans))
+                           force_connections=args.force_connections))
     return EXIT_OK
 
 
@@ -191,7 +191,7 @@ def cmd_undo(args) -> int:
         print("aborted", file=sys.stderr)
         return EXIT_REFUSED
     _report(undo_restore(settings.backup, settings.database, args.schema, backend=backend,
-                         force_connections=args.force_connections, skip_orphans=args.force_orphans))
+                         force_connections=args.force_connections))
     return EXIT_OK
 
 
@@ -230,7 +230,6 @@ def _parser() -> argparse.ArgumentParser:
     for command, handler in ((restore, cmd_restore), (undo, cmd_undo)):
         command.add_argument("--yes", action="store_true")
         command.add_argument("--force-connections", action="store_true")
-        command.add_argument("--force-orphans", action="store_true")
         command.set_defaults(handler=handler)
     prune_command = commands.add_parser("prune")
     prune_command.add_argument("--dry-run", action="store_true")
@@ -251,8 +250,6 @@ def main(argv: Optional[list[str]] = None) -> int:
         return EXIT_REFUSED if exc.refused else EXIT_FAILED
     except RestoreRefused as exc:
         print(f"refused: {exc.code}", file=sys.stderr)
-        for serial in exc.serials:
-            print(f"  certificate {serial}", file=sys.stderr)
         return EXIT_REFUSED
 
 

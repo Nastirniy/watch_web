@@ -23,14 +23,7 @@ CERTIFICATES = UserCertificate.__tablename__
 CA_STATE = CertificateAuthorityState.__tablename__
 SESSIONS = UserSession.__tablename__
 USERS = User.__tablename__
-
-
-class OrphanCertificates(Exception):
-    """Certificates created after the backup whose user is missing from it: nothing was changed"""
-
-    def __init__(self, serials: tuple[str, ...]):
-        super().__init__(f"{len(serials)} certificate(s) of users missing from the backup")
-        self.serials = serials
+POSTS = "posts"
 
 
 class CarryOverUnsupported(Exception):
@@ -45,7 +38,7 @@ class CarryOverUnsupported(Exception):
 class CarryOverResult:
     revocations: int
     certificates_added: int
-    orphan_serials: tuple[str, ...]
+    users_added: tuple[tuple[int, str], ...]     # (id, username as inserted): placeholders, archived
     crl_number: int
     sessions_ended: int
 
@@ -66,19 +59,40 @@ def _naive_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-def _serial(row) -> str:
-    return row.get("serial") or f"#{row['id']}"
+def _add_placeholders(conn: sa.Connection, outgoing: Optional[str], incoming: Optional[str],
+                      user_ids: set[int]) -> tuple[tuple[int, str], ...]:
+    """Insert the users of user_ids from the outgoing data as archived placeholders (spec 8.2): no roles, no post
+    the incoming data lacks, a username taken in the incoming data suffixed with ~<id>"""
+    if not user_ids:
+        return ()
+    out_users, in_users = _reflect(conn, USERS, outgoing), _reflect(conn, USERS, incoming)
+    posts = _reflect(conn, POSTS, incoming)
+    post_ids = set() if posts is None else set(conn.execute(sa.select(posts.c.id)).scalars())
+    taken = set(conn.execute(sa.select(in_users.c.username)).scalars())
+    added = []
+    for row in conn.execute(sa.select(out_users).where(out_users.c.id.in_(sorted(user_ids)))
+                            .order_by(out_users.c.id)).mappings():
+        values = _only(in_users, dict(row))
+        values.update(_only(in_users, {"is_active": False, "is_deleted": True}))
+        if values.get("post_id") is not None and values["post_id"] not in post_ids:
+            values["post_id"] = None
+        if values["username"] in taken:
+            values["username"] = f"{values['username']}~{row['id']}"
+        taken.add(values["username"])
+        conn.execute(sa.insert(in_users).values(**values))
+        added.append((row["id"], values["username"]))
+    return tuple(added)
 
 
-def carry_over(conn: sa.Connection, outgoing: Optional[str], incoming: Optional[str], now: datetime, *,
-               skip_orphans: bool) -> CarryOverResult:
+def carry_over(conn: sa.Connection, outgoing: Optional[str], incoming: Optional[str],
+               now: datetime) -> CarryOverResult:
     stamp = _naive_utc(now)
     out_certs, in_certs = _reflect(conn, CERTIFICATES, outgoing), _reflect(conn, CERTIFICATES, incoming)
     outgoing_rows = [] if out_certs is None else [
         dict(row) for row in conn.execute(sa.select(out_certs).order_by(out_certs.c.id)).mappings()]
     if in_certs is None and any(row["revoked_at"] is not None or row.get("ca_issued") for row in outgoing_rows):
         raise CarryOverUnsupported(CERTIFICATES)
-    revoke, missing, orphans = [], [], ()
+    revoke, missing, users_added = [], [], ()
     if in_certs is not None:
         in_users = _reflect(conn, USERS, incoming)
         incoming_by_fp = {row["fingerprint_hash"]: row for row in conn.execute(sa.select(in_certs)).mappings()}
@@ -88,9 +102,10 @@ def carry_over(conn: sa.Connection, outgoing: Optional[str], incoming: Optional[
                   and row["fingerprint_hash"] in incoming_by_fp
                   and incoming_by_fp[row["fingerprint_hash"]]["revoked_at"] is None]
         missing = [row for row in outgoing_rows if row["fingerprint_hash"] not in incoming_by_fp]
-        orphans = tuple(_serial(row) for row in missing if row["user_id"] not in user_ids)
-        if orphans and not skip_orphans:
-            raise OrphanCertificates(orphans)
+        # users created after the backup come back archived, so their certificates can be carried (revoked)
+        users_added = _add_placeholders(conn, outgoing, incoming,
+                                        {row["user_id"] for row in missing} - user_ids)
+        user_ids |= {user_id for user_id, _ in users_added}
 
     for row in revoke:
         conn.execute(sa.update(in_certs).where(in_certs.c.fingerprint_hash == row["fingerprint_hash"]).values(
@@ -98,8 +113,6 @@ def carry_over(conn: sa.Connection, outgoing: Optional[str], incoming: Optional[
                                "revocation_reason": row.get("revocation_reason")})))
     added = 0
     for row in missing:
-        if row["user_id"] not in user_ids:
-            continue
         values = dict(row)
         if values["id"] in incoming_ids:
             del values["id"]
@@ -130,9 +143,8 @@ def carry_over(conn: sa.Connection, outgoing: Optional[str], incoming: Optional[
             "revoke_cause": SessionRevokeCause.DATABASE_RESTORED.value}))).rowcount
     elif sessions is not None and "is_active" in sessions.c:
         ended = conn.execute(sa.update(sessions).where(sessions.c.is_active.is_(True)).values(is_active=False)).rowcount
-    return CarryOverResult(revocations=len(revoke), certificates_added=added,
-                           orphan_serials=orphans if skip_orphans else (), crl_number=crl_number,
-                           sessions_ended=ended)
+    return CarryOverResult(revocations=len(revoke), certificates_added=added, users_added=users_added,
+                           crl_number=crl_number, sessions_ended=ended)
 
 
 def user_state_differences(conn: sa.Connection, outgoing: Optional[str],

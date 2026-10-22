@@ -7,6 +7,13 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## Database backups
 
+### Changed
+
+- A restore (and an undo) raises the id counter (`AUTO_INCREMENT`) of every table past the replaced data: no id is
+  handed out twice (derived posters and storyboards, the thumbnail cache and certificate folders are keyed by id).
+- Users created after the backup who have a certificate come back archived (inactive, no roles), so their
+  certificates return revoked and go on the CRL; the refusal `orphan_certificates` and `--force-orphans` are gone.
+
 ### Added
 
 - `GET /api/v1/database/status` (`database.view`): the database server (product, version, uptime, connections) and

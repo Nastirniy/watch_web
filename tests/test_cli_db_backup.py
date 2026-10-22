@@ -17,7 +17,8 @@ from app.backend.services.backups.schemas import KeptSchema
 
 UTC = timezone.utc
 STARTED = datetime(2026, 10, 22, 3, 15, 0, tzinfo=UTC)
-CARRY = CarryOverResult(revocations=1, certificates_added=0, orphan_serials=(), crl_number=4, sessions_ended=2)
+CARRY = CarryOverResult(revocations=1, certificates_added=1, users_added=((12, "newbie"),), crl_number=4,
+                        sessions_ended=2)
 
 
 def manifest(started=STARTED, label=BackupLabel.SCHEDULED) -> Manifest:
@@ -144,8 +145,8 @@ def restore_calls(configured, monkeypatch):
     calls = []
     monkeypatch.setattr(db_backup, "plan_restore", lambda cfg, db, ref, backend: PLAN)
 
-    def fake_restore(cfg, db, ref, *, backend, force_connections, skip_orphans):
-        calls.append((ref, force_connections, skip_orphans))
+    def fake_restore(cfg, db, ref, *, backend, force_connections):
+        calls.append((ref, force_connections))
         return RESULT
 
     monkeypatch.setattr(db_backup, "restore_backup", fake_restore)
@@ -157,15 +158,16 @@ def test_restore_needs_yes(restore_calls, capsys):
     assert "aborted" in capsys.readouterr().err
     assert restore_calls == []
     assert run(["restore", "latest"], stdin="yes\n") == 0
-    assert restore_calls == [("latest", False, False)]
+    assert restore_calls == [("latest", False)]
 
 
 def test_restore_with_flags(restore_calls, capsys):
-    assert run(["restore", "20261022T031500Z-scheduled", "--yes", "--force-connections", "--force-orphans"]) == 0
-    assert restore_calls == [("20261022T031500Z-scheduled", True, True)]
+    assert run(["restore", "20261022T031500Z-scheduled", "--yes", "--force-connections"]) == 0
+    assert restore_calls == [("20261022T031500Z-scheduled", True)]
     out = capsys.readouterr().out
     assert "radio_monitoring_before_20261022_120000" in out
     assert "anna" in out and "is_active True->False" in out
+    assert "user 12 newbie: added archived" in out
     assert "docker compose up -d" in out
 
 
@@ -180,17 +182,20 @@ def test_restore_busy(configured, monkeypatch, capsys):
     assert capsys.readouterr().err.strip() == "refused: busy"
 
 
-def test_restore_refused_lists_orphans(configured, monkeypatch, capsys):
+def test_restore_refused(configured, monkeypatch, capsys):
     monkeypatch.setattr(db_backup, "plan_restore", lambda cfg, db, ref, backend: PLAN)
 
-    def orphans(*args, **kw):
-        raise RestoreRefused("orphan_certificates", serials=("abc1", "abc2"))
+    def refused(*args, **kw):
+        raise RestoreRefused("unknown_revision")
 
-    monkeypatch.setattr(db_backup, "restore_backup", orphans)
+    monkeypatch.setattr(db_backup, "restore_backup", refused)
     assert run(["restore", "latest", "--yes"]) == 3
-    err = capsys.readouterr().err
-    assert "refused: orphan_certificates" in err and "abc1" in err and "abc2" in err
+    assert capsys.readouterr().err.strip() == "refused: unknown_revision"
 
+
+def test_force_orphans_is_gone(configured):
+    with pytest.raises(SystemExit):
+        run(["restore", "latest", "--yes", "--force-orphans"])
 
 def test_restore_always_names_the_crl_step(restore_calls, capsys):
     """The tool service has no PKI settings (seen live): the step is printed for servers with PKI either way"""
@@ -201,7 +206,7 @@ def test_restore_always_names_the_crl_step(restore_calls, capsys):
 def test_undo_restore(configured, monkeypatch, capsys):
     seen = []
 
-    def fake_undo(cfg, db, schema, *, backend, force_connections, skip_orphans):
+    def fake_undo(cfg, db, schema, *, backend, force_connections):
         seen.append(schema)
         return RESULT
 

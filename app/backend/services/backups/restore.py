@@ -28,7 +28,7 @@ from sqlalchemy.pool import NullPool
 from app.backend.config import BackupConfig, DatabaseConfig
 from app.backend.models.audit import AuditLog
 from app.backend.services.backups.carry_over import (
-    CarryOverResult, CarryOverUnsupported, OrphanCertificates, carry_over, user_state_differences,
+    CarryOverResult, CarryOverUnsupported, carry_over, user_state_differences,
 )
 from app.backend.services.backups.catalog import scan
 from app.backend.services.backups.client_tools import ClientTools, child_env, defaults_file
@@ -55,12 +55,11 @@ def utcnow() -> datetime:
 
 class RestoreRefused(Exception):
     """Nothing was changed. code: not_found, checksum_mismatch, unknown_revision, unsupported_objects, connections,
-    orphan_certificates (serials), nothing_to_undo, backup_too_old (no table to carry revocations into)"""
+    nothing_to_undo, backup_too_old (no table to carry revocations into)"""
 
-    def __init__(self, code: str, serials: tuple[str, ...] = ()):
+    def __init__(self, code: str):
         super().__init__(code)
         self.code = code
-        self.serials = serials
 
 
 @dataclass(frozen=True)
@@ -98,7 +97,7 @@ class RestoreBackend(Protocol):
     def load_dump(self, path: Path, schema: str) -> None: ...
     def list_tables(self, schema: str) -> list[str]: ...
     def revision(self, schema: str) -> Optional[str]: ...
-    def carry_over(self, outgoing: str, incoming: str, now: datetime, skip_orphans: bool) -> CarryOverResult: ...
+    def carry_over(self, outgoing: str, incoming: str, now: datetime) -> CarryOverResult: ...
     def user_differences(self, outgoing: str, incoming: str) -> list: ...
     def bump_auto_increment(self, outgoing: str, incoming: str) -> int: ...
     def swap(self, db: str, live: list[str], incoming: list[str], source: str, keep_as: str) -> None: ...
@@ -201,9 +200,9 @@ class MariaDbBackend:
         with self.engine.connect() as conn:
             return conn.exec_driver_sql(f"SELECT version_num FROM {quote(schema)}.alembic_version").scalar()
 
-    def carry_over(self, outgoing: str, incoming: str, now: datetime, skip_orphans: bool) -> CarryOverResult:
+    def carry_over(self, outgoing: str, incoming: str, now: datetime) -> CarryOverResult:
         with self.engine.begin() as conn:
-            return carry_over(conn, outgoing, incoming, now, skip_orphans=skip_orphans)
+            return carry_over(conn, outgoing, incoming, now)
 
     def user_differences(self, outgoing: str, incoming: str) -> list:
         with self.engine.connect() as conn:
@@ -305,11 +304,9 @@ def plan_restore(cfg: BackupConfig, db: DatabaseConfig, ref: str, *, backend: Re
                        other_connections=backend.other_connections(db.name))
 
 
-def _carry(backend: RestoreBackend, db: str, incoming: str, now: datetime, skip_orphans: bool) -> CarryOverResult:
+def _carry(backend: RestoreBackend, db: str, incoming: str, now: datetime) -> CarryOverResult:
     try:
-        return backend.carry_over(db, incoming, now, skip_orphans)
-    except OrphanCertificates as exc:
-        raise RestoreRefused("orphan_certificates", serials=exc.serials)
+        return backend.carry_over(db, incoming, now)
     except CarryOverUnsupported as exc:
         _logger.error(f"Backups: cannot carry the final state over: {exc}")
         raise RestoreRefused("backup_too_old")
@@ -326,12 +323,12 @@ def _drop_if_empty(backend: RestoreBackend, schema: str) -> None:
 
 def _details(carry: CarryOverResult, keep_as: str, ids_raised: int) -> dict:
     return {"kept_schema": keep_as, "revocations": carry.revocations, "certificates_added": carry.certificates_added,
-            "orphans_skipped": len(carry.orphan_serials), "crl_number": carry.crl_number,
+            "users_added": len(carry.users_added), "crl_number": carry.crl_number,
             "sessions_ended": carry.sessions_ended, "ids_raised": ids_raised}
 
 
 def restore_backup(cfg: BackupConfig, db: DatabaseConfig, ref: str, *, backend: RestoreBackend,
-                   force_connections: bool = False, skip_orphans: bool = False,
+                   force_connections: bool = False,
                    now: Callable[[], datetime] = utcnow) -> RestoreResult:
     with writer_lock(Path(cfg.dir)):
         folder, manifest = _checked(cfg, ref)
@@ -346,7 +343,7 @@ def restore_backup(cfg: BackupConfig, db: DatabaseConfig, ref: str, *, backend: 
             if set(tables) != set(manifest.tables) or backend.revision(staging) != manifest.migration_revision:
                 _logger.error(f"Backups: {manifest.id} loaded into {staging} does not match its manifest")
                 raise BackupFailure("load_failed")
-            carry = _carry(backend, db.name, staging, now(), skip_orphans)
+            carry = _carry(backend, db.name, staging, now())
             differences = backend.user_differences(db.name, staging)
             ids_raised = backend.bump_auto_increment(db.name, staging)
             name = kept_name(db.name, now())
@@ -368,7 +365,7 @@ def restore_backup(cfg: BackupConfig, db: DatabaseConfig, ref: str, *, backend: 
 
 
 def undo_restore(cfg: BackupConfig, db: DatabaseConfig, schema: Optional[str], *, backend: RestoreBackend,
-                 force_connections: bool = False, skip_orphans: bool = False,
+                 force_connections: bool = False,
                  now: Callable[[], datetime] = utcnow) -> RestoreResult:
     """Swap a kept schema (the newest, or the named one) back into db; the tables it replaces are kept in turn"""
     with writer_lock(Path(cfg.dir)):
@@ -381,7 +378,7 @@ def undo_restore(cfg: BackupConfig, db: DatabaseConfig, schema: Optional[str], *
         if backend.revision(source) not in known_revisions():
             raise RestoreRefused("unknown_revision")
         _guard(backend, db.name, force_connections)
-        carry = _carry(backend, db.name, source, now(), skip_orphans)
+        carry = _carry(backend, db.name, source, now())
         differences = backend.user_differences(db.name, source)
         ids_raised = backend.bump_auto_increment(db.name, source)
         keep_as = kept_name(db.name, now())

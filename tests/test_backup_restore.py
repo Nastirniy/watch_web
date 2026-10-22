@@ -9,7 +9,7 @@ import pytest
 
 from app.backend.config import BackupConfig, DatabaseConfig
 from app.backend.enums.general import BackupLabel
-from app.backend.services.backups.carry_over import CarryOverResult, CarryOverUnsupported, OrphanCertificates
+from app.backend.services.backups.carry_over import CarryOverResult, CarryOverUnsupported
 from app.backend.services.backups.failures import BackupFailure
 from app.backend.services.backups.locking import writer_lock
 from app.backend.services.backups.manifest import FORMAT_VERSION, Manifest, backup_id, write_manifest
@@ -24,7 +24,7 @@ NOW = datetime(2026, 10, 22, 12, 0, 0, tzinfo=UTC)
 DB = DatabaseConfig(name="db", user="u", password="p")
 TABLES = ("alembic_version", "users")
 REVISION = "028_no_actor_foreign_keys"
-CARRY = CarryOverResult(revocations=1, certificates_added=2, orphan_serials=(), crl_number=7, sessions_ended=3)
+CARRY = CarryOverResult(revocations=1, certificates_added=2, users_added=((9, "u9"),), crl_number=7, sessions_ended=3)
 
 
 class FakeBackend:
@@ -78,10 +78,8 @@ class FakeBackend:
         self._call("revision", schema)
         return REVISION if schema == "db" else self.staging_revision
 
-    def carry_over(self, outgoing, incoming, now, skip_orphans):
+    def carry_over(self, outgoing, incoming, now):
         self._call("carry_over", outgoing, incoming)
-        if self.fail_on == "orphans" and not skip_orphans:
-            raise OrphanCertificates(("abc",))
         if self.fail_on == "too_old":
             raise CarryOverUnsupported("user_certificates")
         return CARRY
@@ -168,7 +166,7 @@ def test_restore_order(cfg):
     assert backend.audits[0] == {
         "backup_id": manifest.id, "label": "scheduled", "backup_revision": REVISION,
         "kept_schema": "db_before_20261022_120000", "revocations": 1, "certificates_added": 2,
-        "orphans_skipped": 0, "crl_number": 7, "sessions_ended": 3, "ids_raised": 4,
+        "users_added": 1, "crl_number": 7, "sessions_ended": 3, "ids_raised": 4,
     }
     assert result.kept_schema == "db_before_20261022_120000"
     assert result.carry == CARRY
@@ -248,16 +246,6 @@ def test_loaded_revision_must_match_the_manifest(cfg):
     with pytest.raises(BackupFailure) as exc:
         restore(cfg, backend)
     assert exc.value.code == "load_failed"
-
-
-def test_orphans_refused(cfg):
-    put_backup(Path(cfg.dir))
-    backend = FakeBackend(fail_on="orphans")
-    with pytest.raises(RestoreRefused) as exc:
-        restore(cfg, backend)
-    assert exc.value.code == "orphan_certificates" and exc.value.serials == ("abc",)
-    assert backend.calls[-1] == ("drop_schema", "db_restore")
-    restore(cfg, FakeBackend(fail_on="orphans"), skip_orphans=True)
 
 
 def test_restore_holds_the_lock(cfg):

@@ -11,7 +11,7 @@ from sqlmodel import SQLModel
 
 import app.backend.models  # noqa: F401  (every table on SQLModel.metadata)
 from app.backend.services.backups.carry_over import (
-    CarryOverUnsupported, OrphanCertificates, carry_over, user_state_differences,
+    CarryOverUnsupported, carry_over, user_state_differences,
 )
 
 NOW = datetime(2026, 10, 22, 12, 0, 0, tzinfo=timezone.utc)
@@ -67,7 +67,7 @@ def test_revocation_survives(conn):
     both_users(conn, 1)
     add_cert(conn, 10, 1, "fp10", revoked_at=EARLIER, revoked_by=7, revocation_reason="key_compromise")
     add_cert(conn, 10, 1, "fp10", "incoming")
-    result = carry_over(conn, None, "incoming", NOW, skip_orphans=False)
+    result = carry_over(conn, None, "incoming", NOW)
     row = cert(conn, "fp10")
     assert (row.revoked_at, row.revoked_by, row.revocation_reason) == (EARLIER, 7, "key_compromise")
     assert result.revocations == 1 and result.certificates_added == 0
@@ -77,7 +77,7 @@ def test_new_certificate_inserted_revoked(conn):
     both_users(conn, 1)
     add_cert(conn, 20, 1, "fp20", ca_issued=True, files_dir="1/20")
     add_cert(conn, 21, 1, "fp21", revoked_at=EARLIER, revoked_by=3, revocation_reason="superseded")
-    result = carry_over(conn, None, "incoming", NOW, skip_orphans=False)
+    result = carry_over(conn, None, "incoming", NOW)
     new = cert(conn, "fp20")
     assert new.id == 20 and new.revoked_at == NAIVE_NOW and new.revoked_by is None
     assert new.revocation_reason == "cessation_of_operation"
@@ -91,24 +91,57 @@ def test_inserted_certificate_gets_a_new_id_when_its_id_is_taken(conn):
     both_users(conn, 1)
     add_cert(conn, 30, 1, "fp-out")
     add_cert(conn, 30, 1, "fp-other", "incoming")
-    carry_over(conn, None, "incoming", NOW, skip_orphans=False)
+    carry_over(conn, None, "incoming", NOW)
     assert cert(conn, "fp-out").id != 30
     assert cert(conn, "fp-other").id == 30
 
 
-def test_orphan_refused_then_skipped(conn):
+def test_user_of_a_new_certificate_comes_back_archived(conn):
+    """A user created after the backup, with a certificate: the user returns archived, the certificate revoked, so
+    it goes on the next CRL (spec 8.2)"""
+    add_user(conn, 1)
+    add_user(conn, 1, "incoming")
+    add_user(conn, 2)
+    conn.execute(sa.insert(t("role_assignments")).values(user_id=2, role_id=1, scope_key="root", created_at=EARLIER))
+    add_cert(conn, 40, 2, "fp40", serial="abc40")
+    result = carry_over(conn, None, "incoming", NOW)
+    users = t("users", "incoming")
+    row = conn.execute(sa.select(users).where(users.c.id == 2)).mappings().one()
+    assert (row.username, row.is_active, row.is_deleted) == ("u2", False, True)
+    assert result.users_added == ((2, "u2"),)
+    new = cert(conn, "fp40")
+    assert new.user_id == 2 and new.revoked_at == NAIVE_NOW and new.revocation_reason == "cessation_of_operation"
+    assignments = t("role_assignments", "incoming")
+    assert conn.execute(sa.select(sa.func.count()).select_from(assignments)).scalar() == 0
+
+
+def test_placeholder_without_its_post(conn):
+    conn.execute(sa.insert(t("posts")).values(id=9, name="P9", code="P9", is_deleted=False))
+    add_user(conn, 1, "incoming")
+    conn.execute(sa.insert(t("users")).values(
+        id=3, username="u3", username_alias="U3", is_active=True, user_type="viewer", is_deleted=False, post_id=9,
+        created_at=EARLIER, updated_at=EARLIER))
+    add_cert(conn, 41, 3, "fp41")
+    carry_over(conn, None, "incoming", NOW)
+    users = t("users", "incoming")
+    assert conn.execute(sa.select(users.c.post_id).where(users.c.id == 3)).scalar() is None
+
+
+def test_placeholder_username_clash(conn):
+    add_user(conn, 5)
+    conn.execute(sa.insert(t("users", "incoming")).values(
+        id=6, username="u5", username_alias="other", is_active=True, user_type="viewer", is_deleted=False,
+        created_at=EARLIER, updated_at=EARLIER))
+    add_cert(conn, 42, 5, "fp42")
+    result = carry_over(conn, None, "incoming", NOW)
+    assert result.users_added == ((5, "u5~5"),)
+
+
+def test_users_without_a_new_certificate_are_not_added(conn):
     add_user(conn, 1)
     add_user(conn, 2)
     add_user(conn, 1, "incoming")
-    add_cert(conn, 40, 2, "fp40", serial="abc40")
-    add_cert(conn, 41, 1, "fp41")
-    with pytest.raises(OrphanCertificates) as exc:
-        carry_over(conn, None, "incoming", NOW, skip_orphans=False)
-    assert exc.value.serials == ("abc40",)
-    assert cert(conn, "fp41") is None and cert(conn, "fp40") is None
-    result = carry_over(conn, None, "incoming", NOW, skip_orphans=True)
-    assert result.orphan_serials == ("abc40",)
-    assert cert(conn, "fp40") is None and cert(conn, "fp41") is not None
+    assert carry_over(conn, None, "incoming", NOW).users_added == ()
 
 
 def set_crl(conn, number, schema=None):
@@ -120,7 +153,7 @@ def set_crl(conn, number, schema=None):
 def test_crl_number_is_max(conn, outgoing, incoming, expected):
     set_crl(conn, outgoing)
     set_crl(conn, incoming, "incoming")
-    result = carry_over(conn, None, "incoming", NOW, skip_orphans=False)
+    result = carry_over(conn, None, "incoming", NOW)
     table = t("certificate_authority_state", "incoming")
     assert conn.execute(sa.select(table.c.crl_number)).scalar() == expected == result.crl_number
 
@@ -136,7 +169,7 @@ def test_live_sessions_ended(conn):
     add_session(conn, "a")
     add_session(conn, "b")
     add_session(conn, "c", ended_at=EARLIER)
-    result = carry_over(conn, None, "incoming", NOW, skip_orphans=False)
+    result = carry_over(conn, None, "incoming", NOW)
     table = t("user_sessions", "incoming")
     rows = {r.id: r for r in conn.execute(sa.select(table)).mappings()}
     for session_id in ("a", "b"):
@@ -155,8 +188,8 @@ def test_idempotent(conn):
     set_crl(conn, 5)
     set_crl(conn, 2, "incoming")
     add_session(conn, "a")
-    carry_over(conn, None, "incoming", NOW, skip_orphans=False)
-    again = carry_over(conn, None, "incoming", NOW, skip_orphans=False)
+    carry_over(conn, None, "incoming", NOW)
+    again = carry_over(conn, None, "incoming", NOW)
     assert (again.revocations, again.certificates_added, again.sessions_ended) == (0, 0, 0)
     assert again.crl_number == 5
 
@@ -181,7 +214,7 @@ def test_crl_state_row_follows_the_newer_number(conn):
     conn.execute(sa.insert(t("certificate_authority_state", "incoming")).values(
         id=1, crl_number=9, this_update=EARLIER, next_update=EARLIER + timedelta(days=7), published_at=EARLIER,
         revoked_count=2))
-    carry_over(conn, None, "incoming", NOW, skip_orphans=False)
+    carry_over(conn, None, "incoming", NOW)
     row = conn.execute(sa.select(t("certificate_authority_state", "incoming"))).mappings().one()
     assert (row.crl_number, row.this_update, row.next_update, row.published_at, row.revoked_count) == (
         12, published, published + timedelta(days=7), published, 5)
@@ -210,7 +243,7 @@ def test_restore_into_an_older_schema(conn):
     conn.exec_driver_sql("INSERT INTO incoming.user_certificates (id, user_id, fingerprint_hash) VALUES (10, 1, 'fp10')")
     add_cert(conn, 11, 1, "fp11", export_count=3)
     conn.exec_driver_sql("INSERT INTO incoming.user_sessions (id, user_id, is_active) VALUES ('a', 1, 1), ('b', 1, 0)")
-    result = carry_over(conn, None, "incoming", NOW, skip_orphans=False)
+    result = carry_over(conn, None, "incoming", NOW)
     assert (result.revocations, result.certificates_added, result.sessions_ended) == (1, 1, 1)
     rows = conn.exec_driver_sql(
         "SELECT fingerprint_hash, revocation_reason FROM incoming.user_certificates ORDER BY id").all()
@@ -223,4 +256,4 @@ def test_backup_without_a_certificates_table_is_refused(conn):
     both_users(conn, 1)
     add_cert(conn, 10, 1, "fp10", revoked_at=EARLIER, revocation_reason="key_compromise")
     with pytest.raises(CarryOverUnsupported):
-        carry_over(conn, None, "incoming", NOW, skip_orphans=False)
+        carry_over(conn, None, "incoming", NOW)

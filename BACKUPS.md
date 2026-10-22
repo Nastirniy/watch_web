@@ -124,7 +124,7 @@ All of them run as `docker compose run --rm db-backup <command>`.
 | `create [--label manual\|pre-upgrade] [--no-copy]` | a backup; prints its id |
 | `list [--json]` | backups newest first: id, size, age, revision, copy |
 | `verify <id\|latest> [--deep]` | checksum and gzip. `--deep` also loads the backup into `<db>_verify`, compares its tables and revision with the manifest, then drops it |
-| `restore <id\|latest> [--yes] [--force-connections] [--force-orphans]` | roll the database back (below) |
+| `restore <id\|latest> [--yes] [--force-connections]` | roll the database back (below) |
 | `undo-restore [<schema>] [--yes] ...` | swap the newest (or the named) kept schema back in |
 | `prune [--dry-run]` | retention, plus kept schemas older than `keep_previous_days` (7) |
 | `status [--json]` | what the API reports |
@@ -183,9 +183,11 @@ What `restore` does:
      CRL still lists them.
    - **CRL number:** it never goes backwards.
    - **Sessions:** every session of the backup is ended (`database_restored`), so users log in again.
-   - **Orphans:** a post-backup certificate whose user is missing from the backup makes the restore refuse
-     (`orphan_certificates`, serials listed). `--force-orphans` skips those certificates, and the tool prints their
-     serials so you can revoke them by hand.
+   - **Users created after the backup** who have a certificate come back archived (`is_deleted`, inactive, no
+     roles, no post the backup lacks; a username taken meanwhile gets `~<id>`), so their certificates can come back
+     revoked and go on the CRL. An administrator can restore such a user and give it roles again.
+   - **Ids:** the id counter of every table is raised past the replaced data, so no id is handed out twice (posters,
+     storyboards, the thumbnail cache and certificate folders are keyed by id).
 5. Swap: one atomic `RENAME TABLE` moves every live table to `<db>_before_<YYYYMMDD_HHMMSS>` and every restored
    table into `<db>`.
 6. It writes an audit row (`restore`, resource `database`) and prints the next steps, the carry-over counts, and the
@@ -210,7 +212,6 @@ Refusals (exit 3):
 | `unknown_revision` | the backup is newer than this version of the code |
 | `connections` | other connections use the database |
 | `unsupported_objects` | the database holds objects the swap cannot move |
-| `orphan_certificates` | certificates whose user is missing from the backup |
 | `nothing_to_undo` | no kept schema to swap back |
 
 ## What a rollback does not bring back
