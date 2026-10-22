@@ -11,7 +11,7 @@ import os
 import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Optional
 
 from loguru import logger
@@ -60,19 +60,36 @@ def _media_files(root: Path, now: datetime):
                 yield path.relative_to(root).as_posix()
 
 
-def _derived(root: Path, ids: set[int]) -> list[str]:
-    stale = []
+def _derived(root: Path, now: datetime) -> list[tuple[str, int]]:
+    """(relative path, media id) of the old enough posters and storyboard folders"""
+    found = []
     posters = root / POSTER_DIR
     if posters.is_dir():
         for path in sorted(posters.glob("*/*.jpg")):
-            if path.stem.isdigit() and int(path.stem) not in ids:
-                stale.append(path.relative_to(root).as_posix())
+            if path.stem.isdigit() and _old(path, now):
+                found.append((path.relative_to(root).as_posix(), int(path.stem)))
     storyboards = root / STORYBOARD_DIR
     if storyboards.is_dir():
         for path in sorted(storyboards.glob("*/*")):
-            if path.is_dir() and path.name.isdigit() and int(path.name) not in ids:
-                stale.append(path.relative_to(root).as_posix())
-    return stale
+            if path.is_dir() and path.name.isdigit() and _old(path, now):
+                found.append((path.relative_to(root).as_posix(), int(path.name)))
+    return found
+
+
+def _relative(file_path: str, root: Path) -> Optional[str]:
+    """A row's path as the walk sees it: relative to root, forward slashes; None for an absolute path outside root
+    (rows from before migration 001 may hold absolute paths, rows written on Windows backslashes)"""
+    path = Path(file_path.replace("\\", "/"))
+    if path.is_absolute():
+        try:
+            return path.relative_to(root).as_posix()
+        except ValueError:
+            return None
+    return PurePosixPath(file_path.replace("\\", "/")).as_posix()
+
+
+async def _rows(session: AsyncSession) -> list:
+    return list((await session.exec(select(MediaFile.id, MediaFile.file_path, MediaFile.stored_filename))).all())
 
 
 def _packages(store: Path, named: set[str], now: datetime) -> list[str]:
@@ -89,14 +106,23 @@ def _packages(store: Path, named: set[str], now: datetime) -> list[str]:
 
 async def plan_reconcile(session: AsyncSession, upload_path: Path, store_dir: Optional[Path],
                          now: datetime) -> ReconcileReport:
-    rows = (await session.exec(select(MediaFile.id, MediaFile.file_path))).all()
-    referenced = {Path(file_path).as_posix() for _, file_path in rows}
-    ids = {media_id for media_id, _ in rows}
-    orphan_files = sorted(rel for rel in _media_files(upload_path, now) if rel not in referenced)
+    # Files first, rows after: a row is committed before its file or poster lands, so every file listed here has
+    # its row in the snapshot read below (an upload during the walk is never taken for an orphan)
+    files = list(_media_files(upload_path, now))
+    derived = _derived(upload_path, now)
+    rows = await _rows(session)
+    referenced = {rel for rel in (_relative(file_path, upload_path) for _, file_path, _ in rows) if rel}
+    stored_names = {stored for _, _, stored in rows}
+    ids = {media_id for media_id, _, _ in rows}
+    # never move a file a row names by its unique stored name, wherever its path says it is
+    orphan_files = sorted(rel for rel in files if rel not in referenced and PurePosixPath(rel).name not in stored_names)
     returned, missing = [], []
-    for media_id, file_path in sorted(rows):
-        rel = Path(file_path).as_posix()
-        if (upload_path / rel).exists():
+    for media_id, file_path, _ in sorted(rows):
+        rel = _relative(file_path, upload_path)
+        if (upload_path / rel).exists() if rel else Path(file_path).exists():
+            continue
+        if rel is None:
+            missing.append(media_id)
             continue
         copies = sorted((upload_path / ORPHANED_DIR).glob(f"*/{rel}")) if (upload_path / ORPHANED_DIR).is_dir() else []
         if copies:
@@ -108,7 +134,8 @@ async def plan_reconcile(session: AsyncSession, upload_path: Path, store_dir: Op
         named = {Path(d).as_posix() for d in (await session.exec(
             select(UserCertificate.files_dir).where(UserCertificate.files_dir.is_not(None)))).all()}
         packages = tuple(_packages(store_dir, named, now))
-    return ReconcileReport(orphan_files=tuple(orphan_files), stale_derived=tuple(_derived(upload_path, ids)),
+    return ReconcileReport(orphan_files=tuple(orphan_files),
+                           stale_derived=tuple(rel for rel, media_id in derived if media_id not in ids),
                            returned_originals=tuple(returned), missing_originals=tuple(missing),
                            orphan_packages=packages)
 
@@ -137,6 +164,8 @@ def apply_reconcile(report: ReconcileReport, upload_path: Path, store_dir: Optio
     for rel in report.stale_derived:
         path = upload_path / rel
         try:
+            if not _old(path, now):
+                continue
             shutil.rmtree(path) if path.is_dir() else path.unlink()
             deleted.append(rel)
         except FileNotFoundError:

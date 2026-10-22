@@ -83,6 +83,8 @@ async def test_derived_without_row_deleted_with_row_kept(db, media):
     touch(media / "_derived/storyboards/000/7/sheet-001.jpg")
     touch(media / "_derived/storyboards/000/5/sheet-001.jpg")
     (media / "_derived/storyboards/000/.tmp-8").mkdir()
+    for folder in ("5", "7"):     # a storyboard folder is as old as its last change
+        os.utime(media / "_derived/storyboards/000" / folder, (OLD, OLD))
     report = await plan_reconcile(db, media, None, NOW)
     assert set(report.stale_derived) == {"_derived/posters/000/7.jpg", "_derived/storyboards/000/7"}
     apply_reconcile(report, media, None, NOW)
@@ -161,3 +163,43 @@ async def test_cli_dry_run_then_apply(db, media, capsys):
     assert not (media / "f/8_orphan.jpg").exists()
     row = (await db.exec(select(AuditLog).where(AuditLog.action == "reconcile"))).one()
     assert row.resource_type == "database" and row.details["orphan_files"] == 1
+
+
+async def test_fresh_derived_file_kept(db, media):
+    """A poster the worker just made for an upload newer than the row snapshot (review)"""
+    touch(media / "_derived/posters/000/7.jpg", mtime=NOW.timestamp() - 60)
+    touch(media / "_derived/storyboards/000/8/sheet-001.jpg")
+    os.utime(media / "_derived/storyboards/000/8", (NOW.timestamp() - 60, NOW.timestamp() - 60))
+    assert (await plan_reconcile(db, media, None, NOW)).stale_derived == ()
+
+
+async def test_files_are_listed_before_the_rows_are_read(db, media, monkeypatch):
+    """A row is committed before its file lands: files listed first all have their row in the later snapshot"""
+    from app.backend.services.backups import reconcile
+    order = []
+    real_files, real_rows = reconcile._media_files, reconcile._rows
+
+    def files(root, now):
+        order.append("files")
+        return list(real_files(root, now))
+
+    async def rows(session):
+        order.append("rows")
+        return await real_rows(session)
+
+    monkeypatch.setattr(reconcile, "_media_files", files)
+    monkeypatch.setattr(reconcile, "_rows", rows)
+    await plan_reconcile(db, media, None, NOW)
+    assert order == ["files", "rows"]
+
+
+async def test_row_paths_in_other_forms_keep_their_files(db, media):
+    """An absolute path left by migration 001, a path with backslashes, a row whose stored name matches (review)"""
+    await media_row(db, 11, str(media / "2025/01/obs_1/11_a.jpg"))
+    await media_row(db, 12, r"2025\01\obs_2\12_b.jpg")
+    row = await media_row(db, 13, "somewhere/else/13_c.jpg")
+    for rel in ("2025/01/obs_1/11_a.jpg", "2025/01/obs_2/12_b.jpg", f"2025/02/{row.stored_filename}"):
+        touch(media / rel)
+    report = await plan_reconcile(db, media, None, NOW)
+    assert report.orphan_files == ()
+    assert 11 not in report.missing_originals and 12 not in report.missing_originals
