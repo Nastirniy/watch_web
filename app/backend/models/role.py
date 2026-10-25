@@ -19,6 +19,9 @@ class Role(SQLModel, table=True):
     is_deleted: bool = Field(default=False, index=True)
     # Built-in roles (one per UserType, owned by code and re-synced at every start) carry the type key here
     builtin_key: Optional[str] = Field(default=None, max_length=50, unique=True, index=True)
+    # RoleKind: tree (assigned at a node, role_assignments) or system (assigned without a node,
+    # system_role_assignments); holds only permissions of its level, never changes
+    kind: str = Field(default="tree", max_length=10, sa_column_kwargs={"server_default": "tree"})
 
     # Relationships
     role_permissions: List["RolePermission"] = Relationship(back_populates="role", cascade_delete=True)
@@ -32,6 +35,8 @@ class Permission(SQLModel, table=True):
     name: str = Field(unique=True, index=True)
     display_name: str = Field(default="", max_length=255)
     description: str = Field(default="", max_length=1000)
+    # PermissionLevel: tree or system; written when seeding inserts the row, changed only by a migration
+    level: str = Field(default="tree", max_length=10, sa_column_kwargs={"server_default": "tree"})
 
     # Relationships
     role_permissions: List["RolePermission"] = Relationship(back_populates="permission", cascade_delete=True)

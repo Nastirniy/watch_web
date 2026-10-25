@@ -12,13 +12,16 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.auth.certificates import CN_SCHEME_CURRENT, certificate_values, hash_certificate_data
 from app.backend.auth.scope import Node, ROOT
-from app.backend.enums.general import CertificateSource, Permissions, UserType
+from app.backend.bootstrap.permissions import role_kind_of
+from app.backend.enums.general import BuiltinRole, CertificateSource, Permissions, RoleKind, UserType
 from app.backend.errors.problems import PROBLEM_JSON
 from app.backend.migrations.support.authz_v2 import LegacyRole, LegacyUser, REMOVED, plan_conversion
+from app.backend.migrations.support.authz_v3 import V2Assignment, V2Role, V2User, plan_v3
 from app.backend.models.user import User
 from app.backend.models.user_certificate import UserCertificate
 from app.backend.models.role import Role, Permission, RolePermission
 from app.backend.models.role_assignment import RoleAssignment, scope_columns
+from app.backend.models.system_role_assignment import SystemRoleAssignment
 from app.backend.models.post import Post
 from app.backend.models.scope_group import ScopeGroup
 from app.backend.models.observation import Observation, ObservationFrequency, Category, SignalType, Tag
@@ -67,15 +70,41 @@ async def make_group(db: AsyncSession, name: str = None, parent_id: Optional[int
     return group
 
 
-async def make_role(db: AsyncSession, perms: Iterable, name: str = None) -> Role:
+async def make_role(db: AsyncSession, perms: Iterable, name: str = None, kind: Optional[RoleKind] = None,
+                    allow_mixed: bool = False) -> Role:
+    """A custom role holding perms. Its kind follows the permissions (system when all are system ones); a mix of
+    both levels is refused unless allow_mixed (only a bug, or v2 data before the conversion, makes one)."""
     n = _next()
-    role = Role(name=name or f"role_{n}", display_name=f"Role {n}")
+    names = [perm_name(p) for p in perms]
+    inferred = role_kind_of(names)
+    assert inferred is not None or allow_mixed or not names, f"a role mixing tree and system permissions: {names}"
+    role = Role(name=name or f"role_{n}", display_name=f"Role {n}", kind=(kind or inferred or RoleKind.TREE).value)
     db.add(role)
     await db.flush()
     await _grant(db, role, [perm_name(p) for p in perms])
     await db.commit()
     await db.refresh(role)
     return role
+
+
+async def give(db: AsyncSession, user: User, perms: Iterable, node: Node = ROOT) -> list:
+    """Roles giving the user perms at node, split by level as authorization v3 requires: the tree permissions in a
+    tree role assigned at node, the system ones in a system role (a system assignment: node must be the root).
+    Returns the roles, the tree one first."""
+    names = [perm_name(p) for p in perms]
+    tree = [name for name in names if role_kind_of([name]) is RoleKind.TREE]
+    system = [name for name in names if name not in tree]
+    roles = []
+    if tree or not system:
+        role = await make_role(db, tree)
+        await assign(db, user, role, node)
+        roles.append(role)
+    if system:
+        assert node == ROOT, f"system permissions act only at the root: {system}"
+        role = await make_role(db, system)
+        await assign(db, user, role, ROOT)
+        roles.append(role)
+    return roles
 
 
 async def _grant(db: AsyncSession, role: Role, names: Iterable[str]) -> None:
@@ -96,9 +125,14 @@ async def _permission_names(db: AsyncSession, role_id: int) -> frozenset:
     return frozenset(rows.all())
 
 
-async def assign(db: AsyncSession, user: User, role: Role, node: Node) -> RoleAssignment:
-    """An assignment of the role to the user at the node (root, scope group or post)"""
-    assignment = RoleAssignment(user_id=user.id, role_id=role.id, **scope_columns(node))
+async def assign(db: AsyncSession, user: User, role: Role, node: Node):
+    """An assignment of the role to the user at the node (root, scope group or post); a system role is a system
+    assignment (the node must be the root)"""
+    if role.kind == RoleKind.SYSTEM.value:
+        assert node == ROOT, "a system role has no node"
+        assignment = SystemRoleAssignment(user_id=user.id, role_id=role.id)
+    else:
+        assignment = RoleAssignment(user_id=user.id, role_id=role.id, **scope_columns(node))
     db.add(assignment)
     await db.commit()
     await db.refresh(assignment)
@@ -123,24 +157,26 @@ async def make_user(
         username: str = None,
         user_type: Optional[UserType] = None,
 ) -> User:
-    """A user shaped like the old access model, written the way migration 023 converts it: one role (perms, which
-    may name ADMIN_TRUE and ACCESS_ALL, or an existing role), the home post post_id and access rows
-    extra_access {post id: can_write} go through the frozen conversion (plan_conversion), and its plan is written:
-    the role itself or derived roles (<role>_system / _posts / _view, named against the roles of the database) at
-    the planned nodes, and the inferred user type unless user_type is given. A user who would hold nothing gets no
-    assignment."""
+    """A user shaped like the old access model, written the way migrations 023 and 030 convert it: one role (perms,
+    which may name ADMIN_TRUE and ACCESS_ALL, or an existing role), the home post post_id and access rows
+    extra_access {post id: can_write} go through the frozen v2 conversion (plan_conversion), and its plan is
+    written: the role itself or derived roles (<role>_system / _posts / _view, named against the roles of the
+    database) at the planned nodes, and the inferred user type unless user_type is given. Then the frozen v3
+    conversion (plan_v3) runs on what was written: roles get their kind, a role mixing both levels gives its system
+    permissions to <role>_system, root assignments of system roles become system assignments, the v2 type its v3
+    name. A user who would hold nothing gets no assignment."""
     n = _next()
     user = _new_user(n, username, post_id, UserType.VIEWER.value)
     db.add(user)
     await db.flush()
     if role is None:
         names = frozenset(perm_name(p) for p in perms)
-        role = await make_role(db, names - REMOVED)
+        role = await make_role(db, names - REMOVED, allow_mixed=True)
     else:
         names = await _permission_names(db, role.id)
     legacy_role = LegacyRole(id=role.id, name=role.name, display_name=role.display_name, is_deleted=role.is_deleted,
                              permissions=names)
-    admin_role_id = (await db.exec(select(Role.id).where(Role.builtin_key == UserType.ADMIN.value))).first()
+    admin_role_id = None        # the v2 built-in admin role is gone: make_admin makes administrators
     legacy_user = LegacyUser(id=user.id, username=user.username, post_id=post_id, role_ids=(role.id,),
                              access=tuple(sorted((extra_access or {}).items())))
     taken = (await db.exec(select(Role.name))).all()
@@ -154,23 +190,73 @@ async def make_user(
         await _grant(db, row, part.permissions)
         derived[part.name] = row
     (user_plan,) = plan.users
+    written = []
     for planned in user_plan.assignments:
         role_id = planned.role if isinstance(planned.role, int) else derived[planned.role].id
-        db.add(RoleAssignment(user_id=user.id, role_id=role_id, **scope_columns(Node.parse(planned.node))))
-    user.user_type = UserType(user_type).value if user_type is not None else user_plan.user_type
+        row = RoleAssignment(user_id=user.id, role_id=role_id, **scope_columns(Node.parse(planned.node)))
+        db.add(row)
+        written.append(row)
+    await db.flush()
+    await _convert_v3(db, user, written, user_plan.user_type)
+    if user_type is not None:
+        user.user_type = UserType(user_type).value
     db.add(user)
     await db.commit()
     await db.refresh(user)
     return user
 
 
+async def _convert_v3(db: AsyncSession, user: User, written: list, v2_type: str) -> None:
+    """plan_v3 over the roles and assignments make_user wrote (custom roles only), applied to the database"""
+    role_ids = sorted({row.role_id for row in written})
+    roles = {}
+    for role_id in role_ids:
+        row = (await db.exec(select(Role).where(Role.id == role_id))).one()
+        roles[role_id] = V2Role(row.id, row.name, row.display_name, row.is_deleted, row.builtin_key,
+                                await _permission_names(db, row.id))
+    assignments = [V2Assignment(row.id, user.id, row.role_id, row.scope_key) for row in written]
+    taken = (await db.exec(select(Role.name))).all()
+    plan = plan_v3(roles, assignments, [V2User(user.id, v2_type)], taken)
+    for role_id, kind in plan.role_kinds.items():
+        row = (await db.exec(select(Role).where(Role.id == role_id))).one()
+        if row.builtin_key is None:
+            row.kind = kind
+            db.add(row)
+    for role_id, removed in plan.role_permissions_removed.items():
+        ids = (await db.exec(select(Permission.id).where(Permission.name.in_(sorted(removed))))).all()
+        await db.execute(RolePermission.__table__.delete().where(
+            RolePermission.role_id == role_id, RolePermission.permission_id.in_(ids)))
+    splits = {}
+    for split in plan.split_roles:
+        row = Role(name=split.name, display_name=split.display_name, is_deleted=split.is_deleted,
+                   kind=RoleKind.SYSTEM.value)
+        db.add(row)
+        await db.flush()
+        await _grant(db, row, split.permissions)
+        splits[split.name] = row
+    if plan.moved_assignment_ids:
+        await db.execute(RoleAssignment.__table__.delete().where(RoleAssignment.id.in_(plan.moved_assignment_ids)))
+    for planned in plan.system_assignments:
+        role_id = splits[planned.role].id if isinstance(planned.role, str) else planned.role
+        db.add(SystemRoleAssignment(user_id=planned.user_id, role_id=role_id))
+    user.user_type = plan.user_types[user.id]
+    await db.flush()
+
+
+async def builtin_role(db: AsyncSession, key: BuiltinRole) -> Role:
+    return (await db.exec(select(Role).where(Role.builtin_key == key.value))).one()
+
+
 async def make_admin(db: AsyncSession, post_id: Optional[int] = None) -> User:
-    """A user of type admin holding the built-in admin role (every permission) at the root"""
-    admin_role = (await db.exec(select(Role).where(Role.builtin_key == UserType.ADMIN.value))).one()
-    user = _new_user(_next(), None, post_id, UserType.ADMIN.value)
+    """A user of type system_administrator holding its base roles: administrator at the root (every tree
+    permission) and the system role system_administrator (every system permission)"""
+    user = _new_user(_next(), None, post_id, UserType.SYSTEM_ADMINISTRATOR.value)
     db.add(user)
     await db.flush()
-    db.add(RoleAssignment(user_id=user.id, role_id=admin_role.id, **scope_columns(ROOT)))
+    db.add(RoleAssignment(user_id=user.id, role_id=(await builtin_role(db, BuiltinRole.ADMINISTRATOR)).id,
+                          **scope_columns(ROOT)))
+    db.add(SystemRoleAssignment(user_id=user.id,
+                                role_id=(await builtin_role(db, BuiltinRole.SYSTEM_ADMINISTRATOR)).id))
     await db.commit()
     await db.refresh(user)
     return user

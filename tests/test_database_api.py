@@ -87,7 +87,7 @@ async def test_backups_directory_gone(client, db, headers, tmp_path, monkeypatch
 
 async def test_backups_needs_permission(client, db, headers, tmp_path, monkeypatch):
     monkeypatch.setattr(settings.backup, "dir", str(tmp_path))
-    user = await make_user(db, user_type=UserType.ADMIN)
+    user = await make_user(db, user_type=UserType.SYSTEM_ADMINISTRATOR)
     await assign(db, user, await make_role(db, ["database.view"]), Node.root())
     assert (await client.get(BACKUPS, headers=headers(user))).status_code == 403
     assert (await client.get(STATUS, headers=headers(user))).status_code == 200

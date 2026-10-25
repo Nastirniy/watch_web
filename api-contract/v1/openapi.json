@@ -1222,7 +1222,7 @@
           "USERS"
         ],
         "summary": "Create User",
-        "description": "Create a new user, optionally with a certificate file the user logs in with\n\nWith certificate (PEM or DER) the user gets a certificate row (source uploaded) with its plain values (CN,\nserial, validity), the hashes the login matches and certificate_label as its readable name (default: the CN cut to\n64 characters). The same certificate registered already, for any user, answers 400 certificate_taken; an expired\none is accepted. Without a certificate the user exists but cannot log in until one is issued or uploaded.\n\nThe form fields are described by UserCreateForm. The user gets one assignment: the built-in base role of\nuser_type at the home post (post_id), or at the root without a home post or when the base role holds system\npermissions (admin). The caller needs user.create covering that node (403 permission_required_for_action) and\nevery permission of the role there (403 grant_exceeds_own_permissions). These checks answer first: a post_id\noutside the caller's scope gets the same 403 whether the post exists, is archived or not. An unknown post answers\n404 post_not_found and an archived post 409 post_archived (it cannot be the home post).",
+        "description": "Create a new user, optionally with a certificate file the user logs in with\n\nWith certificate (PEM or DER) the user gets a certificate row (source uploaded) with its plain values (CN,\nserial, validity), the hashes the login matches and certificate_label as its readable name (default: the CN cut to\n64 characters). The same certificate registered already, for any user, answers 400 certificate_taken; an expired\none is accepted. Without a certificate the user exists but cannot log in until one is issued or uploaded.\n\nThe form fields are described by UserCreateForm. The user gets the base roles of user_type (GET /user-types): the\ntree base role at the home post (post_id), or at the root without a home post or for a type whose base role\nacts at the root (system_administrator), and the system base roles. The caller needs user.create covering that\nnode (403 permission_required_for_action) and every permission of each base role where it acts (403\ngrant_exceeds_own_permissions). These checks answer first: a post_id\noutside the caller's scope gets the same 403 whether the post exists, is archived or not. An unknown post answers\n404 post_not_found and an archived post 409 post_archived (it cannot be the home post).",
         "operationId": "create_user",
         "security": [
           {
@@ -29118,7 +29118,7 @@
           "USER_TYPES"
         ],
         "summary": "List User Types",
-        "description": "The catalog of user types, in catalog order: the base role, the base permissions and the ceiling of each.",
+        "description": "The catalog of user types, in catalog order: the tree base role, the permissions of every base role and the\nboundary (tree and system) of each.",
         "operationId": "list_user_types",
         "responses": {
           "200": {
@@ -39057,11 +39057,11 @@
       "PermissionLevel": {
         "type": "string",
         "enum": [
-          "system",
-          "scoped"
+          "tree",
+          "system"
         ],
         "title": "PermissionLevel",
-        "description": "Where a permission can be assigned: system only at the root of the scope tree, scoped at any node"
+        "description": "What a permission acts on: tree at a node of the scope tree and below it, system on the whole system (held only\nthrough system roles)"
       },
       "PermissionNotFoundProblem": {
         "properties": {
@@ -47363,11 +47363,11 @@
           "operator",
           "senior_operator",
           "analyst",
-          "post_admin",
-          "admin"
+          "administrator",
+          "system_administrator"
         ],
         "title": "UserType",
-        "description": "The type of a user; the order is the order of the catalog. The key of the built-in role is the same string"
+        "description": "The type of a user, a position: its base roles, its boundary and the pages of the web client\n(auth/user_types.py); never a place. The order is the order of the catalog."
       },
       "UserTypeCeilingExceededProblem": {
         "properties": {

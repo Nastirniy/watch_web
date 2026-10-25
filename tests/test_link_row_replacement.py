@@ -31,10 +31,10 @@ async def stored_permissions(db, role_id):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("current, requested", [
-    (["tag.view"], ["tag.view", "tag.create"]),
-    (["tag.view", "tag.create"], ["tag.view"]),
-    (["tag.view", "tag.create"], ["tag.create", "tag.view"]),
-    (["tag.view", "tag.create"], ["tag.update", "tag.archive"]),
+    (["tag.view"], ["tag.view", "post.view"]),
+    (["tag.view", "post.view"], ["tag.view"]),
+    (["tag.view", "post.view"], ["post.view", "tag.view"]),
+    (["tag.view", "post.view"], ["post.update", "post.archive"]),
 ])
 async def test_role_permissions_replaced_by_difference(client, db, headers, current, requested):
     admin = await make_admin(db)

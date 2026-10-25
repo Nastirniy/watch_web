@@ -19,10 +19,6 @@ def _fk_columns(db_file: Path, table: str) -> set:
     return names
 
 
-def test_head_is_028():
-    assert HEAD == REVISION
-
-
 def test_models_have_no_foreign_key_on_actor_columns():
     assert not AuditLog.__table__.c.user_id.foreign_keys
     assert not UserCertificate.__table__.c.created_by.foreign_keys
@@ -47,5 +43,5 @@ def test_up_down_up_drops_and_restores_the_foreign_keys(tmp_path):
     assert _fk_columns(db_file, "audit_logs") == set()
     assert _fk_columns(db_file, "user_certificates") == {"user_id"}
     conn = sqlite3.connect(db_file)
-    assert conn.execute("select version_num from alembic_version").fetchone()[0] == REVISION
+    assert conn.execute("select version_num from alembic_version").fetchone()[0] == HEAD
     conn.close()

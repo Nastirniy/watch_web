@@ -23,7 +23,7 @@ from app.backend.models.role import Role
 from app.backend.models.user import User
 from app.backend.models.user_certificate import UserCertificate
 from app.backend.pki.authority import is_signed_by, sha256_fingerprint
-from tests.helpers import assign, make_admin, make_certificate_row, make_group, make_post, make_role, make_user
+from tests.helpers import assign, give, make_admin, make_certificate_row, make_group, make_post, make_role, make_user
 from tests.pki_helpers import legacy_root, make_leaf, pem
 from tests.test_pki_login import CYRILLIC_CN, _login, nginx_headers, production  # noqa: F401
 
@@ -346,8 +346,8 @@ async def test_export_refusals(client, db, headers, pki, monkeypatch):
 # ------------------------------------------------------------------ who may do what
 
 async def _post_admin(db, node: Node) -> User:
-    user = await make_user(db, user_type=UserType.POST_ADMIN)
-    await assign(db, user, await builtin_role(db, UserType.POST_ADMIN), node)
+    user = await make_user(db, user_type=UserType.ADMINISTRATOR)
+    await assign(db, user, await builtin_role(db, UserType.ADMINISTRATOR), node)
     return user
 
 
@@ -416,7 +416,7 @@ async def test_check_order(client, db, headers, pki):
     """Scope first: an outsider learns nothing about the user's certificates, not even whether one exists"""
     here, there = await make_post(db), await make_post(db)
     outsider = await make_user(db, post_id=there.id)
-    await assign(db, outsider, await make_role(db, VIEW_AND_CREATE + [Permissions.CERTIFICATE_EXPORT]), ROOT)
+    await give(db, outsider, VIEW_AND_CREATE + [Permissions.CERTIFICATE_EXPORT])
     restricted = await make_user(db, post_id=there.id)
     await assign(db, restricted, await make_role(db, VIEW_AND_CREATE), Node.post(there.id))
     foreign = await make_user(db, post_id=here.id)

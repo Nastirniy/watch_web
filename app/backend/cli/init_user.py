@@ -25,11 +25,12 @@ from loguru import logger
 from app.backend.database import close_db, get_session_maker, create_database_if_not_exists
 from app.backend.auth.scope import ROOT
 from app.backend.auth.user_types import USER_TYPES
-from app.backend.enums.general import CertificateSource, UserType
+from app.backend.enums.general import CertificateSource, RoleKind, UserType
 from app.backend.errors.coded import CodedError
 from app.backend.models.user import User
 from app.backend.models.role import Role
 from app.backend.models.role_assignment import RoleAssignment, scope_columns
+from app.backend.models.system_role_assignment import SystemRoleAssignment
 from app.backend.pki.profile import LABEL_MAX_LENGTH, normalize_label
 from app.backend.services.audit import create_audit_log
 from app.backend.services.certificates import register_certificate
@@ -38,7 +39,7 @@ from sqlmodel import select
 
 
 def list_types() -> None:
-    """List the user types (the built-in role of each is its base role)."""
+    """List the user types with the number of permissions of their base roles."""
     logger.info(f"User types ({len(USER_TYPES)}):")
     for user_type, spec in USER_TYPES.items():
         logger.info(f"  {user_type.value:<16} {len(spec.base_permissions):>3} permissions")
@@ -86,13 +87,17 @@ async def create_user(
             logger.error(f"User with username '{username}' already exists")
             sys.exit(1)
 
-        # The base role of the type (seeding creates the built-in roles)
-        role = (await session.exec(select(Role).where(Role.builtin_key == user_type.value))).first()
-        if not role:
-            logger.error(f"Built-in role '{user_type.value}' not found. Run migrations and seed first:")
-            logger.info("  python -m app.backend.cli.migrations_manager migrate")
-            logger.info("  python -m app.backend.cli.migrations_manager seed")
-            sys.exit(1)
+        # The base roles of the type (seeding creates the built-in roles), all at the root: the user has no home post
+        spec = USER_TYPES[user_type]
+        roles = []
+        for base in spec.base_roles:
+            role = (await session.exec(select(Role).where(Role.builtin_key == base.role.value))).first()
+            if not role:
+                logger.error(f"Built-in role '{base.role.value}' not found. Run migrations and seed first:")
+                logger.info("  python -m app.backend.cli.migrations_manager migrate")
+                logger.info("  python -m app.backend.cli.migrations_manager seed")
+                sys.exit(1)
+            roles.append(role)
 
         # Create user
         user = User(
@@ -102,7 +107,11 @@ async def create_user(
         )
         session.add(user)
         await session.flush()
-        session.add(RoleAssignment(user_id=user.id, role_id=role.id, **scope_columns(ROOT)))
+        for role in roles:
+            if role.kind == RoleKind.SYSTEM.value:
+                session.add(SystemRoleAssignment(user_id=user.id, role_id=role.id))
+            else:
+                session.add(RoleAssignment(user_id=user.id, role_id=role.id, **scope_columns(ROOT)))
         certificate = None
         if cert_data is not None:
             try:
@@ -180,7 +189,7 @@ async def interactive_create(cert_path: str = None, label: Optional[str] = None)
         logger.error("Display name is required")
         sys.exit(1)
 
-    user_type = _user_type(_prompt("User type", UserType.ADMIN.value))
+    user_type = _user_type(_prompt("User type", UserType.SYSTEM_ADMINISTRATOR.value))
     if cert_path and label is None:
         label = _prompt("Certificate label (empty: its CN)") or None
 

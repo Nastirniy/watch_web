@@ -21,7 +21,7 @@ def _spy_close(monkeypatch, module, events):
 
 
 @pytest.mark.parametrize("argv", [
-    ["init_user", "--username", "admin1", "--alias", "Admin", "--user-type", "admin"],
+    ["init_user", "--username", "admin1", "--alias", "Admin", "--user-type", "system_administrator"],
     ["init_user", "cert.pem", "--label", "Laptop"],   # interactive: prompts for the rest
 ])
 def test_init_user_closes_the_pool(monkeypatch, argv):
@@ -49,7 +49,7 @@ def test_init_user_closes_the_pool_when_the_command_fails(monkeypatch):
 
     monkeypatch.setattr(init_user, "create_user", create_user)
     _spy_close(monkeypatch, init_user, events)
-    monkeypatch.setattr(sys, "argv", ["init_user", "--username", "admin1", "--alias", "A", "--user-type", "admin"])
+    monkeypatch.setattr(sys, "argv", ["init_user", "--username", "admin1", "--alias", "A", "--user-type", "system_administrator"])
     with pytest.raises(SystemExit):
         init_user.main()
     assert events == ["closed"]

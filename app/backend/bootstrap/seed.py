@@ -61,11 +61,12 @@ async def seed_database():
         from app.backend.models.user import User
         from app.backend.models.user_certificate import UserCertificate
         from app.backend.models.role_assignment import RoleAssignment, scope_columns
-        from app.backend.enums.general import CertificateSource, UserType
+        from app.backend.models.system_role_assignment import SystemRoleAssignment
+        from app.backend.enums.general import BuiltinRole, CertificateSource, UserType
         from app.backend.utils.pki_generator import generate_admin_pki_credentials
 
         # 1. Seed roles and permissions (required in all modes)
-        admin_role = await seed_roles_and_permissions(session)
+        builtin_roles = await seed_roles_and_permissions(session)
 
         # 1b. Accepted upload formats (adds missing defaults, never edits existing rows)
         from app.backend.services.media.formats import seed_media_formats
@@ -115,14 +116,18 @@ async def seed_database():
                 admin_user = User(
                     username=settings.admin.username,
                     username_alias=settings.admin.username_alias,
-                    user_type=UserType.ADMIN.value,
+                    user_type=UserType.SYSTEM_ADMINISTRATOR.value,
                     is_active=True
                 )
                 session.add(admin_user)
                 await session.flush()
 
-                # The built-in admin role at the root
-                session.add(RoleAssignment(user_id=admin_user.id, role_id=admin_role.id, **scope_columns(ROOT)))
+                # The base roles of a system administrator: administrator at the root and system_administrator
+                session.add(RoleAssignment(user_id=admin_user.id,
+                                           role_id=builtin_roles[BuiltinRole.ADMINISTRATOR].id,
+                                           **scope_columns(ROOT)))
+                session.add(SystemRoleAssignment(user_id=admin_user.id,
+                                                 role_id=builtin_roles[BuiltinRole.SYSTEM_ADMINISTRATOR].id))
 
                 # Its certificate: only the hashes of the configured (or generated) values, a configured row
                 fingerprint_hash = await hash_data(admin_pki["pki_certificate_fingerprint"])

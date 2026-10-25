@@ -23,13 +23,13 @@ Nobody becomes able to do more than they could by changing access:
   by the route): the caller has not taken the built-in admin role at the root from themselves (409
   cannot_remove_own_admin, check_admin_kept, answered first; whether they held it is read with holds_admin_at_root
   before the change), and an active, non-archived user still holds it (409 last_admin_required). The administrator
-  is the built-in admin role at the root (_admin_at_root), nothing else.
+  is a system assignment of the built-in system_administrator role (_admin_at_root), nothing else.
 - lock_administrators: the first statement of every write that may take that role from someone (an assignment
   removed, a user deactivated, archived or given another type). Such writes run one after another, so the count of
   check_an_admin_remains sees the one before: two administrators deactivating each other at once can no longer
   both succeed.
 
-What a user holds is context.grant_rows, the same definition as their AuthContext (check_target_user reads it with
+What a user holds is context.load_grants, the same definition as their AuthContext (check_target_user reads it with
 the archived roles too).
 """
 from typing import FrozenSet, Iterable, List, Set, Tuple, Union
@@ -39,13 +39,14 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.auth.access_errors import access_denied
-from app.backend.auth.context import AuthContext, grant_rows, grants_of, permission_name
+from app.backend.auth.context import AuthContext, load_grants, permission_name
 from app.backend.auth.scope import Grant, Node, ROOT
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
-from app.backend.enums.general import Permissions, UserType
+from app.backend.enums.general import BuiltinRole, Permissions
 from app.backend.errors.problems import ApiError
 from app.backend.models.role import Permission, Role, RolePermission
 from app.backend.models.role_assignment import RoleAssignment
+from app.backend.models.system_role_assignment import SystemRoleAssignment
 from app.backend.models.user import User
 from app.backend.utils.row_locks import lock_first
 
@@ -115,10 +116,11 @@ def check_assign_at(auth: AuthContext, permissions: Iterable[str], node: Node) -
     check_grant_at(auth, {*permissions, Permissions.USER_UPDATE.value}, node)
 
 
-async def _every_assignment(session: AsyncSession, user_id: int) -> Tuple[Grant, ...]:
-    """Every assignment of the user as a grant, those of archived roles included: an archived role grants nothing
-    now (grant_rows, AuthContext) but its assignments come back with the role's restore"""
-    return grants_of((await session.exec(grant_rows(user_id, include_archived_roles=True))).all())
+async def _every_assignment(session: AsyncSession, user: User) -> Tuple[Grant, ...]:
+    """Every assignment of the user as a grant, system assignments (at the root) and those of archived roles
+    included: an archived role grants nothing now (grant_rows, AuthContext) but its assignments come back with the
+    role's restore"""
+    return await load_grants(session, user, include_archived_roles=True)
 
 
 async def check_target_user(session: AsyncSession, auth: AuthContext, target: User,
@@ -131,7 +133,7 @@ async def check_target_user(session: AsyncSession, auth: AuthContext, target: Us
         missing = [name]
     elif target.id != auth.user.id:
         lacking: Set[str] = set()
-        for grant in await _every_assignment(session, target.id):
+        for grant in await _every_assignment(session, target):
             lacking |= _not_covered(auth, grant.permissions, grant.node)
         missing = sorted(lacking)
     if missing:
@@ -140,31 +142,32 @@ async def check_target_user(session: AsyncSession, auth: AuthContext, target: Us
 
 
 def _admin_at_root():
-    """Assignments of the built-in admin role at the root: the one definition of the administrator"""
+    """System assignments of the built-in system_administrator role: the one definition of the administrator"""
     return (
-        select(RoleAssignment.user_id)
-        .join(Role, Role.id == RoleAssignment.role_id)
-        .where(Role.builtin_key == UserType.ADMIN.value, Role.is_deleted == False,
-               RoleAssignment.scope_key == ROOT.key)
+        select(SystemRoleAssignment.user_id)
+        .join(Role, Role.id == SystemRoleAssignment.role_id)
+        .where(Role.builtin_key == BuiltinRole.SYSTEM_ADMINISTRATOR.value, Role.is_deleted == False)
     )
 
 
 async def lock_administrators(session: AsyncSession) -> None:
-    """The first statement of a write that may take the built-in admin role at the root from someone: that role's
+    """The first statement of a write that may take the built-in system_administrator role from someone: that role's
     row locked (utils/row_locks.py). Later locks of the write (the user) use row_locks.lock."""
-    await lock_first(session, select(Role).where(Role.builtin_key == UserType.ADMIN.value))
+    await lock_first(session, select(Role).where(Role.builtin_key == BuiltinRole.SYSTEM_ADMINISTRATOR.value))
 
 
 async def holds_admin_at_root(session: AsyncSession, user_id: int) -> bool:
-    """The user holds the built-in admin role at the root (as written to the session: flush first when it changed)"""
-    return (await session.exec(_admin_at_root().where(RoleAssignment.user_id == user_id).limit(1))).first() is not None
+    """The user holds the built-in system_administrator role (as written to the session: flush first when it
+    changed)"""
+    return (await session.exec(
+        _admin_at_root().where(SystemRoleAssignment.user_id == user_id).limit(1))).first() is not None
 
 
 async def check_an_admin_remains(session: AsyncSession) -> None:
     """After the change: an active, non-archived user holds the built-in admin role at the root"""
     await session.flush()
     admin = (await session.exec(
-        _admin_at_root().join(User, User.id == RoleAssignment.user_id)
+        _admin_at_root().join(User, User.id == SystemRoleAssignment.user_id)
         .where(User.is_active == True, User.is_deleted == False)
         .limit(1)
     )).first()

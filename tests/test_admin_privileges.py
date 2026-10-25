@@ -27,6 +27,7 @@ from app.backend.errors.problems import ApiError
 from app.backend.models.audit import AuditLog
 from app.backend.models.role import Permission, Role, RolePermission
 from app.backend.models.role_assignment import RoleAssignment
+from app.backend.models.system_role_assignment import SystemRoleAssignment
 from app.backend.models.user import User, UserSession
 from app.backend.models.user_certificate import UserCertificate
 from tests.helpers import ADMIN_TRUE, assign, make_admin, make_post, make_role, make_user
@@ -46,7 +47,7 @@ USER_SESSION_END = V1.path(UserRoutes.USER_SESSION_END)
 VIEW = sorted(USER_TYPES[UserType.VIEWER].base_permissions)
 
 
-async def builtin_role(db, key: str = "admin") -> Role:
+async def builtin_role(db, key: str = "system_administrator") -> Role:
     return (await db.exec(select(Role).where(Role.builtin_key == key))).one()
 
 
@@ -101,12 +102,12 @@ async def test_admin_role_cannot_be_renamed(client, db, headers):
 
     problem(await client.patch(ROLE.format(role_id=role.id), headers=headers(admin), json={"name": "chief"}),
             409, "builtin_role_not_renamable")
-    assert (await db.exec(select(Role.name).where(Role.id == role.id))).one() == "admin"
+    assert (await db.exec(select(Role.name).where(Role.id == role.id))).one() == "system_administrator"
     problem(await client.post(ROLE_ARCHIVE.format(role_id=role.id), headers=headers(admin)), 409, "builtin_role_not_archivable")
 
     # the unchanged name and the other fields stay editable
     same = await client.patch(ROLE.format(role_id=role.id), headers=headers(admin),
-                              json={"name": "admin", "display_name": "Administrators"})
+                              json={"name": "system_administrator", "display_name": "Administrators"})
     assert same.status_code == 200, same.text
     assert same.json()["display_name"] == "Administrators"
 
@@ -120,7 +121,8 @@ async def test_admin_role_permissions_cannot_be_changed(client, db, headers):
     role = await builtin_role(db)
     before = await stored_permissions(db, role.id)
     audit_view = await permission_id(db, "audit.view")
-    every = sorted((await db.exec(select(Permission.id))).all())
+    # every permission of the role (the system role holds every system permission)
+    every = sorted((await db.exec(select(RolePermission.permission_id).where(RolePermission.role_id == role.id))).all())
 
     for caller in (editor, admin):
         problem(await client.delete(ROLE_PERMISSION.format(role_id=role.id, permission_id=audit_view), headers=headers(caller)),
@@ -194,7 +196,7 @@ async def test_create_user_only_with_a_base_role_within_the_callers_permissions(
     post = await make_post(db)
     creator = await make_user(db, perms=[ADMIN_TRUE, "user.view", "user.create", *VIEW], post_id=post.id)
 
-    for name, fields in (("would_be_admin", {"user_type": "admin"}), ("rootless_viewer", {"user_type": "viewer"})):
+    for name, fields in (("would_be_admin", {"user_type": "system_administrator"}), ("rootless_viewer", {"user_type": "viewer"})):
         response = await client.post(USERS, headers=headers(creator), files=certificate_file(f"cn-{name}"),
                                      data={"username": name, "username_alias": "Would be", **fields})
         body = problem(response, 403, "grant_exceeds_own_permissions")
@@ -247,9 +249,11 @@ async def test_role_update_holder_cannot_extend_their_own_role(client, db, heade
 
 @pytest.mark.asyncio
 async def test_role_changes_need_every_permission_they_add_or_remove(client, db, headers):
-    editor = await make_user(db, perms=[ADMIN_TRUE, "role.view", "role.update", "tag.view", "tag.create"])
-    role = await make_role(db, ["tag.view", "audit.view"])
-    tag_view, tag_create, audit_view = [await permission_id(db, n) for n in ("tag.view", "tag.create", "audit.view")]
+    editor = await make_user(db, perms=[ADMIN_TRUE, "role.view", "role.update", "tag.view", "tag.create",
+                                        "tag.update"])
+    # a system role (a role holds permissions of one level)
+    role = await make_role(db, ["tag.update", "audit.view"])
+    tag_view, tag_create, audit_view = [await permission_id(db, n) for n in ("tag.update", "tag.create", "audit.view")]
 
     # a permission the caller lacks may stay on the role: only what the change adds or removes counts
     added = await client.put(ROLE_PERMISSION.format(role_id=role.id, permission_id=tag_create), headers=headers(editor))
@@ -265,7 +269,7 @@ async def test_role_changes_need_every_permission_they_add_or_remove(client, db,
     body = problem(await client.patch(ROLE.format(role_id=role.id), headers=headers(editor), json={"permission_ids": [tag_view]}),
                    403, "grant_exceeds_own_permissions")
     assert body["missing"] == ["audit.view"]
-    assert await stored_permissions(db, role.id) == ["audit.view", "tag.view"]
+    assert await stored_permissions(db, role.id) == ["audit.view", "tag.update"]
 
 
 @pytest.mark.asyncio
@@ -285,9 +289,9 @@ async def test_create_role_only_with_held_permissions(client, db, headers):
 @pytest.mark.asyncio
 async def test_archive_and_restore_of_a_role_need_every_permission_of_the_role(client, db, headers):
     admin = await make_admin(db)
-    archiver = await make_user(db, perms=[ADMIN_TRUE, "role.view", "role.archive", "tag.view"])
-    beyond = await make_role(db, ["tag.view", "audit.view"])
-    within = await make_role(db, ["tag.view"])
+    archiver = await make_user(db, perms=[ADMIN_TRUE, "role.view", "role.archive", "tag.update"])
+    beyond = await make_role(db, ["tag.update", "audit.view"])
+    within = await make_role(db, ["tag.update"])
 
     body = problem(await client.post(ROLE_ARCHIVE.format(role_id=beyond.id), headers=headers(archiver)),
                    403, "grant_exceeds_own_permissions")
@@ -482,7 +486,6 @@ async def test_last_admin_is_the_builtin_admin_at_root(db):
     full = await builtin_role(db)
     every = await make_role(db, await stored_permissions(db, full.id))   # a custom copy: not the administrator
     await make_user(db, role=every)
-    await assign(db, await make_user(db, post_id=post.id), full, Node.post(post.id))   # the admin role below the root
     with pytest.raises(ApiError):
         await check_an_admin_remains(db)
 
@@ -507,7 +510,7 @@ async def test_the_only_admin_cannot_drop_their_admin_at_root(db):
     auth = await load_auth_context(db, admin)
     held_before = await holds_admin_at_root(db, admin.id)
     assert held_before
-    await db.exec(delete(RoleAssignment).where(RoleAssignment.user_id == admin.id))
+    await db.exec(delete(SystemRoleAssignment).where(SystemRoleAssignment.user_id == admin.id))
     with pytest.raises(ApiError) as caught:
         await check_admin_kept(db, auth, held_before)
     assert caught.value.code is ErrorCode.CANNOT_REMOVE_OWN_ADMIN
@@ -524,7 +527,7 @@ async def test_the_last_admin_role_at_root_cannot_go_by_someone_else(db):
     auth = await load_auth_context(db, manager)
     held_before = await holds_admin_at_root(db, manager.id)
     assert not held_before                     # every permission through a custom role: not the administrator
-    await db.exec(delete(RoleAssignment).where(RoleAssignment.user_id == admin.id))
+    await db.exec(delete(SystemRoleAssignment).where(SystemRoleAssignment.user_id == admin.id))
     with pytest.raises(ApiError) as caught:
         await check_admin_kept(db, auth, held_before)
     assert caught.value.code is ErrorCode.LAST_ADMIN_REQUIRED
@@ -538,33 +541,30 @@ async def test_an_admin_cannot_drop_their_own_admin_while_others_remain(db):
     auth = await load_auth_context(db, admin)
     held_before = await holds_admin_at_root(db, admin.id)
 
-    await db.exec(delete(RoleAssignment).where(RoleAssignment.user_id == admin.id))
+    await db.exec(delete(SystemRoleAssignment).where(SystemRoleAssignment.user_id == admin.id))
     with pytest.raises(ApiError) as caught:
         await check_admin_kept(db, auth, held_before)
     assert caught.value.code is ErrorCode.CANNOT_REMOVE_OWN_ADMIN
     await db.rollback()
     await db.refresh(admin)
 
-    await db.exec(delete(RoleAssignment).where(RoleAssignment.user_id == peer_id))
+    await db.exec(delete(SystemRoleAssignment).where(SystemRoleAssignment.user_id == peer_id))
     await check_admin_kept(db, auth, held_before)   # someone else's: allowed while the caller stays
     await db.rollback()
 
 
 @pytest.mark.asyncio
 async def test_the_administrator_is_the_builtin_admin_role_at_the_root(db):
-    """One definition (R27): holds_admin_at_root reads the assignment, by builtin_key; the role's name, a custom copy
-    and the admin role below the root make nobody the administrator"""
-    post = await make_post(db)
+    """One definition (R27): holds_admin_at_root reads the system assignment of the built-in system_administrator
+    role, by builtin_key; the role's name or a custom copy makes nobody the administrator (a system role has no
+    node: below the root it cannot be held at all)"""
     admin = await make_admin(db)
     full = await builtin_role(db)
     copy = await make_role(db, await stored_permissions(db, full.id), name="admin_copy")
-    with_copy = await make_user(db, user_type=UserType.ADMIN)
+    with_copy = await make_user(db, user_type=UserType.SYSTEM_ADMINISTRATOR)
     await assign(db, with_copy, copy, ROOT)
-    below_root = await make_user(db, post_id=post.id, user_type=UserType.ADMIN)
-    await assign(db, below_root, full, Node.post(post.id))
     assert await holds_admin_at_root(db, admin.id)
     assert not await holds_admin_at_root(db, with_copy.id)
-    assert not await holds_admin_at_root(db, below_root.id)
 
 
 @pytest.mark.asyncio
@@ -600,17 +600,20 @@ async def test_create_user_makes_default_assignment(client, db, headers):
         assert response.status_code == 200, response.text
         return response.json()["id"]
 
-    operator, admin_role = await builtin_role(db, "operator"), await builtin_role(db, "admin")
+    operator, admin_role = await builtin_role(db, "operator"), await builtin_role(db, "administrator")
+    system_role = await builtin_role(db, "system_administrator")
     at_post = await create("op_at_post", user_type="operator", post_id=str(post.id))
     assert await stored_assignments(db, at_post) == {(operator.id, f"p:{post.id}")}
     at_root = await create("op_at_root", user_type="operator")
     assert await stored_assignments(db, at_root) == {(operator.id, "root")}
-    # the admin base role holds system permissions: always at the root
-    administrator = await create("second_admin", user_type="admin", post_id=str(post.id))
+    # a system administrator's base roles act at the root: administrator at the root and the system role
+    administrator = await create("second_admin", user_type="system_administrator", post_id=str(post.id))
     assert await stored_assignments(db, administrator) == {(admin_role.id, "root")}
+    assert (await db.exec(select(SystemRoleAssignment.role_id).where(
+        SystemRoleAssignment.user_id == administrator))).all() == [system_role.id]
 
     types = dict((await db.exec(select(User.id, User.user_type).where(User.id.in_([at_post, at_root, administrator])))).all())
-    assert types == {at_post: "operator", at_root: "operator", administrator: "admin"}
+    assert types == {at_post: "operator", at_root: "operator", administrator: "system_administrator"}
     (row,) = (await db.exec(select(RoleAssignment).where(RoleAssignment.user_id == at_post))).all()
     assert row.scope_post_id == post.id and row.scope_group_id is None and row.created_by == admin.id
 

@@ -100,7 +100,7 @@ async def test_archive_requires_role_archive_not_role_delete(client, db, headers
 async def test_permanent_delete_preconditions_and_effect(client, db, headers):
     post = await make_post(db)
     admin = await make_admin(db)
-    role = await make_role(db, ["tag.view", "tag.create"], name="temporary")
+    role = await make_role(db, ["tag.view", "post.view"], name="temporary")
     holder, archived_holder = await make_user(db, post_id=post.id), await make_user(db, post_id=post.id)
     for user in (holder, archived_holder):
         await assign(db, user, role, Node.post(post.id))
@@ -155,7 +155,7 @@ async def test_permanent_delete_preconditions_and_effect(client, db, headers):
     log = (await db.exec(select(AuditLog).where(
         AuditLog.resource_type == "role", AuditLog.resource_id == role.id, AuditLog.action == "delete"))).one()
     assert log.old_values["name"] == "temporary"
-    assert log.old_values["permissions"] == ["tag.create", "tag.view"]
+    assert log.old_values["permissions"] == ["post.view", "tag.view"]
     assert log.old_values["assigned_archived_users"] == [{"id": archived_holder.id, "username": archived_holder.username}]
     # every column of each removed role_assignments row
     (copied,) = log.old_values["assignments"]
@@ -231,7 +231,7 @@ async def test_permanent_delete_removes_legacy_holder_rows(client, db, headers):
 @pytest.mark.asyncio
 async def test_admin_role_can_neither_be_archived_nor_deleted(client, db, headers):
     admin = await make_admin(db)
-    admin_role = (await db.exec(select(Role).where(Role.name == "admin"))).one()
+    admin_role = (await db.exec(select(Role).where(Role.name == "system_administrator"))).one()
     assert (await client.post(ARCHIVE.format(role_id=admin_role.id), headers=headers(admin))).status_code == 409
     assert (await client.delete(ROLE.format(role_id=admin_role.id), headers=headers(admin))).status_code == 409
     assert (await client.get(ROLE.format(role_id=admin_role.id), headers=headers(admin))).json()["is_deleted"] is False
@@ -239,7 +239,7 @@ async def test_admin_role_can_neither_be_archived_nor_deleted(client, db, header
 
 @pytest.mark.asyncio
 async def test_seed_restores_deleted_admin_role(db):
-    admin_role = (await db.exec(select(Role).where(Role.name == "admin"))).one()
+    admin_role = (await db.exec(select(Role).where(Role.name == "system_administrator"))).one()
     admin_role.is_deleted = True
     db.add(admin_role)
     await db.commit()

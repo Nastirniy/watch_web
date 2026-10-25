@@ -4,14 +4,17 @@ Loaded once per request by dependencies.get_auth_context (three queries: the use
 and permissions, every group, every post). Every permission and scope check reads from this object; nothing queries
 the database again during the request.
 
-Access is the user's role assignments (role_assignments: role + node of the scope tree), each a Grant: its
-permissions apply to the node and everything below it (auth/scope.py). Archived roles grant nothing, and a grant on an
+Access is the user's role assignments (role_assignments: tree role + node of the scope tree) and system role
+assignments (system_role_assignments: system role, no node), each a Grant: its permissions apply to the node and
+everything below it (auth/scope.py); a system assignment is a grant at the root of kind system, so every check treats
+it as held at the root. Archived roles grant nothing, and a grant on an
 archived post or at an archived group applies nowhere (it is kept: it applies again after a restore), so it does not
 count as held anywhere either.
 """
 from dataclasses import dataclass, field
 from typing import Dict, FrozenSet, Iterable, Optional, Set, Tuple, Union
 
+from sqlalchemy import null as sa_null
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -21,6 +24,7 @@ from app.backend.models.user import User
 from app.backend.models.post import Post
 from app.backend.models.role import Role, Permission, RolePermission
 from app.backend.models.role_assignment import RoleAssignment, node_of
+from app.backend.models.system_role_assignment import SystemRoleAssignment
 from app.backend.models.scope_group import ScopeGroup
 
 
@@ -161,8 +165,22 @@ def grant_rows(user_id: int, include_archived_roles: bool = False):
     return query if include_archived_roles else query.where(Role.is_deleted == False)
 
 
-def grants_of(rows: Iterable) -> Tuple[Grant, ...]:
-    """The grants of grant_rows, in assignment id order"""
+def system_grant_rows(user_id: int, include_archived_roles: bool = False):
+    """grant_rows of the user's system role assignments, in the same shape (both scope ids null: the root)"""
+    query = (
+        select(SystemRoleAssignment.id, sa_null(), sa_null(),
+               Role.id, Role.name, Role.display_name, Role.builtin_key, Permission.name)
+        .select_from(SystemRoleAssignment)
+        .join(Role, Role.id == SystemRoleAssignment.role_id)
+        .outerjoin(RolePermission, RolePermission.role_id == Role.id)
+        .outerjoin(Permission, Permission.id == RolePermission.permission_id)
+        .where(SystemRoleAssignment.user_id == user_id)
+    )
+    return query if include_archived_roles else query.where(Role.is_deleted == False)
+
+
+def grants_of(rows: Iterable, kind: str = "tree") -> Tuple[Grant, ...]:
+    """The grants of grant_rows (kind tree) or system_grant_rows (kind system), in assignment id order"""
     heads: Dict[int, tuple] = {}            # assignment id -> role id, name, display name, built-in, node
     permissions: Dict[int, Set[str]] = {}
     for assignment_id, group_id, post_id, role_id, name, display_name, builtin_key, permission in rows:
@@ -170,13 +188,16 @@ def grants_of(rows: Iterable) -> Tuple[Grant, ...]:
         held = permissions.setdefault(assignment_id, set())
         if permission:
             held.add(permission)
-    return tuple(Grant(*heads[assignment_id], frozenset(permissions[assignment_id]), assignment_id=assignment_id)
+    return tuple(Grant(*heads[assignment_id], frozenset(permissions[assignment_id]), assignment_id=assignment_id,
+                       kind=kind)
                  for assignment_id in sorted(heads))
 
 
-async def load_grants(session: AsyncSession, user_id: int) -> Tuple[Grant, ...]:
-    """What a user holds where (one query)"""
-    return grants_of((await session.exec(grant_rows(user_id))).all())
+async def load_grants(session: AsyncSession, user: User, include_archived_roles: bool = False) -> Tuple[Grant, ...]:
+    """What a user holds where (two queries): the tree grants, then the system grants"""
+    tree = grants_of((await session.exec(grant_rows(user.id, include_archived_roles))).all())
+    system = grants_of((await session.exec(system_grant_rows(user.id, include_archived_roles))).all(), kind="system")
+    return tree + system
 
 
 async def load_scope_tree(session: AsyncSession) -> ScopeTree:
@@ -195,5 +216,5 @@ async def load_scope_tree(session: AsyncSession) -> ScopeTree:
 
 async def load_auth_context(session: AsyncSession, user: User, session_id: Optional[str] = None) -> AuthContext:
     """Three queries: the grants, the scope tree (groups, posts)"""
-    grants = await load_grants(session, user.id)
+    grants = await load_grants(session, user)
     return AuthContext(user=user, grants=grants, tree=await load_scope_tree(session), session_id=session_id)

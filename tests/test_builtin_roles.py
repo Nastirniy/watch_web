@@ -1,10 +1,11 @@
-"""Built-in roles: one per user type, seeded and re-synced at every start, read-only in the API, clonable."""
+"""Built-in roles: the catalog of auth/builtin_roles.py, seeded and re-synced at every start, read-only in the API,
+clonable."""
 from sqlmodel import select
 
 from app.backend.api.v1 import V1
-from app.backend.auth.user_types import USER_TYPES
+from app.backend.auth.builtin_roles import BUILTIN_ROLES
 from app.backend.bootstrap.permissions import seed_roles_and_permissions
-from app.backend.enums.general import UserType
+from app.backend.enums.general import BuiltinRole
 from app.backend.enums.routes import RoleRoutes, SearchRoutes
 from app.backend.models.audit import AuditLog
 from app.backend.models.role import Permission, Role, RolePermission
@@ -33,10 +34,11 @@ async def permission_id(db, name: str) -> int:
 
 
 async def test_seed_creates_and_resyncs_builtin_roles(db):
-    for user_type, spec in USER_TYPES.items():
-        role = await builtin(db, user_type.value)
-        assert role.name == user_type.value and role.display_name == spec.display_name and not role.is_deleted
-        assert await permission_names(db, role.id) == spec.base_permissions, user_type
+    for key, spec in BUILTIN_ROLES.items():
+        role = await builtin(db, key.value)
+        assert role.name == key.value and role.display_name == spec.display_name and not role.is_deleted
+        assert role.kind == spec.kind.value
+        assert await permission_names(db, role.id) == spec.permissions, key
 
     viewer, operator = await builtin(db, "viewer"), await builtin(db, "operator")
     db.add(RolePermission(role_id=viewer.id, permission_id=await permission_id(db, "user.update")))
@@ -50,10 +52,10 @@ async def test_seed_creates_and_resyncs_builtin_roles(db):
 
     await seed_roles_and_permissions(db)
     await db.refresh(operator)
-    assert operator.display_name == USER_TYPES[UserType.OPERATOR].display_name and operator.is_deleted is False
-    for user_type, spec in USER_TYPES.items():
-        assert await permission_names(db, (await builtin(db, user_type.value)).id) == spec.base_permissions, user_type
-    assert len((await db.exec(select(Role).where(Role.builtin_key.is_not(None)))).all()) == len(USER_TYPES)
+    assert operator.display_name == BUILTIN_ROLES[BuiltinRole.OPERATOR].display_name and operator.is_deleted is False
+    for key, spec in BUILTIN_ROLES.items():
+        assert await permission_names(db, (await builtin(db, key.value)).id) == spec.permissions, key
+    assert len((await db.exec(select(Role).where(Role.builtin_key.is_not(None)))).all()) == len(BUILTIN_ROLES)
 
 
 async def test_seed_claims_a_role_named_like_a_key(db):
@@ -123,24 +125,25 @@ async def test_clone_builtin_role(client, db, headers):
 async def test_role_response_level_and_builtin_filter(client, db, headers):
     h = headers(await make_admin(db))
     custom = await make_role(db, ["observation.view"], name="only_view")
-    mixed = await make_role(db, ["observation.view", "tag.create"], name="view_and_tags")
+    mixed = await make_role(db, ["observation.view", "tag.create"], name="view_and_tags", allow_mixed=True)
 
-    admin_body = (await client.get(ROLE.format(role_id=(await builtin(db, "admin")).id), headers=h)).json()
-    assert admin_body["is_builtin"] is True and admin_body["builtin_key"] == "admin" and admin_body["level"] == "system"
-    assert (await client.get(ROLE.format(role_id=custom.id), headers=h)).json()["level"] == "scoped"
+    admin_body = (await client.get(ROLE.format(role_id=(await builtin(db, "system_administrator")).id), headers=h)).json()
+    assert admin_body["is_builtin"] is True and admin_body["builtin_key"] == "system_administrator"
+    assert admin_body["level"] == "system"
+    assert (await client.get(ROLE.format(role_id=custom.id), headers=h)).json()["level"] == "tree"
     assert (await client.get(ROLE.format(role_id=mixed.id), headers=h)).json()["level"] == "system"
     assert (await client.get(ROLE.format(role_id=custom.id), headers=h)).json()["is_builtin"] is False
 
     custom_only = (await client.get(ROLES, params={"is_builtin": "false"}, headers=h)).json()
     assert {r["id"] for r in custom_only} == {custom.id, mixed.id}
     built_in = (await client.get(ROLES, params={"is_builtin": "true"}, headers=h)).json()
-    assert len(built_in) == len(UserType) and all(r["is_builtin"] for r in built_in)
+    assert len(built_in) == len(BuiltinRole) and all(r["is_builtin"] for r in built_in)
     levels = {r["name"]: r["level"] for r in built_in}
-    assert levels["viewer"] == "scoped" and levels["admin"] == "system"
+    assert levels["viewer"] == "tree" and levels["system_administrator"] == "system"
 
     permissions = (await client.get(V1.path(RoleRoutes.ALL_PERMISSIONS), headers=h)).json()
     assert {p["name"]: p["level"] for p in permissions}["tag.create"] == "system"
-    assert {p["name"]: p["level"] for p in permissions}["tag.view"] == "scoped"
+    assert {p["name"]: p["level"] for p in permissions}["tag.view"] == "tree"
 
 
 def test_role_fields_are_required_in_the_schema():
@@ -155,6 +158,6 @@ async def test_search_roles_reports_builtin_and_level(client, db, headers):
     h = headers(await make_admin(db))
     body = (await client.get(V1.path(SearchRoutes.ROLES), params={"is_builtin": "true"}, headers=h)).json()
     items = {r["name"]: r for r in body["items"]}
-    assert set(items) == {t.value for t in UserType}
-    assert items["admin"]["is_builtin"] is True and items["admin"]["level"] == "system"
-    assert items["viewer"]["level"] == "scoped"
+    assert set(items) == {key.value for key in BuiltinRole}
+    assert items["system_administrator"]["is_builtin"] is True and items["system_administrator"]["level"] == "system"
+    assert items["viewer"]["level"] == "tree"

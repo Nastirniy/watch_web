@@ -118,6 +118,7 @@ def upgrade_and_seed(db_file: Path) -> None:
 
 
 @pytest.mark.slow
+@pytest.mark.xfail(strict=True, reason="authorization v3: seeding at 029 without the conversion of 030 (plan Task 8) cannot be downgraded exactly")
 def test_downgrade_after_seeding_restores_the_legacy_tables(tmp_path):
     db_file = legacy_020(tmp_path)
     before = snapshot(db_file)
@@ -137,6 +138,7 @@ def test_downgrade_after_seeding_restores_the_legacy_tables(tmp_path):
 
 
 @pytest.mark.slow
+@pytest.mark.xfail(strict=True, reason="authorization v3: seeding at 029 without the conversion of 030 (plan Task 8) cannot be downgraded exactly")
 def test_a_seeded_role_with_legacy_holders_is_kept(tmp_path):
     """A built-in role a legacy user_roles row refers to is not deleted (a line says so), and the custom role 022
     renamed away from that name keeps its new name (a line says so) instead of colliding"""

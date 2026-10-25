@@ -90,7 +90,7 @@ async def _create_user(client, db, headers, username: str, cert: x509.Certificat
     created = await client.post(
         CREATE_USER, headers=headers(admin),
         files={"certificate": ("cert.pem", pem(cert), "application/x-pem-file")},
-        data={"username": username, "username_alias": "Alias", "user_type": "admin"},
+        data={"username": username, "username_alias": "Alias", "user_type": "system_administrator"},
     )
     assert created.status_code == 200, created.text
     return created.json()["id"]

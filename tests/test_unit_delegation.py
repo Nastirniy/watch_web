@@ -27,7 +27,7 @@ WRITES = [Permissions.SCOPE_GROUP_CREATE, Permissions.SCOPE_GROUP_UPDATE, Permis
 
 async def _commander(db, node: Node):
     """A post_admin holding the unit management role at node"""
-    user = await make_user(db, user_type=UserType.POST_ADMIN)
+    user = await make_user(db, user_type=UserType.ADMINISTRATOR)
     await assign(db, user, await make_role(db, COMMANDER), node)
     return user
 
@@ -187,7 +187,7 @@ async def _assign_through_api(client, db, headers, user_type: UserType, corps):
 
 async def test_post_admin_type_may_hold_scope_group_writes(client, db, headers):
     corps = await make_group(db, kind="corps")
-    r = await _assign_through_api(client, db, headers, UserType.POST_ADMIN, corps)
+    r = await _assign_through_api(client, db, headers, UserType.ADMINISTRATOR, corps)
     assert r.status_code == 201, r.text
     assert r.json()["scope"]["id"] == corps.id
 
@@ -269,7 +269,7 @@ async def test_include_deleted_shows_archived_groups_only_where_scope_group_arch
 # ----------------------------------------------------------------- bug hunt 2 (A-02, A-05, A-06, C-L1)
 async def _holder(db, grants):
     """A post_admin holding one custom role per (permissions, node)"""
-    user = await make_user(db, user_type=UserType.POST_ADMIN)
+    user = await make_user(db, user_type=UserType.ADMINISTRATOR)
     for perms, node in grants:
         await assign(db, user, await make_role(db, perms), node)
     return user

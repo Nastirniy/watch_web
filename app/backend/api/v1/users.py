@@ -13,6 +13,7 @@ from app.backend.utils.row_locks import lock as lock_row, lock_first
 from app.backend.models.user import User, UserSession
 from app.backend.models.role import Role
 from app.backend.models.role_assignment import RoleAssignment, scope_columns
+from app.backend.models.system_role_assignment import SystemRoleAssignment
 from app.backend.models.post import Post
 from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
@@ -23,10 +24,10 @@ from app.backend.auth.privileges import (
     role_permission_names,
 )
 from app.backend.auth.scope import Node, ROOT
-from app.backend.bootstrap.permissions import role_level
+from app.backend.auth.user_types import USER_TYPES
 from app.backend.auth.service import AuthService
 from app.backend.enums.general import (
-    CertificateSource, PermissionLevel, Permissions, SessionEndReason, SessionRevokeCause, SessionStatus, UserType,
+    CertificateSource, Permissions, SessionEndReason, SessionRevokeCause, SessionStatus, UserType,
 )
 from app.backend.errors.coded import CodedError
 from app.backend.services.certificates import MAX_CERTIFICATE_BYTES, register_certificate
@@ -73,19 +74,24 @@ def taken_error_code(exc: IntegrityError) -> ErrorCode | None:
 FORM_CONTENT_TYPES = ("multipart/form-data", "application/x-www-form-urlencoded")
 
 
-async def _default_assignment(
+async def _base_assignments(
         session: AsyncSession, auth: AuthContext, user_type: UserType, post_id: Optional[int],
-) -> Tuple[Role, Node]:
-    """The first assignment of a new user: the built-in base role of the type at the home post, at the root without
-    one or when the base role holds system permissions (admin). The caller needs user.create covering that node
-    (403 permission_required_for_action) and every permission of the role there (403
-    grant_exceeds_own_permissions)."""
-    role = (await session.exec(select(Role).where(Role.builtin_key == user_type.value))).one()
-    permissions = await role_permission_names(session, [role.id])
-    node = ROOT if post_id is None or role_level(permissions) is PermissionLevel.SYSTEM else Node.post(post_id)
+) -> List[Tuple[Role, Optional[Node]]]:
+    """The first assignments of a new user, the base roles of the type (auth/user_types.py): the tree base role at
+    the home post (at the root without one or for an at_root base role), each system base role without a node
+    (None). The caller needs user.create covering the node of the tree base role (403
+    permission_required_for_action) and every permission of each base role where it acts, the root for a system
+    role (403 grant_exceeds_own_permissions)."""
+    spec = USER_TYPES[user_type]
+    tree = spec.tree_base
+    node = ROOT if post_id is None or tree.at_root else Node.post(post_id)
     AccessControlService.check_covers(auth, Permissions.USER_CREATE, node, "create_user")
-    check_grant_at(auth, permissions, node)
-    return role, node
+    base: List[Tuple[Role, Optional[Node]]] = []
+    for item in (tree, *spec.system_bases):
+        role = (await session.exec(select(Role).where(Role.builtin_key == item.role.value))).one()
+        check_grant_at(auth, await role_permission_names(session, [role.id]), node if item is tree else ROOT)
+        base.append((role, node if item is tree else None))
+    return base
 
 
 def _username_taken(username: str, exclude_user_id: Optional[int] = None):
@@ -155,10 +161,11 @@ async def create_user(
     64 characters). The same certificate registered already, for any user, answers 400 certificate_taken; an expired
     one is accepted. Without a certificate the user exists but cannot log in until one is issued or uploaded.
 
-    The form fields are described by UserCreateForm. The user gets one assignment: the built-in base role of
-    user_type at the home post (post_id), or at the root without a home post or when the base role holds system
-    permissions (admin). The caller needs user.create covering that node (403 permission_required_for_action) and
-    every permission of the role there (403 grant_exceeds_own_permissions). These checks answer first: a post_id
+    The form fields are described by UserCreateForm. The user gets the base roles of user_type (GET /user-types): the
+    tree base role at the home post (post_id), or at the root without a home post or for a type whose base role
+    acts at the root (system_administrator), and the system base roles. The caller needs user.create covering that
+    node (403 permission_required_for_action) and every permission of each base role where it acts (403
+    grant_exceeds_own_permissions). These checks answer first: a post_id
     outside the caller's scope gets the same 403 whether the post exists, is archived or not. An unknown post answers
     404 post_not_found and an archived post 409 post_archived (it cannot be the home post).
     """
@@ -166,7 +173,7 @@ async def create_user(
     certificate = user_data.certificate
 
     # Scope before the post: an outsider gets the same 403 for an unknown, an archived and a live post outside it
-    base_role, node = await _default_assignment(session, auth, user_data.user_type, user_data.post_id)
+    base_roles = await _base_assignments(session, auth, user_data.user_type, user_data.post_id)
     if user_data.post_id is not None:
         post = (await session.exec(select(Post).where(Post.id == user_data.post_id))).first()
         if not post:
@@ -199,8 +206,12 @@ async def create_user(
         # The user, its assignment and its certificate are written by one commit: a user never exists without an
         # assignment, a refused certificate leaves no user
         await session.flush()
-        session.add(RoleAssignment(user_id=user.id, role_id=base_role.id, created_by=current_user.id,
-                                   **scope_columns(node)))
+        for base_role, node in base_roles:
+            if node is None:
+                session.add(SystemRoleAssignment(user_id=user.id, role_id=base_role.id, created_by=current_user.id))
+            else:
+                session.add(RoleAssignment(user_id=user.id, role_id=base_role.id, created_by=current_user.id,
+                                           **scope_columns(node)))
         certificate_row = None
         if cert_data is not None:
             try:
@@ -221,11 +232,14 @@ async def create_user(
             user_id=current_user.id,
             new_values={
                 **user.model_dump(),
-                "assignments": [{"role_id": base_role.id, "scope": node.key}],
+                "assignments": [{"role_id": role.id, "scope": node.key} for role, node in base_roles if node],
+                "system_assignments": [{"role_id": role.id} for role, node in base_roles if node is None],
                 "certificate_id": certificate_id,
             },
             details={"message": f"User {current_user.username} created new user {user.username} "
-                                f"({user.user_type}, {base_role.name} at {node.key})"},
+                                f"({user.user_type}, " + ", ".join(
+                                    f"{role.name} at {node.key if node else 'system'}" for role, node in base_roles)
+                                + ")"},
             **client_info(request, auth)
         )
         await session.commit()
@@ -441,6 +455,8 @@ async def update_user(
         message = f"User {current_user.username} updated user {user.username}"
         if type_change is not None:
             new_values["replaced_assignments"] = type_change.replaced
+            new_values["removed_system_assignments"] = type_change.system_removed
+            new_values["added_system_assignments"] = type_change.system_added
             message += (f" (type {type_change.old_type.value} -> {type_change.new_type.value}, "
                         f"{len(type_change.replaced)} assignments replaced)")
         await create_audit_log(

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, FrozenSet, Iterable
 
 from app.backend.migrations.support import authz_v2 as conv
+from app.backend.migrations.support.authz_v3 import TYPE_MAP
 from app.backend.migrations.support.authz_v2 import (
     ConversionPlan, DerivedRole, LegacyRole, LegacyUser, PlannedAssignment, UserPlan, plan_conversion,
 )
@@ -420,8 +421,11 @@ def test_frozen_sets_equal_the_live_definitions():
     live_system = {name for name, level in PERMISSION_LEVELS.items() if level is PermissionLevel.SYSTEM}
     assert conv.SYSTEM - conv.REMOVED - changed_later == (live_system & known) - conv.REMOVED
     assert conv.ADMIN_TRUE in conv.SYSTEM and changed_later <= conv.SYSTEM
-    assert conv.TYPE_ORDER == tuple(t.value for t in UserType)
-    assert {key: ceiling - conv.REMOVED - changed_later for key, ceiling in conv.TYPE_CEILINGS.items()} == {
+    # authorization v3 renamed post_admin and admin (migrations/support/authz_v3.py TYPE_MAP); the boundaries of
+    # the renamed types are the v2 ceilings
+    renamed = {key: TYPE_MAP.get(key, key) for key in conv.TYPE_ORDER}
+    assert tuple(renamed.values()) == tuple(t.value for t in UserType)
+    assert {renamed[key]: ceiling - conv.REMOVED - changed_later for key, ceiling in conv.TYPE_CEILINGS.items()} == {
         t.value: (spec.allowed_permissions & known) - conv.REMOVED for t, spec in USER_TYPES.items()
     }
     assert conv.REMOVED == {"admin.true", "post.access_all"}

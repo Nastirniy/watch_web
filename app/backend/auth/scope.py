@@ -87,6 +87,8 @@ class Grant:
     node: Node
     permissions: FrozenSet[str]
     assignment_id: Optional[int] = None
+    # tree: a role assignment at node; system: a system role assignment (node is the root)
+    kind: str = "tree"
 
 
 @dataclass(frozen=True)

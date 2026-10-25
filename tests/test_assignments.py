@@ -16,6 +16,7 @@ from sqlmodel import select
 
 from app.backend.api.v1 import V1
 from app.backend.auth import assignments as assignment_rules
+from app.backend.auth.privileges import holds_admin_at_root
 from app.backend.auth.scope import Node, ROOT
 from app.backend.auth.user_types import USER_TYPES
 from app.backend.config import settings
@@ -67,7 +68,7 @@ async def typed_user(db, user_type: UserType, post_id=None, node: Node = None) -
 
 
 async def group_admin_of(db, group: ScopeGroup) -> User:
-    return await typed_user(db, UserType.POST_ADMIN, node=Node.group(group.id))
+    return await typed_user(db, UserType.ADMINISTRATOR, node=Node.group(group.id))
 
 
 async def _archive(db, row) -> None:
@@ -263,8 +264,8 @@ async def test_a_role_without_permissions_needs_user_update_at_the_node(client, 
 # ----------------------------------------------------------------- level, ceiling, nodes
 async def test_system_role_only_at_root(client, db, headers, tree):
     admin = await make_admin(db)
-    target = await typed_user(db, UserType.POST_ADMIN, post_id=tree.a.id)
-    tagger = await make_role(db, [Permissions.TAG_VIEW, Permissions.TAG_CREATE])
+    target = await typed_user(db, UserType.ADMINISTRATOR, post_id=tree.a.id)
+    tagger = await make_role(db, [Permissions.TAG_VIEW, Permissions.TAG_CREATE], allow_mixed=True)
 
     refused = await client.post(assignments_url(target.id), json=body_of(tagger, "post", tree.a.id), headers=headers(admin))
     body = problem(refused, 409, "role_requires_root_scope")
@@ -414,29 +415,16 @@ async def test_a_concurrent_duplicate_is_refused_by_the_unique_index(client, db,
     assert not (await db.exec(select(AuditLog).where(AuditLog.resource_type == "role_assignment"))).all()
 
 
-async def test_last_admin_cannot_drop_own_root_admin(client, db, headers, tree):
-    """Review Focus 5: the last administrator deleting their own admin @ root: 409, nothing changed"""
+async def test_tree_assignment_is_not_the_administrator(client, db, headers, tree):
+    """The administrator is the system assignment of system_administrator: removing a system administrator's
+    administrator @ root (a tree assignment) leaves them the administrator (the last-administrator rules are those of
+    the system assignments)"""
     admin = await make_admin(db)
     (admin_at_root,) = await assignment_ids(db, admin)
-    problem(await client.delete(assignment_url(admin.id, admin_at_root), headers=headers(admin)),
-            409, "last_assignment_required")
-
     await assign(db, admin, await builtin(db, UserType.VIEWER), Node.post(tree.a.id))
-    problem(await client.delete(assignment_url(admin.id, admin_at_root), headers=headers(admin)),
-            409, "cannot_remove_own_admin")
-    assert admin_at_root in await assignment_ids(db, admin)
-
-    # Someone holding every permission at the root through a custom role is not the administrator: the last
-    # administrator's admin @ root stays while nobody else holds it
-    manager = await make_user(db, user_type=UserType.ADMIN)
-    await assign(db, manager, await make_role(db, [p.value for p in Permissions]), ROOT)
-    problem(await client.delete(assignment_url(admin.id, admin_at_root), headers=headers(manager)),
-            409, "last_admin_required")
-    assert admin_at_root in await assignment_ids(db, admin)
-
-    await make_admin(db)
-    removed = await client.delete(assignment_url(admin.id, admin_at_root), headers=headers(manager))
+    removed = await client.delete(assignment_url(admin.id, admin_at_root), headers=headers(admin))
     assert removed.status_code == 204, removed.text
+    assert await holds_admin_at_root(db, admin.id)
 
 
 # ----------------------------------------------------------------- reads and archived users

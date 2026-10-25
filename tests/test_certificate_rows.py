@@ -290,7 +290,7 @@ async def test_init_user_with_and_without_a_certificate(db, session_maker, monke
     monkeypatch.setattr(init_user, "create_database_if_not_exists", nothing)
     monkeypatch.setattr(init_user, "get_session_maker", maker)
 
-    await init_user.create_user("cli_admin", "CLI Admin", None, UserType.ADMIN)
+    await init_user.create_user("cli_admin", "CLI Admin", None, UserType.SYSTEM_ADMINISTRATOR)
     admin = await user_named(db, "cli_admin")
     assert admin is not None and await rows_of(db, admin.id) == []
 

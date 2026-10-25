@@ -25,7 +25,8 @@ async def list_user_types(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require()),
 ):
-    """The catalog of user types, in catalog order: the base role, the base permissions and the ceiling of each."""
+    """The catalog of user types, in catalog order: the tree base role, the permissions of every base role and the
+    boundary (tree and system) of each."""
     rows = await session.exec(select(Role).where(Role.builtin_key.is_not(None)))
     base_roles = {role.builtin_key: role for role in rows.all()}
     return [
@@ -33,7 +34,7 @@ async def list_user_types(
             key=spec.key,
             display_name=spec.display_name,
             description=spec.description,
-            base_role=UserTypeRole.model_validate(base_roles[spec.key.value]),
+            base_role=UserTypeRole.model_validate(base_roles[spec.tree_base.role.value]),
             base_permissions=sorted(spec.base_permissions),
             allowed_permissions=sorted(spec.allowed_permissions),
         )

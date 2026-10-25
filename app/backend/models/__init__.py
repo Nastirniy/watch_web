@@ -2,6 +2,7 @@ from .user import User, UserSession
 from .user_certificate import UserCertificate, CertificateAuthorityState
 from .role import Role, Permission, RolePermission
 from .role_assignment import RoleAssignment
+from .system_role_assignment import SystemRoleAssignment
 from .scope_group import ScopeGroup
 from .post import Post
 from .observation import (
@@ -18,7 +19,7 @@ from .observation_unit import ObservationUnit
 
 __all__ = [
     'User', 'UserSession', 'UserCertificate', 'CertificateAuthorityState',
-    'Role', 'Permission', 'RolePermission', 'RoleAssignment',
+    'Role', 'Permission', 'RolePermission', 'RoleAssignment', 'SystemRoleAssignment',
     'Post', 'ScopeGroup',
     'SignalType', 'Category',
     'Observation', 'ObservationFrequency', 'Tag', 'ObservationTag', 'MediaFile',

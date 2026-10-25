@@ -5,6 +5,20 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Authorization v3 (in progress)
+
+### Changed (breaking)
+
+- User types are positions without a place: `post_admin` is now `administrator` (an administrator of the node it is
+  assigned at: a post, a brigade, a corps or all data) and `admin` is now `system_administrator`. `UserType` values:
+  `viewer`, `operator`, `senior_operator`, `analyst`, `administrator`, `system_administrator`.
+- Permission levels are `tree` (acts at a node and below it) and `system` (acts on the whole system); `scoped` is
+  gone (`GET /roles/list-all-permissions`, `level` of roles).
+- Built-in roles: tree `viewer`, `operator`, `senior_operator`, `analyst`, `administrator` (every tree permission),
+  system `system_administrator`, `auditor`, `dictionary_editor`, `tag_editor`. A new `system_administrator` user gets
+  `administrator` at the root and the system role `system_administrator`.
+- Database: `permissions.level`, `roles.kind`, table `system_role_assignments` (migration `029_authz_v3_schema`).
+
 ## Database backups
 
 ### Changed

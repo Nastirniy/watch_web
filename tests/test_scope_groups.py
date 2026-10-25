@@ -171,8 +171,8 @@ async def _caller(db, node: Node, *perms, user_type: UserType = UserType.ANALYST
 
 async def _group_admin(db, node: Node):
     """Type post_admin with the built-in post_admin role (scope_group.view, post.view, ...) at the node"""
-    user = await make_user(db, user_type=UserType.POST_ADMIN)
-    role = (await db.exec(select(Role).where(Role.builtin_key == UserType.POST_ADMIN.value))).one()
+    user = await make_user(db, user_type=UserType.ADMINISTRATOR)
+    role = (await db.exec(select(Role).where(Role.builtin_key == UserType.ADMINISTRATOR.value))).one()
     await assign(db, user, role, node)
     return user
 
@@ -233,7 +233,7 @@ async def test_group_writes_need_scope_group_view_at_the_group(client, db, heade
     east = await make_group(db, "East")
     west = await make_group(db, "West")
     editor = await _caller(db, ROOT_NODE, Permissions.SCOPE_GROUP_CREATE, Permissions.SCOPE_GROUP_UPDATE,
-                           Permissions.SCOPE_GROUP_ARCHIVE, user_type=UserType.ADMIN)
+                           Permissions.SCOPE_GROUP_ARCHIVE, user_type=UserType.SYSTEM_ADMINISTRATOR)
     await assign(db, editor, await make_role(db, [Permissions.SCOPE_GROUP_VIEW]), Node.group(east.id))
     h = headers(editor)
 
@@ -281,7 +281,7 @@ async def test_a_group_move_needs_post_update_at_the_old_and_the_new_parent(clie
     west = await make_group(db, "West")
     a = await make_post(db, "A", group_id=kharkiv.id)
     mover = await _caller(db, ROOT_NODE, Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_UPDATE,
-                          user_type=UserType.ADMIN)
+                          user_type=UserType.SYSTEM_ADMINISTRATOR)
     await assign(db, mover, await make_role(db, [Permissions.OBSERVATION_VIEW, Permissions.OBSERVATION_UPDATE]),
                  Node.group(west.id))
     h = headers(mover)
@@ -303,7 +303,7 @@ async def test_a_group_move_needs_post_update_at_the_old_and_the_new_parent(clie
     assert renamed.status_code == 200, renamed.text
 
     # post.update at both parents: the move to West is allowed, the root is a location of its own
-    both = await _caller(db, Node.group(east.id), Permissions.POST_UPDATE, Permissions.POST_VIEW, user_type=UserType.ADMIN)
+    both = await _caller(db, Node.group(east.id), Permissions.POST_UPDATE, Permissions.POST_VIEW, user_type=UserType.SYSTEM_ADMINISTRATOR)
     await assign(db, both, await make_role(db, [Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_UPDATE]), ROOT_NODE)
     await assign(db, both, await make_role(db, [Permissions.POST_UPDATE, Permissions.POST_VIEW]), Node.group(west.id))
     moved = await client.patch(_group(kharkiv.id), json={"parent_id": west.id}, headers=headers(both))

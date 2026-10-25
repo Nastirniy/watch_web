@@ -15,20 +15,20 @@ ids: the target user and the caller's scope answer before the existence or the s
             -> check_assign_at(user.update and its role's permissions, its node) 403
             -> the user's last assignment 409 (of a live role: another one of a live role remains; an assignment of
                an archived role grants nothing)
-            -> the built-in admin role at the root: not taken from oneself, and someone keeps it 409
 
 change_user_type (PATCH /users/{user_id} with user_type, rule 4; the route ran rule 2, check_target_user with
-user.update, first) replaces every assignment of the old type's built-in role with the new type's at the same node
-(at the root when the new one holds system permissions, as the default assignment of a new user; an assignment the
-user already has is kept and the replaced row merged into it), then checks every assignment against the ceiling of the
-new type:
+user.update, first) gives the user the base roles of the new type (auth/user_types.py): every assignment of the old
+type's tree base role gets the new type's tree base role at the same node (at the root when the new one is at_root;
+an assignment the user already has is kept and the replaced row merged into it), the system base roles of the old
+type the new one lacks are removed and those it adds are given; then every assignment of both tables is checked
+against the boundary of the new type:
 
-            check_assign_at(user.update and the new base role's permissions, at the node of the default assignment
-               of a new user (the home post; the root without one or for a system role), also when nothing is
-               replaced, and at each target node) 403
+            check_assign_at(user.update and the new tree base role's permissions, at the node of the default
+               assignment of a new user (the home post; the root without one or for an at_root base role), also when
+               nothing is replaced, and at each target node; each added system base role at the root) 403
             -> the replacements written (the unique index answers a concurrent assignment of the new base role at
                the same node: the route maps it to 409 assignment_exists)
-            -> every assignment, those of archived roles included, within the new ceiling 409
+            -> every assignment of both tables, those of archived roles included, within the new boundary 409
                user_type_ceiling_exceeded
             (the route then ends the user's sessions, runs check_admin_kept and writes the audit row, one transaction)
 
@@ -55,18 +55,19 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.auth.context import AuthContext
 from app.backend.auth.privileges import (
-    check_admin_kept, check_assign_at, check_target_user, holds_admin_at_root, role_permission_names,
+    check_assign_at, check_target_user, holds_admin_at_root, role_permission_names,
 )
 from app.backend.auth.scope import Node, NodeKind, ROOT
-from app.backend.auth.user_types import excess_permissions
-from app.backend.bootstrap.permissions import permission_level, role_level
+from app.backend.auth.user_types import USER_TYPES, excess_permissions
+from app.backend.bootstrap.permissions import permission_level
 from app.backend.config import settings
 from app.backend.enums.errors import ErrorCode
-from app.backend.enums.general import PermissionLevel, Permissions, UserType
+from app.backend.enums.general import BuiltinRole, PermissionLevel, Permissions, UserType
 from app.backend.errors.problems import ApiError
 from app.backend.models.post import Post
 from app.backend.models.role import Permission, Role, RolePermission
 from app.backend.models.role_assignment import RoleAssignment, scope_columns
+from app.backend.models.system_role_assignment import SystemRoleAssignment
 from app.backend.models.scope_group import ScopeGroup
 from app.backend.models.user import User
 
@@ -211,13 +212,9 @@ async def delete_assignment(session: AsyncSession, auth: AuthContext, target: Us
     await _check_not_last(session, target, assignment, role)
 
     removed = assignment.model_dump()
-    admin_at_root = role.builtin_key == UserType.ADMIN.value and removed["scope_key"] == ROOT.key
-    held_before = admin_at_root and await holds_admin_at_root(session, auth.user.id)
     session.expunge(assignment)
     # A core statement: no ORM cascade or relationship bookkeeping in the async session
     await session.execute(sa_delete(RoleAssignment).where(RoleAssignment.id == assignment_id))
-    if admin_at_root:
-        await check_admin_kept(session, auth, held_before)
     logger.info(f"User {auth.user.username} removes assignment {assignment_id} ({removed['scope_key']}) of user {target.id}")
     return removed
 
@@ -228,16 +225,19 @@ class TypeChange:
     """What change_user_type did: the audit row and the route read it"""
     old_type: UserType
     new_type: UserType
-    # One entry per assignment of the old base role, by id: "before" (every column) and either "after" (every column:
-    # the same row with the new role, at the root for a system role) or "merged_into" (the row was removed, the user
-    # already held the new base role at that node: the id of that assignment)
+    # One entry per assignment of the old tree base role, by id: "before" (every column) and either "after" (every
+    # column: the same row with the new role, at the root for an at_root base role) or "merged_into" (the row was
+    # removed, the user already held the new base role at that node: the id of that assignment)
     replaced: List[dict]
-    # The caller held the built-in admin role at the root before the change (check_admin_kept)
+    # System base roles: the removed system assignments (every column) and the added ones (every column)
+    system_removed: List[dict]
+    system_added: List[dict]
+    # The caller held the built-in system_administrator role before the change (check_admin_kept)
     admin_held_before: bool
 
 
-async def _builtin_role(session: AsyncSession, user_type: UserType) -> Role:
-    return (await session.exec(select(Role).where(Role.builtin_key == user_type.value))).one()
+async def _builtin_role(session: AsyncSession, key: BuiltinRole) -> Role:
+    return (await session.exec(select(Role).where(Role.builtin_key == key.value))).one()
 
 
 async def _permissions_by_role(session: AsyncSession, role_ids: Iterable[int]) -> Dict[int, Set[str]]:
@@ -255,11 +255,26 @@ async def _permissions_by_role(session: AsyncSession, role_ids: Iterable[int]) -
 
 
 async def _check_type_ceiling(session: AsyncSession, target: User, user_type: UserType) -> None:
-    """Every assignment of the user fits the ceiling of the type, those of archived roles included (they apply again
-    when the role is restored)"""
+    """Every assignment of the user, system assignments included, fits the boundary of the type, those of archived
+    roles included (they apply again when the role is restored)"""
     views = await assignment_views(session, target.id)
-    by_role = await _permissions_by_role(session, (view.role.id for view in views))
+    system_rows = (await session.exec(
+        select(SystemRoleAssignment.id, Role.id, Role.name, Role.display_name)
+        .join(Role, Role.id == SystemRoleAssignment.role_id)
+        .where(SystemRoleAssignment.user_id == target.id)
+        .order_by(SystemRoleAssignment.id)
+    )).all()
+    by_role = await _permissions_by_role(session, [*(view.role.id for view in views), *(row[1] for row in system_rows)])
     exceeding = []
+    for assignment_id, role_id, name, display_name in system_rows:
+        excess = sorted(excess_permissions(user_type, by_role[role_id]))
+        if excess:
+            exceeding.append({
+                "id": assignment_id,
+                "role": {"id": role_id, "name": name, "display_name": display_name},
+                "scope": {"kind": "root", "id": None, "name": settings.app.name},
+                "excess_permissions": excess,
+            })
     for view in views:
         excess = sorted(excess_permissions(user_type, by_role[view.role.id]))
         if excess:
@@ -292,9 +307,11 @@ async def change_user_type(session: AsyncSession, auth: AuthContext, target: Use
     old_type = UserType(target.user_type)
     if new_type is old_type:
         return None
-    old_base, new_base = await _builtin_role(session, old_type), await _builtin_role(session, new_type)
+    old_spec, new_spec = USER_TYPES[old_type], USER_TYPES[new_type]
+    old_base = await _builtin_role(session, old_spec.tree_base.role)
+    new_base = await _builtin_role(session, new_spec.tree_base.role)
     new_permissions = await role_permission_names(session, [new_base.id])
-    to_root = role_level(new_permissions) is PermissionLevel.SYSTEM
+    to_root = new_spec.tree_base.at_root
 
     rows = (await session.exec(
         select(RoleAssignment)
@@ -302,10 +319,18 @@ async def change_user_type(session: AsyncSession, auth: AuthContext, target: Use
         .order_by(RoleAssignment.id)
     )).all()
     plan = [(row, ROOT if to_root else row.node) for row in rows]
+    # The same base role at the same node: nothing to replace
+    plan = [(row, node) for row, node in plan if not (row.role_id == new_base.id and row.scope_key == node.key)]
     # The bar of a new user's default assignment, whether or not anything is replaced (R29)
     default_node = ROOT if target.post_id is None or to_root else Node.post(target.post_id)
     for node in (default_node, *(node for _, node in plan)):
         check_assign_at(auth, new_permissions, node)
+
+    old_system = {base.role for base in old_spec.system_bases}
+    new_system = {base.role for base in new_spec.system_bases}
+    added_roles = [await _builtin_role(session, key) for key in sorted(new_system - old_system)]
+    for role in added_roles:
+        check_assign_at(auth, await role_permission_names(session, [role.id]), ROOT)
     admin_held_before = await holds_admin_at_root(session, auth.user.id)
 
     held = await _held_nodes(session, target.id, new_base.id)
@@ -325,13 +350,32 @@ async def change_user_type(session: AsyncSession, auth: AuthContext, target: Use
         held[node.key] = row.id
         replaced.append({"before": before, "after": row.model_dump()})
 
+    system_removed: List[dict] = []
+    for key in sorted(old_system - new_system):
+        role = await _builtin_role(session, key)
+        for row in (await session.exec(select(SystemRoleAssignment).where(
+                SystemRoleAssignment.user_id == target.id, SystemRoleAssignment.role_id == role.id))).all():
+            system_removed.append(row.model_dump())
+            session.expunge(row)
+            await session.execute(sa_delete(SystemRoleAssignment).where(SystemRoleAssignment.id == row.id))
+    system_added: List[SystemRoleAssignment] = []
+    for role in added_roles:
+        exists = (await session.exec(select(SystemRoleAssignment.id).where(
+            SystemRoleAssignment.user_id == target.id, SystemRoleAssignment.role_id == role.id))).first()
+        if exists is None:
+            row = SystemRoleAssignment(user_id=target.id, role_id=role.id, created_by=auth.user.id)
+            session.add(row)
+            system_added.append(row)
+
     target.user_type = new_type.value
     session.add(target)
     await session.flush()
     await _check_type_ceiling(session, target, new_type)
     logger.info(f"User {auth.user.username} changes the type of user {target.id} from {old_type.value} to "
-                f"{new_type.value} ({len(replaced)} assignments of {old_base.name} replaced)")
-    return TypeChange(old_type, new_type, replaced, admin_held_before)
+                f"{new_type.value} ({len(replaced)} assignments of {old_base.name} replaced, "
+                f"{len(system_removed)} system assignments removed, {len(system_added)} added)")
+    return TypeChange(old_type, new_type, replaced, system_removed, [row.model_dump() for row in system_added],
+                      admin_held_before)
 
 
 # ------------------------------------------------------------------ role edits (holders of the role)

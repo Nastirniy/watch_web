@@ -131,12 +131,12 @@ async def test_me_for_the_admin_at_the_root(client, db, headers):
     admin = await make_admin(db)
     body = (await client.get(ME, headers=headers(admin))).json()
     every = sorted(p.value for p in Permissions)
-    assert body["user_type"] == "admin"
+    assert body["user_type"] == "system_administrator"
     assert body["permissions"] == every and body["root_permissions"] == every
     assert "post.access_all" not in body["permissions"] and "admin.true" not in body["permissions"]
     assert body["post_permissions"] == {}
     (assignment,) = body["assignments"]
-    assert assignment["role"]["name"] == "admin" and assignment["scope"]["kind"] == "root"
+    assert assignment["role"]["name"] == "administrator" and assignment["scope"]["kind"] == "root"
 
 
 @pytest.mark.asyncio

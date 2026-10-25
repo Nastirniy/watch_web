@@ -1,10 +1,10 @@
 """The display texts and levels of every permission and the built-in roles; seeding keeps the database in sync."""
-from typing import Dict, Iterable
+from typing import Dict, Iterable, Optional
 
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.backend.enums.general import PermissionLevel, Permissions, UserType
+from app.backend.enums.general import BuiltinRole, PermissionLevel, Permissions, RoleKind
 from app.backend.utils.logging_config import get_database_logger
 
 _logger = get_database_logger()
@@ -65,7 +65,10 @@ PERMISSION_META = {
     "backup.view": ("Перегляд резервних копій", "Дозволяє переглядати резервні копії бази даних, час останньої успішної копії, копії на іншому сховищі та збережені стани після відновлення"),
 }
 
-# Permissions assignable only at the root of the scope tree; every other permission is scoped
+# Permissions of the system level: they act on the whole system and are held only through system roles (system role
+# assignments, without a node); every other permission is of the tree level (acts at a node and below it). A level is
+# never changed by seeding: the start refuses a database whose levels differ (bootstrap/authorization.py), a change
+# is a migration that decides what happens to the roles holding the permission.
 _SYSTEM_PERMISSIONS = frozenset({
     "role.create", "role.update", "role.archive", "role.delete",
     "category.create", "category.update", "category.archive",
@@ -78,7 +81,7 @@ _SYSTEM_PERMISSIONS = frozenset({
 })
 
 PERMISSION_LEVELS: Dict[str, PermissionLevel] = {
-    perm.value: PermissionLevel.SYSTEM if perm.value in _SYSTEM_PERMISSIONS else PermissionLevel.SCOPED
+    perm.value: PermissionLevel.SYSTEM if perm.value in _SYSTEM_PERMISSIONS else PermissionLevel.TREE
     for perm in Permissions
 }
 
@@ -88,30 +91,39 @@ def permission_level(name: str) -> PermissionLevel:
 
 
 def role_level(permission_names: Iterable[str]) -> PermissionLevel:
-    """A role is system when it holds at least one system permission: it can be assigned only at the root"""
+    """System when at least one permission is of the system level"""
     if any(permission_level(name) is PermissionLevel.SYSTEM for name in permission_names):
         return PermissionLevel.SYSTEM
-    return PermissionLevel.SCOPED
+    return PermissionLevel.TREE
 
 
-async def sync_builtin_roles(session: AsyncSession) -> Dict[UserType, "Role"]:
-    """One built-in role per user type, owned by code: found by builtin_key, else a role already named like the
-    key is claimed, else created. Display texts, the archive flag and the permission set (the base of the type)
-    are restored at every start. The permissions must already be seeded. Does not commit."""
-    from app.backend.auth.user_types import USER_TYPES
-    from app.backend.models.role import Role, Permission, RolePermission
+def role_kind_of(permission_names: Iterable[str]) -> Optional[RoleKind]:
+    """The kind a role holding exactly these permissions has; None for none or a mix of both levels"""
+    levels = {permission_level(name) for name in permission_names}
+    if len(levels) != 1:
+        return None
+    return RoleKind.TREE if levels == {PermissionLevel.TREE} else RoleKind.SYSTEM
+
+
+async def sync_builtin_roles(session: AsyncSession) -> Dict[BuiltinRole, "Role"]:
+    """The built-in roles of auth/builtin_roles.py, owned by code: found by builtin_key, else a role already named like
+    the key is claimed, else created. Kind, display texts, the archive flag and the permission set are restored at
+    every start. The permissions must already be seeded. Does not commit."""
+    from app.backend.auth.builtin_roles import BUILTIN_ROLES
+    from app.backend.models.role import Permission, Role, RolePermission
 
     permission_ids = {name: pid for pid, name in (await session.exec(select(Permission.id, Permission.name))).all()}
-    roles: Dict[UserType, Role] = {}
-    for user_type, spec in USER_TYPES.items():
-        key = user_type.value
+    roles: Dict[BuiltinRole, Role] = {}
+    for builtin, spec in BUILTIN_ROLES.items():
+        key = builtin.value
         role = (await session.exec(select(Role).where(Role.builtin_key == key))).first()
         if role is None:
             role = (await session.exec(select(Role).where(Role.name == key))).first()
             if role is not None:
-                _logger.warning(f"Role '{key}' claimed as the built-in role of the user type")
+                _logger.warning(f"Role '{key}' claimed as a built-in role")
         if role is None:
-            role = Role(name=key, display_name=spec.display_name, description=spec.description, builtin_key=key)
+            role = Role(name=key, display_name=spec.display_name, description=spec.description, builtin_key=key,
+                        kind=spec.kind.value)
             session.add(role)
             await session.flush()
             _logger.info(f"Built-in role '{key}' created")
@@ -120,13 +132,14 @@ async def sync_builtin_roles(session: AsyncSession) -> Dict[UserType, "Role"]:
                 _logger.warning(f"Built-in role '{key}' was archived; restored by seeding")
             role.builtin_key = key
             role.name = key
+            role.kind = spec.kind.value
             role.display_name = spec.display_name
             role.description = spec.description
             role.is_deleted = False
             session.add(role)
             await session.flush()
 
-        wanted = {permission_ids[name] for name in spec.base_permissions}
+        wanted = {permission_ids[name] for name in spec.permissions}
         present = set()
         for grant in (await session.exec(select(RolePermission).where(RolePermission.role_id == role.id))).all():
             if grant.permission_id in wanted:
@@ -136,17 +149,16 @@ async def sync_builtin_roles(session: AsyncSession) -> Dict[UserType, "Role"]:
         for permission_id in sorted(wanted - present):
             session.add(RolePermission(role_id=role.id, permission_id=permission_id))
         await session.flush()
-        roles[user_type] = role
+        roles[builtin] = role
     return roles
 
 
 async def seed_roles_and_permissions(session: AsyncSession):
-    """Idempotent: ensure every Permission row from the enum (display texts refreshed from PERMISSION_META)
-    and the built-in role of every user type with exactly its base permissions (sync_builtin_roles; the admin
-    role holds every permission, re-granted on every run). Renamed permissions are handled by migrations
-    (010_archive_permissions), never here.
+    """Idempotent: ensure every Permission row from the enum (inserted with its level, display texts refreshed from
+    PERMISSION_META; a stored level is never changed here) and every built-in role with exactly its permissions
+    (sync_builtin_roles). Renamed permissions are handled by migrations (010_archive_permissions), never here.
 
-    Returns the admin Role.
+    Returns the built-in roles.
     """
     from app.backend.models.role import Permission
 
@@ -159,7 +171,8 @@ async def seed_roles_and_permissions(session: AsyncSession):
         display_name, description = PERMISSION_META.get(perm.value, (perm.value, ""))
         row = existing_permissions.get(perm.value)
         if row is None:
-            session.add(Permission(name=perm.value, display_name=display_name, description=description))
+            session.add(Permission(name=perm.value, display_name=display_name, description=description,
+                                   level=PERMISSION_LEVELS[perm.value].value))
             permissions_added += 1
         elif row.display_name != display_name or row.description != description:
             # Display texts are code-owned (there is no API to edit them), keep the database in sync
@@ -173,4 +186,4 @@ async def seed_roles_and_permissions(session: AsyncSession):
 
     roles = await sync_builtin_roles(session)
     await session.commit()
-    return roles[UserType.ADMIN]
+    return roles

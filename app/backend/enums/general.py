@@ -96,19 +96,41 @@ class Permissions(Enum):
 
 
 class PermissionLevel(str, Enum):
-    """Where a permission can be assigned: system only at the root of the scope tree, scoped at any node"""
+    """What a permission acts on: tree at a node of the scope tree and below it, system on the whole system (held only
+    through system roles)"""
+    TREE = "tree"
     SYSTEM = "system"
-    SCOPED = "scoped"
 
 
-class UserType(str, Enum):
-    """The type of a user; the order is the order of the catalog. The key of the built-in role is the same string"""
+class RoleKind(str, Enum):
+    """A tree role holds only tree permissions and is assigned at a node (role_assignments); a system role holds only
+    system permissions and is assigned without a node (system_role_assignments). Never changes."""
+    TREE = "tree"
+    SYSTEM = "system"
+
+
+class BuiltinRole(str, Enum):
+    """The built-in roles (roles.builtin_key), owned by code (auth/builtin_roles.py) and re-synced at every start"""
     VIEWER = "viewer"
     OPERATOR = "operator"
     SENIOR_OPERATOR = "senior_operator"
     ANALYST = "analyst"
-    POST_ADMIN = "post_admin"
-    ADMIN = "admin"
+    ADMINISTRATOR = "administrator"
+    SYSTEM_ADMINISTRATOR = "system_administrator"
+    AUDITOR = "auditor"
+    DICTIONARY_EDITOR = "dictionary_editor"
+    TAG_EDITOR = "tag_editor"
+
+
+class UserType(str, Enum):
+    """The type of a user, a position: its base roles, its boundary and the pages of the web client
+    (auth/user_types.py); never a place. The order is the order of the catalog."""
+    VIEWER = "viewer"
+    OPERATOR = "operator"
+    SENIOR_OPERATOR = "senior_operator"
+    ANALYST = "analyst"
+    ADMINISTRATOR = "administrator"
+    SYSTEM_ADMINISTRATOR = "system_administrator"
 
 
 class ObservationStatus(Enum):

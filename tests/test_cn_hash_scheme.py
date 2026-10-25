@@ -52,7 +52,7 @@ async def _post_certificate(client, db, headers, username: str, cert: x509.Certi
     return await client.post(
         CREATE_USER, headers=headers(admin),
         files={"certificate": ("cert.pem", pem(cert), "application/x-pem-file")},
-        data={"username": username, "username_alias": "Alias", "user_type": "admin"},
+        data={"username": username, "username_alias": "Alias", "user_type": "system_administrator"},
     )
 
 

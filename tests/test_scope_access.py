@@ -29,11 +29,12 @@ from app.backend.filters.user_filter import UserCriteria, UserFilterService
 from app.backend.models.observation import ObservationFrequency
 from app.backend.models.post import Post
 from app.backend.models.role_assignment import RoleAssignment
+from app.backend.models.system_role_assignment import SystemRoleAssignment
 from app.backend.models.scope_group import ScopeGroup
 from app.backend.models.user import User
 from app.backend.services.media import uploads
 from tests.helpers import (
-    ACCESS_ALL, ADMIN_TRUE, assign, make_admin, make_dictionary, make_media, make_observation, make_post, make_role,
+    ACCESS_ALL, ADMIN_TRUE, assign, give, make_admin, make_dictionary, make_media, make_observation, make_post, make_role,
     make_user, observation_payload, perm_name,
 )
 
@@ -67,9 +68,10 @@ def with_grants(db):
     grant's permissions at the grant's node each"""
     async def set_grants(user, *grants):
         await db.exec(delete(RoleAssignment).where(RoleAssignment.user_id == user.id))
+        await db.exec(delete(SystemRoleAssignment).where(SystemRoleAssignment.user_id == user.id))
         await db.commit()
         for granted in grants:
-            await assign(db, user, await make_role(db, granted.permissions), granted.node)
+            await give(db, user, granted.permissions, granted.node)
     return set_grants
 
 

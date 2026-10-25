@@ -36,7 +36,7 @@ async def _corps_tree(db):
 @pytest.mark.asyncio
 async def test_corps_commander_gets_the_corps_and_everything_below(client, db, headers):
     corps, brigade, sibling, other = await _corps_tree(db)
-    user = await make_user(db, user_type=UserType.POST_ADMIN)
+    user = await make_user(db, user_type=UserType.ADMINISTRATOR)
     await assign(db, user, await make_role(db, UNIT_VIEW_UPDATE), Node.group(corps.id))
     assert await _me(client, headers, user) == {
         str(corps.id): EXPECTED, str(brigade.id): EXPECTED, str(sibling.id): EXPECTED}
@@ -45,7 +45,7 @@ async def test_corps_commander_gets_the_corps_and_everything_below(client, db, h
 @pytest.mark.asyncio
 async def test_root_only_user_has_no_entries(client, db, headers):
     await _corps_tree(db)
-    user = await make_user(db, user_type=UserType.POST_ADMIN)
+    user = await make_user(db, user_type=UserType.ADMINISTRATOR)
     await assign(db, user, await make_role(db, UNIT_VIEW_UPDATE), ROOT)
     assert await _me(client, headers, user) == {}
 
@@ -53,7 +53,7 @@ async def test_root_only_user_has_no_entries(client, db, headers):
 @pytest.mark.asyncio
 async def test_grant_at_an_archived_corps_gives_nothing(client, db, headers):
     corps, brigade, _, _ = await _corps_tree(db)
-    user = await make_user(db, user_type=UserType.POST_ADMIN)
+    user = await make_user(db, user_type=UserType.ADMINISTRATOR)
     await assign(db, user, await make_role(db, UNIT_VIEW_UPDATE), Node.group(corps.id))
     corps.is_deleted = True
     db.add(corps)
@@ -65,7 +65,7 @@ async def test_grant_at_an_archived_corps_gives_nothing(client, db, headers):
 async def test_grant_at_a_post_gives_nothing(client, db, headers):
     corps, _, _, _ = await _corps_tree(db)
     post = await make_post(db, group_id=corps.id)
-    user = await make_user(db, user_type=UserType.POST_ADMIN)
+    user = await make_user(db, user_type=UserType.ADMINISTRATOR)
     await assign(db, user, await make_role(db, UNIT_VIEW_UPDATE), Node.post(post.id))
     assert await _me(client, headers, user) == {}
 
@@ -73,7 +73,7 @@ async def test_grant_at_a_post_gives_nothing(client, db, headers):
 @pytest.mark.asyncio
 async def test_two_roles_at_the_corps_and_a_brigade_union_at_the_brigade(client, db, headers):
     corps, brigade, sibling, _ = await _corps_tree(db)
-    user = await make_user(db, user_type=UserType.POST_ADMIN)
+    user = await make_user(db, user_type=UserType.ADMINISTRATOR)
     await assign(db, user, await make_role(db, [Permissions.SCOPE_GROUP_VIEW]), Node.group(corps.id))
     await assign(db, user, await make_role(db, [Permissions.SCOPE_GROUP_UPDATE, Permissions.POST_VIEW]),
                  Node.group(brigade.id))
@@ -87,7 +87,7 @@ async def test_two_roles_at_the_corps_and_a_brigade_union_at_the_brigade(client,
 @pytest.mark.asyncio
 async def test_login_response_carries_the_same_field(client, db, monkeypatch):
     corps, brigade, _, _ = await _corps_tree(db)
-    user = await make_user(db, user_type=UserType.POST_ADMIN)
+    user = await make_user(db, user_type=UserType.ADMINISTRATOR)
     await assign(db, user, await make_role(db, UNIT_VIEW_UPDATE), Node.group(brigade.id))
     cert = make_certificate("Group-Perms", 0xD1)
     await make_certificate_row(db, user, cert=cert)

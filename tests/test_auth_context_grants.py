@@ -44,10 +44,13 @@ async def test_admin_sees_every_post_record(db):
     admin = await make_admin(db)
     auth = await load_auth_context(db, admin)
     assert auth.posts_with(P.POST_VIEW) is None and auth.has_at_root(P.TAG_CREATE)
-    (grant,) = auth.grants
-    admin_role = (await db.exec(select(Role).where(Role.builtin_key == "admin"))).one()
-    assert grant.node == ROOT and grant.role_is_builtin and grant.role_id == admin_role.id
-    assert "admin.true" not in grant.permissions and "post.access_all" not in grant.permissions
+    tree, system = auth.grants
+    administrator = (await db.exec(select(Role).where(Role.builtin_key == "administrator"))).one()
+    system_administrator = (await db.exec(select(Role).where(Role.builtin_key == "system_administrator"))).one()
+    assert tree.node == ROOT and tree.role_is_builtin and tree.role_id == administrator.id and tree.kind == "tree"
+    assert system.node == ROOT and system.role_id == system_administrator.id and system.kind == "system"
+    for grant in auth.grants:
+        assert "admin.true" not in grant.permissions and "post.access_all" not in grant.permissions
     assert auth.covers(P.USER_UPDATE, ROOT) and auth.covers_user(P.USER_UPDATE, admin)
     assert auth.root_permissions == auth.held_anywhere and auth.post_permissions() == {}
     assert not hasattr(auth, "is_admin") and not hasattr(auth, "roles")   # the administrator: privileges.holds_admin_at_root

@@ -1,4 +1,5 @@
-"""Seeding: the admin role always ends up with every permission; admin.true and post.access_all are no permissions."""
+"""Seeding: the administrator roles always end up with every permission of their kind (tree and system);
+admin.true and post.access_all are no permissions."""
 import pytest
 from sqlmodel import select
 
@@ -8,8 +9,9 @@ from app.backend.models.role import Role, Permission, RolePermission
 
 
 async def admin_grants(db) -> set:
-    admin = (await db.exec(select(Role).where(Role.name == "admin"))).one()
-    return set((await db.exec(select(RolePermission.permission_id).where(RolePermission.role_id == admin.id))).all())
+    """The permissions of administrator and system_administrator together"""
+    admins = (await db.exec(select(Role.id).where(Role.name.in_(["administrator", "system_administrator"])))).all()
+    return set((await db.exec(select(RolePermission.permission_id).where(RolePermission.role_id.in_(admins)))).all())
 
 
 @pytest.mark.asyncio
@@ -27,7 +29,7 @@ async def test_seed_is_idempotent_and_complete(db):
 
 @pytest.mark.asyncio
 async def test_seed_regrants_removed_permission(db):
-    admin = (await db.exec(select(Role).where(Role.name == "admin"))).one()
+    admin = (await db.exec(select(Role).where(Role.name == "system_administrator"))).one()
     admin_perm = (await db.exec(select(Permission).where(Permission.name == Permissions.AUDIT_VIEW.value))).one()
     row = (await db.exec(select(RolePermission).where(
         RolePermission.role_id == admin.id, RolePermission.permission_id == admin_perm.id))).one()
