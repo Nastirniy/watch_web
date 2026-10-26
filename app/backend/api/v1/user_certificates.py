@@ -233,7 +233,8 @@ async def export_user_certificate(
     await check_target_user(session, auth, user, Permissions.CERTIFICATE_EXPORT)
     try:
         row = await get_user_certificate(session, user.id, certificate_id, lock=True)
-        package = await export_package(session, row, _audit(session, request, auth, AuditEvent.USER_CERTIFICATE_EXPORT, user))
+        package = await export_package(
+            session, row, _audit(session, request, auth, AuditEvent.USER_CERTIFICATE_EXPORT, user))
     except CodedError as exc:
         raise ApiError.from_coded(exc)
     _logger.info(f"User {auth.user.username} downloaded certificate {row.id} of user {user.username} again")

@@ -23,8 +23,7 @@ from app.backend.auth.certificates import (
 )
 from app.backend.errors.coded import CodedError
 from app.backend.enums.audit import AuditEvent
-from app.backend.services.audit import create_audit_log, home_scope, user_facts
-from app.backend.services.audit.subjects import home_node
+from app.backend.services.audit import create_audit_log, home_node, home_scope, user_facts
 from app.backend.services.certificates import active_certificate, certificate_state
 from app.backend.utils.row_locks import lock_all
 from app.backend.utils.text import fit_column
@@ -210,8 +209,8 @@ class AuthService:
         await create_audit_log(
             session,
             AuditEvent.USER_LOGIN,
-            params={"username": user.username},
-            scope=home_scope(user),
+            params={"username": locked.username},
+            scope=home_node(locked.post_id),
             resource_id=user.id,
             user_id=user.id,
             session_id=session_id,

@@ -32,7 +32,8 @@ async def user_facts(session: AsyncSession, user_id: int) -> Tuple[str, Node]:
 
 
 async def role_name(session: AsyncSession, role_id: int) -> str:
-    return (await session.exec(select(Role.name).where(Role.id == role_id))).one()
+    """From the identity map when the write loaded the role (assignments do), else one query"""
+    return (await session.get(Role, role_id)).name
 
 
 async def node_name(session: AsyncSession, node: Node) -> str:

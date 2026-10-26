@@ -16,10 +16,10 @@ from app.backend.models.user import UserSession
 from app.backend.pki.authority import sha256_fingerprint
 from app.backend.pki.crl import split_pem_crls
 from app.backend.services.crl_publisher import crl_status, publish_crl
-from tests.helpers import assign, make_admin, make_certificate_row, make_post, make_role, make_user
+from tests.helpers import assign, issue, make_admin, make_certificate_row, make_post, make_role, make_user
 from tests.pki_helpers import legacy_root, make_leaf, pem
 from tests.test_certificate_routes import (
-    _post_admin, audit_rows, issue, loaded_package, problem_code, rows_of, upload,
+    _post_admin, audit_rows, loaded_package, problem_code, rows_of, upload,
 )
 from tests.test_pki_login import _login, nginx_headers, production  # noqa: F401
 from app.backend.enums.routes import AuthRoutes

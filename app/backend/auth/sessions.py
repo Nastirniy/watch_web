@@ -89,8 +89,8 @@ async def begin_session_write(session: AsyncSession, user_id: int) -> None:
 
 async def begin_account_session_write(session: AsyncSession, user_id: int) -> Optional[Row]:
     """begin_session_write for a write that depends on the account flags (the end of an inactive user's sessions, a
-    login storing its session): the same shared lock, returning (id, is_active, is_deleted, username, post_id) as committed, or None
-    when there is no such user. The flags cannot change before the commit: a change of them locks the row FOR UPDATE.
+    login storing its session): the same shared lock, returning (id, is_active, is_deleted, username, post_id) as
+    committed, or None when there is no such user. The flags cannot change before the commit: a change of them locks the row FOR UPDATE.
 
     Plain columns of users only, never the ORM entity: User carries presence column properties
     (models/presence_properties.py: last_activity_at, last_login_at) whose subqueries read user_sessions. A locking

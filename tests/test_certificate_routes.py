@@ -23,7 +23,7 @@ from app.backend.models.role import Role
 from app.backend.models.user import User
 from app.backend.models.user_certificate import UserCertificate
 from app.backend.pki.authority import is_signed_by, sha256_fingerprint
-from tests.helpers import assign, give, make_admin, make_certificate_row, make_group, make_post, make_role, make_user
+from tests.helpers import assign, give, issue, make_admin, make_certificate_row, make_group, make_post, make_role, make_user
 from tests.pki_helpers import legacy_root, make_leaf, pem
 from tests.test_pki_login import CYRILLIC_CN, _login, nginx_headers, production  # noqa: F401
 
@@ -47,10 +47,6 @@ def certificate_url(user_id: int, certificate_id: int) -> str:
 
 def export_url(user_id: int, certificate_id: int) -> str:
     return V1.path(UserRoutes.USER_CERTIFICATE_EXPORT, user_id=user_id, certificate_id=certificate_id)
-
-
-async def issue(client, headers, caller, user, label: str = "Laptop", **body):
-    return await client.post(certificates_url(user.id), json={"label": label, **body}, headers=headers(caller))
 
 
 async def upload(client, headers, caller, user, data: bytes, label: str = "Office PC"):

@@ -9,8 +9,7 @@ from app.backend.enums.audit import AuditCategory, AuditEvent
 from app.backend.enums.general import BuiltinRole, SessionRevokeCause, UserType
 from app.backend.enums.routes import AuthRoutes, UserRoutes
 from app.backend.models.audit import AuditLog
-from tests.helpers import assign, builtin_role, make_admin, make_post, make_user
-from tests.test_certificate_routes import issue
+from tests.helpers import assign, builtin_role, issue, make_admin, make_post, make_user
 
 
 async def rows_of_event(db, event: AuditEvent) -> list:
@@ -161,13 +160,19 @@ async def test_certificate_rows(client, db, headers, pki):
     assert row.params["username"] == user.username and row.params["label"] == "Laptop"
     assert row.details is None and isinstance(row.params["not_after"], str)
 
+    exported = await client.post(V1.path(UserRoutes.USER_CERTIFICATE_EXPORT, user_id=user.id,
+                                        certificate_id=issued.json()["certificate"]["id"]), headers=headers(admin))
+    assert exported.status_code == 200, exported.text
+    (exp,) = await rows_of_event(db, AuditEvent.USER_CERTIFICATE_EXPORT)
+    assert exp.params["export_count"] == 1 and "session_count" not in exp.params
+
     revoked = await client.post(V1.path(UserRoutes.USER_CERTIFICATE_REVOKE, user_id=user.id,
                                         certificate_id=issued.json()["certificate"]["id"]),
                                 json={"reason": "key_compromise"}, headers=headers(admin))
     assert revoked.status_code == 200, revoked.text
     (gone,) = await rows_of_event(db, AuditEvent.USER_CERTIFICATE_REVOKE)
     assert gone.params["reason"] == "key_compromise" and gone.scope_key == f"p:{post.id}"
-    assert "sessions_ended" not in gone.params
+    assert gone.params["session_count"] == 0 and "export_count" not in gone.params
 
 
 # ---------------------------------------------------------------- cli

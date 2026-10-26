@@ -559,7 +559,7 @@ async def archive_user(
     session.add(user)
     await check_an_admin_remains(session)
 
-    invalidated = await AuthService.invalidate_all_user_sessions(
+    await AuthService.invalidate_all_user_sessions(
         session=session,
         user_id=user_id,
         cause=SessionRevokeCause.ACCOUNT_ARCHIVED,

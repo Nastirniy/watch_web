@@ -412,3 +412,11 @@ def observation_payload(post_id: int, signal_type_id: int) -> dict:
         "frequencies": [{"kind": "rc", "frequency_min": "100.000", "frequency_max": "200.000"}],
         "observed_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+async def issue(client, headers, caller, user, label: str = "Laptop", **body):
+    """POST /users/{id}/certificates as caller: issue a certificate for the user (needs the pki fixture)"""
+    from app.backend.api.v1 import V1
+    from app.backend.enums.routes import UserRoutes
+    return await client.post(V1.path(UserRoutes.USER_CERTIFICATES, user_id=user.id), json={"label": label, **body},
+                             headers=headers(caller))

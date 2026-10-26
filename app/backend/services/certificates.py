@@ -366,7 +366,9 @@ async def export_package(session: AsyncSession, certificate: UserCertificate,
     certificate.export_count += 1
     certificate.last_exported_at = _now()
     session.add(certificate)
-    await write_audit(certificate, certificate_audit_details(certificate, x509.load_pem_x509_certificate(certificate_pem)))
+    await write_audit(certificate, {
+        **certificate_audit_details(certificate, x509.load_pem_x509_certificate(certificate_pem)),
+        "export_count": certificate.export_count})
     await session.commit()
     _logger.info(f"Certificate exported: id={certificate.id}, user_id={certificate.user_id}, "
                  f"export_count={certificate.export_count}")
@@ -406,7 +408,8 @@ async def revoke_certificate(
     ended = await AuthService.invalidate_certificate_sessions(
         session, row.user_id, row.fingerprint_hash, SessionRevokeCause.CERTIFICATE_REVOKED,
         actor_user_id=revoked_by, commit=False)
-    await write_audit(row, {**certificate_audit_details(row, _stored_certificate(row)), "reason": reason.value})
+    await write_audit(row, {**certificate_audit_details(row, _stored_certificate(row)), "reason": reason.value,
+                            "session_count": ended})
     await session.commit()
     _logger.info(f"Certificate revoked: id={row.id}, user_id={row.user_id}, serial={row.serial}, "
                  f"reason={reason.value}, revoked_by={revoked_by}, sessions_ended={ended}")
