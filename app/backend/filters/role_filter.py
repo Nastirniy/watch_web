@@ -22,6 +22,7 @@ class RoleCriteria(ListCriteria):
     display_name_contains: Optional[str] = None
     description_contains: Optional[str] = None
     is_builtin: Optional[bool] = None
+    kind: Optional[str] = None
     created_at_from: Optional[datetime] = None
     created_at_to: Optional[datetime] = None
 
@@ -53,6 +54,7 @@ class RoleFilterService(SimpleFilterEngine):
         query = cls._apply_contains(query, Role.description, params.description_contains)
         query = cls._apply_range(query, Role.created_at, params.created_at_from, params.created_at_to)
         query = cls._apply_builtin(query, params.is_builtin)
+        query = cls._apply_exact(query, Role.kind, getattr(params.kind, "value", params.kind))
 
         query = cls._apply_sorting(query, params)
         query = cls._apply_pagination(query, params)
@@ -77,6 +79,7 @@ class RoleFilterService(SimpleFilterEngine):
         query = cls._apply_contains(query, Role.description, params.description_contains)
         query = cls._apply_range(query, Role.created_at, params.created_at_from, params.created_at_to)
         query = cls._apply_builtin(query, params.is_builtin)
+        query = cls._apply_exact(query, Role.kind, getattr(params.kind, "value", params.kind))
         return query
 
     @staticmethod

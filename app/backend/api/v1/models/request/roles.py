@@ -2,6 +2,7 @@ from typing import List, Optional
 from pydantic import Field, field_validator, PositiveInt
 
 from app.backend.enums.errors import FieldErrorCode
+from app.backend.enums.general import RoleKind
 from app.backend.errors.coded import invalid
 from app.backend.utils.validators import SecureBaseModel, SecurityValidators
 
@@ -31,6 +32,9 @@ class RoleClone(SecureBaseModel):
 
 
 class RoleCreate(RoleClone):
+    kind: RoleKind = Field(description="tree: holds tree permissions, assigned at a node (/users/{user_id}/assignments); "
+                                        "system: holds system permissions, assigned without a node "
+                                        "(/users/{user_id}/system-assignments). Never changes.")
     permission_ids: Optional[List[PositiveInt]] = Field(default=None)
 
     @field_validator('permission_ids')

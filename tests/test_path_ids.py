@@ -24,7 +24,7 @@ async def test_ids_below_one_are_validation_errors(client, db, headers, url, par
 @pytest.mark.asyncio
 async def test_permission_ids_in_a_body_must_be_positive(client, db, headers):
     admin = await make_admin(db)
-    response = await client.post(V1.path(RoleRoutes.ROOT), json={"name": "r1", "display_name": "R1", "permission_ids": [0]},
+    response = await client.post(V1.path(RoleRoutes.ROOT), json={"name": "r1", "display_name": "R1", "kind": "tree", "permission_ids": [0]},
                                  headers=headers(admin))
     body = response.json()
     assert response.status_code == 422 and body["errors"][0]["code"] == "greater_than", body

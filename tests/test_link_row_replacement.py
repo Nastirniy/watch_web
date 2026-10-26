@@ -52,9 +52,9 @@ async def test_role_permissions_replaced_by_difference(client, db, headers, curr
 @pytest.mark.asyncio
 async def test_role_create_stores_the_requested_permissions(client, db, headers):
     admin = await make_admin(db)
-    wanted = await permission_ids(db, ["tag.view", "tag.create"])
+    wanted = await permission_ids(db, ["tag.view", "post.view"])
     response = await client.post(ROLES, headers=headers(admin), json={
-        "name": "linked", "display_name": "Linked", "permission_ids": wanted})
+        "name": "linked", "display_name": "Linked", "kind": "tree", "permission_ids": wanted})
     assert response.status_code == 201, response.text
     assert await stored_permissions(db, response.json()["id"]) == sorted(wanted)
 
@@ -67,7 +67,7 @@ async def test_repeated_permission_ids_answer_the_field_error(client, db, header
     pid = (await permission_ids(db, ["tag.view"]))[0]
     if method == "post":
         response = await client.post(ROLES, headers=headers(admin), json={
-            "name": "dup", "display_name": "Dup", "permission_ids": [pid, pid]})
+            "name": "dup", "display_name": "Dup", "kind": "tree", "permission_ids": [pid, pid]})
     else:
         response = await client.patch(ROLE.format(role_id=role.id), headers=headers(admin), json={"permission_ids": [pid, pid]})
     assert response.status_code == 422, response.text

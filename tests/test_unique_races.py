@@ -171,7 +171,7 @@ async def test_role_create_race_answers_taken(client, db, headers):
     await make_role(db, [], name="racing")
     with blind_select("roles.name =") as fired:
         response = await client.post(V1.path(RoleRoutes.ROOT), headers=headers(admin),
-                                     json={"name": "racing", "display_name": "Racing"})
+                                     json={"name": "racing", "display_name": "Racing", "kind": "tree"})
     assert fired
     assert response.status_code == 400, response.text
     assert response.json()["code"] == "role_name_taken"

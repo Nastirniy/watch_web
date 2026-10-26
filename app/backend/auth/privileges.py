@@ -87,9 +87,14 @@ def check_grant_at(auth: AuthContext, permissions: Iterable[str], node: Node) ->
 
 
 async def role_nodes(session: AsyncSession, role_id: int) -> FrozenSet[Node]:
-    """Every node the role is assigned at, assignments of archived users included (R28)"""
+    """Every node the role is assigned at, assignments of archived users included (R28); a system assignment acts at
+    the root"""
     keys = await session.exec(select(RoleAssignment.scope_key).where(RoleAssignment.role_id == role_id).distinct())
-    return frozenset(Node.parse(key) for key in keys.all())
+    nodes = {Node.parse(key) for key in keys.all()}
+    system = await session.exec(select(SystemRoleAssignment.id).where(SystemRoleAssignment.role_id == role_id).limit(1))
+    if system.first() is not None:
+        nodes.add(ROOT)
+    return frozenset(nodes)
 
 
 def check_role_grant(auth: AuthContext, nodes: Iterable[Node], added: Iterable[str] = (),

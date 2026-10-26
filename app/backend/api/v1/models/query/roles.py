@@ -6,6 +6,7 @@ from typing import Optional, Literal
 from pydantic import Field
 
 from app.backend.api.v1.models.query.base import BaseFilterParams
+from app.backend.enums.general import RoleKind
 from app.backend.utils.validators import UtcDatetime
 
 # Fields the results can be sorted by; sort_by accepts exactly these (another value answers 422)
@@ -25,5 +26,6 @@ class RoleFilterParams(BaseFilterParams):
     display_name_contains: Optional[str] = Field(default=None, max_length=50, description="Display name contains text")
     description_contains: Optional[str] = Field(default=None, max_length=100, description="Description contains text")
     is_builtin: Optional[bool] = Field(default=None, description="Only built-in roles (true) or only custom ones (false)")
+    kind: Optional[RoleKind] = Field(default=None, description="Only tree roles or only system roles")
     created_at_from: Optional[UtcDatetime] = Field(default=None, description="Created after")
     created_at_to: Optional[UtcDatetime] = Field(default=None, description="Created before")

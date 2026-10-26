@@ -37,9 +37,9 @@ role edits the roles row (get_role_or_404(lock=True)): concurrent changes of one
 another.
 
 check_role_permissions_added (PATCH /roles/{role_id}, PUT /roles/{role_id}/permissions/{permission_id}): permissions
-added to a role reach every holder at once, so a system permission needs every assignment of the role at the root
-(409 role_requires_root_scope) and every holder's type must allow the added permissions (409
-role_holders_exceed_user_type). Archived users are holders too: a restore gives them the role back as it is.
+added to a role reach every holder at once (both kinds of assignment), so every holder's type must allow them for the
+role's kind (409 role_holders_exceed_user_type). Archived users are holders too: a restore gives them the role back as
+it is. A permission of another level never reaches this: the route refuses it first (permission_level_mismatch).
 
 assignment_views reads the assignments of a user with the role and the scope named, as dataclasses (the route
 converts them into its response model).
@@ -62,7 +62,7 @@ from app.backend.auth.user_types import USER_TYPES, excess_permissions
 from app.backend.bootstrap.permissions import permission_level
 from app.backend.config import settings
 from app.backend.enums.errors import ErrorCode
-from app.backend.enums.general import BuiltinRole, PermissionLevel, Permissions, UserType
+from app.backend.enums.general import BuiltinRole, PermissionLevel, Permissions, RoleKind, UserType
 from app.backend.errors.problems import ApiError
 from app.backend.models.post import Post
 from app.backend.models.role import Permission, Role, RolePermission
@@ -380,26 +380,26 @@ async def change_user_type(session: AsyncSession, auth: AuthContext, target: Use
 
 # ------------------------------------------------------------------ role edits (holders of the role)
 async def check_role_permissions_added(session: AsyncSession, role_id: int, added: Iterable[str]) -> None:
-    """Permissions added to a role apply at once at every assignment of it, those of archived users included (the
-    restore of a user gives the role back as it is): a system permission needs every assignment at the root (409
-    role_requires_root_scope), and the type of every holder must allow the added permissions (409
-    role_holders_exceed_user_type, every such holder listed once)."""
+    """Permissions added to a role apply at once at every assignment of it, both kinds, those of archived users
+    included (the restore of a user gives the role back as it is): the boundary of every holder's type for the role's
+    kind must allow the added permissions (409 role_holders_exceed_user_type, every such holder listed once)."""
     added = sorted(set(added))
     if not added:
         return
+    kind = RoleKind((await session.exec(select(Role.kind).where(Role.id == role_id))).one())
     rows = (await session.exec(
-        select(User.id, User.username, User.user_type, RoleAssignment.scope_key)
+        select(User.id, User.username, User.user_type)
         .join(RoleAssignment, RoleAssignment.user_id == User.id)
         .where(RoleAssignment.role_id == role_id)
-        .order_by(User.id, RoleAssignment.id)
+        .union_all(
+            select(User.id, User.username, User.user_type)
+            .join(SystemRoleAssignment, SystemRoleAssignment.user_id == User.id)
+            .where(SystemRoleAssignment.role_id == role_id))
     )).all()
-    below_root = next((Node.parse(scope_key) for *_, scope_key in rows if scope_key != ROOT.key), None)
-    if below_root is not None:
-        _check_level(added, below_root)
 
     holders: Dict[int, dict] = {}
-    for user_id, username, user_type, _ in rows:
-        excess = sorted(excess_permissions(UserType(user_type), added))
+    for user_id, username, user_type in sorted(rows):
+        excess = sorted(excess_permissions(UserType(user_type), added, kind))
         if excess and user_id not in holders:
             holders[user_id] = {"id": user_id, "username": username, "user_type": user_type, "excess_permissions": excess}
     if holders:

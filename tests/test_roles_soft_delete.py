@@ -57,7 +57,8 @@ async def test_archive_lifecycle(client, db, headers):
 
     # cannot be archived twice, name cannot be reused
     assert (await client.post(ARCHIVE.format(role_id=role.id), headers=headers(admin))).status_code == 404
-    reuse = await client.post(ROLES, json={"name": "reviewer", "display_name": "Reviewer"}, headers=headers(admin))
+    reuse = await client.post(ROLES, json={"name": "reviewer", "display_name": "Reviewer", "kind": "tree"},
+                              headers=headers(admin))
     assert reuse.status_code == 409
 
     # /auth/me: the assignment is listed with its archived role and grants nothing; the row itself is kept
@@ -148,7 +149,8 @@ async def test_permanent_delete_preconditions_and_effect(client, db, headers):
     assert (await client.get(TAGS, headers=headers(holder))).status_code == 403, "nothing is granted any more"
 
     # name can be reused now
-    reuse = await client.post(ROLES, json={"name": "temporary", "display_name": "Temporary"}, headers=headers(admin))
+    reuse = await client.post(ROLES, json={"name": "temporary", "display_name": "Temporary", "kind": "tree"},
+                              headers=headers(admin))
     assert reuse.status_code == 201, reuse.text
 
     # the audit row keeps everything that was removed

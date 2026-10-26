@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Literal, NamedTuple, Optional
 
 from pydantic import BaseModel, Field
 
-from app.backend.enums.general import UserType
+from app.backend.enums.general import RoleKind, UserType
 
 
 class RequiredPermissions(BaseModel):
@@ -272,6 +272,11 @@ class ErrorCode(ProblemType):
         409, "This role can be assigned only at the root",
         "The role holds system permissions ({system_permissions}): it can be assigned only at the root",
         system_permissions=List[str]))
+    # A role holds permissions of one level: the level of its kind (authorization v3)
+    PERMISSION_LEVEL_MISMATCH = ("permission_level_mismatch", problem(
+        409, "A role holds permissions of its own level only",
+        "A {role_kind} role cannot hold: {permissions}",
+        role_kind=RoleKind, permissions=List[str]))
     # Every role a user holds fits the ceiling of the user's type (spec section 4)
     ROLE_EXCEEDS_USER_TYPE = ("role_exceeds_user_type", problem(
         409, "The role holds permissions the user's type does not allow",

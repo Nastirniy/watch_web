@@ -4804,6 +4804,24 @@
             "description": "Only built-in roles (true) or only custom ones (false)"
           },
           {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RoleKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tree roles or only system roles",
+              "title": "Kind"
+            },
+            "description": "Only tree roles or only system roles"
+          },
+          {
             "name": "created_at_from",
             "in": "query",
             "required": false,
@@ -4952,7 +4970,7 @@
           "ROLES"
         ],
         "summary": "Create Role",
-        "description": "Create new role. permission_ids may name only permissions the caller holds (403 grant_exceeds_own_permissions).",
+        "description": "Create new role of a kind (tree or system). permission_ids name permissions of the kind's level only (409\npermission_level_mismatch) and only permissions the caller holds (403 grant_exceeds_own_permissions).",
         "operationId": "create_role",
         "security": [
           {
@@ -5089,11 +5107,25 @@
             }
           },
           "409": {
-            "description": "`role_name_archived`: Role name belongs to an archived role",
+            "description": "`permission_level_mismatch`: A role holds permissions of its own level only; `role_name_archived`: Role name belongs to an archived role",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RoleNameArchivedProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PermissionLevelMismatchProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RoleNameArchivedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "permission_level_mismatch": "#/components/schemas/PermissionLevelMismatchProblem",
+                      "role_name_archived": "#/components/schemas/RoleNameArchivedProblem"
+                    }
+                  }
                 }
               }
             }
@@ -5333,7 +5365,7 @@
           "ROLES"
         ],
         "summary": "Update Role",
-        "description": "Update role and optionally replace all permissions. Archived roles answer 404 until restored (POST /{role_id}/restore).\n\nA built-in role keeps its name and its permissions (409); clone it to change them. Permissions permission_ids\nremoves must be held by the caller (at some node). Permissions it adds apply at once at every assignment of the\nrole, those of archived users included (restoring a user gives the role back as it is), so the caller must hold\neach of them at every node the role is assigned at (at some node for a role assigned nowhere): otherwise 403\ngrant_exceeds_own_permissions with the permissions missing. Then a system permission needs every assignment of the\nrole at the root (409 role_requires_root_scope), and the type of every holder, archived ones included, must allow\nthe added permissions (409 role_holders_exceed_user_type, with the users and their excess_permissions). Nothing is\nchanged on any refusal.",
+        "description": "Update role and optionally replace all permissions. Archived roles answer 404 until restored (POST /{role_id}/restore).\n\nA built-in role keeps its name and its permissions (409); clone it to change them. Permissions permission_ids\nremoves must be held by the caller (at some node). Permissions it adds apply at once at every assignment of the\nrole, those of archived users included (restoring a user gives the role back as it is), so the caller must hold\neach of them at every node the role is assigned at (at some node for a role assigned nowhere): otherwise 403\ngrant_exceeds_own_permissions with the permissions missing. permission_ids name permissions of the role's level\nonly (409 permission_level_mismatch). Then the type of every holder, archived ones included, must allow the added\npermissions (409 role_holders_exceed_user_type, with the users and their excess_permissions). Nothing is changed\non any refusal.",
         "operationId": "update_role",
         "security": [
           {
@@ -5496,7 +5528,7 @@
             }
           },
           "409": {
-            "description": "`builtin_role_not_renamable`: Built-in roles cannot be renamed; `builtin_role_permissions_fixed`: The permissions of built-in roles cannot be changed; `role_holders_exceed_user_type`: The type of a user holding this role does not allow the added permissions; `role_name_archived`: Role name belongs to an archived role; `role_requires_root_scope`: This role can be assigned only at the root",
+            "description": "`builtin_role_not_renamable`: Built-in roles cannot be renamed; `builtin_role_permissions_fixed`: The permissions of built-in roles cannot be changed; `permission_level_mismatch`: A role holds permissions of its own level only; `role_holders_exceed_user_type`: The type of a user holding this role does not allow the added permissions; `role_name_archived`: Role name belongs to an archived role",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5508,13 +5540,13 @@
                       "$ref": "#/components/schemas/BuiltinRolePermissionsFixedProblem"
                     },
                     {
+                      "$ref": "#/components/schemas/PermissionLevelMismatchProblem"
+                    },
+                    {
                       "$ref": "#/components/schemas/RoleHoldersExceedUserTypeProblem"
                     },
                     {
                       "$ref": "#/components/schemas/RoleNameArchivedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/RoleRequiresRootScopeProblem"
                     }
                   ],
                   "discriminator": {
@@ -5522,9 +5554,9 @@
                     "mapping": {
                       "builtin_role_not_renamable": "#/components/schemas/BuiltinRoleNotRenamableProblem",
                       "builtin_role_permissions_fixed": "#/components/schemas/BuiltinRolePermissionsFixedProblem",
+                      "permission_level_mismatch": "#/components/schemas/PermissionLevelMismatchProblem",
                       "role_holders_exceed_user_type": "#/components/schemas/RoleHoldersExceedUserTypeProblem",
-                      "role_name_archived": "#/components/schemas/RoleNameArchivedProblem",
-                      "role_requires_root_scope": "#/components/schemas/RoleRequiresRootScopeProblem"
+                      "role_name_archived": "#/components/schemas/RoleNameArchivedProblem"
                     }
                   }
                 }
@@ -6274,7 +6306,7 @@
           "ROLES"
         ],
         "summary": "Add Role Permission",
-        "description": "Grant one permission to a role (idempotent). Returns the role's permissions.\nA built-in role gets permissions only by seeding (409 builtin_role_permissions_fixed). The permission applies at\nonce at every assignment of the role, those of archived users included (restoring a user gives the role back as it\nis), so the caller must hold it at every node the role is assigned at (at some node for a role assigned nowhere):\notherwise 403 grant_exceeds_own_permissions. Then a system permission needs every assignment of the role at the\nroot (409 role_requires_root_scope), and the type of every holder, archived ones included, must allow it (409\nrole_holders_exceed_user_type).",
+        "description": "Grant one permission to a role (idempotent). Returns the role's permissions.\nA built-in role gets permissions only by seeding (409 builtin_role_permissions_fixed). The permission applies at\nonce at every assignment of the role, those of archived users included (restoring a user gives the role back as it\nis), so the caller must hold it at every node the role is assigned at (at some node for a role assigned nowhere):\notherwise 403 grant_exceeds_own_permissions. The permission must be of the role's level (409\npermission_level_mismatch), and the type of every holder, archived ones included, must allow it (409\nrole_holders_exceed_user_type).",
         "operationId": "add_role_permission",
         "security": [
           {
@@ -6431,7 +6463,7 @@
             }
           },
           "409": {
-            "description": "`builtin_role_permissions_fixed`: The permissions of built-in roles cannot be changed; `role_holders_exceed_user_type`: The type of a user holding this role does not allow the added permissions; `role_requires_root_scope`: This role can be assigned only at the root",
+            "description": "`builtin_role_permissions_fixed`: The permissions of built-in roles cannot be changed; `permission_level_mismatch`: A role holds permissions of its own level only; `role_holders_exceed_user_type`: The type of a user holding this role does not allow the added permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6440,18 +6472,18 @@
                       "$ref": "#/components/schemas/BuiltinRolePermissionsFixedProblem"
                     },
                     {
-                      "$ref": "#/components/schemas/RoleHoldersExceedUserTypeProblem"
+                      "$ref": "#/components/schemas/PermissionLevelMismatchProblem"
                     },
                     {
-                      "$ref": "#/components/schemas/RoleRequiresRootScopeProblem"
+                      "$ref": "#/components/schemas/RoleHoldersExceedUserTypeProblem"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
                       "builtin_role_permissions_fixed": "#/components/schemas/BuiltinRolePermissionsFixedProblem",
-                      "role_holders_exceed_user_type": "#/components/schemas/RoleHoldersExceedUserTypeProblem",
-                      "role_requires_root_scope": "#/components/schemas/RoleRequiresRootScopeProblem"
+                      "permission_level_mismatch": "#/components/schemas/PermissionLevelMismatchProblem",
+                      "role_holders_exceed_user_type": "#/components/schemas/RoleHoldersExceedUserTypeProblem"
                     }
                   }
                 }
@@ -26997,6 +27029,24 @@
             "description": "Only built-in roles (true) or only custom ones (false)"
           },
           {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RoleKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tree roles or only system roles",
+              "title": "Kind"
+            },
+            "description": "Only tree roles or only system roles"
+          },
+          {
             "name": "created_at_from",
             "in": "query",
             "required": false,
@@ -39063,6 +39113,83 @@
         "title": "PermissionLevel",
         "description": "What a permission acts on: tree at a node of the scope tree and below it, system on the whole system (held only\nthrough system roles)"
       },
+      "PermissionLevelMismatchProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "A role holds permissions of its own level only",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "A {role_kind} role cannot hold: {permissions}"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "permission_level_mismatch",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          },
+          "role_kind": {
+            "$ref": "#/components/schemas/RoleKind"
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Permissions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code",
+          "role_kind",
+          "permissions"
+        ],
+        "title": "PermissionLevelMismatchProblem",
+        "description": "A role holds permissions of its own level only (HTTP 409). Problem type permission_level_mismatch.",
+        "examples": [
+          {
+            "code": "permission_level_mismatch",
+            "detail": "A <role_kind> role cannot hold: <permissions>",
+            "instance": "/api/v1/...",
+            "permissions": "<permissions>",
+            "role_kind": "<role_kind>",
+            "status": 409,
+            "title": "A role holds permissions of its own level only",
+            "type": "https://example.org/problems/permission_level_mismatch"
+          }
+        ]
+      },
       "PermissionNotFoundProblem": {
         "properties": {
           "type": {
@@ -39231,7 +39358,7 @@
           },
           "level": {
             "$ref": "#/components/schemas/PermissionLevel",
-            "description": "system: assignable only at the root; scoped: at any node"
+            "description": "tree: acts at a node and below it (tree roles); system: acts on the whole system (system roles)"
           }
         },
         "additionalProperties": false,
@@ -40563,6 +40690,10 @@
             ],
             "title": "Description"
           },
+          "kind": {
+            "$ref": "#/components/schemas/RoleKind",
+            "description": "tree: holds tree permissions, assigned at a node (/users/{user_id}/assignments); system: holds system permissions, assigned without a node (/users/{user_id}/system-assignments). Never changes."
+          },
           "permission_ids": {
             "anyOf": [
               {
@@ -40583,7 +40714,8 @@
         "type": "object",
         "required": [
           "name",
-          "display_name"
+          "display_name",
+          "kind"
         ],
         "title": "RoleCreate"
       },
@@ -40884,6 +41016,15 @@
             ]
           }
         ]
+      },
+      "RoleKind": {
+        "type": "string",
+        "enum": [
+          "tree",
+          "system"
+        ],
+        "title": "RoleKind",
+        "description": "A tree role holds only tree permissions and is assigned at a node (role_assignments); a system role holds only\nsystem permissions and is assigned without a node (system_role_assignments). Never changes."
       },
       "RoleNameArchivedProblem": {
         "properties": {
@@ -41332,16 +41473,16 @@
               }
             ],
             "title": "Builtin Key",
-            "description": "Key of the user type this built-in role belongs to; null for custom roles"
+            "description": "Key of the built-in role (GET /user-types names the base roles of each type); null for custom roles"
           },
           "is_builtin": {
             "type": "boolean",
             "title": "Is Builtin",
             "description": "Built-in roles are owned by the system: no rename, no permission change, no archive"
           },
-          "level": {
-            "$ref": "#/components/schemas/PermissionLevel",
-            "description": "system when the role holds a system permission (assignable only at the root), else scoped"
+          "kind": {
+            "$ref": "#/components/schemas/RoleKind",
+            "description": "tree: holds tree permissions and is assigned at a node; system: holds system permissions and is assigned without a node (system assignments). Never changes"
           }
         },
         "additionalProperties": false,
@@ -41355,7 +41496,7 @@
           "updated_at",
           "builtin_key",
           "is_builtin",
-          "level"
+          "kind"
         ],
         "title": "RoleResponse"
       },

@@ -62,6 +62,7 @@ async def stored_assignments(db, user_id: int) -> set:
 
 
 async def own_role_id(db, user_id: int) -> int:
+    """The user's one tree role"""
     (role_id,) = {role_id for role_id, _ in await stored_assignments(db, user_id)}
     return role_id
 
@@ -235,15 +236,16 @@ async def test_role_update_holder_cannot_extend_their_own_role(client, db, heade
     editor = await make_user(db, perms=[ADMIN_TRUE, "role.view", "role.update"])
     own_role = await own_role_id(db, editor.id)
     before = await stored_permissions(db, own_role)
-    every = list((await db.exec(select(Permission.id))).all())
+    # the editor's tree role (role.view; role.update came with a system role): every tree permission
+    every = list((await db.exec(select(Permission.id).where(Permission.level == "tree"))).all())
 
     body = problem(await client.patch(ROLE.format(role_id=own_role), headers=headers(editor), json={"permission_ids": every}),
                    403, "grant_exceeds_own_permissions")
-    assert "user.create" in body["missing"] and "role.update" not in body["missing"]
-    body = problem(await client.put(ROLE_PERMISSION.format(role_id=own_role, permission_id=await permission_id(db, "audit.view")),
+    assert "user.create" in body["missing"] and "role.view" not in body["missing"]
+    body = problem(await client.put(ROLE_PERMISSION.format(role_id=own_role, permission_id=await permission_id(db, "user.create")),
                                     headers=headers(editor)),
                    403, "grant_exceeds_own_permissions")
-    assert body["missing"] == ["audit.view"]
+    assert body["missing"] == ["user.create"]
     assert await stored_permissions(db, own_role) == before
 
 
@@ -276,13 +278,15 @@ async def test_role_changes_need_every_permission_they_add_or_remove(client, db,
 async def test_create_role_only_with_held_permissions(client, db, headers):
     creator = await make_user(db, perms=[ADMIN_TRUE, "role.view", "role.create"])
     body = problem(await client.post(ROLES, headers=headers(creator), json={
-        "name": "auditors", "display_name": "Auditors", "permission_ids": [await permission_id(db, "audit.view")]}),
+        "name": "auditors", "display_name": "Auditors", "kind": "system",
+        "permission_ids": [await permission_id(db, "audit.view")]}),
         403, "grant_exceeds_own_permissions")
     assert body["missing"] == ["audit.view"]
     assert (await db.exec(select(Role).where(Role.name == "auditors"))).first() is None
 
     allowed = await client.post(ROLES, headers=headers(creator), json={
-        "name": "role_viewers", "display_name": "Role viewers", "permission_ids": [await permission_id(db, "role.view")]})
+        "name": "role_viewers", "display_name": "Role viewers", "kind": "tree",
+        "permission_ids": [await permission_id(db, "role.view")]})
     assert allowed.status_code == 201, allowed.text
 
 

@@ -80,10 +80,10 @@ async def _scene(db) -> Dict[str, Any]:
     other_corps = await make_group(db, kind="corps")
     brigade = await make_group(db, parent_id=corps.id, kind="brigade")
     permissions = {p.name: p.id for p in (await db.exec(select(Permission).where(
-        Permission.name.in_(["tag.view", "tag.create"])))).all()}
+        Permission.name.in_(["tag.view", "post.view"])))).all()}
     return {"user": user, **ids, "other_category_id": other["category_id"], "format_id": fmt.id,
             "post_id": (await make_post(db)).id, "role_id": role.id, "empty_role_id": empty_role.id,
-            "view_permission_id": permissions["tag.view"], "create_permission_id": permissions["tag.create"],
+            "view_permission_id": permissions["tag.view"], "create_permission_id": permissions["post.view"],
             "group_id": group.id, "other_group_id": other_group.id, "corps_id": corps.id,
             "other_corps_id": other_corps.id, "brigade_id": brigade.id}
 
@@ -141,7 +141,8 @@ def _post_update(client, headers, user, ids):
 
 def _role_create(client, headers, user, ids):
     return client.post(V1.path(RoleRoutes.ROOT), headers=headers(user),
-                       json={"name": "new_role", "display_name": "New role", "permission_ids": [ids["view_permission_id"]]})
+                       json={"name": "new_role", "display_name": "New role", "kind": "tree",
+                             "permission_ids": [ids["view_permission_id"]]})
 
 
 def _role_update(client, headers, user, ids):

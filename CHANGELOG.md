@@ -18,6 +18,16 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   system `system_administrator`, `auditor`, `dictionary_editor`, `tag_editor`. A new `system_administrator` user gets
   `administrator` at the root and the system role `system_administrator`.
 - Database: `permissions.level`, `roles.kind`, table `system_role_assignments` (migration `029_authz_v3_schema`).
+- Roles have a `kind` (`tree` or `system`): required in `POST /roles`, kept by clone, never changed; `RoleResponse`
+  carries `kind` instead of `level`; `GET /roles` and `GET /search/roles` filter by `kind`. A role holds permissions of
+  its kind's level only: create, `PATCH /roles/{role_id}` with `permission_ids` and
+  `PUT /roles/{role_id}/permissions/{permission_id}` answer 409 `permission_level_mismatch` (`role_kind`,
+  `permissions`) otherwise; these routes no longer answer `role_requires_root_scope`.
+- The type boundary of every holder (both kinds of assignment) is checked for the role's kind when permissions are
+  added (`role_holders_exceed_user_type`); `DELETE /roles/{role_id}` also removes the role's system assignments and
+  copies them into the audit row (`system_assignments`).
+- Evaluation: a grant puts in effect only the permissions of its kind's level inside the boundary of the user's
+  type; anything else is left out (logged once per grant).
 
 ## Database backups
 

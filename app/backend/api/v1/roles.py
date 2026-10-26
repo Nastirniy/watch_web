@@ -11,13 +11,15 @@ from app.backend.api.shared.helpers.db_errors import is_unique_violation, unique
 from app.backend.database import get_session
 from app.backend.models.role import Role, Permission, RolePermission
 from app.backend.models.role_assignment import RoleAssignment
+from app.backend.models.system_role_assignment import SystemRoleAssignment
 from app.backend.models.user import User
 from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.assignments import check_role_permissions_added
+from app.backend.auth.integrity import other_level
 from app.backend.auth.privileges import check_grant, check_role_grant, role_nodes, role_permission_names
-from app.backend.enums.general import Permissions
+from app.backend.enums.general import Permissions, RoleKind
 from app.backend.enums.routes import RoleRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.services.audit import create_audit_log
@@ -42,6 +44,14 @@ from app.backend.errors.openapi import GUARDED, problems
 
 router = APIRouter(prefix=RoleRoutes.BASE.value, tags=[RoleRoutes.tag()])
 _logger = get_api_logger()
+
+
+def _refuse_other_level(kind, names) -> None:
+    """A role holds permissions of its kind's level only (409 permission_level_mismatch)"""
+    names = list(names)
+    mismatched = other_level(kind, names)
+    if mismatched:
+        raise ApiError(ErrorCode.PERMISSION_LEVEL_MISMATCH, role_kind=RoleKind(kind).value, permissions=mismatched)
 
 
 async def _role_response(session: AsyncSession, role: Role) -> RoleResponse:
@@ -78,7 +88,7 @@ async def list_roles(
     status_code=status.HTTP_201_CREATED,
     responses=problems(
         ErrorCode.ROLE_NAME_TAKEN, ErrorCode.PERMISSION_NOT_FOUND, ErrorCode.ROLE_NAME_ARCHIVED,
-        AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
+        ErrorCode.PERMISSION_LEVEL_MISMATCH, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
     ),
 )
 async def create_role(
@@ -87,14 +97,16 @@ async def create_role(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.ROLE_VIEW, Permissions.ROLE_CREATE]))
 ):
-    """Create new role. permission_ids may name only permissions the caller holds (403 grant_exceeds_own_permissions)."""
+    """Create new role of a kind (tree or system). permission_ids name permissions of the kind's level only (409
+    permission_level_mismatch) and only permissions the caller holds (403 grant_exceeds_own_permissions)."""
     current_user = auth.user
     # Preventive validation
     await check_role_name_exists(session, role_data.name)
     permissions = [await get_permission_or_404(session, perm_id) for perm_id in role_data.permission_ids or []]
+    _refuse_other_level(role_data.kind, (permission.name for permission in permissions))
     check_grant(auth, (permission.name for permission in permissions))
 
-    role = Role(**role_data.model_dump(exclude={"permission_ids"}))
+    role = Role(**role_data.model_dump(exclude={"permission_ids", "kind"}), kind=role_data.kind.value)
     session.add(role)
     async with unique_violation_as(session, ErrorCode.ROLE_NAME_TAKEN):
         await session.flush()
@@ -171,7 +183,7 @@ async def get_role(
     responses=problems(
         ErrorCode.ROLE_NAME_TAKEN, ErrorCode.PERMISSION_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND,
         ErrorCode.ROLE_NAME_ARCHIVED, ErrorCode.BUILTIN_ROLE_NOT_RENAMABLE, ErrorCode.BUILTIN_ROLE_PERMISSIONS_FIXED,
-        ErrorCode.ROLE_REQUIRES_ROOT_SCOPE, ErrorCode.ROLE_HOLDERS_EXCEED_USER_TYPE,
+        ErrorCode.PERMISSION_LEVEL_MISMATCH, ErrorCode.ROLE_HOLDERS_EXCEED_USER_TYPE,
         AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
     ),
 )
@@ -188,10 +200,10 @@ async def update_role(
     removes must be held by the caller (at some node). Permissions it adds apply at once at every assignment of the
     role, those of archived users included (restoring a user gives the role back as it is), so the caller must hold
     each of them at every node the role is assigned at (at some node for a role assigned nowhere): otherwise 403
-    grant_exceeds_own_permissions with the permissions missing. Then a system permission needs every assignment of the
-    role at the root (409 role_requires_root_scope), and the type of every holder, archived ones included, must allow
-    the added permissions (409 role_holders_exceed_user_type, with the users and their excess_permissions). Nothing is
-    changed on any refusal.
+    grant_exceeds_own_permissions with the permissions missing. permission_ids name permissions of the role's level
+    only (409 permission_level_mismatch). Then the type of every holder, archived ones included, must allow the added
+    permissions (409 role_holders_exceed_user_type, with the users and their excess_permissions). Nothing is changed
+    on any refusal.
     """
     current_user = auth.user
     role = await get_role_or_404(session, role_id, lock=True)
@@ -205,6 +217,7 @@ async def update_role(
         current_names = await role_permission_names(session, [role_id])
         if role.builtin_key is not None and wanted_names != current_names:
             raise ApiError(ErrorCode.BUILTIN_ROLE_PERMISSIONS_FIXED)
+        _refuse_other_level(role.kind, wanted_names)
         added, removed = wanted_names - current_names, current_names - wanted_names
         check_role_grant(auth, await role_nodes(session, role_id), added=added, removed=removed)
         await check_role_permissions_added(session, role_id, added)
@@ -388,7 +401,7 @@ async def clone_role(
     check_grant(auth, names)
     source_id = source.id
 
-    role = Role(**role_data.model_dump())
+    role = Role(**role_data.model_dump(), kind=source.kind)
     session.add(role)
     async with unique_violation_as(session, ErrorCode.ROLE_NAME_TAKEN):
         await session.flush()
@@ -451,18 +464,22 @@ async def delete_role(
         select(User.id, User.username, User.is_deleted)
         .join(RoleAssignment, RoleAssignment.user_id == User.id)
         .where(RoleAssignment.role_id == role_id)
-        .distinct()
-        .order_by(User.id)
+        .union(
+            select(User.id, User.username, User.is_deleted)
+            .join(SystemRoleAssignment, SystemRoleAssignment.user_id == User.id)
+            .where(SystemRoleAssignment.role_id == role_id))
     )
-    assigned_rows = assigned.all()
+    assigned_rows = sorted(assigned.all())
     active_users = [{"id": uid, "username": name} for uid, name, deleted in assigned_rows if not deleted]
     if active_users:
         raise ApiError(ErrorCode.ROLE_HAS_ACTIVE_USERS, assigned_users=active_users)
     archived_users = [{"id": uid, "username": name} for uid, name, deleted in assigned_rows if deleted]
     # Spec section 6 rule 6: every archived holder keeps another assignment (of any role: a restore gives it back)
     holder_ids = [user["id"] for user in archived_users]
-    kept = set((await session.exec(
+    kept = set(row[0] for row in (await session.exec(
         select(RoleAssignment.user_id).where(RoleAssignment.user_id.in_(holder_ids), RoleAssignment.role_id != role_id)
+        .union(select(SystemRoleAssignment.user_id).where(SystemRoleAssignment.user_id.in_(holder_ids),
+                                                          SystemRoleAssignment.role_id != role_id))
     )).all()) if holder_ids else set()
     stranded = [user for user in archived_users if user["id"] not in kept]
     if stranded:
@@ -472,6 +489,9 @@ async def delete_role(
     # A full copy of every role_assignments row the delete removes: every column
     assignments = [assignment.model_dump() for assignment in (await session.exec(
         select(RoleAssignment).where(RoleAssignment.role_id == role_id).order_by(RoleAssignment.id)
+    )).all()]
+    system_assignments = [assignment.model_dump() for assignment in (await session.exec(
+        select(SystemRoleAssignment).where(SystemRoleAssignment.role_id == role_id).order_by(SystemRoleAssignment.id)
     )).all()]
 
     permissions = await session.exec(
@@ -484,12 +504,13 @@ async def delete_role(
     legacy_holders = await legacy_holder_rows(session, role_id)
     old_values = {
         **role.model_dump(), "permissions": permission_names, "assigned_archived_users": archived_users,
-        "assignments": assignments, "user_roles_v1": legacy_holders,
+        "assignments": assignments, "system_assignments": system_assignments, "user_roles_v1": legacy_holders,
     }
 
     # Core statements on purpose: no ORM cascade (no lazy loads in an async session), every row is removed explicitly
     await session.execute(sa_delete(RolePermission).where(RolePermission.role_id == role_id))
     await session.execute(sa_delete(RoleAssignment).where(RoleAssignment.role_id == role_id))
+    await session.execute(sa_delete(SystemRoleAssignment).where(SystemRoleAssignment.role_id == role_id))
     await delete_legacy_holder_rows(session, role_id)
     await session.execute(sa_delete(Role).where(Role.id == role_id))
     await create_audit_log(
@@ -502,7 +523,8 @@ async def delete_role(
         details={
             "message": (
                 f"User {current_user.username} permanently deleted role '{old_values['name']}' "
-                f"({len(permission_names)} permissions, {len(assignments)} assignments of {len(archived_users)} "
+                f"({len(permission_names)} permissions, {len(assignments) + len(system_assignments)} assignments of "
+                f"{len(archived_users)} "
                 f"archived users, {len(legacy_holders)} legacy user_roles_v1 rows)"
             ),
             "permanent": True,
@@ -553,7 +575,7 @@ async def _role_permissions(session: AsyncSession, role_id: Annotated[int, Path(
     response_model=List[PermissionResponse],
     responses=problems(
         ErrorCode.PERMISSION_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.BUILTIN_ROLE_PERMISSIONS_FIXED,
-        ErrorCode.ROLE_REQUIRES_ROOT_SCOPE, ErrorCode.ROLE_HOLDERS_EXCEED_USER_TYPE,
+        ErrorCode.PERMISSION_LEVEL_MISMATCH, ErrorCode.ROLE_HOLDERS_EXCEED_USER_TYPE,
         AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
     ),
 )
@@ -568,8 +590,8 @@ async def add_role_permission(
     A built-in role gets permissions only by seeding (409 builtin_role_permissions_fixed). The permission applies at
     once at every assignment of the role, those of archived users included (restoring a user gives the role back as it
     is), so the caller must hold it at every node the role is assigned at (at some node for a role assigned nowhere):
-    otherwise 403 grant_exceeds_own_permissions. Then a system permission needs every assignment of the role at the
-    root (409 role_requires_root_scope), and the type of every holder, archived ones included, must allow it (409
+    otherwise 403 grant_exceeds_own_permissions. The permission must be of the role's level (409
+    permission_level_mismatch), and the type of every holder, archived ones included, must allow it (409
     role_holders_exceed_user_type)."""
     current_user = auth.user
     role = await get_role_or_404(session, role_id, lock=True)
@@ -581,6 +603,7 @@ async def add_role_permission(
     if not existing.first():
         if role.builtin_key is not None:
             raise ApiError(ErrorCode.BUILTIN_ROLE_PERMISSIONS_FIXED)
+        _refuse_other_level(role.kind, [permission.name])
         check_role_grant(auth, await role_nodes(session, role_id), added=[permission.name])
         await check_role_permissions_added(session, role_id, [permission.name])
         # A rollback expires every loaded object: keep what is needed afterwards as plain values

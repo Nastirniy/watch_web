@@ -534,12 +534,12 @@ async def test_archived_holders_bound_role_edits(client, db, headers, tree):
     put = await client.put(ROLE_PERMISSION.format(role_id=tagger.id, permission_id=update_id), headers=headers(admin))
     assert problem(put, 409, "role_holders_exceed_user_type")["users"] == expected
 
-    # A system permission while the archived holder's assignment is below the root
+    # A system permission never enters a tree role, whoever holds it
     patched = await client.patch(ROLE.format(role_id=tagger.id), headers=headers(admin),
                                  json={"permission_ids": [tag_view, tag_create]})
-    assert problem(patched, 409, "role_requires_root_scope")["system_permissions"] == ["tag.create"]
+    assert problem(patched, 409, "permission_level_mismatch")["permissions"] == ["tag.create"]
     put = await client.put(ROLE_PERMISSION.format(role_id=tagger.id, permission_id=tag_create), headers=headers(admin))
-    assert problem(put, 409, "role_requires_root_scope")["system_permissions"] == ["tag.create"]
+    assert problem(put, 409, "permission_level_mismatch")["permissions"] == ["tag.create"]
     assert await role_permissions(db, tagger) == {"tag.view"}
 
 
@@ -561,7 +561,7 @@ async def test_a_holder_with_several_assignments_is_listed_once(client, db, head
     assert await role_permissions(db, reader) == {"observation.view"}
 
 
-async def test_role_edit_refused_with_system_permission_below_root(client, db, headers, tree):
+async def test_role_edit_refused_with_a_permission_of_another_level(client, db, headers, tree):
     admin = await make_admin(db)
     group_admin = await typed_user(db, UserType.ADMINISTRATOR, node=Node.group(tree.east.id))
     tagger = await make_role(db, ["tag.view"])
@@ -570,16 +570,15 @@ async def test_role_edit_refused_with_system_permission_below_root(client, db, h
 
     patched = await client.patch(ROLE.format(role_id=tagger.id), headers=headers(admin),
                                  json={"permission_ids": [view_id, create_id]})
-    assert problem(patched, 409, "role_requires_root_scope")["system_permissions"] == ["tag.create"]
+    assert problem(patched, 409, "permission_level_mismatch")["role_kind"] == "tree"
     put = await client.put(ROLE_PERMISSION.format(role_id=tagger.id, permission_id=create_id), headers=headers(admin))
-    assert problem(put, 409, "role_requires_root_scope")["system_permissions"] == ["tag.create"]
+    assert problem(put, 409, "permission_level_mismatch")["permissions"] == ["tag.create"]
     assert await role_permissions(db, tagger) == {"tag.view"}
 
-    # The same change on a role held only at the root, by a user whose type allows it
+    # A system role held by a user whose type allows the permission gets it
     root_holder = await typed_user(db, UserType.ADMINISTRATOR)
-    at_root = await make_role(db, ["tag.view"])
-    await assign(db, root_holder, at_root, ROOT)
-    allowed = await client.put(ROLE_PERMISSION.format(role_id=at_root.id, permission_id=create_id), headers=headers(admin))
+    (editors,) = await give(db, root_holder, ["tag.update"])
+    allowed = await client.put(ROLE_PERMISSION.format(role_id=editors.id, permission_id=create_id), headers=headers(admin))
     assert allowed.status_code == 200, allowed.text
 
 
