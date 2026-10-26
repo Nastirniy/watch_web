@@ -18,6 +18,7 @@ from app.backend.services.backups.catalog import load_catalog_async
 from app.backend.services.crl_publisher import crl_status
 from app.backend.services.signer_client import SignerRefused, SignerUnavailable, signer_client
 from app.backend.utils.validators import ResponseDatetime
+from app.backend.auth.integrity import authorization_report
 
 _logger = get_api_logger()
 
@@ -73,6 +74,14 @@ class BackupsHealthModel(BaseModel):
     last_run_outcome: Optional[str] = Field(None, description="ok or failed: the last backup run")
 
 
+class AuthorizationHealthModel(BaseModel):
+    """Authorization (auth/integrity.py), counts only"""
+    status: str = Field(..., description="healthy, or degraded: a grant puts less in effect than its role holds, or "
+                                         "no active system administrator")
+    violations: int = Field(..., description="Grants that leave permissions out (level or type boundary)")
+    system_administrators: int = Field(..., description="Active users holding the built-in system_administrator")
+
+
 class HealthResponse(BaseModel):
     """Main health check response model"""
     status: str = Field(..., description="Overall system status")
@@ -84,6 +93,7 @@ class HealthResponse(BaseModel):
     services: ServicesHealthModel = Field(..., description="Services health information")
     pki: Optional[PkiHealthModel] = Field(None, description="Client certificate authority; only when configured")
     backups: Optional[BackupsHealthModel] = Field(None, description="Database backups; only when configured")
+    authorization: Optional[AuthorizationHealthModel] = Field(None, description="Authorization data, counts only")
 
 
 # Rate limiting for health endpoint
@@ -241,6 +251,16 @@ async def check_services_health() -> ServicesHealthModel:
 
 
 PKI_MIN_DAYS = 2
+
+
+async def check_authorization_health(session: AsyncSession) -> AuthorizationHealthModel:
+    """The authorization part of /health: the counts of auth/integrity.authorization_report"""
+    report = await authorization_report(session)
+    healthy = not report.violations and report.system_administrators > 0
+    return AuthorizationHealthModel(
+        status=(ServiceHealthStatus.HEALTHY if healthy else ServiceHealthStatus.DEGRADED).value,
+        violations=len(report.violations), system_administrators=report.system_administrators,
+    )
 
 
 async def check_pki_health(session: AsyncSession) -> Optional[PkiHealthModel]:

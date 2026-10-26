@@ -42,6 +42,10 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   tree permissions at the root only; `permissions` (the menu) stays the union.
 - `GET /user-types`: `base_roles` (`id`, `name`, `display_name`, `kind`, `at_root`), `tree_boundary` and
   `system_boundary` replace `base_role`, `base_permissions` and `allowed_permissions`.
+- `/health`: new `authorization` part (`status`, `violations`, `system_administrators`, counts only); degraded (and
+  the overall status with it) while a grant leaves permissions out or no active user holds `system_administrator`.
+- Start: a permission level or a built-in role out of step with the code stops the start; grants that leave
+  permissions out and a missing system administrator are logged.
 
 ## Database backups
 

@@ -7,6 +7,7 @@ from app.backend.config import settings
 from app.backend.enums.routes import SystemRoutes
 from app.backend.pki.crl import build_crl
 from app.backend.services.crl_publisher import publish_crl
+from tests.helpers import make_admin
 from tests.pki_helpers import legacy_root, pem
 
 
@@ -22,6 +23,7 @@ async def test_health_has_no_pki_part_without_configuration(client, db):
 
 
 async def test_health_reports_pki(client, db, pki):
+    await make_admin(db)          # the authorization part needs a system administrator
     await publish_crl(db)
     response = await client.get(SystemRoutes.HEALTH.value)
     body = response.json()

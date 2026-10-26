@@ -9,6 +9,7 @@ from app.backend.enums.general import BackupLabel
 from app.backend.enums.routes import SystemRoutes
 from app.backend.services.backups.catalog import LastRun, write_last_run
 from app.backend.services.backups.manifest import FORMAT_VERSION, Manifest, backup_id, write_manifest
+from tests.helpers import make_admin
 
 
 @pytest.fixture(autouse=True)
@@ -49,6 +50,7 @@ async def test_no_backups_part_without_configuration(client, db, monkeypatch):
 
 
 async def test_healthy_with_fresh_backup(client, db, backups):
+    await make_admin(db)          # the authorization part needs a system administrator
     newest = put(backups, 1)
     body = await health(client)
     assert body["backups"]["status"] == "healthy"

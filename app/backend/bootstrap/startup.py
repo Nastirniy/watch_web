@@ -83,11 +83,22 @@ async def _migrate_and_seed():
         # Always seed initial data
         await seed_database()
         await _check_unit_structure()
+        await _check_authorization()
         _logger.info("Database initialization completed successfully")
         
     except Exception as e:
         _logger.error(f"Failed to initialize database: {e}")
         raise
+
+
+async def _check_authorization():
+    """Permission levels or built-in roles out of step with the code stop the start; grants that leave permissions
+    out and a missing system administrator are logged (bootstrap/authorization.py)"""
+    from app.backend.bootstrap.authorization import check_authorization_catalog, log_authorization_report
+    from app.backend.database import get_session_maker
+    async with (await get_session_maker())() as session:
+        await check_authorization_catalog(session)
+        await log_authorization_report(session)
 
 
 async def _check_unit_structure():
