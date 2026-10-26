@@ -5,6 +5,22 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Audit log
+
+### Database
+
+- Migration `031_audit_events` adds to `audit_logs`: `event` (catalog code, `enums/audit.py`), `category`,
+  `request_id` (the request's X-Request-ID), `scope_key` / `scope_post_id` / `scope_group_id` (the node the event
+  happened at, null for system-wide events), `params` (what the event's message needs, snapshotted), plus the indexes
+  `ix_audit_logs_category_created` and `ix_audit_logs_scope_created`. It backfills `event` and `category` of
+  existing rows from (resource_type, action) through the frozen mapping `migrations/support/audit_events_v1.py`
+  (search rows -> `search.<entity>`, data migration rows -> `legacy.migrate`, anything else -> `legacy.unknown`)
+  and the scope where it is exact (observations, frequencies, media, posts, scope groups, role assignments), in
+  batches of 10,000 ids. Old `details` stay untouched. The downgrade drops the columns and indexes.
+- `create_audit_log(session, AuditEvent.X, params=..., scope=...)` writes them on every new row; the old keyword
+  form (`action=`, `resource_type=`) is mapped through the same table until every writer names its event. No API
+  change.
+
 ## Users by unit
 
 ### Added
