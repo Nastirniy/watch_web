@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from alembic import op
 import sqlalchemy as sa
 
-from app.backend.migrations.support.authz_v3 import LEVELS, ROOT_KEY, SYSTEM, TREE, TREE_BOUNDARY, plan_v3
+from app.backend.migrations.support.authz_v3 import LEVELS, ROOT_KEY, SYSTEM, TREE, TREE_BOUNDARY, TYPE_MAP, plan_v3
 from app.backend.migrations.support.authz_v3_data import load_v2
 
 revision = "030_authorization_v3"
@@ -108,15 +108,16 @@ def upgrade() -> None:
             _record(conn, "level", pid, {"old": level})
             conn.execute(PERMISSIONS.update().where(PERMISSIONS.c.id == pid).values(level=wanted))
 
+    # Custom roles named like a new built-in key first: the built-in renames take those names (roles.name is unique)
+    for role_id, name in plan.role_renames.items():
+        _record(conn, "role_name", role_id, {"old": roles[role_id].name})
+        conn.execute(ROLES.update().where(ROLES.c.id == role_id).values(name=name))
     for role_id, key in plan.builtin_keys.items():
         old = _row(conn, ROLES, role_id)
         _record(conn, "builtin_key", role_id, {"old": old["builtin_key"], "old_name": old["name"],
                                                "old_display_name": old["display_name"],
                                                "old_description": old["description"]})
         conn.execute(ROLES.update().where(ROLES.c.id == role_id).values(builtin_key=key, name=key))
-    for role_id, name in plan.role_renames.items():
-        _record(conn, "role_name", role_id, {"old": roles[role_id].name})
-        conn.execute(ROLES.update().where(ROLES.c.id == role_id).values(name=name))
     for role_id, kind in plan.role_kinds.items():
         if kind != TREE:
             _record(conn, "role_kind", role_id, {"old": TREE})
@@ -212,6 +213,13 @@ def downgrade() -> None:
         return
     of = lambda wanted: [(ref_id, data) for kind, ref_id, data in entries if kind == wanted]  # noqa: E731
 
+    # Holders of system_administrator the upgrade did not make (users created or retyped after it): they get the v2
+    # admin role at the root back below, their v3 types are mapped back (the v2 code knows no other type)
+    logged_system = {ref_id for ref_id, _ in of("system_assignment")}
+    admin_role = conn.execute(sa.select(ROLES.c.id).where(ROLES.c.builtin_key == "system_administrator")).scalar()
+    later_admins = sorted({user_id for assignment_id, user_id in conn.execute(
+        sa.select(SYSTEM_ASSIGNMENTS.c.id, SYSTEM_ASSIGNMENTS.c.user_id)
+        .where(SYSTEM_ASSIGNMENTS.c.role_id == admin_role)) if assignment_id not in logged_system})
     conn.execute(SYSTEM_ASSIGNMENTS.delete())
     for ref_id, _ in of("added_assignment"):
         conn.execute(ASSIGNMENTS.delete().where(ASSIGNMENTS.c.id == ref_id))
@@ -227,16 +235,27 @@ def downgrade() -> None:
         conn.execute(GRANTS.delete().where(GRANTS.c.id == ref_id))
     for ref_id, data in of("removed_grant"):
         conn.execute(GRANTS.insert().values(**data))
-    for ref_id, data in of("role_name"):
-        conn.execute(ROLES.update().where(ROLES.c.id == ref_id).values(name=data["old"]))
+    # Built-in names back first: they free the names the custom roles had (the reverse of the upgrade)
     for ref_id, data in of("builtin_key"):
         conn.execute(ROLES.update().where(ROLES.c.id == ref_id).values(
             builtin_key=data["old"], name=data["old_name"], display_name=data["old_display_name"],
             description=data["old_description"]))
+    for ref_id, data in of("role_name"):
+        conn.execute(ROLES.update().where(ROLES.c.id == ref_id).values(name=data["old"]))
+    for user_id in later_admins if admin_role is not None else ():
+        holds = conn.execute(sa.select(ASSIGNMENTS.c.id).where(
+            ASSIGNMENTS.c.user_id == user_id, ASSIGNMENTS.c.role_id == admin_role,
+            ASSIGNMENTS.c.scope_key == ROOT_KEY)).first()
+        if holds is None:
+            conn.execute(ASSIGNMENTS.insert().values(user_id=user_id, role_id=admin_role, scope_group_id=None,
+                                                     scope_post_id=None, scope_key=ROOT_KEY, created_at=_now(),
+                                                     created_by=None))
     conn.execute(ROLES.update().values(kind=TREE))
     for ref_id, data in of("level"):
         conn.execute(PERMISSIONS.update().where(PERMISSIONS.c.id == ref_id).values(level=data["old"]))
     for ref_id, data in of("user_type"):
         conn.execute(USERS.update().where(USERS.c.id == ref_id).values(user_type=data["old"]))
+    for v2_type, v3_type in TYPE_MAP.items():
+        conn.execute(USERS.update().where(USERS.c.user_type == v3_type).values(user_type=v2_type))
     conn.execute(LOG.delete())
     _log("restored the v2 data")

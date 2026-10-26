@@ -274,8 +274,11 @@ without 030 (the permission levels are not written yet).
 4. The web client moves to the new contract: `user_type` values, `system_permissions` and `system_assignments` in
    `/auth/me`, `kind` on roles, the system assignment routes (`API.md`).
 
-Rollback: `alembic downgrade 029_authz_v3_schema` restores the v2 data exactly from the log (system assignments made
-after the upgrade are lost; the built-in roles seeding added are deleted), then deploy the previous version.
+Rollback: `alembic downgrade 028_no_actor_foreign_keys` (with the new version: the previous one does not know 029)
+restores the v2 data exactly from the log and drops the v3 columns and tables, then deploy the previous version.
+Users created or retyped after the upgrade get their v2 type back (`administrator` -> `post_admin`,
+`system_administrator` -> `admin`, holders of `system_administrator` get the `admin` role at the root); other system
+assignments made after the upgrade are lost, and the built-in roles seeding added are deleted.
 
 The database is changed only by the API, migrations, seeding and the restore tool: never fix authorization rows with
 hand-written SQL on a server (the start report and `/health` show what to fix through the API).

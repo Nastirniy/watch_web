@@ -16,7 +16,6 @@ from sqlmodel import select
 
 from app.backend.api.v1 import V1
 from app.backend.auth import assignments as assignment_rules
-from app.backend.auth.privileges import holds_admin_at_root
 from app.backend.auth.scope import Node, ROOT
 from app.backend.auth.user_types import USER_TYPES
 from app.backend.config import settings
@@ -411,18 +410,6 @@ async def test_a_concurrent_duplicate_is_refused_by_the_unique_index(client, db,
     problem(refused, 409, "assignment_exists")
     assert await assignment_ids(db, target) == before
     assert not (await db.exec(select(AuditLog).where(AuditLog.resource_type == "role_assignment"))).all()
-
-
-async def test_tree_assignment_is_not_the_administrator(client, db, headers, tree):
-    """The administrator is the system assignment of system_administrator: removing a system administrator's
-    administrator @ root (a tree assignment) leaves them the administrator (the last-administrator rules are those of
-    the system assignments)"""
-    admin = await make_admin(db)
-    (admin_at_root,) = await assignment_ids(db, admin)
-    await assign(db, admin, await builtin(db, UserType.VIEWER), Node.post(tree.a.id))
-    removed = await client.delete(assignment_url(admin.id, admin_at_root), headers=headers(admin))
-    assert removed.status_code == 204, removed.text
-    assert await holds_admin_at_root(db, admin.id)
 
 
 # ----------------------------------------------------------------- reads and archived users

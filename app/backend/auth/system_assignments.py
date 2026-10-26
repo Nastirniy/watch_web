@@ -14,9 +14,10 @@ at the root, so it is granted as an assignment at the root: user.update and ever
             -> the user's last assignment of either table 409 last_assignment_required
             -> the built-in system_administrator: not taken from oneself, and someone keeps it 409
 
-create locks the target's users row first and then the role row (shared): a concurrent change of the role's
-permissions (which locks the role row) runs before or after, never in between (v2 open item R40). The route of delete
-takes lock_administrators first.
+Both routes take lock_administrators first (the built-in system_administrator role row, then the user: one order
+for every write that may touch the administrator); create then locks the role row (shared) before any plain read, so
+a concurrent change of the role's permissions (which locks the role row) runs before or after, never in between
+(v2 open item R40).
 """
 from dataclasses import dataclass
 from datetime import datetime
@@ -28,7 +29,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.auth.assignments import (
-    AssignmentRoleView, _check_not_last_of_user, _live_role, _lock_user, _refuse_archived,
+    AssignmentRoleView, _check_not_last_of_user, _lock_user, _refuse_archived, _require_live,
 )
 from app.backend.auth.context import AuthContext
 from app.backend.auth.privileges import check_admin_kept, check_assign_at, check_target_user, holds_admin_at_root, \
@@ -41,6 +42,7 @@ from app.backend.errors.problems import ApiError
 from app.backend.models.role import Role
 from app.backend.models.system_role_assignment import SystemRoleAssignment
 from app.backend.models.user import User
+from app.backend.utils.row_locks import lock
 
 
 @dataclass(frozen=True)
@@ -54,9 +56,11 @@ async def create_system_assignment(session: AsyncSession, auth: AuthContext, tar
                                    role_id: int) -> SystemRoleAssignment:
     """The system assignment of the role to the target, checked and added to the session (not flushed)"""
     await _lock_user(session, target)
+    # The role row with a shared lock before any plain read (R40, see assignments.create_assignment)
+    locked = await lock(session, select(Role).where(Role.id == role_id), shared=True)
     await check_target_user(session, auth, target, Permissions.USER_UPDATE)
     _refuse_archived(target)
-    role = await _live_role(session, role_id, shared_lock=True)
+    role = _require_live(locked, role_id)
     if role.kind != RoleKind.SYSTEM.value:
         raise ApiError(ErrorCode.ROLE_IS_TREE, role_id=role.id)
     permissions = await role_permission_names(session, [role.id])

@@ -15,6 +15,8 @@ ids: the target user and the caller's scope answer before the existence or the s
             -> check_assign_at(user.update and its role's permissions, its node) 403
             -> the user's last assignment 409 (of a live role: another one of a live role remains; an assignment of
                an archived role grants nothing)
+            -> the built-in administrator at the root: not taken from oneself while the administrator, and an
+               administrator (system_administrator and administrator at the root) remains 409
 
 change_user_type (PATCH /users/{user_id} with user_type, rule 4; the route ran rule 2, check_target_user with
 user.update, first) gives the user the base roles of the new type (auth/user_types.py): every assignment of the old
@@ -55,7 +57,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.auth.context import AuthContext
 from app.backend.auth.privileges import (
-    check_assign_at, check_target_user, holds_admin_at_root, role_permission_names,
+    check_admin_kept, check_assign_at, check_target_user, holds_admin_at_root, role_permission_names,
 )
 from app.backend.auth.scope import Node, NodeKind, ROOT
 from app.backend.auth.user_types import USER_TYPES, excess_permissions
@@ -103,12 +105,16 @@ def _refuse_archived(target: User) -> None:
         raise ApiError(ErrorCode.USER_NOT_FOUND)
 
 
-async def _live_role(session: AsyncSession, role_id: int, shared_lock: bool = False) -> Role:
-    """The live role; with shared_lock its row read with a shared lock (inside a write that began with lock_first): a
-    concurrent edit of the role's permissions runs before or after the assignment, never in between"""
-    query = select(Role).where(Role.id == role_id, Role.is_deleted == False)  # noqa: E712
-    role = await lock(session, query, shared=True) if shared_lock else (await session.exec(query)).first()
+async def _live_role(session: AsyncSession, role_id: int) -> Role:
+    role = (await session.exec(select(Role).where(Role.id == role_id, Role.is_deleted == False))).first()  # noqa: E712
     if role is None:
+        raise ApiError(ErrorCode.ROLE_NOT_FOUND, role_id=role_id)
+    return role
+
+
+def _require_live(role: Optional[Role], role_id: int) -> Role:
+    """The role a write locked (lock_role_row), 404 when it is unknown or archived"""
+    if role is None or role.is_deleted:
         raise ApiError(ErrorCode.ROLE_NOT_FOUND, role_id=role_id)
     return role
 
@@ -181,9 +187,12 @@ async def create_assignment(session: AsyncSession, auth: AuthContext, target: Us
                             node: Node) -> RoleAssignment:
     """The assignment of the role to the target at the node, checked and added to the session (not flushed)"""
     await _lock_user(session, target)
+    # The role row with a shared lock before any plain read: the read view of the write starts after both locks,
+    # so a concurrent edit of the role's permissions is seen whole, before or after (R40; MariaDB 1020 otherwise)
+    locked = await lock(session, select(Role).where(Role.id == role_id), shared=True)
     await check_target_user(session, auth, target, Permissions.USER_UPDATE)
     _refuse_archived(target)
-    role = await _live_role(session, role_id, shared_lock=True)
+    role = _require_live(locked, role_id)
     if role.kind != RoleKind.TREE.value:
         raise ApiError(ErrorCode.ROLE_IS_SYSTEM, role_id=role.id)
     permissions = await role_permission_names(session, [role.id])
@@ -214,9 +223,14 @@ async def delete_assignment(session: AsyncSession, auth: AuthContext, target: Us
     await _check_not_last_of_user(session, target, role, tree_id=assignment.id)
 
     removed = assignment.model_dump()
+    # administrator at the root is half of the administrator (system_administrator is the other half)
+    anchor = role.builtin_key == BuiltinRole.ADMINISTRATOR.value and removed["scope_key"] == ROOT.key
+    held_before = anchor and await holds_admin_at_root(session, auth.user.id)
     session.expunge(assignment)
     # A core statement: no ORM cascade or relationship bookkeeping in the async session
     await session.execute(sa_delete(RoleAssignment).where(RoleAssignment.id == assignment_id))
+    if anchor:
+        await check_admin_kept(session, auth, held_before)
     logger.info(f"User {auth.user.username} removes assignment {assignment_id} ({removed['scope_key']}) of user {target.id}")
     return removed
 

@@ -163,7 +163,7 @@ def grant_rows(user_id: int, include_archived_roles: bool = False):
     (privileges.check_target_user: what the user would hold again after a role's restore); never for an AuthContext"""
     query = (
         select(RoleAssignment.id, RoleAssignment.scope_group_id, RoleAssignment.scope_post_id,
-               Role.id, Role.name, Role.display_name, Role.builtin_key, Permission.name)
+               Role.id, Role.name, Role.display_name, Role.builtin_key, Permission.name, Role.kind)
         .select_from(RoleAssignment)
         .join(Role, Role.id == RoleAssignment.role_id)
         .outerjoin(RolePermission, RolePermission.role_id == Role.id)
@@ -177,7 +177,7 @@ def system_grant_rows(user_id: int, include_archived_roles: bool = False):
     """grant_rows of the user's system role assignments, in the same shape (both scope ids null: the root)"""
     query = (
         select(SystemRoleAssignment.id, sa_null(), sa_null(),
-               Role.id, Role.name, Role.display_name, Role.builtin_key, Permission.name)
+               Role.id, Role.name, Role.display_name, Role.builtin_key, Permission.name, Role.kind)
         .select_from(SystemRoleAssignment)
         .join(Role, Role.id == SystemRoleAssignment.role_id)
         .outerjoin(RolePermission, RolePermission.role_id == Role.id)
@@ -191,10 +191,11 @@ def system_grant_rows(user_id: int, include_archived_roles: bool = False):
 _WARNED: Set[Tuple[str, int]] = set()
 
 
-def _in_effect(user: User, kind: str, assignment_id: int, names: FrozenSet[str]) -> FrozenSet[str]:
-    """What the grant puts in effect for the user (auth/integrity.py); a grant with something left out is logged
-    once per process (ids and permission names, nothing about the user)"""
-    kept, left_out = effective_permissions(user.user_type, kind, names)
+def _in_effect(user: User, kind: str, assignment_id: int, names: FrozenSet[str], role_kind: str) -> FrozenSet[str]:
+    """What the grant puts in effect for the user (auth/integrity.py; nothing for a role of the other kind than its
+    table); a grant with something left out is logged once per process (ids and permission names, nothing about
+    the user)"""
+    kept, left_out = effective_permissions(user.user_type, kind, names, role_kind)
     if left_out and (kind, assignment_id) not in _WARNED:
         _WARNED.add((kind, assignment_id))
         logger.warning(f"Grant {kind}:{assignment_id} of user {user.id}: {sorted(left_out)} not in effect "
@@ -207,15 +208,17 @@ def grants_of(rows: Iterable, kind: str = "tree", user: Optional[User] = None) -
     each grant holds only what it puts in effect for that user: the permissions of the kind's level inside the
     boundary of the user's type (auth/integrity.py)."""
     heads: Dict[int, tuple] = {}            # assignment id -> role id, name, display name, built-in, node
+    role_kinds: Dict[int, str] = {}
     permissions: Dict[int, Set[str]] = {}
-    for assignment_id, group_id, post_id, role_id, name, display_name, builtin_key, permission in rows:
+    for assignment_id, group_id, post_id, role_id, name, display_name, builtin_key, permission, role_kind in rows:
         heads.setdefault(assignment_id, (role_id, name, display_name, builtin_key is not None, node_of(group_id, post_id)))
+        role_kinds[assignment_id] = role_kind
         held = permissions.setdefault(assignment_id, set())
         if permission:
             held.add(permission)
     def held_by(assignment_id: int) -> FrozenSet[str]:
         names = frozenset(permissions[assignment_id])
-        return names if user is None else _in_effect(user, kind, assignment_id, names)
+        return names if user is None else _in_effect(user, kind, assignment_id, names, role_kinds[assignment_id])
 
     return tuple(Grant(*heads[assignment_id], held_by(assignment_id), assignment_id=assignment_id, kind=kind)
                  for assignment_id in sorted(heads))

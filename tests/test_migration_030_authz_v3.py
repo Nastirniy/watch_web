@@ -35,6 +35,7 @@ ROLES = {   # id: (name, builtin_key, archived, permission names)
     5: ("aud", None, 0, ["audit.view"]),
     6: ("Auditor", None, 0, ["post.view"]),                       # named like a new built-in role
     7: ("old", None, 1, ["post.view", "tag.create"]),
+    8: ("administrator", None, 0, ["post.view"]),                 # named like the renamed built-in post_admin
 }
 USERS = {   # id: (username, v2 type, post)
     1: ("chief", "admin", None), 2: ("brigade", "post_admin", None), 3: ("oper", "operator", 7),
@@ -42,7 +43,7 @@ USERS = {   # id: (username, v2 type, post)
 }
 ASSIGNMENTS = {   # id: (user, role, scope key)
     1: (1, 1, "root"), 2: (2, 2, "g:3"), 3: (3, 3, "p:7"), 4: (4, 4, "root"), 5: (4, 5, "root"),
-    6: (5, 6, "p:7"), 7: (6, 7, "root"), 8: (6, 3, "root"),
+    6: (5, 6, "p:7"), 7: (6, 7, "root"), 8: (6, 3, "root"), 9: (5, 8, "p:7"),
 }
 TABLES = ("permissions", "roles", "role_permissions", "role_assignments", "users", "system_role_assignments")
 
@@ -146,6 +147,7 @@ def test_conversion_rows(tmp_path):
     assert roles["system_administrator"] == (1, "system_administrator", "system")
     assert roles["ops_system"][2] == "tree" and roles["ops_system_system"][2] == "system"
     assert roles["aud"][2] == "system" and roles["Auditor_custom"][0] == 6
+    assert roles["administrator_custom"][0] == 8      # renamed before post_admin takes the name (final review C1)
     assert conn.execute("select level from permissions where name = 'audit.view'").fetchone() == ("system",)
     types = dict(conn.execute("select id, user_type from users"))
     assert types == {1: "system_administrator", 2: "administrator", 3: "operator", 4: "system_administrator",
@@ -202,3 +204,35 @@ def test_report_v3_on_the_database_before_the_conversion(tmp_path, capsys):
     assert {u["user_id"]: u["type_after"] for u in report["users"]}[2] == "administrator"
     assert run_migrate(db_file).returncode == 0
     assert authz_report.main(["--v3", "--url", f"sqlite:///{db_file}"]) == 2
+
+
+@pytest.mark.slow
+def test_downgrade_maps_users_made_after_the_upgrade(tmp_path):
+    """Final review I4: a user created or retyped after the upgrade keeps a v3 type the v2 code cannot read; the
+    downgrade maps it back and gives a former system administrator the v2 admin role at the root"""
+    db_file = v2_database(tmp_path)
+    assert run_migrate(db_file).returncode == 0
+    conn = sqlite3.connect(db_file)
+    (administrator,) = conn.execute("select id from roles where builtin_key = 'administrator'").fetchone()
+    (system_admin,) = conn.execute("select id from roles where builtin_key = 'system_administrator'").fetchone()
+    conn.execute("insert into users (id, username, username_alias, is_active, user_type, is_deleted, created_at,"
+                 " updated_at) values (20, 'later', 'Later', 1, 'system_administrator', 0, ?, ?)", (STAMP, STAMP))
+    conn.execute("insert into users (id, username, username_alias, is_active, user_type, is_deleted, created_at,"
+                 " updated_at) values (21, 'unit', 'Unit', 1, 'administrator', 0, ?, ?)", (STAMP, STAMP))
+    conn.execute("insert into role_assignments (user_id, role_id, scope_key, created_at) values (20, ?, 'root', ?)",
+                 (administrator, STAMP))
+    conn.execute("insert into system_role_assignments (user_id, role_id, created_at) values (20, ?, ?)",
+                 (system_admin, STAMP))
+    conn.execute("insert into role_assignments (user_id, role_id, scope_group_id, scope_key, created_at)"
+                 " values (21, ?, 3, 'g:3', ?)", (administrator, STAMP))
+    conn.commit()
+    conn.close()
+    down = _run_downgrade(db_file, PREVIOUS)
+    assert down.returncode == 0, down.stdout + down.stderr
+    conn = sqlite3.connect(db_file)
+    types = dict(conn.execute("select id, user_type from users where id in (20, 21)"))
+    assert types == {20: "admin", 21: "post_admin"}
+    held = set(conn.execute("select a.user_id, r.builtin_key, a.scope_key from role_assignments a"
+                            " join roles r on r.id = a.role_id where a.user_id in (20, 21)"))
+    assert (20, "admin", "root") in held and (21, "post_admin", "g:3") in held
+    conn.close()

@@ -270,6 +270,22 @@ async def create_user(
         raise
 
 
+async def _lock_role_then_user(session: AsyncSession, user_id: int, role_id: int, administrators: bool) -> User:
+    """The locks of an assignment write, in one order, before any plain read: the administrators' lock (system
+    assignments), the role row (shared), then the user. Locking the User entity reads the presence subqueries
+    (models/presence_properties.py), a plain read that takes the snapshot on MariaDB: the role is locked before it,
+    so a concurrent edit of the role's permissions is seen whole, before or after (R40), never a 1020."""
+    if administrators:
+        await lock_administrators(session)
+        await lock_row(session, select(Role.id).where(Role.id == role_id), shared=True)
+    else:
+        await lock_first(session, select(Role.id).where(Role.id == role_id), shared=True)
+    user = await lock_row(session, select(User).where(User.id == user_id))
+    if not user:
+        raise ApiError(ErrorCode.USER_NOT_FOUND)
+    return user
+
+
 async def _get_user_or_404(session: AsyncSession, user_id: int, lock: Optional[str] = None) -> User:
     """The user, archived or not (each route decides what an archived user means after its scope check).
 
@@ -765,7 +781,7 @@ async def create_user_assignment(
     the tree boundary of the user's type 409 role_exceeds_user_type; the same role at the same node 409
     assignment_exists.
     """
-    target = await _get_user_or_404(session, user_id, lock="user")
+    target = await _lock_role_then_user(session, user_id, data.role_id, administrators=False)
     assignment = await create_assignment(session, auth, target, data.role_id, data.scope.node)
     async with unique_violation_as(session, ErrorCode.ASSIGNMENT_EXISTS):
         await session.flush()
@@ -790,6 +806,7 @@ async def create_user_assignment(
     status_code=status.HTTP_204_NO_CONTENT,
     responses=problems(
         ErrorCode.USER_NOT_FOUND, ErrorCode.ASSIGNMENT_NOT_FOUND, ErrorCode.LAST_ASSIGNMENT_REQUIRED,
+        ErrorCode.LAST_ADMIN_REQUIRED, ErrorCode.CANNOT_REMOVE_OWN_ADMIN,
         AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
     ),
 )
@@ -808,9 +825,11 @@ async def delete_user_assignment(
     404 assignment_not_found; user.update and every permission of its role held by the caller at its node (403
     grant_exceeds_own_permissions); the user's last assignment of either kind 409 last_assignment_required (an
     assignment of a live role needs another one of a live role to remain: an assignment of an archived role grants
-    nothing; one of an archived role needs any other assignment to remain).
+    nothing; one of an archived role needs any other assignment to remain); the built-in administrator role at the
+    root is half of the administrator: an administrator (system_administrator and administrator at the root, active)
+    must remain (409 last_admin_required) and it cannot be taken from oneself while one (409 cannot_remove_own_admin).
     """
-    target = await _get_user_or_404(session, user_id, lock="user")
+    target = await _get_user_or_404(session, user_id, lock="administrators")
     removed = await delete_assignment(session, auth, target, assignment_id)
     await create_audit_log(
         session=session,
@@ -874,7 +893,8 @@ async def create_user_system_assignment(
     permission of the role held by the caller at the root (403 grant_exceeds_own_permissions); a role above the
     system boundary of the user's type 409 role_exceeds_user_type; the same role 409 assignment_exists.
     """
-    target = await _get_user_or_404(session, user_id, lock="user")
+    # The administrators' lock first, as every route that may touch the system_administrator role (one lock order)
+    target = await _lock_role_then_user(session, user_id, data.role_id, administrators=True)
     assignment = await create_system_assignment(session, auth, target, data.role_id)
     async with unique_violation_as(session, ErrorCode.ASSIGNMENT_EXISTS):
         await session.flush()

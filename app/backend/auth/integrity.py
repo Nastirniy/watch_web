@@ -12,7 +12,8 @@ shows the counts. Nothing here reaches FastAPI.
 from dataclasses import dataclass
 from typing import Dict, FrozenSet, Iterable, List, Set, Tuple, Union
 
-from sqlalchemy import func
+from sqlalchemy import exists, func
+from sqlalchemy.orm import aliased
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -41,7 +42,7 @@ class Violation:
 @dataclass(frozen=True)
 class AuthorizationReport:
     violations: Tuple[Violation, ...]
-    system_administrators: int  # live, active users holding the built-in system_administrator role
+    system_administrators: int  # active users holding system_administrator and administrator at the root
 
 
 def other_level(kind: Union[RoleKind, str], names: Iterable[str]) -> List[str]:
@@ -52,16 +53,39 @@ def other_level(kind: Union[RoleKind, str], names: Iterable[str]) -> List[str]:
 
 
 def effective_permissions(user_type: Union[UserType, str], kind: Union[RoleKind, str],
-                          names: Iterable[str]) -> Tuple[FrozenSet[str], FrozenSet[str]]:
-    """(kept, left out) of the permissions a grant of the kind holds for a user of the type. A name the catalog does
-    not know (a row left in the database) is left out."""
+                          names: Iterable[str], role_kind: Union[RoleKind, str, None] = None
+                          ) -> Tuple[FrozenSet[str], FrozenSet[str]]:
+    """(kept, left out) of the permissions a grant of the kind (its table) holds for a user of the type. A name the
+    catalog does not know (a row left in the database) is left out; a role whose kind (role_kind) is not the
+    grant's puts nothing in effect."""
     kind = RoleKind(kind)
-    allowed = boundary(UserType(user_type), kind)
     names = frozenset(names)
+    if role_kind is not None and RoleKind(role_kind) is not kind:
+        return frozenset(), names
+    allowed = boundary(UserType(user_type), kind)
     kept = frozenset(name for name in names
                      if name in allowed and PERMISSION_LEVELS.get(name) is not None
                      and PERMISSION_LEVELS[name].value == kind.value)
     return kept, names - kept
+
+
+def administrators_query():
+    """User ids holding the built-in system_administrator system role (live) AND the built-in administrator tree role
+    at the root (live): the one definition of the administrator, who can manage everything (privileges.py,
+    the report)"""
+    tree_role = aliased(Role)
+    at_root = (
+        select(RoleAssignment.id).join(tree_role, tree_role.id == RoleAssignment.role_id)
+        .where(RoleAssignment.user_id == SystemRoleAssignment.user_id,
+               tree_role.builtin_key == BuiltinRole.ADMINISTRATOR.value, tree_role.is_deleted == False,  # noqa: E712
+               RoleAssignment.scope_key == ROOT_KEY)
+    )
+    return (
+        select(SystemRoleAssignment.user_id)
+        .join(Role, Role.id == SystemRoleAssignment.role_id)
+        .where(Role.builtin_key == BuiltinRole.SYSTEM_ADMINISTRATOR.value, Role.is_deleted == False,  # noqa: E712
+               exists(at_root))
+    )
 
 
 async def authorization_report(session: AsyncSession) -> AuthorizationReport:
@@ -69,37 +93,37 @@ async def authorization_report(session: AsyncSession) -> AuthorizationReport:
     permissions out, and the number of live system administrators. Three reads."""
     tree = (await session.exec(
         select(RoleAssignment.id, RoleAssignment.user_id, RoleAssignment.role_id, RoleAssignment.scope_key,
-               User.user_type, Permission.name)
+               User.user_type, Permission.name, Role.kind)
         .join(User, User.id == RoleAssignment.user_id)
+        .join(Role, Role.id == RoleAssignment.role_id)
         .join(RolePermission, RolePermission.role_id == RoleAssignment.role_id)
         .join(Permission, Permission.id == RolePermission.permission_id)
     )).all()
     system = (await session.exec(
         select(SystemRoleAssignment.id, SystemRoleAssignment.user_id, SystemRoleAssignment.role_id, User.user_type,
-               Permission.name)
+               Permission.name, Role.kind)
         .join(User, User.id == SystemRoleAssignment.user_id)
+        .join(Role, Role.id == SystemRoleAssignment.role_id)
         .join(RolePermission, RolePermission.role_id == SystemRoleAssignment.role_id)
         .join(Permission, Permission.id == RolePermission.permission_id)
     )).all()
-    grants: Dict[Tuple[str, int], Tuple[int, int, str, str]] = {}
+    grants: Dict[Tuple[str, int], Tuple[int, int, str, str, str]] = {}
     names: Dict[Tuple[str, int], Set[str]] = {}
-    for assignment_id, user_id, role_id, scope_key, user_type, name in tree:
-        grants[("tree", assignment_id)] = (user_id, role_id, scope_key, user_type)
+    for assignment_id, user_id, role_id, scope_key, user_type, name, role_kind in tree:
+        grants[("tree", assignment_id)] = (user_id, role_id, scope_key, user_type, role_kind)
         names.setdefault(("tree", assignment_id), set()).add(name)
-    for assignment_id, user_id, role_id, user_type, name in system:
-        grants[("system", assignment_id)] = (user_id, role_id, ROOT_KEY, user_type)
+    for assignment_id, user_id, role_id, user_type, name, role_kind in system:
+        grants[("system", assignment_id)] = (user_id, role_id, ROOT_KEY, user_type, role_kind)
         names.setdefault(("system", assignment_id), set()).add(name)
     violations = []
     for key in sorted(grants):
-        user_id, role_id, scope_key, user_type = grants[key]
-        _, left_out = effective_permissions(user_type, key[0], names[key])
+        user_id, role_id, scope_key, user_type, role_kind = grants[key]
+        _, left_out = effective_permissions(user_type, key[0], names[key], role_kind)
         if left_out:
             violations.append(Violation(key[0], key[1], user_id, role_id, scope_key, left_out))
+    holders = administrators_query().subquery()
     administrators = (await session.exec(
-        select(func.count(func.distinct(SystemRoleAssignment.user_id)))
-        .join(Role, Role.id == SystemRoleAssignment.role_id)
-        .join(User, User.id == SystemRoleAssignment.user_id)
-        .where(Role.builtin_key == BuiltinRole.SYSTEM_ADMINISTRATOR.value, Role.is_deleted == False,  # noqa: E712
-               User.is_active == True, User.is_deleted == False)  # noqa: E712
+        select(func.count(func.distinct(User.id))).where(
+            User.id.in_(select(holders.c.user_id)), User.is_active == True, User.is_deleted == False)  # noqa: E712
     )).one()
     return AuthorizationReport(tuple(violations), int(administrators))

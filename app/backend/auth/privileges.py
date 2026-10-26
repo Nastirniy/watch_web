@@ -23,7 +23,8 @@ Nobody becomes able to do more than they could by changing access:
   by the route): the caller has not taken the built-in admin role at the root from themselves (409
   cannot_remove_own_admin, check_admin_kept, answered first; whether they held it is read with holds_admin_at_root
   before the change), and an active, non-archived user still holds it (409 last_admin_required). The administrator
-  is a system assignment of the built-in system_administrator role (_admin_at_root), nothing else.
+  is a user holding the built-in system_administrator system role and the built-in administrator role at the root
+  (_admin_at_root), nothing else: removing either from the last one is refused.
 - lock_administrators: the first statement of every write that may take that role from someone (an assignment
   removed, a user deactivated, archived or given another type). Such writes run one after another, so the count of
   check_an_admin_remains sees the one before: two administrators deactivating each other at once can no longer
@@ -40,6 +41,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.auth.access_errors import access_denied
 from app.backend.auth.context import AuthContext, load_grants, permission_name
+from app.backend.auth.integrity import administrators_query
 from app.backend.auth.scope import Grant, Node, ROOT
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.enums.general import BuiltinRole, Permissions
@@ -147,12 +149,9 @@ async def check_target_user(session: AsyncSession, auth: AuthContext, target: Us
 
 
 def _admin_at_root():
-    """System assignments of the built-in system_administrator role: the one definition of the administrator"""
-    return (
-        select(SystemRoleAssignment.user_id)
-        .join(Role, Role.id == SystemRoleAssignment.role_id)
-        .where(Role.builtin_key == BuiltinRole.SYSTEM_ADMINISTRATOR.value, Role.is_deleted == False)
-    )
+    """The administrators: holders of system_administrator and of administrator at the root
+    (integrity.administrators_query, the one definition)"""
+    return administrators_query()
 
 
 async def lock_administrators(session: AsyncSession) -> None:
