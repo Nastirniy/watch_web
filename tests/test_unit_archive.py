@@ -1,4 +1,5 @@
 """Archive of corps and brigades with an optional cascade, restore of the node only, the permissions on the node."""
+import pytest
 from sqlmodel import select
 
 from app.backend.api.v1 import V1
@@ -121,6 +122,7 @@ async def _limited_user(db, corps, permissions, node=None):
     return user
 
 
+@pytest.mark.fit_types
 async def test_cascade_without_post_archive_at_the_node_changes_nothing(client, db, headers):
     corps, brigade, (p1, _, _, _) = await _structure(db)
     user = await _limited_user(db, corps, [Permissions.POST_UPDATE])
@@ -132,6 +134,7 @@ async def test_cascade_without_post_archive_at_the_node_changes_nothing(client, 
     assert not (await _rows(db, Post, [p1.id]))[p1.id].is_deleted
 
 
+@pytest.mark.fit_types
 async def test_detach_needs_post_update_at_the_node_and_the_destination(client, db, headers):
     corps = await make_group(db, kind="corps")
     post = await make_post(db, group_id=corps.id)
@@ -151,6 +154,7 @@ async def test_detach_needs_post_update_at_the_node_and_the_destination(client, 
     assert r.status_code == 200, r.text
 
 
+@pytest.mark.fit_types
 async def test_archive_needs_scope_group_archive_at_the_node(client, db, headers):
     corps = await make_group(db, kind="corps")
     other = await make_group(db, kind="corps")

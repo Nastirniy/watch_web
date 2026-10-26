@@ -39,11 +39,14 @@ from tests.pki_helpers import DownTransport, client_ca, write_ca_files
 
 
 @pytest.fixture(autouse=True)
-def _chosen_types_are_per_test():
-    """Ids repeat between the tests' databases: the users whose type a test chose (tests/helpers.py) are per test"""
+def _chosen_types_are_per_test(request):
+    """Ids repeat between the tests' databases: the users whose type a test chose (tests/helpers.py) are per test, and
+    so is the fit_types mark (the factories widen types only in a marked test)"""
     factories._EXPLICIT_TYPES.clear()
+    factories.FIT_TYPES["allowed"] = request.node.get_closest_marker("fit_types") is not None
     yield
     factories._EXPLICIT_TYPES.clear()
+    factories.FIT_TYPES["allowed"] = False
 
 
 @pytest_asyncio.fixture

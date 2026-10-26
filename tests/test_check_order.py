@@ -97,6 +97,7 @@ async def test_create_observation_unknown_post_is_404_for_access_all(client, db,
     assert response.json()["code"] == "post_not_found"
 
 
+@pytest.mark.fit_types
 @pytest.mark.asyncio
 async def test_user_create_and_move_answer_alike_for_unknown_archived_and_foreign_posts(client, db, headers):
     """A caller holding user.create and user.update at one post learns nothing about other post ids: an unknown id,
@@ -185,6 +186,7 @@ async def test_user_outsider_gets_the_same_403_for_an_archived_and_a_live_user(c
         assert response.json()["code"] == "user_self_only"
 
 
+@pytest.mark.fit_types
 @pytest.mark.asyncio
 async def test_user_update_outsider_gets_the_same_403_for_an_archived_and_a_live_user(client, db, headers):
     """PATCH /users/{user_id}: the caller's reach answers before the archived state (404 only inside it)"""
@@ -215,6 +217,7 @@ async def test_user_update_outsider_gets_the_same_403_for_an_archived_and_a_live
     (UserRoutes.USER_SESSIONS_END, "user.update"),
     (UserRoutes.USER_SESSION_END, "user.update"),
 ])
+@pytest.mark.fit_types
 async def test_user_state_routes_answer_the_outsider_alike(client, db, headers, route, permission):
     """R39: archive, restore and ending sessions check the caller's reach before the archived state of the user (404
     user_not_found, 409 user_not_archived only inside it), so an outsider gets the same 403 for an archived and a live

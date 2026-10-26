@@ -1,5 +1,6 @@
 """Observation counters of a corps or brigade: GET /corps/{id}/observation-stats, /brigades/{id}/observation-stats,
 by created_at like the post's, with placement (recorded / current); only posts with observation.view count."""
+import pytest
 from datetime import datetime, timedelta, timezone
 
 from sqlmodel import select
@@ -89,6 +90,7 @@ async def test_buckets_equal_the_sum_over_the_posts(client, db, headers):
     assert unit["all_time"]["not_archived"] == sum(s["all_time"]["not_archived"] for s in per_post)
 
 
+@pytest.mark.fit_types
 async def test_only_posts_with_observation_view_count(client, db, headers):
     h = headers(await make_admin(db))
     corps, b10, b20, _, _, _ = await _scenario(client, db, h)

@@ -212,6 +212,7 @@ async def test_create_user_only_with_a_base_role_within_the_callers_permissions(
     assert allowed.status_code == 200, allowed.text
 
 
+@pytest.mark.fit_types
 @pytest.mark.asyncio
 async def test_create_user_needs_user_create_covering_the_node(client, db, headers):
     a, b = await make_post(db), await make_post(db)
@@ -392,6 +393,7 @@ async def test_limited_admin_cannot_archive_or_restore_a_more_privileged_user(cl
     assert (await db.exec(select(User.is_deleted).where(User.id == second_admin.id))).one() is True
 
 
+@pytest.mark.fit_types
 @pytest.mark.asyncio
 async def test_target_user_needs_the_routes_permission_covering_them(client, db, headers):
     """Each route checks its own user.* permission at the target's home post: user.update for PATCH and the session
@@ -417,6 +419,7 @@ async def test_target_user_needs_the_routes_permission_covering_them(client, db,
     assert (await client.post(USER_RESTORE.format(user_id=at_b.id), headers=headers(caller))).status_code == 200
 
 
+@pytest.mark.fit_types
 @pytest.mark.asyncio
 async def test_moving_a_user_needs_user_update_covering_the_new_post(client, db, headers):
     a, b = await make_post(db), await make_post(db)
@@ -436,6 +439,7 @@ async def test_moving_a_user_needs_user_update_covering_the_new_post(client, db,
     assert moved.json()["post_id"] == b.id
 
 
+@pytest.mark.fit_types
 @pytest.mark.asyncio
 async def test_a_target_with_an_assignment_beyond_the_caller(db):
     """check_target_user: every assignment of the target must be one the caller could grant at its node"""
@@ -453,6 +457,7 @@ async def test_a_target_with_an_assignment_beyond_the_caller(db):
     assert caught.value.params["missing"] == ["observation.view"]
 
 
+@pytest.mark.fit_types
 @pytest.mark.asyncio
 async def test_an_archived_role_of_the_target_still_counts(client, db, headers):
     """Spec section 6 rule 2: the caller could grant every existing assignment of the target. An assignment of an

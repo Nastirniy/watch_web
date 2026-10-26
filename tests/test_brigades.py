@@ -1,4 +1,5 @@
 """/brigades: CRUD of brigades (scope groups of kind brigade inside a corps), moves between corps, posts of a brigade."""
+import pytest
 from sqlmodel import select
 
 from app.backend.api.v1 import V1
@@ -60,6 +61,7 @@ async def test_create_in_an_archived_or_unknown_corps_is_404(client, db, headers
         assert r.status_code == 404 and r.json()["code"] == "scope_group_not_found"
 
 
+@pytest.mark.fit_types
 async def test_create_needs_scope_group_create_covering_the_corps(client, db, headers):
     corps = await make_group(db, kind="corps")
     other = await make_group(db, kind="corps")
@@ -133,6 +135,7 @@ async def test_move_refusals(client, db, headers):
     assert r.status_code == 409 and r.json()["code"] == "scope_group_name_taken"
 
 
+@pytest.mark.fit_types
 async def test_move_without_post_update_at_the_new_corps_changes_nothing(client, db, headers):
     c1 = await make_group(db, kind="corps")
     c2 = await make_group(db, kind="corps")
@@ -147,6 +150,7 @@ async def test_move_without_post_update_at_the_new_corps_changes_nothing(client,
     assert row.parent_id == c1.id
 
 
+@pytest.mark.fit_types
 async def test_move_without_post_rights_at_the_old_corps_changes_nothing(client, db, headers):
     c1 = await make_group(db, kind="corps")
     c2 = await make_group(db, kind="corps")

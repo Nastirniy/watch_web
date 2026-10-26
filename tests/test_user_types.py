@@ -237,6 +237,7 @@ async def test_downgrade_above_ceiling_refused(client, db, headers, tree):
     assert body["user_type"] == "operator"
     assert body["assignments"][0]["excess_permissions"] == ["media.update"]
     assert body["assignments"] == [{
+        "kind": "tree",
         "id": extra.id,
         "role": {"id": media_editor.id, "name": media_editor.name, "display_name": media_editor.display_name},
         "scope": {"kind": "post", "id": tree.a.id, "name": "A"},

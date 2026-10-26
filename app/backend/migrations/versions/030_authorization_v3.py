@@ -8,7 +8,8 @@ system role system_administrator, every role gets its kind, the system permissio
 <name>_system role, the assignments of system roles leave role_assignments (those at the root come back as system
 assignments, those below the root are reported and dropped), holders of the admin role get administrator at the
 root, user types are renamed (post_admin -> administrator, admin -> system_administrator), one audit row per user
-(action migrate, resource_type user, details = what changed for the user) and the "converted" row last. Every change
+and per role the conversion changes or creates (action migrate, resource_type user or role, details = what changed)
+and the "converted" row last. Every change
 is logged (kind, ref_id, data) for the downgrade. New rows take the creation time of their source row.
 
 Downgrade restores 029 exactly from the log: system assignments are deleted (also those made after the upgrade),
@@ -101,6 +102,10 @@ def upgrade() -> None:
     permission_ids = {name: pid for pid, name in conn.execute(sa.select(PERMISSIONS.c.id, PERMISSIONS.c.name))}
     changes = {user.id: {"user_type": [user.user_type, plan.user_types[user.id]], "moved_assignments": [],
                          "system_assignments": [], "added_assignments": [], "dropped": []} for user in users}
+    role_changes = {}   # role id -> what changed (only what did)
+
+    def changed(role_id: int, field: str, value) -> None:
+        role_changes.setdefault(role_id, {})[field] = value
 
     for pid, name, level in conn.execute(sa.select(PERMISSIONS.c.id, PERMISSIONS.c.name, PERMISSIONS.c.level)):
         wanted = LEVELS.get(name)
@@ -112,29 +117,40 @@ def upgrade() -> None:
     for role_id, name in plan.role_renames.items():
         _record(conn, "role_name", role_id, {"old": roles[role_id].name})
         conn.execute(ROLES.update().where(ROLES.c.id == role_id).values(name=name))
+        changed(role_id, "name", [roles[role_id].name, name])
     for role_id, key in plan.builtin_keys.items():
         old = _row(conn, ROLES, role_id)
         _record(conn, "builtin_key", role_id, {"old": old["builtin_key"], "old_name": old["name"],
                                                "old_display_name": old["display_name"],
                                                "old_description": old["description"]})
         conn.execute(ROLES.update().where(ROLES.c.id == role_id).values(builtin_key=key, name=key))
+        if old["name"] != key:
+            changed(role_id, "name", [old["name"], key])
+        if old["builtin_key"] != key:
+            changed(role_id, "builtin_key", [old["builtin_key"], key])
     for role_id, kind in plan.role_kinds.items():
         if kind != TREE:
             _record(conn, "role_kind", role_id, {"old": TREE})
             conn.execute(ROLES.update().where(ROLES.c.id == role_id).values(kind=kind))
+            changed(role_id, "kind", [TREE, kind])
 
     for role_id, names in plan.role_permissions_removed.items():
         ids = [permission_ids[name] for name in sorted(names) if name in permission_ids]
+        removed = []
         for grant in conn.execute(sa.select(GRANTS).where(GRANTS.c.role_id == role_id,
                                                           GRANTS.c.permission_id.in_(ids))).mappings().all():
             _record(conn, "removed_grant", grant["id"], dict(grant))
             conn.execute(GRANTS.delete().where(GRANTS.c.id == grant["id"]))
+            removed.append(next(name for name, pid in permission_ids.items() if pid == grant["permission_id"]))
+        if removed:
+            changed(role_id, "permissions_removed", sorted(removed))
     for role_id, names in plan.role_permissions_added.items():
         for name in sorted(names):
             if name in permission_ids:
                 new_id = conn.execute(GRANTS.insert().values(role_id=role_id, permission_id=permission_ids[name])
                                       ).inserted_primary_key[0]
                 _record(conn, "added_grant", new_id)
+                role_changes.setdefault(role_id, {}).setdefault("permissions_added", []).append(name)
 
     split_ids = {}
     for split in plan.split_roles:
@@ -147,6 +163,8 @@ def upgrade() -> None:
         _record(conn, "split_role", new_id, {"source_id": split.source_id})
         for name in sorted(split.permissions):
             conn.execute(GRANTS.insert().values(role_id=new_id, permission_id=permission_ids[name]))
+        changed(split.source_id, "split_into", new_id)
+        role_changes[new_id] = {"split_from": split.source_id, "permissions": sorted(split.permissions)}
 
     moved = {assignment_id: _row(conn, ASSIGNMENTS, assignment_id) for assignment_id in plan.moved_assignment_ids}
     for planned in plan.system_assignments:
@@ -169,9 +187,10 @@ def upgrade() -> None:
             is_deleted=False, builtin_key="administrator", kind=TREE,
         )).inserted_primary_key[0]
         _record(conn, "created_role", administrator_id)
-        for name in sorted(TREE_BOUNDARY["administrator"]):
-            if name in permission_ids:
-                conn.execute(GRANTS.insert().values(role_id=administrator_id, permission_id=permission_ids[name]))
+        granted = [name for name in sorted(TREE_BOUNDARY["administrator"]) if name in permission_ids]
+        for name in granted:
+            conn.execute(GRANTS.insert().values(role_id=administrator_id, permission_id=permission_ids[name]))
+        role_changes[administrator_id] = {"created": "administrator", "permissions": granted}
     for user_id in plan.added_root_administrators:
         # the holder's admin assignment at the root (moved to the system table above) gives its creation time
         source = next(row for row in moved.values() if row["user_id"] == user_id and row["scope_key"] == ROOT_KEY)
@@ -194,7 +213,13 @@ def upgrade() -> None:
             conn.execute(USERS.update().where(USERS.c.id == user.id).values(user_type=new_type))
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     for user_id, details in changes.items():
+        if details["user_type"][0] == details["user_type"][1] and not any(
+                details[field] for field in ("moved_assignments", "system_assignments", "added_assignments", "dropped")):
+            continue    # nothing changed for the user
         conn.execute(AUDIT.insert().values(user_id=None, action="migrate", resource_type="user", resource_id=user_id,
+                                           details={"authorization_v3": details}, success=True, created_at=now))
+    for role_id, details in sorted(role_changes.items()):
+        conn.execute(AUDIT.insert().values(user_id=None, action="migrate", resource_type="role", resource_id=role_id,
                                            details={"authorization_v3": details}, success=True, created_at=now))
     _record(conn, "converted", None, {"users": len(users), "split_roles": len(plan.split_roles),
                                       "system_assignments": len(plan.system_assignments),

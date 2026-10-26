@@ -269,7 +269,8 @@ without 030 (the permission levels are not written yet).
    `dropped grants` lists grants the conversion does not carry (a system permission below the root, a grant outside
    the boundary of the new type).
 3. Deploy; the start migrates, seeds the new built-in roles (`auditor`, `dictionary_editor`, `tag_editor`) and logs
-   a warning for every grant that leaves permissions out. `/health` shows `authorization`
+   a warning for every grant that leaves permissions out. Every user and role the conversion changes or creates gets
+   an audit row (`action` `migrate`, `resource_type` `user` or `role`) saying what changed. `/health` shows `authorization`
    (`violations`, `system_administrators`).
 4. The web client moves to the new contract: `user_type` values, `system_permissions` and `system_assignments` in
    `/auth/me`, `kind` on roles, the system assignment routes (`API.md`).

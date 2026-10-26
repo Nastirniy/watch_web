@@ -52,6 +52,8 @@ class ExcessScope(BaseModel):
 
 class ExcessAssignment(BaseModel):
     """An assignment whose role holds permissions the ceiling of the user's type does not allow"""
+    kind: RoleKind = Field(description="The table of the assignment: tree (at a node, /users/{user_id}/assignments) "
+                                       "or system (/users/{user_id}/system-assignments); the id is of that table")
     id: int
     role: ExcessRole
     scope: ExcessScope

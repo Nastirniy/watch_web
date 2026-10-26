@@ -158,8 +158,30 @@ def test_conversion_rows(tmp_path):
     tree = set(conn.execute("select a.user_id, r.name, a.scope_key from role_assignments a join roles r on r.id = a.role_id"))
     assert (1, "administrator", "root") in tree and (4, "ops_system", "root") in tree
     assert not {row for row in tree if row[1] in ("aud", "system_administrator")}
-    audits = conn.execute("select count(*) from audit_logs where action = 'migrate' and resource_type = 'user'").fetchone()[0]
-    assert audits == 6
+    conn.close()
+
+
+@pytest.mark.slow
+def test_audit_rows_of_changed_users_and_roles(tmp_path):
+    """One audit row per user the conversion changes (oper and reader keep everything: none) and one per role it
+    changes or creates (the built-in operator stays: none), the split roles naming their source"""
+    db_file = v2_database(tmp_path)
+    assert run_migrate(db_file).returncode == 0
+    conn = sqlite3.connect(db_file)
+    roles = {name: rid for rid, name in conn.execute("select id, name from roles")}
+    audits = {(kind, rid): json.loads(details)["authorization_v3"] for kind, rid, details in conn.execute(
+        "select resource_type, resource_id, details from audit_logs where action = 'migrate'")}
+    assert sorted(rid for kind, rid in audits if kind == "user") == [1, 2, 4, 6]
+    assert sorted(rid for kind, rid in audits if kind == "role") == sorted(
+        [1, 2, 4, 5, 6, 7, 8, roles["ops_system_system"], roles["old_system"]])
+    assert audits[("user", 2)]["user_type"] == ["post_admin", "administrator"]
+    assert audits[("role", 1)]["name"] == ["admin", "system_administrator"]
+    assert audits[("role", 1)]["kind"] == ["tree", "system"]
+    assert audits[("role", 2)]["permissions_added"] == sorted(ALLOWED_GAIN)
+    assert audits[("role", 4)]["permissions_removed"] == ["audit.view"]
+    assert audits[("role", 4)]["split_into"] == roles["ops_system_system"]
+    assert audits[("role", roles["ops_system_system"])] == {"split_from": 4, "permissions": ["audit.view"]}
+    assert audits[("role", 6)] == {"name": ["Auditor", "Auditor_custom"]}
     conn.close()
 
 

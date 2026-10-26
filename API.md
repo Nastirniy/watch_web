@@ -234,7 +234,7 @@ the user (`session_expired`, `revoke_cause` `user_type_changed`): the new pages 
 | `permission_level_mismatch` | 409 | A role gets a permission of the other level (`role_kind`, `permissions`) |
 | `role_is_system`, `role_is_tree` | 409 | A system role on the tree assignment routes, a tree role on the system ones (`role_id`) |
 | `role_exceeds_user_type` | 409 | The role holds permissions the boundary of the user's type does not allow (`user_type`, `excess_permissions`) |
-| `user_type_ceiling_exceeded` | 409 | A type change while other assignments exceed the new type (`user_type`, `assignments` with their `excess_permissions`) |
+| `user_type_ceiling_exceeded` | 409 | A type change while other assignments exceed the new type (`user_type`, `assignments`: `kind` (`tree` or `system`: the table of the `id`), `role`, `scope`, `excess_permissions`; each assignment against the boundary of its kind) |
 | `role_holders_exceed_user_type` | 409 | Permissions added to a role that the type of a holder does not allow (`users`) |
 | `builtin_role_not_renamable`, `builtin_role_permissions_fixed`, `builtin_role_not_archivable`, `builtin_role_not_deletable` | 409 | Built-in roles cannot change (clone one) |
 | `scope_group_not_found` | 404 | Unknown, archived or outside the caller's `scope_group.view` |

@@ -47,6 +47,7 @@ async def _archiver(db):
     return user
 
 
+@pytest.mark.fit_types
 async def test_archiving_an_empty_brigade_without_cascade_needs_no_post_update(client, db, headers):
     corps = await make_group(db, kind="corps")
     brigade = await make_group(db, parent_id=corps.id, kind="brigade")
@@ -55,6 +56,7 @@ async def test_archiving_an_empty_brigade_without_cascade_needs_no_post_update(c
     assert r.status_code == 200 and r.json()["is_deleted"] is True, r.text
 
 
+@pytest.mark.fit_types
 async def test_archiving_an_empty_corps_without_cascade_needs_no_post_update(client, db, headers):
     corps = await make_group(db, kind="corps")
     user = await _archiver(db)
@@ -62,6 +64,7 @@ async def test_archiving_an_empty_corps_without_cascade_needs_no_post_update(cli
     assert r.status_code == 200 and r.json()["is_deleted"] is True, r.text
 
 
+@pytest.mark.fit_types
 async def test_a_unit_with_only_an_archived_post_detaches_without_post_rights(client, db, headers):
     corps = await make_group(db, kind="corps")
     post = await make_post(db, group_id=corps.id)
@@ -73,6 +76,7 @@ async def test_a_unit_with_only_an_archived_post_detaches_without_post_rights(cl
     assert r.status_code == 200, r.text
 
 
+@pytest.mark.fit_types
 async def test_a_unit_with_an_active_post_still_needs_post_rights_to_detach(client, db, headers):
     corps = await make_group(db, kind="corps")
     await make_post(db, group_id=corps.id)
@@ -81,6 +85,7 @@ async def test_a_unit_with_an_active_post_still_needs_post_rights_to_detach(clie
     assert r.status_code == 403 and r.json()["code"] == "permission_required_for_action", r.text
 
 
+@pytest.mark.fit_types
 async def test_the_detach_still_needs_scope_group_archive_at_the_parent(client, db, headers):
     corps = await make_group(db, kind="corps")
     other = await make_group(db, kind="corps")
@@ -103,6 +108,7 @@ def _count_post_view_reads(monkeypatch):
     return reads
 
 
+@pytest.mark.fit_types
 async def test_corps_list_reads_post_view_once(client, db, headers, monkeypatch):
     for _ in range(5):
         corps = await make_group(db, kind="corps")
@@ -115,6 +121,7 @@ async def test_corps_list_reads_post_view_once(client, db, headers, monkeypatch)
     assert reads.count(Permissions.POST_VIEW.value) == 1, reads
 
 
+@pytest.mark.fit_types
 async def test_brigade_lists_read_post_view_once(client, db, headers, monkeypatch):
     corps = await make_group(db, kind="corps")
     for _ in range(4):
@@ -130,6 +137,7 @@ async def test_brigade_lists_read_post_view_once(client, db, headers, monkeypatc
         assert reads.count(Permissions.POST_VIEW.value) == 1, (path, reads)
 
 
+@pytest.mark.fit_types
 async def test_a_post_that_arrives_after_the_tree_was_read_is_checked_before_the_detach(client, db, headers, monkeypatch):
     """The request's tree shows an empty unit; an active post is committed into it before the lock: the detach moves
     it, so post.update / post.view are asked after all (403) and nothing changes"""
@@ -154,6 +162,7 @@ async def test_a_post_that_arrives_after_the_tree_was_read_is_checked_before_the
     assert not [row for row in audited if row.action in ("archive", "update")]
 
 
+@pytest.mark.fit_types
 async def test_a_post_that_arrives_late_is_detached_for_a_caller_with_the_post_rights(client, db, headers, monkeypatch):
     corps = await make_group(db, kind="corps")
     user = await _archiver(db)

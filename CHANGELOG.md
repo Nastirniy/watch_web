@@ -53,6 +53,14 @@ management) and downgrade exactly.
   the overall status with it) while a grant leaves permissions out or no active user holds `system_administrator`.
 - Start: a permission level or a built-in role out of step with the code stops the start; grants that leave
   permissions out and a missing system administrator are logged.
+- `user_type_ceiling_exceeded`: every item of `assignments` has `kind` (`tree` or `system`), the table its `id` is
+  of; each assignment is checked against the boundary of its kind (a system permission in a tree role is excess).
+- A type change (`PATCH /users/{user_id}` with `user_type`) and a permission added to a role the user holds no longer
+  both succeed when they run together: one answers 409 (`user_type_ceiling_exceeded` or
+  `role_holders_exceed_user_type`).
+- `030_authorization_v3` writes an audit row (`action` `migrate`) for every user it changes (`resource_type` `user`)
+  and every role it changes or creates (`resource_type` `role`: `name`, `builtin_key`, `kind`,
+  `permissions_removed`, `permissions_added`, `split_into`; a split role `split_from` and `permissions`).
 
 ## Database backups
 

@@ -362,6 +362,7 @@ async def test_post_admin_cannot_export(client, db, headers, pki):
     assert r.json()["missing"] == ["certificate.export"]
 
 
+@pytest.mark.fit_types
 async def test_delegation_inside_and_outside_scope(client, db, headers, pki):
     east, west = await make_group(db, name="East"), await make_group(db, name="West")
     east_post, west_post = await make_post(db, group_id=east.id), await make_post(db, group_id=west.id)
@@ -391,6 +392,7 @@ async def test_delegation_inside_and_outside_scope(client, db, headers, pki):
     assert await rows_of(db, outside.id) == [] and await rows_of(db, stronger.id) == []
 
 
+@pytest.mark.fit_types
 async def test_user_view_without_certificate_view(client, db, headers, pki):
     """certificate.view must cover the user, not just be held somewhere"""
     here, there = await make_post(db), await make_post(db)
@@ -412,6 +414,7 @@ async def test_own_certificates_need_certificate_view(client, db, headers, pki):
     assert r.status_code == 403 and problem_code(r) == "permission_denied"
 
 
+@pytest.mark.fit_types
 async def test_check_order(client, db, headers, pki):
     """Scope first: an outsider learns nothing about the user's certificates, not even whether one exists"""
     here, there = await make_post(db), await make_post(db)
@@ -434,6 +437,7 @@ async def test_check_order(client, db, headers, pki):
     assert r.status_code == 403 and problem_code(r) == "user_self_only"
 
 
+@pytest.mark.fit_types
 async def test_archived_user_needs_user_archive(client, db, headers, pki):
     post = await make_post(db)
     viewer = await make_user(db, post_id=post.id)
@@ -461,6 +465,7 @@ async def test_another_users_certificate_is_404(client, db, headers, pki):
 
 # ------------------------------------------------------------------ lists
 
+@pytest.mark.fit_types
 async def test_list_and_filters(client, db, headers, pki):
     now = datetime.now(timezone.utc)
     p1, p2 = await make_post(db), await make_post(db)

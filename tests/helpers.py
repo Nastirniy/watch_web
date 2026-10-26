@@ -31,6 +31,8 @@ from app.backend.models.media import MediaFile
 _counter = itertools.count(1)
 # Users whose type the test chose (make_user with user_type, make_admin): assign() and give() never change it
 _EXPLICIT_TYPES: set = set()
+# The test is marked fit_types (conftest): the factories may widen the type of a user the test did not type
+FIT_TYPES = {"allowed": False}
 
 # The legacy flags (gone from the permission catalog with migration 023): make_user still takes them, the frozen
 # conversion turns them into assignments exactly like the migration did
@@ -214,8 +216,9 @@ async def make_user(
 
 async def _fit_type(db: AsyncSession, user: User) -> None:
     """A user whose type the test did not choose gets the first type of the catalog whose boundary covers all their
-    assignments (as the v2 conversion inferred types): such tests are about scope, not types, and before v3 the
-    ceiling of the type did not act at evaluation. A user with a chosen type keeps it."""
+    assignments (as the v2 conversion inferred types), in tests marked fit_types only: such tests are about scope, not
+    types, and before v3 the ceiling of the type did not act at evaluation. Anywhere else a role beyond the type fails
+    the test here, so a widened type never hides a boundary. A user with a chosen type keeps it."""
     if user.id in _EXPLICIT_TYPES:
         return
     rows = (await db.exec(
@@ -236,6 +239,9 @@ async def _fit_type(db: AsyncSession, user: User) -> None:
     current = UserType(user.user_type)
     if tree <= boundary(current, RoleKind.TREE) and system <= boundary(current, RoleKind.SYSTEM):
         return
+    assert FIT_TYPES["allowed"], (
+        f"user {user.id} of type {current.value} is given roles beyond its boundary: pass user_type, or mark the "
+        f"test fit_types to widen it")
     fitting = next(t for t in USER_TYPES
                    if tree <= boundary(t, RoleKind.TREE) and system <= boundary(t, RoleKind.SYSTEM))
     await db.execute(User.__table__.update().where(User.id == user.id).values(user_type=fitting.value))

@@ -1329,6 +1329,7 @@ async def test_admin_model(seed):
     assert not result["fails"], {str(k): v["message"][:300] for k, v in result["fails"].items()}
 
 
+@pytest.mark.fit_types
 @pytest.mark.parametrize("seed", range(max(1, SEEDS * 2 // 5)))
 async def test_viewer_model(seed):
     result = await run_seed(SEED_BASE + 1000 + seed, viewer=True)

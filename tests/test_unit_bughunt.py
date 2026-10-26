@@ -1,4 +1,5 @@
 """Findings of the corps and brigades bug hunt (2026-10-20)."""
+import pytest
 from sqlmodel import select
 
 from app.backend.api.v1 import V1
@@ -16,6 +17,7 @@ async def _root_user(db, *permissions):
     return user
 
 
+@pytest.mark.fit_types
 async def test_cascade_and_detach_need_post_view_too(client, db, headers):
     """Write routes require X.view AND the write permission (CLAUDE.md); POST /posts/{id}/archive answers 403 for
     the same caller"""
@@ -34,6 +36,7 @@ async def test_cascade_and_detach_need_post_view_too(client, db, headers):
     assert (row.group_id, row.is_deleted) == (brigade.id, False)
 
 
+@pytest.mark.fit_types
 async def test_brigade_and_group_moves_need_post_view_too(client, db, headers):
     c1 = await make_group(db, kind="corps")
     c2 = await make_group(db, kind="corps")
@@ -50,6 +53,7 @@ async def test_brigade_and_group_moves_need_post_view_too(client, db, headers):
     assert row.parent_id == c1.id
 
 
+@pytest.mark.fit_types
 async def test_brigade_move_answer_counts_the_moved_posts(client, db, headers):
     """The answer of a move used the tree from before the move (seen as post_count 0 before a move also needed
     post.view at the old corps); the answer now counts from the tree after the move"""

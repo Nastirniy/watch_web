@@ -1,5 +1,6 @@
 """AuthContext: the grants of the user's role assignments on the scope tree. Users are built with the legacy-shaped
 factory of tests/helpers.py (written as migration 023 converts them) or with real assignments (assign)."""
+import pytest
 from sqlmodel import select
 
 from app.backend.auth.context import load_auth_context, load_scope_tree
@@ -158,6 +159,7 @@ async def test_load_scope_tree(db):
     assert auth.tree == tree
 
 
+@pytest.mark.fit_types
 async def test_grants_come_from_role_assignments(db):
     """One grant per assignment of a role that is not archived, at the node of its scope columns"""
     east = await make_group(db, "East")

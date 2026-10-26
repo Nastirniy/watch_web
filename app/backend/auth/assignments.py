@@ -36,7 +36,8 @@ against the boundary of the new type:
 
 create_assignment and change_user_type lock the target's users row first (SELECT ... FOR UPDATE, _lock_user), the
 role edits the roles row (get_role_or_404(lock=True)): concurrent changes of one user, or of one role, run one after
-another.
+another. The type change route locks the user's roles (shared) before it (api/v1/users.py _lock_user_and_roles), so
+a permission added to one of them and the new type are checked against each other, never both accepted.
 
 check_role_permissions_added (PATCH /roles/{role_id}, PUT /roles/{role_id}/permissions/{permission_id}): permissions
 added to a role reach every holder at once (both kinds of assignment), so every holder's type must allow them for the
@@ -271,8 +272,9 @@ async def _permissions_by_role(session: AsyncSession, role_ids: Iterable[int]) -
 
 
 async def _check_type_ceiling(session: AsyncSession, target: User, user_type: UserType) -> None:
-    """Every assignment of the user, system assignments included, fits the boundary of the type, those of archived
-    roles included (they apply again when the role is restored)"""
+    """Every assignment of the user fits the boundary of the type for its kind (a tree assignment the tree boundary,
+    a system one the system boundary: what a grant puts in effect), those of archived roles included (they apply again
+    when the role is restored)"""
     views = await assignment_views(session, target.id)
     system_rows = (await session.exec(
         select(SystemRoleAssignment.id, Role.id, Role.name, Role.display_name)
@@ -283,18 +285,20 @@ async def _check_type_ceiling(session: AsyncSession, target: User, user_type: Us
     by_role = await _permissions_by_role(session, [*(view.role.id for view in views), *(row[1] for row in system_rows)])
     exceeding = []
     for assignment_id, role_id, name, display_name in system_rows:
-        excess = sorted(excess_permissions(user_type, by_role[role_id]))
+        excess = sorted(excess_permissions(user_type, by_role[role_id], RoleKind.SYSTEM))
         if excess:
             exceeding.append({
+                "kind": RoleKind.SYSTEM.value,
                 "id": assignment_id,
                 "role": {"id": role_id, "name": name, "display_name": display_name},
                 "scope": {"kind": "root", "id": None, "name": settings.app.name},
                 "excess_permissions": excess,
             })
     for view in views:
-        excess = sorted(excess_permissions(user_type, by_role[view.role.id]))
+        excess = sorted(excess_permissions(user_type, by_role[view.role.id], RoleKind.TREE))
         if excess:
             exceeding.append({
+                "kind": RoleKind.TREE.value,
                 "id": view.id,
                 "role": {"id": view.role.id, "name": view.role.name, "display_name": view.role.display_name},
                 "scope": {"kind": view.scope.kind, "id": view.scope.id, "name": view.scope.name},

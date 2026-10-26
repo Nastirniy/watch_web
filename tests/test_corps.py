@@ -1,4 +1,5 @@
 """/corps: CRUD of corps (scope groups of kind corps under the root), the brigades and the posts of a corps."""
+import pytest
 from sqlmodel import select
 
 from app.backend.api.v1 import V1
@@ -56,6 +57,7 @@ async def test_corps_name_taken_case_insensitive_and_against_root_groups(client,
     assert r.status_code == 409 and r.json()["code"] == "scope_group_name_taken"
 
 
+@pytest.mark.fit_types
 async def test_create_needs_scope_group_create_at_the_root(client, db, headers):
     corps = await make_group(db, kind="corps")
     user = await make_user(db)
@@ -79,6 +81,7 @@ async def test_get_and_update(client, db, headers):
     assert list(audit) == ["create", "update"]
 
 
+@pytest.mark.fit_types
 async def test_other_kinds_and_out_of_scope_answer_404(client, db, headers):
     h = headers(await make_admin(db))
     corps = await make_group(db, kind="corps")
@@ -150,6 +153,7 @@ async def test_brigades_of_a_corps(client, db, headers):
     assert {b["id"] for b in r.json()} == {b1.id, b2.id, b4.id}
 
 
+@pytest.mark.fit_types
 async def test_posts_of_a_corps_and_counts(client, db, headers):
     corps = await make_group(db, kind="corps")
     brigade = await make_group(db, parent_id=corps.id, kind="brigade")

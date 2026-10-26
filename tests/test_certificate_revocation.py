@@ -172,6 +172,7 @@ async def test_revocation_while_the_signer_is_down_reaches_the_next_crl(client, 
     assert (await crl_status(db)).stale is False
 
 
+@pytest.mark.fit_types
 async def test_revoke_permissions_and_scope(client, db, headers, pki):
     admin = await make_admin(db)
     here, there = await make_post(db), await make_post(db)

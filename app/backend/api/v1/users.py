@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from app.backend.api.shared.helpers.db_errors import is_data_too_long, is_unique_violation, unique_violation_as
 from app.backend.api.shared.helpers.post_helper import refuse_archived_post
 from app.backend.database import get_session
-from app.backend.utils.row_locks import lock as lock_row, lock_first
+from app.backend.utils.row_locks import lock as lock_row, lock_all, lock_first
 from app.backend.models.user import User, UserSession
 from app.backend.models.role import Role
 from app.backend.models.role_assignment import RoleAssignment, scope_columns
@@ -286,6 +286,29 @@ async def _lock_role_then_user(session: AsyncSession, user_id: int, role_id: int
     return user
 
 
+async def _lock_user_and_roles(session: AsyncSession, user_id: int) -> User:
+    """The locks of a type change, in one order, before any plain read: the administrators' lock, the user row (its id
+    only), the user's assignments and their roles (shared), then the user entity. Locking the User entity reads the
+    presence subqueries, a plain read that takes the snapshot on MariaDB: a permission added to one of the roles
+    meanwhile (the role edit locks the role row first and reads the types of its holders) is seen whole, before or
+    after, and one of the two answers 409, never both succeed. The assignments of the user stay as read: every
+    writer of them locks the user first. An archived user takes no role locks (the route answers 404)."""
+    await lock_administrators(session)
+    found = await lock_row(session, select(User.id, User.is_deleted).where(User.id == user_id))
+    if found is not None and not found[1]:
+        role_ids = {
+            *await lock_all(session, select(RoleAssignment.role_id).where(RoleAssignment.user_id == user_id), shared=True),
+            *await lock_all(session, select(SystemRoleAssignment.role_id).where(SystemRoleAssignment.user_id == user_id),
+                            shared=True),
+        }
+        if role_ids:
+            await lock_all(session, select(Role.id).where(Role.id.in_(sorted(role_ids))).order_by(Role.id), shared=True)
+    user = await lock_row(session, select(User).where(User.id == user_id))
+    if not user:
+        raise ApiError(ErrorCode.USER_NOT_FOUND)
+    return user
+
+
 async def _get_user_or_404(session: AsyncSession, user_id: int, lock: Optional[str] = None) -> User:
     """The user, archived or not (each route decides what an archived user means after its scope check).
 
@@ -390,7 +413,10 @@ async def update_user(
             content_type=content_type,
         )
 
-    user = await _get_user_or_404(session, user_id, lock="administrators")
+    if update_data.user_type is not None:
+        user = await _lock_user_and_roles(session, user_id)
+    else:
+        user = await _get_user_or_404(session, user_id, lock="administrators")
     # Scope before the state: an outsider gets the same 403 for an archived and a live user
     await check_target_user(session, auth, user, Permissions.USER_UPDATE)
     if user.is_deleted:

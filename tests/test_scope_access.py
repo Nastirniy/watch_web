@@ -176,6 +176,7 @@ async def test_a_grant_only_at_an_archived_node_is_held_nowhere(client, db, head
             ["observation.view"])
 
 
+@pytest.mark.fit_types
 async def test_archived_posts_are_listed_only_where_post_archive_is_held(client, db, headers, with_grants):
     east = await _group(db, "East")
     in_east, outside = await make_post(db, group_id=east.id), await make_post(db)
@@ -206,6 +207,7 @@ async def test_removed_gate_does_not_widen(client, db, headers):
             "permission_denied", ["post.archive"])
 
 
+@pytest.mark.fit_types
 async def test_create_and_move_need_the_permission_at_the_target(client, db, headers, with_grants):
     east, west = await _group(db, "East"), await _group(db, "West")
     sector = await _group(db, "Sector", parent_id=east.id)
@@ -235,6 +237,7 @@ async def test_create_and_move_need_the_permission_at_the_target(client, db, hea
     assert in_east.group_id == sector.id
 
 
+@pytest.mark.fit_types
 async def test_a_move_needs_post_update_covering_the_old_and_the_new_location(client, db, headers, with_grants):
     east, west = await _group(db, "East"), await _group(db, "West")
     post = await make_post(db, group_id=east.id)
@@ -259,6 +262,7 @@ async def test_a_move_needs_post_update_covering_the_old_and_the_new_location(cl
     assert post.group_id == west.id
 
 
+@pytest.mark.fit_types
 async def test_archive_and_restore_follow_post_archive_at_the_post(client, db, headers, with_grants):
     east = await _group(db, "East")
     in_east, outside = await make_post(db, group_id=east.id), await make_post(db)
@@ -319,6 +323,7 @@ def _context(tree: ScopeTree, *grants: Grant) -> AuthContext:
     return AuthContext(user=caller, grants=grants, tree=tree)
 
 
+@pytest.mark.fit_types
 async def test_include_deleted_shows_archived_only_where_archive_is_held(client, db, headers, with_grants):
     a, b = await make_post(db), await make_post(db)
     live_a, gone_a = await make_user(db, post_id=a.id), await make_user(db, post_id=a.id)
@@ -601,6 +606,7 @@ async def test_observation_writes_need_their_permission_at_the_post(client, db, 
                               headers=headers(editor)), "post_access_denied", ["observation.view"])
 
 
+@pytest.mark.fit_types
 async def test_observations_of_an_archived_post_need_post_archive_at_it(client, db, headers, with_grants):
     post = await make_post(db)
     ids = await make_dictionary(db)
@@ -688,6 +694,7 @@ async def _band_ids(db, observation) -> list:
 TWO_BANDS = [("rc", "100.000", "200.000"), ("video", "300.000", "400.000")]
 
 
+@pytest.mark.fit_types
 async def test_band_archive_needs_observation_archive_at_the_post(client, db, headers, with_grants):
     """observation.update at A does not archive a band at A; observation.archive held at B (so the route is
     reachable) archives bands at B only"""
@@ -715,6 +722,7 @@ async def test_band_archive_needs_observation_archive_at_the_post(client, db, he
             "post_write_denied", ["observation.update"])
 
 
+@pytest.mark.fit_types
 async def test_media_view_without_media_archive_at_the_post(client, db, headers, with_grants):
     """media.view at A shows the caller's own file there, archiving it needs media.archive at A (held at B only)"""
     a, b = await make_post(db), await make_post(db)
@@ -750,6 +758,7 @@ async def test_observation_view_without_media_view_at_the_post(client, db, heade
         assert media.id not in _ids(await client.get(path, headers=headers(reader))), path
 
 
+@pytest.mark.fit_types
 async def test_user_reads_of_another_user_need_user_view_covering_them(client, db, headers, with_grants):
     """The session list of a user lost the admin gate: user.view must cover the target"""
     a, b = await make_post(db), await make_post(db)
@@ -775,6 +784,7 @@ async def test_user_sessions_need_user_view_covering_the_user(client, db, header
     assert (await client.get(sessions, headers=headers(await make_admin(db)))).status_code == 200
 
 
+@pytest.mark.fit_types
 async def test_sessions_of_an_archived_user_need_user_archive_covering_them(client, db, headers, with_grants):
     """Like GET /users/{user_id}: an archived user is shown only where user.archive covers them"""
     a = await make_post(db)
@@ -791,6 +801,7 @@ async def test_sessions_of_an_archived_user_need_user_archive_covering_them(clie
     assert shown.status_code == 200, shown.text
 
 
+@pytest.mark.fit_types
 async def test_administration_routes_need_only_their_permissions(client, db, headers, with_grants):
     """Dictionaries, formats, roles and groups: the permissions of the route at some node, no admin.true"""
     editor = await make_user(db, perms=[P.TAG_VIEW, P.TAG_CREATE, P.SCOPE_GROUP_VIEW, P.ROLE_VIEW])

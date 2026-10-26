@@ -149,6 +149,7 @@ async def test_regenerate_needs_access_to_the_post_of_the_media(client, db, head
     assert not poster.exists()
 
 
+@pytest.mark.fit_types
 @pytest.mark.asyncio
 async def test_regenerate_by_an_administrator_without_a_post_is_no_post_assigned(client, db, headers, tmp_path, monkeypatch):
     """check_post answers no_post_assigned to a caller whose media permissions apply at no post (held at a group

@@ -222,6 +222,7 @@ def _list_urls(which: str, corps_a, corps_b) -> list:
     return [V1.path(ScopeGroupRoutes.ROOT)]
 
 
+@pytest.mark.fit_types
 @pytest.mark.parametrize("which", LISTS)
 async def test_include_deleted_shows_archived_groups_only_where_scope_group_archive_is_in_effect(
         client, db, headers, which):

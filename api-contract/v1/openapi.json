@@ -33778,6 +33778,10 @@
       },
       "ExcessAssignment": {
         "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/RoleKind",
+            "description": "The table of the assignment: tree (at a node, /users/{user_id}/assignments) or system (/users/{user_id}/system-assignments); the id is of that table"
+          },
           "id": {
             "type": "integer",
             "title": "Id"
@@ -33798,6 +33802,7 @@
         },
         "type": "object",
         "required": [
+          "kind",
           "id",
           "role",
           "scope",

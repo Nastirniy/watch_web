@@ -42,10 +42,10 @@ async def lock(session: AsyncSession, query: SelectOfScalar[T], shared: bool = F
     return (await session.exec(locking(query, shared))).first()
 
 
-async def lock_all(session: AsyncSession, query: SelectOfScalar[T]) -> List[T]:
-    """Every row of query, locked (FOR UPDATE) and as committed; give the query an ORDER BY id so that every writer
-    locks the rows in the same order. Inside a write that began with lock_first."""
-    return list((await session.exec(query.with_for_update().execution_options(populate_existing=True))).all())
+async def lock_all(session: AsyncSession, query: SelectOfScalar[T], shared: bool = False) -> List[T]:
+    """Every row of query, locked (FOR UPDATE, or shared) and as committed; give the query an ORDER BY id so that
+    every writer locks the rows in the same order. Inside a write that began with lock_first."""
+    return list((await session.exec(locking(query, shared))).all())
 
 
 async def lock_first(session: AsyncSession, query: SelectOfScalar[T], shared: bool = False) -> Optional[T]:

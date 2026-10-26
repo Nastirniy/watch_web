@@ -51,6 +51,7 @@ async def test_home_post_scope(client, db, headers):
     assert create_b.json()["code"] == "post_access_denied"
 
 
+@pytest.mark.fit_types
 @pytest.mark.asyncio
 async def test_no_post_assigned(client, db, headers):
     """no_post_assigned: the permission is held, at a node that reaches no post (a group without posts). A grant only
