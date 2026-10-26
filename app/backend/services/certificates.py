@@ -174,7 +174,7 @@ def certificate_audit_details(row: UserCertificate, certificate: Optional[x509.C
     if certificate is not None:
         details["sha256_fingerprint"] = sha256_fingerprint(certificate)
     if row.not_after is not None:
-        details["not_after"] = as_utc(row.not_after)
+        details["not_after"] = as_utc(row.not_after).isoformat()
     return details
 
 
@@ -406,8 +406,7 @@ async def revoke_certificate(
     ended = await AuthService.invalidate_certificate_sessions(
         session, row.user_id, row.fingerprint_hash, SessionRevokeCause.CERTIFICATE_REVOKED,
         actor_user_id=revoked_by, commit=False)
-    await write_audit(row, {**certificate_audit_details(row, _stored_certificate(row)), "reason": reason.value,
-                            "sessions_ended": ended})
+    await write_audit(row, {**certificate_audit_details(row, _stored_certificate(row)), "reason": reason.value})
     await session.commit()
     _logger.info(f"Certificate revoked: id={row.id}, user_id={row.user_id}, serial={row.serial}, "
                  f"reason={reason.value}, revoked_by={revoked_by}, sessions_ended={ended}")

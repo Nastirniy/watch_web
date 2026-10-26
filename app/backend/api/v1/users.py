@@ -38,7 +38,8 @@ from app.backend.auth import sessions as session_lifetimes
 from app.backend.api.v1.models.response.auth import SessionsEndedResponse, UserSessionResponse, build_session_response
 from app.backend.enums.routes import UserRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
-from app.backend.services.audit import create_audit_log
+from app.backend.enums.audit import AuditEvent
+from app.backend.services.audit import create_audit_log, home_scope, node_name, role_name
 from app.backend.services.units import membership_nodes
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.api.v1.models.request.assignments import AssignmentCreate, SystemAssignmentCreate
@@ -233,9 +234,10 @@ async def create_user(
 
         # The audit row joins the same transaction: one commit
         await create_audit_log(
-            session=session,
-            action="create",
-            resource_type="user",
+            session,
+            AuditEvent.USER_CREATE,
+            params={"username": user.username, "user_type": user.user_type},
+            scope=home_scope(user),
             resource_id=user.id,
             user_id=current_user.id,
             new_values={
@@ -244,10 +246,6 @@ async def create_user(
                 "system_assignments": [{"role_id": role.id} for role, node in base_roles if node is None],
                 "certificate_id": certificate_id,
             },
-            details={"message": f"User {current_user.username} created new user {user.username} "
-                                f"({user.user_type}, " + ", ".join(
-                                    f"{role.name} at {node.key if node else 'system'}" for role, node in base_roles)
-                                + ")"},
             **client_info(request, auth)
         )
         await session.commit()
@@ -492,22 +490,19 @@ async def update_user(
             await check_an_admin_remains(session)
 
         new_values = user.model_dump()
-        message = f"User {current_user.username} updated user {user.username}"
         if type_change is not None:
             new_values["replaced_assignments"] = type_change.replaced
             new_values["removed_system_assignments"] = type_change.system_removed
             new_values["added_system_assignments"] = type_change.system_added
-            message += (f" (type {type_change.old_type.value} -> {type_change.new_type.value}, "
-                        f"{len(type_change.replaced)} assignments replaced)")
         await create_audit_log(
-            session=session,
-            action="update",
-            resource_type="user",
+            session,
+            AuditEvent.USER_UPDATE,
+            params={"username": user.username},
+            scope=home_scope(user),
             resource_id=user.id,
             user_id=current_user.id,
             old_values=old_values,
             new_values=new_values,
-            details={"message": message},
             **client_info(request, auth)
         )
         await session.commit()
@@ -574,13 +569,13 @@ async def archive_user(
         commit=False,
     )
     await create_audit_log(
-        session=session,
-        action="archive",
-        resource_type="user",
+        session,
+        AuditEvent.USER_ARCHIVE,
+        params={"username": user.username},
+        scope=home_scope(user),
         resource_id=user.id,
         user_id=current_user.id,
         old_values=old_values,
-        details={"message": f"User {current_user.username} archived user {user.username} ({invalidated} sessions invalidated)"},
         **client_info(request, auth)
     )
     await session.commit()
@@ -618,13 +613,13 @@ async def restore_user(
     user.updated_at = datetime.now(timezone.utc)
     session.add(user)
     await create_audit_log(
-        session=session,
-        action="restore",
-        resource_type="user",
+        session,
+        AuditEvent.USER_RESTORE,
+        params={"username": user.username},
+        scope=home_scope(user),
         resource_id=user.id,
         user_id=current_user.id,
         old_values=old_values,
-        details={"message": f"User {current_user.username} restored user {user.username}"},
         **client_info(request, auth)
     )
     await session.commit()
@@ -733,13 +728,13 @@ async def end_user_session(
     session_lifetimes.end(row, SessionEndReason.REVOKED, SessionRevokeCause.ENDED_BY_ADMIN)
     session.add(row)
     await create_audit_log(
-        session=session,
-        action="force_logout",
-        resource_type="session",
+        session,
+        AuditEvent.SESSION_END,
+        params={"username": target.username, "cause": SessionRevokeCause.ENDED_BY_ADMIN.value,
+                "ended_session_id": row.id},
+        scope=home_scope(target),
         resource_id=user_id,
         user_id=auth.user.id,
-        details={"message": f"User {auth.user.username} ended one session of user_id={user_id}",
-                 "ended_session_id": row.id, "cause": SessionRevokeCause.ENDED_BY_ADMIN.value},
         **client_info(request, auth)
     )
     await session.commit()
@@ -807,14 +802,14 @@ async def create_user_assignment(
     async with unique_violation_as(session, ErrorCode.ASSIGNMENT_EXISTS):
         await session.flush()
     await create_audit_log(
-        session=session,
-        action="create",
-        resource_type="role_assignment",
+        session,
+        AuditEvent.ROLE_ASSIGNMENT_CREATE,
+        params={"username": target.username, "role_name": await role_name(session, assignment.role_id),
+                "node_name": await node_name(session, assignment.node)},
+        scope=assignment.node,
         resource_id=assignment.id,
         user_id=auth.user.id,
         new_values=assignment.model_dump(),
-        details={"message": f"User {auth.user.username} assigned role {assignment.role_id} at {assignment.scope_key} "
-                            f"to user {target.username}"},
         **client_info(request, auth)
     )
     await session.commit()
@@ -852,15 +847,16 @@ async def delete_user_assignment(
     """
     target = await _get_user_or_404(session, user_id, lock="administrators")
     removed = await delete_assignment(session, auth, target, assignment_id)
+    removed_node = Node.parse(removed["scope_key"])
     await create_audit_log(
-        session=session,
-        action="delete",
-        resource_type="role_assignment",
+        session,
+        AuditEvent.ROLE_ASSIGNMENT_DELETE,
+        params={"username": target.username, "role_name": await role_name(session, removed["role_id"]),
+                "node_name": await node_name(session, removed_node)},
+        scope=removed_node,
         resource_id=assignment_id,
         user_id=auth.user.id,
         old_values=removed,
-        details={"message": f"User {auth.user.username} removed the assignment of role {removed['role_id']} at "
-                            f"{removed['scope_key']} from user {target.username}"},
         **client_info(request, auth)
     )
     await session.commit()
@@ -920,14 +916,12 @@ async def create_user_system_assignment(
     async with unique_violation_as(session, ErrorCode.ASSIGNMENT_EXISTS):
         await session.flush()
     await create_audit_log(
-        session=session,
-        action="create",
-        resource_type="system_role_assignment",
+        session,
+        AuditEvent.SYSTEM_ROLE_ASSIGNMENT_CREATE,
+        params={"username": target.username, "role_name": await role_name(session, assignment.role_id)},
         resource_id=assignment.id,
         user_id=auth.user.id,
         new_values=assignment.model_dump(),
-        details={"message": f"User {auth.user.username} gave system role {assignment.role_id} to user "
-                            f"{target.username}"},
         **client_info(request, auth)
     )
     await session.commit()
@@ -964,14 +958,12 @@ async def delete_user_system_assignment(
     target = await _get_user_or_404(session, user_id, lock="administrators")
     removed = await delete_system_assignment(session, auth, target, assignment_id)
     await create_audit_log(
-        session=session,
-        action="delete",
-        resource_type="system_role_assignment",
+        session,
+        AuditEvent.SYSTEM_ROLE_ASSIGNMENT_DELETE,
+        params={"username": target.username, "role_name": await role_name(session, removed["role_id"])},
         resource_id=assignment_id,
         user_id=auth.user.id,
         old_values=removed,
-        details={"message": f"User {auth.user.username} removed system role {removed['role_id']} from user "
-                            f"{target.username}"},
         **client_info(request, auth)
     )
     await session.commit()

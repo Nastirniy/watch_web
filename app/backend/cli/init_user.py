@@ -32,7 +32,8 @@ from app.backend.models.role import Role
 from app.backend.models.role_assignment import RoleAssignment, scope_columns
 from app.backend.models.system_role_assignment import SystemRoleAssignment
 from app.backend.pki.profile import LABEL_MAX_LENGTH, normalize_label
-from app.backend.services.audit import create_audit_log
+from app.backend.enums.audit import AuditEvent
+from app.backend.services.audit import create_audit_log, home_scope
 from app.backend.services.certificates import register_certificate
 
 from sqlmodel import select
@@ -132,16 +133,16 @@ async def create_user(
 
         # Create audit log
         await create_audit_log(
-            session=session,
-            action="create",
-            resource_type="user",
+            session,
+            AuditEvent.USER_CREATE,
+            params={"username": user.username, "user_type": user.user_type, "via": "cli"},
+            scope=home_scope(user),
             resource_id=user.id,
             new_values={
                 **user.model_dump(),
                 "assignments": [{"role_id": role.id, "scope": ROOT.key}],
                 "certificate_id": certificate_id,
             },
-            details={"message": f"User {user.username} created via CLI init utility"},
             ip_address="127.0.0.1",
             request_url="CLI"
         )

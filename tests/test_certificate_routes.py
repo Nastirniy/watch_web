@@ -128,9 +128,9 @@ async def test_issue_returns_the_package_once(client, db, headers, pki):
 
     (audit,) = await audit_rows(db, "issue")
     assert audit.resource_id == row.id and audit.user_id == admin.id
-    assert audit.details["label"] == "Laptop" and audit.details["serial"] == row.serial
-    assert audit.details["sha256_fingerprint"] == sha256_fingerprint(cert) and audit.details["not_after"]
-    stored = json.dumps([audit.details, audit.new_values, audit.old_values])
+    assert audit.params["label"] == "Laptop" and audit.params["serial"] == row.serial
+    assert audit.params["sha256_fingerprint"] == sha256_fingerprint(cert) and audit.params["not_after"]
+    stored = json.dumps([audit.params, audit.new_values, audit.old_values])
     assert body["password"] not in stored and body["p12_base64"][:40] not in stored and "PRIVATE KEY" not in stored
 
 
@@ -279,8 +279,8 @@ async def test_upload_route(client, db, headers, pki, monkeypatch):
 
     assert len(await rows_of(db, user.id)) == 3
     uploads = await audit_rows(db, "upload")
-    assert len(uploads) == 3 and uploads[0].details["sha256_fingerprint"] == sha256_fingerprint(ours)
-    assert uploads[0].details["label"] == "Office PC" and uploads[0].details["serial"] == format(ours.serial_number, "x")
+    assert len(uploads) == 3 and uploads[0].params["sha256_fingerprint"] == sha256_fingerprint(ours)
+    assert uploads[0].params["label"] == "Office PC" and uploads[0].params["serial"] == format(ours.serial_number, "x")
 
 
 async def test_upload_works_without_pki(client, db, headers):
@@ -311,8 +311,8 @@ async def test_export_counts_and_audits(client, db, headers, pki):
     assert row.export_count == 2 and row.last_exported_at is not None
     exports = await audit_rows(db, "export")
     assert len(exports) == 2 and exports[0].resource_id == certificate_id and exports[0].user_id == admin.id
-    assert exports[0].details["sha256_fingerprint"] == sha256_fingerprint(loaded_package(body).cert.certificate)
-    assert issued["password"] not in json.dumps([exports[0].details, exports[0].new_values])
+    assert exports[0].params["sha256_fingerprint"] == sha256_fingerprint(loaded_package(body).cert.certificate)
+    assert issued["password"] not in json.dumps([exports[0].params, exports[0].new_values])
 
 
 async def test_export_refusals(client, db, headers, pki, monkeypatch):
@@ -587,7 +587,7 @@ async def test_cli_issue(session_maker, db, pki, tmp_path, monkeypatch):
     assert loaded.cert.certificate.not_valid_after_utc - loaded.cert.certificate.not_valid_before_utc == \
         timedelta(days=30, minutes=5)
     (audit,) = await audit_rows(db, "issue")
-    assert audit.details["via"] == "cli" and audit.user_id is None and audit.resource_id == row.id
+    assert audit.params["via"] == "cli" and audit.user_id is None and audit.resource_id == row.id
 
     # The files of a former run are never overwritten; unknown users and bad labels issue nothing
     assert await pki_cli.run(["issue", "--username", user.username, "--label", "Laptop", "--out", str(out)]) == 1

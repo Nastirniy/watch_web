@@ -30,7 +30,8 @@ from app.backend.models.user import User
 from app.backend.models.user_certificate import UserCertificate
 from app.backend.pki.authority import CaCheckError, load_ca_certificate, sha256_fingerprint
 from app.backend.pki.profile import LABEL_MAX_LENGTH, normalize_label
-from app.backend.services.audit import create_audit_log
+from app.backend.enums.audit import AuditEvent
+from app.backend.services.audit import create_audit_log, home_scope
 from app.backend.services.certificates import issue_certificate, state_clause
 from app.backend.services.crl_publisher import crl_status, publish_crl
 from app.backend.services.signer_client import SignerRefused, SignerUnavailable, signer_client
@@ -100,10 +101,10 @@ async def _issue(session, args) -> int:
         print(f"no user {args.username}", file=sys.stderr)
         return 1
 
-    async def write_audit(row: UserCertificate, details: dict) -> None:
+    async def write_audit(row: UserCertificate, params: dict) -> None:
         await create_audit_log(
-            session=session, action="issue", resource_type="user_certificate", resource_id=row.id, user_id=None,
-            details={"via": "cli", "message": f"pki issue: certificate {row.id} of user {user.username}", **details},
+            session, AuditEvent.USER_CERTIFICATE_ISSUE, params={"username": user.username, "via": "cli", **params},
+            scope=home_scope(user), resource_id=row.id,
         )
 
     try:

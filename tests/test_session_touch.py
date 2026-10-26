@@ -109,7 +109,7 @@ async def test_ending_a_session_of_an_inactive_certificate_twice_keeps_the_first
     stored = await _stored(session_maker, row.id)
     assert stored.end_reason == "revoked" and stored.revoke_cause == "certificate_revoked"
     async with session_maker() as fresh:
-        logged = (await fresh.exec(select(AuditLog).where(AuditLog.action == "force_logout",
+        logged = (await fresh.exec(select(AuditLog).where(AuditLog.action == "end",
                                                           AuditLog.session_id == row.id))).all()
     assert len(logged) == 1
 
@@ -562,9 +562,9 @@ async def test_the_sessions_of_an_inactive_user_end_once(client, db, session_mak
     assert (stored_idle.end_reason, stored_idle.revoke_cause) == ("idle_timeout", None)
     assert utc(stored_idle.ended_at) < datetime.now(timezone.utc) - timedelta(days=1)
     async with session_maker() as fresh:
-        logged = (await fresh.exec(select(AuditLog).where(AuditLog.action == "force_logout",
+        logged = (await fresh.exec(select(AuditLog).where(AuditLog.action == "end",
                                                           AuditLog.resource_id == user.id))).all()
-    assert len(logged) == 1 and logged[0].details["cause"] == "account_deactivated"
+    assert len(logged) == 1 and logged[0].params["cause"] == "account_deactivated"
 
 
 async def test_a_refresh_of_an_inactive_user_ends_its_sessions_outside_its_claim(client, db, engine, session_maker):
@@ -611,7 +611,7 @@ async def _ended_and_logged(session_maker, user_id):
     async with session_maker() as fresh:
         ended = (await fresh.exec(select(UserSession).where(UserSession.user_id == user_id,
                                                             UserSession.ended_at.is_not(None)))).all()
-        logged = (await fresh.exec(select(AuditLog).where(AuditLog.action == "force_logout",
+        logged = (await fresh.exec(select(AuditLog).where(AuditLog.action == "end",
                                                           AuditLog.resource_id == user_id))).all()
     return ended, logged
 

@@ -58,10 +58,10 @@ async def test_revoke_lists_the_serial_on_the_crl(client, db, headers, pki):
     assert entry.extensions.get_extension_for_class(x509.CRLReason).value.reason == x509.ReasonFlags.key_compromise
     (audit,) = await audit_rows(db, "revoke")
     assert audit.resource_id == certificate_id and audit.user_id == admin.id
-    assert audit.details["reason"] == "key_compromise" and audit.details["serial"] == row.serial
+    assert audit.params["reason"] == "key_compromise" and audit.params["serial"] == row.serial
     # Like every certificate audit row: the fingerprint (of the stored certificate) and the expiry
-    assert audit.details["sha256_fingerprint"] == sha256_fingerprint(cert)
-    assert datetime.fromisoformat(audit.details["not_after"]) == cert.not_valid_after_utc
+    assert audit.params["sha256_fingerprint"] == sha256_fingerprint(cert)
+    assert datetime.fromisoformat(audit.params["not_after"]) == cert.not_valid_after_utc
     assert (await crl_status(db)).stale is False
 
 
@@ -134,8 +134,8 @@ async def test_revoking_a_foreign_upload_blocks_login_but_not_the_crl(client, db
     assert r.status_code == 200, r.text
     (audit,) = await audit_rows(db, "revoke")
     # The row keeps the expiry; the file was not stored, so its fingerprint is not known (never made up)
-    assert datetime.fromisoformat(audit.details["not_after"]) == leaf.not_valid_after_utc
-    assert "sha256_fingerprint" not in audit.details
+    assert datetime.fromisoformat(audit.params["not_after"]) == leaf.not_valid_after_utc
+    assert "sha256_fingerprint" not in audit.params
     login = await client.post(LOGIN, headers=nginx_headers(leaf))
     assert login.status_code == 401 and problem_code(login) == "certificate_revoked"
     # Nothing of ours to publish: no file was written, and an explicit publish lists nothing
@@ -152,7 +152,7 @@ async def test_revoking_a_legacy_row_works_without_pki(client, db, headers):
     assert r.status_code == 200 and r.json()["state"] == "revoked", r.text
     (audit,) = await audit_rows(db, "revoke")
     # A legacy row has only hashes: no fingerprint, no expiry (left out, never invented)
-    assert "sha256_fingerprint" not in audit.details and "not_after" not in audit.details
+    assert "sha256_fingerprint" not in audit.params and "not_after" not in audit.params
 
 
 async def test_revocation_while_the_signer_is_down_reaches_the_next_crl(client, db, headers, pki):

@@ -37,7 +37,8 @@ from app.backend.errors.openapi import GUARDED, problems
 from app.backend.errors.problems import ApiError
 from app.backend.models.user import User
 from app.backend.models.user_certificate import UserCertificate
-from app.backend.services.audit import create_audit_log
+from app.backend.enums.audit import AuditEvent
+from app.backend.services.audit import create_audit_log, home_scope
 from app.backend.services.certificates import (
     MAX_CERTIFICATE_BYTES, WriteAudit, export_package, get_user_certificate, issue_certificate, revoke_certificate,
     upload_certificate, user_certificates,
@@ -49,8 +50,6 @@ from app.backend.utils.logging_config import get_api_logger
 router = APIRouter(prefix=UserRoutes.BASE.value, tags=[UserRoutes.tag()])
 _logger = get_api_logger()
 
-AUDIT_RESOURCE = "user_certificate"
-_DONE = {"issue": "issued", "upload": "uploaded", "export": "downloaded again", "revoke": "revoked"}
 # The checks of every route (module docstring): the user, user.view, the archive, certificate.view
 _OWNER_PROBLEMS = (ErrorCode.USER_NOT_FOUND, AccessErrorCode.USER_SELF_ONLY, *GUARDED)
 
@@ -69,18 +68,16 @@ async def _certificate_owner(session: AsyncSession, auth: AuthContext, user_id: 
     return user
 
 
-def _audit(session: AsyncSession, request: Request, auth: AuthContext, action: str, owner: User) -> WriteAudit:
+def _audit(session: AsyncSession, request: Request, auth: AuthContext, event: AuditEvent, owner: User) -> WriteAudit:
     """The audit row of the change, written by the service inside its transaction"""
-    async def write(row: UserCertificate, details: dict) -> None:
+    async def write(row: UserCertificate, params: dict) -> None:
         await create_audit_log(
-            session=session,
-            action=action,
-            resource_type=AUDIT_RESOURCE,
+            session,
+            event,
+            params={"username": owner.username, **params},
+            scope=home_scope(owner),
             resource_id=row.id,
             user_id=auth.user.id,
-            details={"message": f"User {auth.user.username} {_DONE[action]} certificate {row.id} of user "
-                                f"{owner.username}", **details,
-                     **({"export_count": row.export_count} if action == "export" else {})},
             **client_info(request, auth),
         )
     return write
@@ -137,7 +134,7 @@ async def issue_user_certificate(
     validity_days = data.validity_days if data.validity_days is not None else settings.pki.validity_days
     try:
         package = await issue_certificate(session, user, data.label, validity_days, auth.user.id,
-                                          _audit(session, request, auth, "issue", user))
+                                          _audit(session, request, auth, AuditEvent.USER_CERTIFICATE_ISSUE, user))
     except CodedError as exc:
         raise ApiError.from_coded(exc)
     _logger.info(f"User {auth.user.username} issued certificate {package.certificate.id} for user {user.username}")
@@ -177,7 +174,7 @@ async def upload_user_certificate(
         # Two uploads of the same certificate pass the SELECT check together: the unique index decides
         async with unique_violation_as(session, ErrorCode.CERTIFICATE_TAKEN):
             row = await upload_certificate(session, user, cert_data, form.label, auth.user.id,
-                                           _audit(session, request, auth, "upload", user))
+                                           _audit(session, request, auth, AuditEvent.USER_CERTIFICATE_UPLOAD, user))
     except CodedError as exc:
         raise ApiError.from_coded(exc)
     _logger.info(f"User {auth.user.username} uploaded certificate {row.id} for user {user.username}")
@@ -236,7 +233,7 @@ async def export_user_certificate(
     await check_target_user(session, auth, user, Permissions.CERTIFICATE_EXPORT)
     try:
         row = await get_user_certificate(session, user.id, certificate_id, lock=True)
-        package = await export_package(session, row, _audit(session, request, auth, "export", user))
+        package = await export_package(session, row, _audit(session, request, auth, AuditEvent.USER_CERTIFICATE_EXPORT, user))
     except CodedError as exc:
         raise ApiError.from_coded(exc)
     _logger.info(f"User {auth.user.username} downloaded certificate {row.id} of user {user.username} again")
@@ -275,7 +272,7 @@ async def revoke_user_certificate(
     try:
         row = await revoke_certificate(
             session, await get_user_certificate(session, user.id, certificate_id), reason, auth.user.id,
-            _audit(session, request, auth, "revoke", user))
+            _audit(session, request, auth, AuditEvent.USER_CERTIFICATE_REVOKE, user))
     except CodedError as exc:
         raise ApiError.from_coded(exc)
     _logger.info(f"User {auth.user.username} revoked certificate {row.id} of user {user.username} ({reason.value})")

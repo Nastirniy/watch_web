@@ -22,7 +22,9 @@ from app.backend.auth.certificates import (
     cn_hash_matches,
 )
 from app.backend.errors.coded import CodedError
-from app.backend.services.audit import create_audit_log
+from app.backend.enums.audit import AuditEvent
+from app.backend.services.audit import create_audit_log, home_scope, user_facts
+from app.backend.services.audit.subjects import home_node
 from app.backend.services.certificates import active_certificate, certificate_state
 from app.backend.utils.row_locks import lock_all
 from app.backend.utils.text import fit_column
@@ -205,19 +207,17 @@ class AuthService:
         # of one user, or a login next to the user's other requests, never collide on it
         session.add(user_session)
 
-        # Create audit log using helper
         await create_audit_log(
-            session=session,
+            session,
+            AuditEvent.USER_LOGIN,
+            params={"username": user.username},
+            scope=home_scope(user),
+            resource_id=user.id,
             user_id=user.id,
             session_id=session_id,
-            action="login",
-            resource_type="user",
-            resource_id=user.id,
             ip_address=ip_address,
             user_agent=user_agent,
             request_url=request_url,
-            details={"message": f"User {user.username} logged in"},
-            success=True
         )
 
         await session.commit()
@@ -319,7 +319,7 @@ class AuthService:
     async def invalidate_session(
             session: AsyncSession,
             session_id: str,
-            user_id: int,
+            user: User,
             ip_address: Optional[str] = None,
             user_agent: Optional[str] = None
     ) -> bool:
@@ -330,6 +330,7 @@ class AuthService:
         (sessions.begin_session_write: it waits for an administrator ending the user's sessions), then one
         conditional UPDATE (ended_at still empty) with no read before it, so it never updates a session row changed
         after a read view (MariaDB error 1020), and the audit row only when it ended the session. Committed here."""
+        user_id = user.id
         await session_lifetimes.begin_session_write(session, user_id)
         result = await session.exec(
             update(UserSession)
@@ -341,15 +342,14 @@ class AuthService:
             await session.commit()
             return False
         await create_audit_log(
-            session=session,
+            session,
+            AuditEvent.SESSION_LOGOUT,
+            params={"username": user.username},
+            scope=home_scope(user),
             user_id=user_id,
             session_id=session_id,
-            action="logout",
-            resource_type="session",
             ip_address=ip_address,
             user_agent=user_agent,
-            details={"message": "User session invalidated (logout)"},
-            success=True
         )
         await session.commit()
         return True
@@ -388,19 +388,16 @@ class AuthService:
             session.add(user_session)
 
         if count > 0:
+            username, home = await user_facts(session, user_id)
             await create_audit_log(
-                session=session,
-                user_id=actor_user_id or user_id,
-                action="force_logout",
-                resource_type="session",
+                session,
+                AuditEvent.SESSION_END,
+                params={"username": username, "cause": cause.value, "session_count": count},
+                scope=home,
                 resource_id=user_id,
+                user_id=actor_user_id or user_id,
                 ip_address=ip_address,
                 user_agent=user_agent,
-                details={
-                    "message": f"All {count} live sessions revoked for user_id={user_id}",
-                    "cause": cause.value
-                },
-                success=True
             )
             _logger.info(f"Revoked {count} live sessions for user_id={user_id}, cause={cause.value}")
         if commit and not_ended:
@@ -442,19 +439,16 @@ class AuthService:
             session.add(user_session)
 
         if count > 0:
+            username, home = await user_facts(session, user_id)
             await create_audit_log(
-                session=session,
-                user_id=actor_user_id or user_id,
-                action="force_logout",
-                resource_type="session",
+                session,
+                AuditEvent.SESSION_END,
+                params={"username": username, "cause": cause.value, "session_count": count},
+                scope=home,
                 resource_id=user_id,
+                user_id=actor_user_id or user_id,
                 ip_address=ip_address,
                 user_agent=user_agent,
-                details={
-                    "message": f"{count} live sessions of one certificate revoked for user_id={user_id}",
-                    "cause": cause.value
-                },
-                success=True
             )
             _logger.info(f"Revoked {count} live sessions of one certificate for user_id={user_id}, "
                          f"cause={cause.value}")
@@ -499,15 +493,14 @@ class AuthService:
         user_session.ended_at, user_session.end_reason = ended_at, SessionEndReason.REVOKED.value
         user_session.revoke_cause = SessionRevokeCause.CERTIFICATE_REVOKED.value
         await create_audit_log(
-            session=session,
+            session,
+            AuditEvent.SESSION_END,
+            params={"username": user.username, "cause": SessionRevokeCause.CERTIFICATE_REVOKED.value,
+                    "ended_session_id": user_session.id},
+            scope=home_scope(user),
+            resource_id=user.id,
             user_id=user.id,
             session_id=user_session.id,
-            action="force_logout",
-            resource_type="session",
-            resource_id=user.id,
-            details={"message": f"Session of a certificate that is no longer active ended for user_id={user.id}",
-                     "cause": SessionRevokeCause.CERTIFICATE_REVOKED.value},
-            success=True
         )
         await session.commit()
         _logger.warning(f"Session bound to a certificate that is no longer active ended: user_id={user.id}")
@@ -561,14 +554,12 @@ class AuthService:
             session.add(user_session)
         if count > 0:
             await create_audit_log(
-                session=session,
-                user_id=user_id,
-                action="force_logout",
-                resource_type="session",
+                session,
+                AuditEvent.SESSION_END,
+                params={"username": account.username, "cause": cause.value, "session_count": count},
+                scope=home_node(account.post_id),
                 resource_id=user_id,
-                details={"message": f"All {count} live sessions revoked for user_id={user_id}",
-                         "cause": cause.value},
-                success=True
+                user_id=user_id,
             )
             _logger.info(f"Revoked {count} live sessions for user_id={user_id}, cause={cause.value}")
         await session.commit()
