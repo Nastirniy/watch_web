@@ -314,9 +314,16 @@ mover's own rights only.
   Restore (`POST /{id}/restore`) brings back the node only; list the archived brigades and posts below with
   `include_deleted=true` and restore them one by one. A brigade whose corps is archived: restore the corps first
   (404 `scope_group_not_found`).
-- `PostResponse.corps` and `.brigade` (`{id, name}` or null) are where the post sits now. Posts and users (lists
-  and search) filter by `corps_id` / `brigade_id` (users by their home post); `corps_id` includes the posts of its
-  brigades; an id of another kind gives an empty list. A unit filter narrows what the caller sees, never widens it.
+- `PostResponse.corps` and `.brigade` (`{id, name}` or null) are where the post sits now. Posts (lists and search)
+  filter by `corps_id` / `brigade_id`; `corps_id` includes the posts of its brigades; an id of another kind gives an
+  empty list. A unit filter narrows what the caller sees, never widens it.
+- User records carry `home` (the home post's name and code), `post`, `brigade` and `corps`. `post_id`, `brigade_id`
+  and `corps_id` on `GET /users/` and `/search/users` match users whose home is the node or below it, or who hold an
+  assignment (a tree role, not archived, on a node not archived) at the node or below it; `membership` selects
+  `any` (default), `home` or `assigned`. `post_id` therefore no longer means the home post only: for the home post
+  alone (what `PostResponse.user_count` counts) pass `membership=home`. The base role of a user sits at its home post
+  and stays there when the user is moved, so after a move `post_id=<old post>` still lists the user by default
+  (assigned), and not with `membership=home`; in production `assigned` usually includes the home users too.
 - `ObservationWithMedia.corps` and `.brigade` are where the post was when the observation was created, recorded at
   create and never changed (a later move of the post or the brigade does not change them); the names are today's.
   An observation created while its post moves may record the place from just before the move.
@@ -325,7 +332,7 @@ mover's own rights only.
   and `placement=current` is not affected by it. The command may be run again after later placements; it adds rows
   only to observations that still have none, and existing rows never change.
 - Unit names on posts and observations are shown to anyone who sees the post or observation, without
-  `scope_group.view`.
+  `scope_group.view`; user records show the home post's name and code and its units the same way.
 - Observations and media (lists and search) filter by `corps_id` / `brigade_id` with `placement`: `recorded` (the
   default: where the post was when the observation was created) or `current` (where the post is now; posts archived
   since are left out). `placement` only chooses which unit an observation belongs to; both read today's data, and the

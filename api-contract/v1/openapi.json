@@ -366,7 +366,7 @@
           "AUTHENTICATION"
         ],
         "summary": "Get Current User Info",
-        "description": "The current user and what the web client builds its interface from: user_type (pages), permissions (menu),\nassignments, root_permissions and post_permissions (buttons at a post: root_permissions plus its entry), and\ncertificate: the client certificate of this session (id, label, not_after, state; null for a session bound to\nnone, the development login), so the web client can warn before it expires",
+        "description": "The current user and what the web client builds its interface from: user_type (pages), permissions (menu),\nassignments, root_permissions and post_permissions (buttons at a post: root_permissions plus its entry), and\nhome, post, brigade and corps (the home post and its units, null without them), and\ncertificate: the client certificate of this session (id, label, not_after, state; null for a session bound to\nnone, the development login), so the web client can warn before it expires",
         "operationId": "get_current_user_info",
         "responses": {
           "200": {
@@ -740,7 +740,7 @@
           "USERS"
         ],
         "summary": "List Users",
-        "description": "List users with filters.\n\nThe users whose home post is where user.view is in effect, and the caller; users without a home post only\nwith user.view at the root. Archived users only with include_deleted (requires user.archive), and only where\nuser.archive is in effect.",
+        "description": "List users with filters.\n\nThe users whose home post is where user.view is in effect, and the caller; users without a home post only\nwith user.view at the root. Archived users only with include_deleted (requires user.archive), and only where\nuser.archive is in effect.\n\npost_id, brigade_id and corps_id match the home node or an assignment at the node or below, chosen by\nmembership (any, home, assigned).",
         "operationId": "list_users",
         "security": [
           {
@@ -920,10 +920,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Users attached to this post: home post, or an assignment at it (see membership)",
+              "description": "Users attached to this post: home post, or an assignment at it (see membership). Before, only the home post: pass membership=home for that (what PostResponse.user_count counts)",
               "title": "Post Id"
             },
-            "description": "Users attached to this post: home post, or an assignment at it (see membership)"
+            "description": "Users attached to this post: home post, or an assignment at it (see membership). Before, only the home post: pass membership=home for that (what PostResponse.user_count counts)"
           },
           {
             "name": "corps_id",
@@ -972,11 +972,11 @@
                 "assigned"
               ],
               "type": "string",
-              "description": "How post_id, brigade_id and corps_id match: home (the home node is there), assigned (a role assignment at the node or below it; archived nodes and roles do not count) or any (either); no effect without a unit field",
+              "description": "How post_id, brigade_id and corps_id match: home (the home node is there), assigned (a role assignment at the node or below it; archived nodes and roles do not count) or any (either). Base roles sit at the home post, so assigned usually includes the home users too. No effect without a unit field",
               "default": "any",
               "title": "Membership"
             },
-            "description": "How post_id, brigade_id and corps_id match: home (the home node is there), assigned (a role assignment at the node or below it; archived nodes and roles do not count) or any (either); no effect without a unit field"
+            "description": "How post_id, brigade_id and corps_id match: home (the home node is there), assigned (a role assignment at the node or below it; archived nodes and roles do not count) or any (either). Base roles sit at the home post, so assigned usually includes the home users too. No effect without a unit field"
           },
           {
             "name": "user_type",
@@ -26519,10 +26519,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Users attached to this post: home post, or an assignment at it (see membership)",
+              "description": "Users attached to this post: home post, or an assignment at it (see membership). Before, only the home post: pass membership=home for that (what PostResponse.user_count counts)",
               "title": "Post Id"
             },
-            "description": "Users attached to this post: home post, or an assignment at it (see membership)"
+            "description": "Users attached to this post: home post, or an assignment at it (see membership). Before, only the home post: pass membership=home for that (what PostResponse.user_count counts)"
           },
           {
             "name": "corps_id",
@@ -26571,11 +26571,11 @@
                 "assigned"
               ],
               "type": "string",
-              "description": "How post_id, brigade_id and corps_id match: home (the home node is there), assigned (a role assignment at the node or below it; archived nodes and roles do not count) or any (either); no effect without a unit field",
+              "description": "How post_id, brigade_id and corps_id match: home (the home node is there), assigned (a role assignment at the node or below it; archived nodes and roles do not count) or any (either). Base roles sit at the home post, so assigned usually includes the home users too. No effect without a unit field",
               "default": "any",
               "title": "Membership"
             },
-            "description": "How post_id, brigade_id and corps_id match: home (the home node is there), assigned (a role assignment at the node or below it; archived nodes and roles do not count) or any (either); no effect without a unit field"
+            "description": "How post_id, brigade_id and corps_id match: home (the home node is there), assigned (a role assignment at the node or below it; archived nodes and roles do not count) or any (either). Base roles sit at the home post, so assigned usually includes the home users too. No effect without a unit field"
           },
           {
             "name": "user_type",

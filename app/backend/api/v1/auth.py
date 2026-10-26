@@ -293,6 +293,7 @@ async def get_current_user_info(
 ):
     """The current user and what the web client builds its interface from: user_type (pages), permissions (menu),
     assignments, root_permissions and post_permissions (buttons at a post: root_permissions plus its entry), and
+    home, post, brigade and corps (the home post and its units, null without them), and
     certificate: the client certificate of this session (id, label, not_after, state; null for a session bound to
     none, the development login), so the web client can warn before it expires"""
     return build_user_info(auth, await assignment_views(session, auth.user.id),

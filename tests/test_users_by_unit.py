@@ -221,3 +221,46 @@ async def test_search_users_has_the_same_membership(client, db, headers):
     assert searched.status_code == 200, searched.text
     assert sorted(u["id"] for u in searched.json()["items"]) == sorted(listed)
     assert searched.json()["total"] == len(listed) == 3
+
+
+async def test_a_created_user_is_listed_once_because_its_base_role_sits_at_the_home_post(client, db, headers):
+    h = headers(await make_admin(db))
+    corps, brigade, (p1, *_rest) = await _structure(db)
+    created = await client.post(USERS, headers=h, data={"username": "made_here", "username_alias": "Made here",
+                                                        "user_type": "viewer", "post_id": str(p1.id)})
+    assert created.status_code == 200, created.text
+    user_id = created.json()["id"]
+    # home P1 and the base role at P1: one row under any, and under both split sets
+    assert (await _ids(client, h, brigade_id=brigade.id)).count(user_id) == 1
+    assert user_id in await _ids(client, h, brigade_id=brigade.id, membership="home")
+    assert user_id in await _ids(client, h, brigade_id=brigade.id, membership="assigned")
+
+
+async def test_a_moved_user_keeps_its_base_role_at_the_old_post(client, db, headers):
+    h = headers(await make_admin(db))
+    corps, brigade, (p1, p2, p0, p3, p4) = await _structure(db)
+    created = await client.post(USERS, headers=h, data={"username": "will_move", "username_alias": "Will move",
+                                                        "user_type": "viewer", "post_id": str(p1.id)})
+    assert created.status_code == 200, created.text
+    user_id = created.json()["id"]
+    moved = await client.patch(_user(user_id), headers=h, data={"post_id": p4.id})
+    assert moved.status_code == 200, moved.text
+    # the base role stays at P1: still a member there by assignment, no longer by home
+    assert user_id in await _ids(client, h, post_id=p1.id)
+    assert user_id in await _ids(client, h, post_id=p1.id, membership="assigned")
+    assert user_id not in await _ids(client, h, post_id=p1.id, membership="home")
+    assert user_id in await _ids(client, h, post_id=p4.id, membership="home")
+
+
+async def test_an_assignment_at_an_archived_subgroup_does_not_count(client, db, headers):
+    h = headers(await make_admin(db))
+    corps, brigade, (p1, p2, p0, p3, p4) = await _structure(db)
+    sub = await make_group(db, name="Archived sub", parent_id=brigade.id)
+    sub.is_deleted = True
+    db.add(sub)
+    await db.commit()
+    role = await make_role(db, [Permissions.OBSERVATION_VIEW])
+    a6 = await make_user(db, post_id=p4.id)
+    await assign(db, a6, role, Node.group(sub.id))
+    assert a6.id not in await _ids(client, h, brigade_id=brigade.id)
+    assert a6.id not in await _ids(client, h, brigade_id=brigade.id, membership="assigned")

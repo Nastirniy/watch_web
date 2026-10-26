@@ -14,7 +14,7 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ### Changed
 
-- `post_id`, `brigade_id`, `corps_id` on `GET /users/` and `/search/users` also match users assigned at the node or below; `membership` = any | home | assigned (`any` by default).
+- Behaviour change: `post_id`, `brigade_id`, `corps_id` on `GET /users/` and `/search/users` also match users assigned (a tree role, not archived) at the node or below, not only users whose home is there; `membership` = any | home | assigned (`any` by default). `post_id=P` no longer equals the home users of P (`PostResponse.user_count`): pass `membership=home` for the home post only.
 
 ## Authorization v3
 

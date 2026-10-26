@@ -69,12 +69,18 @@ async def post_unit_names(session: AsyncSession, tree: ScopeTree, group_ids: Ite
                                       for unit_id in post_units(tree, group_id).values()))
 
 
+def is_unit(tree: ScopeTree, kind: ScopeGroupKind, unit_id: int) -> bool:
+    """The one check of a unit's kind: unit_id is a group of this kind (a plain group, another kind or an unknown id
+    is not)"""
+    return tree.group_kind.get(unit_id) == ScopeGroupKind(kind).value
+
+
 def unit_post_ids(tree: ScopeTree, kind: ScopeGroupKind, unit_id: Optional[int]) -> Optional[FrozenSet[int]]:
     """The posts under the unit now (archived ones included; the list's own archive rules apply), None without a
     unit; an id of another kind, a plain group or an unknown id: no post"""
     if unit_id is None:
         return None
-    if tree.group_kind.get(unit_id) != ScopeGroupKind(kind).value:
+    if not is_unit(tree, kind, unit_id):
         return frozenset()
     return tree.posts_under(Node.group(unit_id))
 
@@ -120,11 +126,8 @@ def membership_nodes(tree: ScopeTree, params, live_only: bool = False) -> Option
         unit_id = getattr(params, f"{kind.value}_id", None)
         if unit_id is None:
             continue
-        if tree.group_kind.get(unit_id) == kind.value:
-            posts = narrow(posts, tree.posts_under(Node.group(unit_id)))
-            groups = narrow(groups, tree.groups_under(Node.group(unit_id)))
-        else:
-            posts, groups = narrow(posts, nothing), narrow(groups, nothing)
+        posts = narrow(posts, unit_post_ids(tree, kind, unit_id) or nothing)
+        groups = narrow(groups, tree.groups_under(Node.group(unit_id)) if is_unit(tree, kind, unit_id) else nothing)
     if posts is None or groups is None:
         return None
     if live_only:

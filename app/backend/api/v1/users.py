@@ -124,6 +124,9 @@ async def list_users(
     The users whose home post is where user.view is in effect, and the caller; users without a home post only
     with user.view at the root. Archived users only with include_deleted (requires user.archive), and only where
     user.archive is in effect.
+
+    post_id, brigade_id and corps_id match the home node or an assignment at the node or below, chosen by
+    membership (any, home, assigned).
     """
     current_user = auth.user
     archived = AccessControlService.archived_scope(auth, filters, Permissions.USER_ARCHIVE)
