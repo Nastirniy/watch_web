@@ -33,8 +33,17 @@ from app.backend.config import settings
 from app.backend.services.signer_client import use_signer_transport
 from app.backend.signer.app import create_app as create_signer_app
 from app.backend.signer.settings import SignerSettings
+from tests import helpers as factories
 from tests.helpers import errors_are_problems
 from tests.pki_helpers import DownTransport, client_ca, write_ca_files
+
+
+@pytest.fixture(autouse=True)
+def _chosen_types_are_per_test():
+    """Ids repeat between the tests' databases: the users whose type a test chose (tests/helpers.py) are per test"""
+    factories._EXPLICIT_TYPES.clear()
+    yield
+    factories._EXPLICIT_TYPES.clear()
 
 
 @pytest_asyncio.fixture

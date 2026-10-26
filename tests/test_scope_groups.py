@@ -372,7 +372,8 @@ async def test_a_post_is_not_restored_into_an_archived_group(client, db, headers
     assert post.is_deleted is True
 
     other = await make_post(db, "Elsewhere")
-    outsider = await _caller(db, Node.post(other.id), Permissions.POST_VIEW, Permissions.POST_ARCHIVE)
+    outsider = await _caller(db, Node.post(other.id), Permissions.POST_VIEW, Permissions.POST_ARCHIVE,
+                             user_type=UserType.ADMINISTRATOR)
     r = await client.post(restore, headers=headers(outsider))
     assert r.status_code == 403 and r.json()["code"] == "post_access_denied", r.text
 

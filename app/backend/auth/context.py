@@ -14,10 +14,12 @@ count as held anywhere either.
 from dataclasses import dataclass, field
 from typing import Dict, FrozenSet, Iterable, Optional, Set, Tuple, Union
 
+from loguru import logger
 from sqlalchemy import null as sa_null
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.backend.auth.integrity import effective_permissions
 from app.backend.auth.scope import Grant, Node, ROOT, ScopeTree
 from app.backend.enums.general import Permissions
 from app.backend.models.user import User
@@ -93,6 +95,11 @@ class AuthContext:
     def _held_at(self, post_id: int, grants: Iterable[Grant]) -> FrozenSet[str]:
         in_effect = set(self.tree.nodes_in_effect_at_post(post_id))
         return frozenset().union(*(grant.permissions for grant in grants if grant.node in in_effect))
+
+    @property
+    def system_permissions(self) -> FrozenSet[str]:
+        """Permissions of the system grants (system role assignments)"""
+        return frozenset().union(*(grant.permissions for grant in self.grants if grant.kind == "system"))
 
     @property
     def root_permissions(self) -> FrozenSet[str]:
@@ -179,8 +186,25 @@ def system_grant_rows(user_id: int, include_archived_roles: bool = False):
     return query if include_archived_roles else query.where(Role.is_deleted == False)
 
 
-def grants_of(rows: Iterable, kind: str = "tree") -> Tuple[Grant, ...]:
-    """The grants of grant_rows (kind tree) or system_grant_rows (kind system), in assignment id order"""
+# (kind, assignment id) of the grants whose left-out permissions were logged by this process: one line each
+_WARNED: Set[Tuple[str, int]] = set()
+
+
+def _in_effect(user: User, kind: str, assignment_id: int, names: FrozenSet[str]) -> FrozenSet[str]:
+    """What the grant puts in effect for the user (auth/integrity.py); a grant with something left out is logged
+    once per process (ids and permission names, nothing about the user)"""
+    kept, left_out = effective_permissions(user.user_type, kind, names)
+    if left_out and (kind, assignment_id) not in _WARNED:
+        _WARNED.add((kind, assignment_id))
+        logger.warning(f"Grant {kind}:{assignment_id} of user {user.id}: {sorted(left_out)} not in effect "
+                       f"(level or boundary of type {user.user_type})")
+    return kept
+
+
+def grants_of(rows: Iterable, kind: str = "tree", user: Optional[User] = None) -> Tuple[Grant, ...]:
+    """The grants of grant_rows (kind tree) or system_grant_rows (kind system), in assignment id order. With user,
+    each grant holds only what it puts in effect for that user: the permissions of the kind's level inside the
+    boundary of the user's type (auth/integrity.py)."""
     heads: Dict[int, tuple] = {}            # assignment id -> role id, name, display name, built-in, node
     permissions: Dict[int, Set[str]] = {}
     for assignment_id, group_id, post_id, role_id, name, display_name, builtin_key, permission in rows:
@@ -188,15 +212,20 @@ def grants_of(rows: Iterable, kind: str = "tree") -> Tuple[Grant, ...]:
         held = permissions.setdefault(assignment_id, set())
         if permission:
             held.add(permission)
-    return tuple(Grant(*heads[assignment_id], frozenset(permissions[assignment_id]), assignment_id=assignment_id,
-                       kind=kind)
+    def held_by(assignment_id: int) -> FrozenSet[str]:
+        names = frozenset(permissions[assignment_id])
+        return names if user is None else _in_effect(user, kind, assignment_id, names)
+
+    return tuple(Grant(*heads[assignment_id], held_by(assignment_id), assignment_id=assignment_id, kind=kind)
                  for assignment_id in sorted(heads))
 
 
 async def load_grants(session: AsyncSession, user: User, include_archived_roles: bool = False) -> Tuple[Grant, ...]:
-    """What a user holds where (two queries): the tree grants, then the system grants"""
-    tree = grants_of((await session.exec(grant_rows(user.id, include_archived_roles))).all())
-    system = grants_of((await session.exec(system_grant_rows(user.id, include_archived_roles))).all(), kind="system")
+    """What a user holds where (two queries): the tree grants, then the system grants, each with what it puts in
+    effect for the user (the level of its kind, the boundary of the user's type)"""
+    tree = grants_of((await session.exec(grant_rows(user.id, include_archived_roles))).all(), user=user)
+    system = grants_of((await session.exec(system_grant_rows(user.id, include_archived_roles))).all(), kind="system",
+                       user=user)
     return tree + system
 
 

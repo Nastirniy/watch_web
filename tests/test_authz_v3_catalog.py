@@ -103,7 +103,7 @@ async def test_admin_factory_is_a_system_administrator(db):
 
 
 async def test_system_assignment_is_a_root_grant(db):
-    user = await make_user(db, user_type=UserType.ANALYST)
+    user = await make_user(db, user_type=UserType.SYSTEM_ADMINISTRATOR)
     auditor = (await db.exec(select(Role).where(Role.builtin_key == BuiltinRole.AUDITOR.value))).one()
     db.add(SystemRoleAssignment(user_id=user.id, role_id=auditor.id))
     await db.commit()

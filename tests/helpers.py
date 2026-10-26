@@ -12,6 +12,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.auth.certificates import CN_SCHEME_CURRENT, certificate_values, hash_certificate_data
 from app.backend.auth.scope import Node, ROOT
+from app.backend.auth.user_types import USER_TYPES, boundary
 from app.backend.bootstrap.permissions import role_kind_of
 from app.backend.enums.general import BuiltinRole, CertificateSource, Permissions, RoleKind, UserType
 from app.backend.errors.problems import PROBLEM_JSON
@@ -28,6 +29,8 @@ from app.backend.models.observation import Observation, ObservationFrequency, Ca
 from app.backend.models.media import MediaFile
 
 _counter = itertools.count(1)
+# Users whose type the test chose (make_user with user_type, make_admin): assign() and give() never change it
+_EXPLICIT_TYPES: set = set()
 
 # The legacy flags (gone from the permission catalog with migration 023): make_user still takes them, the frozen
 # conversion turns them into assignments exactly like the migration did
@@ -134,6 +137,8 @@ async def assign(db: AsyncSession, user: User, role: Role, node: Node):
     else:
         assignment = RoleAssignment(user_id=user.id, role_id=role.id, **scope_columns(node))
     db.add(assignment)
+    await db.flush()
+    await _fit_type(db, user)
     await db.commit()
     await db.refresh(assignment)
     return assignment
@@ -200,10 +205,41 @@ async def make_user(
     await _convert_v3(db, user, written, user_plan.user_type)
     if user_type is not None:
         user.user_type = UserType(user_type).value
+        _EXPLICIT_TYPES.add(user.id)
     db.add(user)
     await db.commit()
     await db.refresh(user)
     return user
+
+
+async def _fit_type(db: AsyncSession, user: User) -> None:
+    """A user whose type the test did not choose gets the first type of the catalog whose boundary covers all their
+    assignments (as the v2 conversion inferred types): such tests are about scope, not types, and before v3 the
+    ceiling of the type did not act at evaluation. A user with a chosen type keeps it."""
+    if user.id in _EXPLICIT_TYPES:
+        return
+    rows = (await db.exec(
+        select(Role.kind, Permission.name).select_from(RoleAssignment)
+        .join(Role, Role.id == RoleAssignment.role_id)
+        .join(RolePermission, RolePermission.role_id == Role.id)
+        .join(Permission, Permission.id == RolePermission.permission_id)
+        .where(RoleAssignment.user_id == user.id)
+        .union_all(
+            select(Role.kind, Permission.name).select_from(SystemRoleAssignment)
+            .join(Role, Role.id == SystemRoleAssignment.role_id)
+            .join(RolePermission, RolePermission.role_id == Role.id)
+            .join(Permission, Permission.id == RolePermission.permission_id)
+            .where(SystemRoleAssignment.user_id == user.id))
+    )).all()
+    tree = {name for kind, name in rows if kind == RoleKind.TREE.value}
+    system = {name for kind, name in rows if kind == RoleKind.SYSTEM.value}
+    current = UserType(user.user_type)
+    if tree <= boundary(current, RoleKind.TREE) and system <= boundary(current, RoleKind.SYSTEM):
+        return
+    fitting = next(t for t in USER_TYPES
+                   if tree <= boundary(t, RoleKind.TREE) and system <= boundary(t, RoleKind.SYSTEM))
+    await db.execute(User.__table__.update().where(User.id == user.id).values(user_type=fitting.value))
+    user.user_type = fitting.value
 
 
 async def _convert_v3(db: AsyncSession, user: User, written: list, v2_type: str) -> None:
@@ -253,6 +289,7 @@ async def make_admin(db: AsyncSession, post_id: Optional[int] = None) -> User:
     user = _new_user(_next(), None, post_id, UserType.SYSTEM_ADMINISTRATOR.value)
     db.add(user)
     await db.flush()
+    _EXPLICIT_TYPES.add(user.id)
     db.add(RoleAssignment(user_id=user.id, role_id=(await builtin_role(db, BuiltinRole.ADMINISTRATOR)).id,
                           **scope_columns(ROOT)))
     db.add(SystemRoleAssignment(user_id=user.id,
