@@ -14,6 +14,8 @@ How the database of watch_web is backed up, checked and rolled back. Design:
 - **What the API does:** it only reads. `GET /api/v1/database/status` (`database.view`) and
   `GET /api/v1/database/backups` (`backup.view`) report, and `/health` has a `backups` part. Nothing in the API starts
   a backup or a restore.
+- **What it never does:** change rows by hand. The database is changed only by the API, migrations, seeding and this
+  tool's restore; a restored backup at an older revision is upgraded by the migrations at the next start.
 - **What it covers:** the database only. Media files (`MEDIA_ROOT`) and the PKI directory need their own backup (see
   "What a rollback does not bring back").
 

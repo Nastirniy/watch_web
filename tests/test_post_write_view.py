@@ -12,7 +12,7 @@ P = Permissions
 
 
 async def _user(db, grants):
-    """A post_admin holding one custom role per (permissions, node)"""
+    """An administrator holding one custom role per (permissions, node)"""
     user = await make_user(db, user_type=UserType.ADMINISTRATOR)
     for perms, node in grants:
         await assign(db, user, await make_role(db, perms), node)

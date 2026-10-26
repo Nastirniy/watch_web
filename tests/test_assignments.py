@@ -6,8 +6,8 @@ no assignment the caller could not grant), the type ceiling, system roles only a
 least one assignment per user and the last administrator. Scope and ownership answer before the existence or the
 state of a group or a post, so an outsider learns nothing about ids.
 
-Tree of every test: East > Kharkiv > post A; West > post B. The group admin is of type post_admin with the built-in
-post_admin role at East.
+Tree of every test: East > Kharkiv > post A; West > post B. The group admin is of type administrator with the built-in
+administrator role at East.
 """
 from dataclasses import dataclass
 

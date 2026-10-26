@@ -5,7 +5,13 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
-## Authorization v3 (in progress)
+## Authorization v3
+
+Tree roles at a node and system roles without one, the user type as a boundary applied at every request, no
+`post_admin` / `admin` types (spec `docs/superpowers/specs/2026-10-26-authorization-v3-design.md`; upgrade:
+`DEPLOYMENT.md`, "Upgrading to authorization v3", with `authz_report --v3` first). Migrations `029_authz_v3_schema`
+and `030_authorization_v3` keep every user's permissions at every node (former `post_admin` holders gain unit
+management) and downgrade exactly.
 
 ### Changed (breaking)
 

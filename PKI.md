@@ -224,7 +224,7 @@ On a server with PKI the first administrator gets a certificate from the command
 `MYSETTINGS_ADMIN__PKI_CERTIFICATE_*` does not apply in production):
 
 ```bash
-docker compose exec api python -m app.backend.cli.init_user --username admin --alias "Administrator" --user-type admin
+docker compose exec api python -m app.backend.cli.init_user --username admin --alias "Administrator" --user-type system_administrator
 docker compose exec api python -m app.backend.cli.pki issue --username admin --label "Admin - office PC" --out /tmp/admin-cert
 install -d -m 0700 /root/watch-web-admin-cert                      # outside the project directory
 docker compose cp api:/tmp/admin-cert/. /root/watch-web-admin-cert/

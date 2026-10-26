@@ -170,7 +170,7 @@ async def _caller(db, node: Node, *perms, user_type: UserType = UserType.ANALYST
 
 
 async def _group_admin(db, node: Node):
-    """Type post_admin with the built-in post_admin role (scope_group.view, post.view, ...) at the node"""
+    """Type administrator with the built-in administrator role (every tree permission) at the node"""
     user = await make_user(db, user_type=UserType.ADMINISTRATOR)
     role = (await db.exec(select(Role).where(Role.builtin_key == UserType.ADMINISTRATOR.value))).one()
     await assign(db, user, role, node)

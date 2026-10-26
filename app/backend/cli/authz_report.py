@@ -21,7 +21,7 @@ root and are active and not archived (root_admins in --json), the users the last
 (the legacy administrator role was not the admin role, for example) a WARNING line says so: after the upgrade, archive
 and deactivation answer last_admin_required and nobody can assign the admin role; create an administrator on the
 server with python -m app.backend.cli.init_user <certificate.pem> --username <name> --alias <display name>
---user-type admin.
+--user-type system_administrator (authorization v3).
 
 A database at 023 or later is converted already: the command says so and exits 0. Exit code 2: the database is not
 at 022 (or is not an alembic database, or the sqlite file does not exist).

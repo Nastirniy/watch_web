@@ -1,7 +1,7 @@
 """Unit management below the root (D1): scope_group.create / update / archive are scoped permissions. A write on a
 group needs its scope_group permission covering the group's parent (the root for a group directly under it); a move
 needs scope_group.update covering the old and the new parent. A holder at a group manages the groups inside it,
-never the group itself. post_admin may hold the three (ceiling), the operator may not.
+never the group itself. An administrator may hold the three (boundary), the operator may not.
 """
 import pytest
 from sqlmodel import select
@@ -26,7 +26,7 @@ WRITES = [Permissions.SCOPE_GROUP_CREATE, Permissions.SCOPE_GROUP_UPDATE, Permis
 
 
 async def _commander(db, node: Node):
-    """A post_admin holding the unit management role at node"""
+    """An administrator holding the unit management role at node"""
     user = await make_user(db, user_type=UserType.ADMINISTRATOR)
     await assign(db, user, await make_role(db, COMMANDER), node)
     return user
@@ -268,7 +268,7 @@ async def test_include_deleted_shows_archived_groups_only_where_scope_group_arch
 
 # ----------------------------------------------------------------- bug hunt 2 (A-02, A-05, A-06, C-L1)
 async def _holder(db, grants):
-    """A post_admin holding one custom role per (permissions, node)"""
+    """An administrator holding one custom role per (permissions, node)"""
     user = await make_user(db, user_type=UserType.ADMINISTRATOR)
     for perms, node in grants:
         await assign(db, user, await make_role(db, perms), node)

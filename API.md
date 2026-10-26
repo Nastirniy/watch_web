@@ -171,12 +171,14 @@ The login, the refresh and `GET /api/v1/auth/me` carry what the interface is bui
 
 | Field | Use it for |
 |-------|------------|
-| `user_type` | Which pages the web shows. The catalog is `GET /api/v1/user-types/` (`key`, `display_name`, `description`, `base_role`, `base_permissions`, `allowed_permissions` = the ceiling of the type). The API never authorizes by type: a page still checks its buttons. |
-| `permissions` | Permissions held at some node (an assignment on an archived post or at an archived group counts nowhere): the menu (an entry whose route the user can call somewhere). |
-| `root_permissions` | Permissions held at the root: in effect at every post. |
+| `user_type` | Which pages the web shows: a position (`viewer`, `operator`, `senior_operator`, `analyst`, `administrator`, `system_administrator`), never a place. The catalog is `GET /api/v1/user-types/` (`key`, `display_name`, `description`, `base_roles` with `kind` and `at_root`, `tree_boundary`, `system_boundary`: the most a user of the type can ever have in effect). The API never authorizes by type: a page still checks its buttons. |
+| `permissions` | Permissions held at some node or through a system role (an assignment on an archived post or at an archived group counts nowhere): the menu (an entry whose route the user can call somewhere). |
+| `root_permissions` | Tree permissions held at the root: in effect at every post. |
+| `system_permissions` | Permissions of the system roles: administration of the whole system (roles, dictionaries, formats, audit, monitoring, backups, certificate export). |
 | `post_permissions` | `{"7": ["observation.create", ...]}`: per post (key: the post id as a string), the permissions that assignments at groups and at the post put in effect there, for every post they reach. |
 | `group_permissions` | `{"3": ["scope_group.update", ...]}`: per group (key: the group id as a string), the permissions that assignments at groups put in effect there (the group of the assignment and every group below it, archived ones too), for every group they reach; assignments at the root and at posts are not in it, an assignment at an archived group reaches nothing. In effect at a group = `root_permissions` plus its entry. |
-| `assignments` | The user's assignments, as `GET /users/{user_id}/assignments` lists them. |
+| `assignments` | The user's tree assignments, as `GET /users/{user_id}/assignments` lists them. |
+| `system_assignments` | The user's system assignments, as `GET /users/{user_id}/system-assignments` lists them. |
 | `post_id` | Home post: membership (who manages the user); it grants nothing by itself. |
 
 Buttons: the permissions in effect at post 7 are `root_permissions` plus `post_permissions["7"]` (a post missing from
@@ -200,15 +202,27 @@ the user (`session_expired`, `revoke_cause` `user_type_changed`): the new pages 
   role, `role.is_deleted`, grants nothing).
 - `POST /api/v1/users/{user_id}/assignments` (201): `{"role_id": 5, "scope": {"kind": "post", "id": 7}}`; `id` is
   left out for `{"kind": "root"}`. `DELETE /api/v1/users/{user_id}/assignments/{assignment_id}` (204).
-- The caller may assign only a role whose permissions they hold at that node (and `user.update` there). A role with a
-  `system` permission (`RoleResponse.level` `system`) is assignable only at the root; a role must fit the ceiling of
-  the user's type (`allowed_permissions`). Offer only roles that pass these checks.
-- A new user (`POST /api/v1/users/`, form fields `user_type` and an optional `post_id`) gets the built-in role of the
-  type at the home post (at the root without one, or for the `admin` type); add more with the assignment routes.
-  `PATCH /api/v1/users/{user_id}` with `user_type` changes the type and replaces the old built-in role with the new
-  one at the same nodes, or at the root when the new built-in role holds system permissions (the `admin` type).
-- Built-in roles (`is_builtin`, `builtin_key`: one per type) are read-only; `POST /api/v1/roles/{role_id}/clone`
-  makes an editable copy.
+- Roles have a `kind` (`RoleResponse.kind`): `tree` roles hold tree permissions and are assigned at a node through the
+  routes above; `system` roles hold system permissions and are assigned without a node:
+  `GET /api/v1/users/{user_id}/system-assignments` (`[{id, role, created_at}]`),
+  `POST /api/v1/users/{user_id}/system-assignments` (201) with `{"role_id": 5}`,
+  `DELETE /api/v1/users/{user_id}/system-assignments/{assignment_id}` (204). Each route refuses the other kind (409
+  `role_is_system` / `role_is_tree`). `POST /api/v1/roles/` takes `kind` (required, never changed); a role holds
+  permissions of its kind's level only (409 `permission_level_mismatch`). `GET /api/v1/roles/?kind=system` lists one
+  kind.
+- The caller may assign only a role whose permissions they hold at that node, the root for a system role (and
+  `user.update` there); a role must fit the boundary of the user's type for its kind (`tree_boundary`,
+  `system_boundary`). Offer only roles that pass these checks. A grant outside the boundary never acts, even if some
+  other path wrote it.
+- A new user (`POST /api/v1/users/`, form fields `user_type` and an optional `post_id`) gets the base roles of the
+  type: the tree base role at the home post (at the root without one, or for `system_administrator`), and the system
+  base roles; add more with the assignment routes. `PATCH /api/v1/users/{user_id}` with `user_type` changes the type
+  and replaces the old base roles with the new ones (tree ones at the same nodes, or at the root for an `at_root`
+  base role; system ones added and removed).
+- Built-in roles (`is_builtin`, `builtin_key`): tree `viewer`, `operator`, `senior_operator`, `analyst`,
+  `administrator` (every tree permission: at a post, the administrator of the post; at a brigade, of the brigade; at
+  the root, of all data), system `system_administrator`, `auditor`, `dictionary_editor`, `tag_editor`. They are
+  read-only; `POST /api/v1/roles/{role_id}/clone` makes an editable copy (of the same kind).
 
 ### Problem codes of authorization and scope
 
@@ -217,8 +231,9 @@ the user (`session_expired`, `revoke_cause` `user_type_changed`): the new pages 
 | `assignment_not_found` | 404 | The assignment is not one of this user's |
 | `assignment_exists` | 409 | The user already holds this role at this node |
 | `last_assignment_required` | 409 | The user's last assignment (of a live role) cannot be removed; also the permanent delete of a role that is the only assignment of an archived holder |
-| `role_requires_root_scope` | 409 | A role with system permissions below the root (`system_permissions`) |
-| `role_exceeds_user_type` | 409 | The role holds permissions the user's type does not allow (`user_type`, `excess_permissions`) |
+| `permission_level_mismatch` | 409 | A role gets a permission of the other level (`role_kind`, `permissions`) |
+| `role_is_system`, `role_is_tree` | 409 | A system role on the tree assignment routes, a tree role on the system ones (`role_id`) |
+| `role_exceeds_user_type` | 409 | The role holds permissions the boundary of the user's type does not allow (`user_type`, `excess_permissions`) |
 | `user_type_ceiling_exceeded` | 409 | A type change while other assignments exceed the new type (`user_type`, `assignments` with their `excess_permissions`) |
 | `role_holders_exceed_user_type` | 409 | Permissions added to a role that the type of a holder does not allow (`users`) |
 | `builtin_role_not_renamable`, `builtin_role_permissions_fixed`, `builtin_role_not_archivable`, `builtin_role_not_deletable` | 409 | Built-in roles cannot change (clone one) |
@@ -230,7 +245,7 @@ the user (`session_expired`, `revoke_cause` `user_type_changed`): the new pages 
 | `scope_group_name_taken` | 409 | The name is used under the same parent |
 | `scope_group_parent_not_allowed` | 409 | A group of this kind cannot sit there (`group_kind`, `parent_kind`; `root` for none) |
 | `corps_has_brigades` | 409 | Archive without cascade of a corps that still has active brigades |
-| `last_admin_required`, `cannot_remove_own_admin` | 409 | The built-in `admin` role at the root must stay with an active user and cannot be taken from oneself |
+| `last_admin_required`, `cannot_remove_own_admin` | 409 | The built-in `system_administrator` system role must stay with an active user and cannot be taken from oneself |
 
 Field codes inside `validation_error`: `scope_id_required` (a group or post scope without `id`),
 `scope_id_not_allowed` (the root with an `id`).
@@ -243,8 +258,8 @@ plain groups are `group`): a role assigned at a corps or brigade (`{"kind": "gro
 below it, and `GET /scope-groups/tree` shows them with their `kind`. No new permissions: `scope_group.*` for the
 units, `post.*` for what happens to their posts.
 
-Who manages what: `scope_group.create`, `.update` and `.archive` are scoped permissions (assignable at the root, a corps, a
-brigade or a plain group; the `post_admin` type may hold them, the operator types may not; a holder at the root manages
+Who manages what: `scope_group.create`, `.update` and `.archive` are tree permissions (assignable at the root, a corps, a
+brigade or a plain group; the built-in `administrator` role holds them, the operator types may not; a holder at the root manages
 every corps, brigade and plain group). A write on a group needs
 its permission covering the group's parent, the root for a corps or a root plain group:
 
@@ -422,7 +437,8 @@ Field codes inside `validation_error`: `certificate_label_invalid` (the label), 
 ## Database and backups (status only)
 
 A page for administrators. Backups are made, checked and restored on the server (`BACKUPS.md`); the API only
-reports. Both permissions are system permissions (assignable only at the root); only the `admin` user type holds them.
+reports. Both permissions are system permissions (held through a system role, `system_administrator` among the
+built-in ones); only the `system_administrator` user type may hold them.
 
 | Operation | Permissions | Purpose |
 |-----------|-------------|---------|

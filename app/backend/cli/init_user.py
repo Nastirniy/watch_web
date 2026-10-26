@@ -4,13 +4,13 @@ Init User Utility - Create the first user from the server machine.
 
 Usage:
     python -m app.backend.cli.init_user /path/to/cert.pem
-    python -m app.backend.cli.init_user /path/to/cert.pem --username admin --alias "Admin" --user-type admin
+    python -m app.backend.cli.init_user /path/to/cert.pem --username admin --alias "Admin" --user-type system_administrator
     python -m app.backend.cli.init_user /path/to/cert.pem --username ivan --alias "Ivan" --user-type viewer --label "PC"
-    python -m app.backend.cli.init_user --username admin --alias "Admin" --user-type admin
+    python -m app.backend.cli.init_user --username admin --alias "Admin" --user-type system_administrator
     python -m app.backend.cli.init_user --list-types
 
-The user gets the built-in base role of the user type at the root of the scope tree (no home post); more access is
-role assignments through the API. With a certificate file the user gets it as an uploaded certificate (label: --label,
+The user gets the base roles of the user type: its tree base role at the root of the scope tree (no home post) and
+its system base roles; more access is role assignments through the API. With a certificate file the user gets it as an uploaded certificate (label: --label,
 default its CN); without one the user cannot log in until a certificate is issued or uploaded for them.
 """
 

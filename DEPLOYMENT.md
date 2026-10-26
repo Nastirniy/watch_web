@@ -185,7 +185,7 @@ user: roles, home post and access rows become role assignments (a role at the ro
    `docker compose run --rm --no-deps api python -m ...`, the certificate in a directory mounted into the container):
 
    ```bash
-   python -m app.backend.cli.init_user /path/to/cert.pem --username <name> --alias "<display name>" --user-type admin
+   python -m app.backend.cli.init_user /path/to/cert.pem --username <name> --alias "<display name>" --user-type system_administrator
    ```
 
    Per user: the inferred `type`, the roles, home post and access rows before, the assignments after
@@ -240,6 +240,45 @@ What was done through the API since the upgrade is not undone, it stays as it is
 - roles created through the API stay, as roles without holders;
 - what lived only in the new model is lost with it: assignments, type changes, scope groups. Users created after the
   upgrade have no legacy roles and lose access on a downgrade.
+
+### Upgrading to authorization v3 (tree and system roles, the type as a boundary)
+
+Migrations `029_authz_v3_schema` (`permissions.level`, `roles.kind`, `system_role_assignments`, the conversion log)
+and `030_authorization_v3` convert the v2 data (spec `docs/superpowers/specs/2026-10-26-authorization-v3-design.md`,
+section 7): the user types `post_admin` and `admin` become `administrator` and `system_administrator`, the built-in
+roles `post_admin` and `admin` become `administrator` (every tree permission) and the system role
+`system_administrator`, a custom role mixing both levels gives its system permissions to a new `<name>_system` role,
+system roles are assigned through `system_role_assignments`, and a custom role named like a new built-in key
+(`administrator`, `system_administrator`, `auditor`, `dictionary_editor`, `tag_editor`) becomes `<name>_custom`.
+Every user keeps every permission at every node; holders of the former `post_admin` role at a group or the root gain
+`scope_group.create/update/archive` there (unit management). The new version refuses to start on a database at 029
+without 030 (the permission levels are not written yet).
+
+1. Make a backup first (`BACKUPS.md`).
+2. On a copy of the production database at 028 or 029, run the dry run of 030, read-only:
+
+   ```bash
+   python -m app.backend.cli.authz_report --v3 --url mysql+aiomysql://user:password@127.0.0.1:3306/radio_monitoring_copy
+   python -m app.backend.cli.authz_report --v3 --json --url mysql+aiomysql://user:password@127.0.0.1:3306/radio_monitoring_copy > authz_v3_report.json
+   ```
+
+   `unexpected differences` must be 0 (any line there is a user who would lose or gain more than unit management:
+   stop and report it); `system administrators after the conversion` names the users who will hold
+   `system_administrator`. With none, create one after the upgrade:
+   `python -m app.backend.cli.init_user <certificate.pem> --username <name> --alias "<display name>" --user-type system_administrator`.
+   `dropped grants` lists grants the conversion does not carry (a system permission below the root, a grant outside
+   the boundary of the new type).
+3. Deploy; the start migrates, seeds the new built-in roles (`auditor`, `dictionary_editor`, `tag_editor`) and logs
+   a warning for every grant that leaves permissions out. `/health` shows `authorization`
+   (`violations`, `system_administrators`).
+4. The web client moves to the new contract: `user_type` values, `system_permissions` and `system_assignments` in
+   `/auth/me`, `kind` on roles, the system assignment routes (`API.md`).
+
+Rollback: `alembic downgrade 029_authz_v3_schema` restores the v2 data exactly from the log (system assignments made
+after the upgrade are lost; the built-in roles seeding added are deleted), then deploy the previous version.
+
+The database is changed only by the API, migrations, seeding and the restore tool: never fix authorization rows with
+hand-written SQL on a server (the start report and `/health` show what to fix through the API).
 
 ### Upgrading to PKI client certificates
 
