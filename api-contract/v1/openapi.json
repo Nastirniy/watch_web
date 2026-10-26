@@ -920,10 +920,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by post ID",
+              "description": "Users attached to this post: home post, or an assignment at it (see membership)",
               "title": "Post Id"
             },
-            "description": "Filter by post ID"
+            "description": "Users attached to this post: home post, or an assignment at it (see membership)"
           },
           {
             "name": "corps_id",
@@ -938,10 +938,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Users whose home post is in this corps now, its brigades included; an id of another kind gives nothing",
+              "description": "Users attached to this corps: home node in it (its brigades included), or an assignment at it or below it (see membership); an id of another kind gives nothing",
               "title": "Corps Id"
             },
-            "description": "Users whose home post is in this corps now, its brigades included; an id of another kind gives nothing"
+            "description": "Users attached to this corps: home node in it (its brigades included), or an assignment at it or below it (see membership); an id of another kind gives nothing"
           },
           {
             "name": "brigade_id",
@@ -956,10 +956,27 @@
                   "type": "null"
                 }
               ],
-              "description": "Users whose home post is in this brigade now; an id of another kind gives nothing",
+              "description": "Users attached to this brigade: home node in it, or an assignment at it or below it (see membership); an id of another kind gives nothing",
               "title": "Brigade Id"
             },
-            "description": "Users whose home post is in this brigade now; an id of another kind gives nothing"
+            "description": "Users attached to this brigade: home node in it, or an assignment at it or below it (see membership); an id of another kind gives nothing"
+          },
+          {
+            "name": "membership",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "any",
+                "home",
+                "assigned"
+              ],
+              "type": "string",
+              "description": "How post_id, brigade_id and corps_id match: home (the home node is there), assigned (a role assignment at the node or below it; archived nodes and roles do not count) or any (either); no effect without a unit field",
+              "default": "any",
+              "title": "Membership"
+            },
+            "description": "How post_id, brigade_id and corps_id match: home (the home node is there), assigned (a role assignment at the node or below it; archived nodes and roles do not count) or any (either); no effect without a unit field"
           },
           {
             "name": "user_type",
@@ -26502,10 +26519,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by post ID",
+              "description": "Users attached to this post: home post, or an assignment at it (see membership)",
               "title": "Post Id"
             },
-            "description": "Filter by post ID"
+            "description": "Users attached to this post: home post, or an assignment at it (see membership)"
           },
           {
             "name": "corps_id",
@@ -26520,10 +26537,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Users whose home post is in this corps now, its brigades included; an id of another kind gives nothing",
+              "description": "Users attached to this corps: home node in it (its brigades included), or an assignment at it or below it (see membership); an id of another kind gives nothing",
               "title": "Corps Id"
             },
-            "description": "Users whose home post is in this corps now, its brigades included; an id of another kind gives nothing"
+            "description": "Users attached to this corps: home node in it (its brigades included), or an assignment at it or below it (see membership); an id of another kind gives nothing"
           },
           {
             "name": "brigade_id",
@@ -26538,10 +26555,27 @@
                   "type": "null"
                 }
               ],
-              "description": "Users whose home post is in this brigade now; an id of another kind gives nothing",
+              "description": "Users attached to this brigade: home node in it, or an assignment at it or below it (see membership); an id of another kind gives nothing",
               "title": "Brigade Id"
             },
-            "description": "Users whose home post is in this brigade now; an id of another kind gives nothing"
+            "description": "Users attached to this brigade: home node in it, or an assignment at it or below it (see membership); an id of another kind gives nothing"
+          },
+          {
+            "name": "membership",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "any",
+                "home",
+                "assigned"
+              ],
+              "type": "string",
+              "description": "How post_id, brigade_id and corps_id match: home (the home node is there), assigned (a role assignment at the node or below it; archived nodes and roles do not count) or any (either); no effect without a unit field",
+              "default": "any",
+              "title": "Membership"
+            },
+            "description": "How post_id, brigade_id and corps_id match: home (the home node is there), assigned (a role assignment at the node or below it; archived nodes and roles do not count) or any (either); no effect without a unit field"
           },
           {
             "name": "user_type",

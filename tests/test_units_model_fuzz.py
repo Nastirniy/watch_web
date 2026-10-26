@@ -1126,7 +1126,7 @@ class Sim:
                             self.fail(("x", label, include_deleted), f"(x) {label} corps {g} {params}: {resp.status_code} api {got and sorted(got)} model {sorted(want)}")
             if admin:
                 want = {u for u, hp in m.users.items() if hp in m.posts_under(g)}
-                got = {u["id"] for u in await self.fetch_all(USERS, {f"{kind}_id": g}, headers)}
+                got = {u["id"] for u in await self.fetch_all(USERS, {f"{kind}_id": g, "membership": "home"}, headers)}
                 if got != want:
                     self.fail(("x", "users-filter", kind), f"(x) users {kind}_id={g}: api {sorted(got)} model {sorted(want)}")
                 for placement in ("recorded", "current"):

@@ -95,6 +95,43 @@ def unit_filter_of(tree: ScopeTree, params) -> Optional[FrozenSet[int]]:
     return units_filter(tree, {kind: getattr(params, f"{kind.value}_id", None) for kind in UNIT_KINDS})
 
 
+@dataclass(frozen=True)
+class UnitNodes:
+    """The nodes a unit filter of a user list matches: users attached to any of these posts or groups"""
+    posts: FrozenSet[int]
+    groups: FrozenSet[int]
+
+
+def membership_nodes(tree: ScopeTree, params, live_only: bool = False) -> Optional[UnitNodes]:
+    """The nodes of the post_id / brigade_id / corps_id fields of a query model (all given must hold: the
+    intersection), None when none is given. post_id: that post; a unit: the posts and groups under it (an id of
+    another kind: nothing). live_only leaves out archived posts and groups (an assignment on one applies nowhere)."""
+    posts: Optional[FrozenSet[int]] = None
+    groups: Optional[FrozenSet[int]] = None
+    nothing: FrozenSet[int] = frozenset()
+
+    def narrow(current: Optional[FrozenSet[int]], found: FrozenSet[int]) -> FrozenSet[int]:
+        return found if current is None else current & found
+
+    post_id = getattr(params, "post_id", None)
+    if post_id is not None:
+        posts, groups = narrow(posts, frozenset({post_id})), narrow(groups, nothing)
+    for kind in UNIT_KINDS:
+        unit_id = getattr(params, f"{kind.value}_id", None)
+        if unit_id is None:
+            continue
+        if tree.group_kind.get(unit_id) == kind.value:
+            posts = narrow(posts, tree.posts_under(Node.group(unit_id)))
+            groups = narrow(groups, tree.groups_under(Node.group(unit_id)))
+        else:
+            posts, groups = narrow(posts, nothing), narrow(groups, nothing)
+    if posts is None or groups is None:
+        return None
+    if live_only:
+        posts, groups = posts - tree.archived_posts, groups - tree.archived_groups
+    return UnitNodes(posts=posts, groups=groups)
+
+
 def unit_counts(auth: AuthContext, unit_id: int, viewable: Optional[FrozenSet[int]]) -> Tuple[int, int]:
     """(active units directly inside it the caller sees (scope_group.view), active posts at any depth below it with
     post.view in effect): the brigade_count and post_count of a unit answer, from the request's tree. viewable is

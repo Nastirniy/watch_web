@@ -3,8 +3,10 @@ current names, in a constant number of queries for a page."""
 from sqlalchemy import event
 
 from app.backend.api.v1 import V1
+from app.backend.auth.scope import Node
+from app.backend.enums.general import BuiltinRole, Permissions, UserType
 from app.backend.enums.routes import AuthRoutes, ScopeGroupRoutes, SearchRoutes, UserRoutes
-from tests.helpers import make_admin, make_group, make_post, make_user
+from tests.helpers import assign, builtin_role, make_admin, make_group, make_post, make_role, make_user
 
 USERS = V1.path(UserRoutes.ROOT)
 
@@ -134,3 +136,88 @@ async def test_a_page_of_users_reads_unit_names_in_constant_queries(client, db, 
     assert len(second.json()) > len(first.json())
     assert all(u["corps"] is not None for u in second.json() if u["post_id"] is not None)
     assert len(statements) == small
+
+
+async def _membership(db):
+    """The tree of _structure plus an archived post P5 under B, users homed at P0, P1, P2 and assigned-only users
+    (home P4, outside the unit): A1 at P1, A2 at B, A3 at P1 and P2, A4 at the archived P5, A5 at P1 through an
+    archived role"""
+    corps, brigade, (p1, p2, p0, p3, p4) = await _structure(db)
+    p5 = await make_post(db, group_id=brigade.id)
+    p5.is_deleted = True
+    db.add(p5)
+    await db.commit()
+    role = await make_role(db, [Permissions.OBSERVATION_VIEW])
+    dead_role = await make_role(db, [Permissions.OBSERVATION_VIEW])
+    dead_role.is_deleted = True
+    db.add(dead_role)
+    await db.commit()
+
+    home = {n: await make_user(db, post_id=post.id) for n, post in (("p0", p0), ("p1", p1), ("p2", p2))}
+    a1, a2, a3, a4, a5 = [await make_user(db, post_id=p4.id) for _ in range(5)]
+    await assign(db, a1, role, Node.post(p1.id))
+    await assign(db, a2, role, Node.group(brigade.id))
+    await assign(db, a3, role, Node.post(p1.id))
+    await assign(db, a3, role, Node.post(p2.id))
+    await assign(db, a4, role, Node.post(p5.id))
+    await assign(db, a5, dead_role, Node.post(p1.id))
+    return corps, brigade, (p1, p2, p0, p3, p4, p5), home, (a1, a2, a3, a4, a5)
+
+
+async def _ids(client, h, **params):
+    response = await client.get(USERS, params={"page_size": 100, **params}, headers=h)
+    assert response.status_code == 200, response.text
+    return [u["id"] for u in response.json()]
+
+
+async def test_brigade_filter_lists_home_and_assigned_users_once(client, db, headers):
+    h = headers(await make_admin(db))
+    corps, brigade, posts, home, (a1, a2, a3, a4, a5) = await _membership(db)
+    listed = await _ids(client, h, brigade_id=brigade.id)
+    assert sorted(listed) == sorted([home["p1"].id, home["p2"].id, a1.id, a2.id, a3.id])
+
+
+async def test_membership_home_and_assigned_split_the_set(client, db, headers):
+    h = headers(await make_admin(db))
+    corps, brigade, posts, home, (a1, a2, a3, a4, a5) = await _membership(db)
+    assert sorted(await _ids(client, h, brigade_id=brigade.id, membership="home")) ==         sorted([home["p1"].id, home["p2"].id])
+    assert sorted(await _ids(client, h, brigade_id=brigade.id, membership="assigned")) == sorted([a1.id, a2.id, a3.id])
+
+
+async def test_corps_filter_reaches_posts_directly_under_the_corps(client, db, headers):
+    h = headers(await make_admin(db))
+    corps, brigade, posts, home, (a1, a2, a3, a4, a5) = await _membership(db)
+    assert sorted(await _ids(client, h, corps_id=corps.id)) ==         sorted([home["p0"].id, home["p1"].id, home["p2"].id, a1.id, a2.id, a3.id])
+
+
+async def test_post_filter_lists_assigned_users(client, db, headers):
+    h = headers(await make_admin(db))
+    corps, brigade, (p1, *_), home, (a1, a2, a3, a4, a5) = await _membership(db)
+    assert sorted(await _ids(client, h, post_id=p1.id)) == sorted([home["p1"].id, a1.id, a3.id])
+    assert await _ids(client, h, post_id=p1.id, membership="home") == [home["p1"].id]
+
+
+async def test_unit_filter_never_widens_visibility(client, db, headers):
+    corps, brigade, (p1, *_), home, (a1, *_rest) = await _membership(db)
+    caller = await make_user(db, user_type=UserType.ADMINISTRATOR)
+    await assign(db, caller, await builtin_role(db, BuiltinRole.ADMINISTRATOR), Node.post(p1.id))
+    listed = await _ids(client, headers(caller), brigade_id=brigade.id)
+    assert sorted(listed) == sorted([home["p1"].id, caller.id])
+    assert a1.id not in listed
+
+
+async def test_caller_outside_the_unit_is_not_listed(client, db, headers):
+    caller = await make_admin(db)
+    corps, brigade, *_ = await _membership(db)
+    assert caller.id not in await _ids(client, headers(caller), brigade_id=brigade.id)
+
+
+async def test_search_users_has_the_same_membership(client, db, headers):
+    h = headers(await make_admin(db))
+    corps, brigade, *_ = await _membership(db)
+    listed = await _ids(client, h, brigade_id=brigade.id, membership="assigned")
+    searched = await client.get(V1.path(SearchRoutes.USERS),
+                                params={"page_size": 100, "brigade_id": brigade.id, "membership": "assigned"}, headers=h)
+    assert searched.status_code == 200, searched.text
+    assert sorted(u["id"] for u in searched.json()["items"]) == sorted(listed)
+    assert searched.json()["total"] == len(listed) == 3

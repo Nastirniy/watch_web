@@ -23,7 +23,7 @@ from app.backend.models.media_format import MediaFormat
 from app.backend.models.media import MediaFile
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.services.audit import create_audit_log
-from app.backend.services.units import observation_units_filter, unit_filter_of
+from app.backend.services.units import membership_nodes, observation_units_filter, unit_filter_of
 from app.backend.utils.row_locks import start_write
 
 # Filter params
@@ -153,18 +153,21 @@ async def search_users(
     session: AsyncSession = Depends(get_session)
 ) -> SearchResponse[UserResponse]:
     # Scope of GET /users: user.view at the home post, the caller always, archived users where user.archive applies
-    access_post_ids = AccessControlService.resolve_scope(auth, Permissions.USER_VIEW, params.post_id)
+    AccessControlService.resolve_scope(auth, Permissions.USER_VIEW, params.post_id)   # 403 for a post the caller cannot see
+    access_post_ids = AccessControlService.resolve_scope(auth, Permissions.USER_VIEW, None)   # post_id is a membership filter
     archived = AccessControlService.archived_scope(auth, params, Permissions.USER_ARCHIVE)
     query = select(User)
-    units = unit_filter_of(auth.tree, params)
+    units = membership_nodes(auth.tree, params)
+    assigned = membership_nodes(auth.tree, params, live_only=True)
     query = UserFilterService.apply_filters(query, params, access_post_ids, archived_post_ids=archived,
-                                            caller_id=auth.user.id, unit_post_ids=units)
+                                            caller_id=auth.user.id, unit_nodes=units, assigned_nodes=assigned)
     result = await session.exec(query)
     items = result.all()
 
     count_query = select(func.count()).select_from(User)
     count_query = UserFilterService.apply_filters_for_count(
-        count_query, params, access_post_ids, archived_post_ids=archived, caller_id=auth.user.id, unit_post_ids=units,
+        count_query, params, access_post_ids, archived_post_ids=archived, caller_id=auth.user.id, unit_nodes=units,
+        assigned_nodes=assigned,
     )
     total = (await session.exec(count_query)).one()
 

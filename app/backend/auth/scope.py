@@ -146,6 +146,15 @@ class ScopeTree:
             return frozenset({node.id})
         return frozenset(post_id for post_id, chain in self._post_chains.items() if node.id in chain)
 
+    def groups_under(self, node: Node) -> FrozenSet[int]:
+        """The group itself (for a group node) and every group below it, archived ones included; the root: every
+        group; a post: none"""
+        if node.kind == "root":
+            return frozenset(self.group_parent)
+        if node.kind == "post":
+            return frozenset()
+        return frozenset(group_id for group_id in self.group_parent if node.id in self._group_chain(group_id))
+
     # ------------------------------------------------------------------ units
     def _units(self, chain: Tuple[int, ...]) -> Dict[str, int]:
         """unit kind -> group id for every group of the chain that is a unit, top down (archived ones included)"""

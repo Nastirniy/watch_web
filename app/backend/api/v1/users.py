@@ -39,7 +39,7 @@ from app.backend.api.v1.models.response.auth import SessionsEndedResponse, UserS
 from app.backend.enums.routes import UserRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.services.audit import create_audit_log
-from app.backend.services.units import unit_filter_of
+from app.backend.services.units import membership_nodes
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.api.v1.models.request.assignments import AssignmentCreate, SystemAssignmentCreate
 from app.backend.api.v1.models.request.users import UserCreateForm, UserUpdateForm
@@ -127,11 +127,13 @@ async def list_users(
     """
     current_user = auth.user
     archived = AccessControlService.archived_scope(auth, filters, Permissions.USER_ARCHIVE)
-    scope = AccessControlService.resolve_scope(auth, Permissions.USER_VIEW, filters.post_id)
+    AccessControlService.resolve_scope(auth, Permissions.USER_VIEW, filters.post_id)   # 403 for a post the caller cannot see
+    scope = AccessControlService.resolve_scope(auth, Permissions.USER_VIEW, None)      # the post_id filter is a membership
 
     query = select(User)
     query = UserFilterService.apply_filters(query, filters, scope, archived_post_ids=archived, caller_id=current_user.id,
-                                            unit_post_ids=unit_filter_of(auth.tree, filters))
+                                            unit_nodes=membership_nodes(auth.tree, filters),
+                                            assigned_nodes=membership_nodes(auth.tree, filters, live_only=True))
     result = await session.exec(query)
     users = result.all()
 

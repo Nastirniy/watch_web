@@ -157,3 +157,13 @@ def test_units_of_group():
 def test_empty_tree_knows_no_kinds():
     assert ScopeTree.empty().group_kind == {}
     assert TREE.units_of_post(7) == {}
+
+
+def test_groups_under():
+    tree = ScopeTree(group_parent={1: None, 2: 1, 3: 2, 4: None}, archived_groups=frozenset({3}),
+                     post_group={7: 3}, archived_posts=frozenset())
+    assert tree.groups_under(Node.group(1)) == {1, 2, 3}
+    assert tree.groups_under(Node.group(2)) == {2, 3}
+    assert tree.groups_under(Node.group(4)) == {4}
+    assert tree.groups_under(Node.post(7)) == frozenset()
+    assert tree.groups_under(ROOT) == {1, 2, 3, 4}

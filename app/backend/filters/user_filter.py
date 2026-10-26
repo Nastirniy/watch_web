@@ -5,13 +5,17 @@ UserFilterService - Filter service for User entity
 from dataclasses import dataclass
 from datetime import datetime
 from typing import FrozenSet, Optional, Iterable
-from sqlalchemy import or_
+from sqlalchemy import false, or_
 from sqlalchemy.sql.selectable import Select
+from sqlmodel import select
 
 from app.backend.enums.general import UserType
+from app.backend.models.role import Role
+from app.backend.models.role_assignment import RoleAssignment
 from app.backend.models.user import User
 from app.backend.auth.presence import online_user_ids_select
 from app.backend.filters.simple_engine import ListCriteria, SimpleFilterEngine
+from app.backend.services.units import UnitNodes
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -23,8 +27,9 @@ class UserCriteria(ListCriteria):
     username_alias: Optional[str] = None
     username_alias_contains: Optional[str] = None
     post_id: Optional[int] = None
-    corps_id: Optional[int] = None      # the route turns units into unit_post_ids (services/units.py units_filter)
+    corps_id: Optional[int] = None      # the route turns post_id / corps_id / brigade_id into UnitNodes (services/units.py membership_nodes)
     brigade_id: Optional[int] = None
+    membership: str = "any"             # any | home | assigned: how the unit fields match
     user_type: Optional[UserType] = None
     is_active: Optional[bool] = None
     is_online: Optional[bool] = None
@@ -61,6 +66,32 @@ class UserFilterService(SimpleFilterEngine):
         return query
 
     @classmethod
+    def _apply_membership(cls, query: Select, params: UserCriteria, unit_nodes: Optional[UnitNodes],
+                          assigned_nodes: Optional[UnitNodes]) -> Select:
+        """post_id / corps_id / brigade_id (both nodes None: not asked for). unit_nodes is the home side (the home
+        post is one of its posts), assigned_nodes the assigned side, live nodes only (membership_nodes(live_only=True)):
+        a user with a role assignment at one of its posts or groups, the role not archived. IN (subquery) lists a user
+        once. The caller's access (_apply_scope) is a separate condition: this one narrows, never widens."""
+        if unit_nodes is None and assigned_nodes is None:
+            return query
+        home = User.post_id.in_(sorted(unit_nodes.posts)) if unit_nodes is not None else false()
+        attached = []
+        if assigned_nodes is not None:
+            if assigned_nodes.posts:
+                attached.append(RoleAssignment.scope_post_id.in_(sorted(assigned_nodes.posts)))
+            if assigned_nodes.groups:
+                attached.append(RoleAssignment.scope_group_id.in_(sorted(assigned_nodes.groups)))
+        assigned = User.id.in_(
+            select(RoleAssignment.user_id).join(Role, Role.id == RoleAssignment.role_id)
+            .where(Role.is_deleted == False, or_(*attached))    # noqa: E712
+        ) if attached else false()
+        if params.membership == "home":
+            return query.where(home)
+        if params.membership == "assigned":
+            return query.where(assigned)
+        return query.where(or_(home, assigned))
+
+    @classmethod
     def _apply_user_type(cls, query: Select, params: UserCriteria) -> Select:
         """users.user_type holds the value of the enum (a plain string column)"""
         return cls._apply_exact(query, User.user_type, params.user_type.value if params.user_type else None)
@@ -74,10 +105,11 @@ class UserFilterService(SimpleFilterEngine):
         archived_post_ids: Optional[FrozenSet[int]] = None,
         caller_id: Optional[int] = None,
         *,
-        unit_post_ids: Optional[FrozenSet[int]],
+        unit_nodes: Optional[UnitNodes],
+        assigned_nodes: Optional[UnitNodes],
     ) -> Select:
-        """Apply all filters from UserCriteria (scope: _apply_scope); unit_post_ids: the posts of the units asked
-        for (corps_id, brigade_id; None: no unit filter), matched against the home post"""
+        """Apply all filters from UserCriteria (scope: _apply_scope); unit_nodes / assigned_nodes: the nodes of
+        post_id, corps_id and brigade_id for the home side and the assigned side (both None: no unit filter)"""
         params = cls.criteria(params)
 
         # Archive state and access control
@@ -85,9 +117,7 @@ class UserFilterService(SimpleFilterEngine):
 
         # ID filters
         query = cls._apply_exact(query, User.id, params.id)
-        query = cls._apply_exact(query, User.post_id, params.post_id)
-        if unit_post_ids is not None:   # home post in the units asked for: the caller is not listed outside them
-            query = query.where(User.post_id.in_(sorted(unit_post_ids)))
+        query = cls._apply_membership(query, params, unit_nodes, assigned_nodes)
 
         # Username filters
         query = cls._apply_exact(query, User.username, params.username)
@@ -121,15 +151,14 @@ class UserFilterService(SimpleFilterEngine):
         archived_post_ids: Optional[FrozenSet[int]] = None,
         caller_id: Optional[int] = None,
         *,
-        unit_post_ids: Optional[FrozenSet[int]],
+        unit_nodes: Optional[UnitNodes],
+        assigned_nodes: Optional[UnitNodes],
     ) -> Select:
         """Apply filters without pagination"""
         params = cls.criteria(params)
         query = cls._apply_scope(query, params, access_post_ids, archived_post_ids, caller_id)
         query = cls._apply_exact(query, User.id, params.id)
-        query = cls._apply_exact(query, User.post_id, params.post_id)
-        if unit_post_ids is not None:   # home post in the units asked for: the caller is not listed outside them
-            query = query.where(User.post_id.in_(sorted(unit_post_ids)))
+        query = cls._apply_membership(query, params, unit_nodes, assigned_nodes)
         query = cls._apply_exact(query, User.username, params.username)
         query = cls._apply_contains(query, User.username, params.username_contains)
         query = cls._apply_exact(query, User.username_alias, params.username_alias)

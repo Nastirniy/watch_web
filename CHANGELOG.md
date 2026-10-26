@@ -12,6 +12,10 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - Every user record (`GET /users/`, `/users/{id}`, `/search/users`, `/auth/me`) carries `home`, `post`, `brigade`, `corps`: the home node and the units around it
   now.
 
+### Changed
+
+- `post_id`, `brigade_id`, `corps_id` on `GET /users/` and `/search/users` also match users assigned at the node or below; `membership` = any | home | assigned (`any` by default).
+
 ## Authorization v3
 
 Tree roles at a node and system roles without one, the user type as a boundary applied at every request, no
