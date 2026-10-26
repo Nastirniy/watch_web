@@ -16,6 +16,23 @@ from app.backend.utils.text import fit_column
 
 NO_SCOPE = {"scope_group_id": None, "scope_post_id": None, "scope_key": None}
 
+# A search event (search.<entity>) keeps action "search" with the singular entity as resource_type; every other
+# event writes its code split at the dot. Search rows written before the catalog keep their stored PLURAL
+# resource_type (migration 031 backfills event / category only and never rewrites resource_type).
+SEARCH_ACTION = "search"
+SEARCHED_RESOURCE = {
+    "observations": "observation", "users": "user", "posts": "post", "roles": "role", "categories": "category",
+    "signal_types": "signal_type", "tags": "tag", "media": "media", "media_formats": "media_format",
+}
+
+
+def resource_and_action(event: AuditEvent) -> tuple[str, str]:
+    """(resource_type, action) columns of a new-form row of the event"""
+    resource_type, action = event.code.split(".", 1)
+    if resource_type == SEARCH_ACTION:
+        return SEARCHED_RESOURCE[action], SEARCH_ACTION
+    return resource_type, action
+
 
 def serialize_for_audit(obj: Any) -> Any:
     """
@@ -58,7 +75,8 @@ async def create_audit_log(
     """Add the audit row of an event to the session of the change (the caller commits; a failure to write it fails
     the request).
 
-    event: the catalog event (enums/audit.py); its code gives resource_type / action, its category the category.
+    event: the catalog event (enums/audit.py); its code gives resource_type / action (resource_and_action), its
+    category the category.
     params: exactly the event's params (unknown or missing required one: TypeError; Optional ones may be left out),
     snapshotted now. scope: the node the event happened at (None: system-wide). The request id comes from the
     request's context. workspace is accepted and ignored until its column exists (part 5).
@@ -78,7 +96,7 @@ async def create_audit_log(
         if not isinstance(event, AuditEvent):
             raise TypeError(f"create_audit_log needs an AuditEvent, not {event!r}")
         check_event_params(event, params or {})
-        resource_type, action = event.code.split(".", 1)
+        resource_type, action = resource_and_action(event)
     audit = AuditLog(
         event=event.code,
         category=event.category.value,

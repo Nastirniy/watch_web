@@ -9,8 +9,8 @@ class AuditLog(SQLModel, table=True):
     """One audited event (enums/audit.py AuditEvent), written by services/audit.create_audit_log.
 
     event / category: the catalog code and its category (null only on rows a raw INSERT wrote after migration 031
-    and before its writer names its event); action / resource_type: the code split at the dot, kept for old readers
-    and old rows. params: what the event's message needs, snapshotted at write time. scope_*: the node the event
+    and before its writer names its event); action / resource_type: the code split at the dot (a search event:
+    action search, the singular entity), kept for old readers and old rows. params: what the event's message needs, snapshotted at write time. scope_*: the node the event
     happened at (models/role_assignment.scope_columns), all null for a system-wide event. request_id: the
     X-Request-ID of the request (null outside a request). No foreign keys: rows outlive what they name."""
     __tablename__ = "audit_logs"
@@ -28,7 +28,8 @@ class AuditLog(SQLModel, table=True):
     action: str = Field(max_length=100, index=True)
     resource_type: str = Field(max_length=50, index=True)
     resource_id: Optional[int] = Field(default=None, index=True)
-    params: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
+    # none_as_null: a row without params stores SQL NULL (as backfilled and raw-INSERT rows do), not JSON 'null'
+    params: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON(none_as_null=True)))
 
     scope_key: Optional[str] = Field(default=None, max_length=24)
     scope_post_id: Optional[int] = Field(default=None, index=True)

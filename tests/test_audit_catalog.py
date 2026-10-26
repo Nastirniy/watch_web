@@ -62,6 +62,7 @@ def test_search_and_dictionary_events():
 # --- create_audit_log(event=...): category, scope, request id, params ----------------------------------------------
 
 import pytest
+from sqlalchemy import text as sa_text
 
 from app.backend.auth.scope import Node
 from app.backend.migrations.support.audit_events_v1 import LEGACY_EVENTS, LEGACY_MIGRATE, LEGACY_UNKNOWN
@@ -105,7 +106,32 @@ async def test_row_gets_category_scope_request_id(db):
     system = await db.get(AuditLog, system_row.id)
     assert (system.scope_key, system.scope_post_id, system.scope_group_id, system.request_id) == (None,) * 4
     assert (system.event, system.category, system.resource_type, system.action) == (
-        "search.tags", "reads", "search", "tags")
+        "search.tags", "reads", "tag", "search")
+
+
+async def test_search_events_keep_action_search_with_the_singular_entity(db):
+    row = await create_audit_log(db, AuditEvent.SEARCH_OBSERVATIONS, params={"result_count": 3})
+    stored = await _stored(db, row)
+    assert (stored.event, stored.category, stored.action, stored.resource_type) == (
+        "search.observations", "reads", "search", "observation")
+    singular = {"observations": "observation", "users": "user", "posts": "post", "roles": "role",
+                "categories": "category", "signal_types": "signal_type", "tags": "tag", "media": "media",
+                "media_formats": "media_format"}
+    for member in AuditEvent:
+        resource_type, action = audit_service.writer.resource_and_action(member)
+        if member.code.startswith("search."):
+            assert (resource_type, action) == (singular[member.code.split(".", 1)[1]], "search"), member.code
+        else:
+            assert f"{resource_type}.{action}" == member.code
+
+
+async def test_a_row_without_params_stores_sql_null(db):
+    row = await create_audit_log(db, AuditEvent.SEARCH_TAGS, params={"result_count": 1})
+    empty = await create_audit_log(db, action="create", resource_type="tag", details={"message": "x"})
+    await db.commit()
+    found = (await db.execute(sa_text("select id from audit_logs where params is null"))).all()
+    assert {row_id for (row_id,) in found} == {empty.id}
+    assert row.id not in {row_id for (row_id,) in found}
 
 
 async def test_wrong_params_raise_type_error(db):
