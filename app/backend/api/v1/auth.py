@@ -24,6 +24,7 @@ from app.backend.utils.logging_config import get_auth_logger
 from app.backend.config import settings
 from app.backend.auth.certificates import parse_cn
 from app.backend.services.certificates import session_certificate
+from app.backend.services.user_units import users_units
 from app.backend.api.v1.models.request.auth import (
     LoginRequest,
     RefreshRequest,
@@ -296,7 +297,8 @@ async def get_current_user_info(
     none, the development login), so the web client can warn before it expires"""
     return build_user_info(auth, await assignment_views(session, auth.user.id),
                            await system_assignment_views(session, auth.user.id),
-                           await session_certificate(session, auth.user.id, auth.session_id))
+                           await session_certificate(session, auth.user.id, auth.session_id),
+                           (await users_units(session, auth.tree, [auth.user]))[auth.user.id])
 
 
 @router.get(

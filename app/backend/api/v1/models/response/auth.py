@@ -6,8 +6,11 @@ from app.backend.enums.general import SessionEndReason, SessionRevokeCause, Sess
 from app.backend.models.user import UserSession
 from app.backend.models.user_certificate import UserCertificate
 from app.backend.services.certificates import certificate_state
+from app.backend.services.user_units import UserUnits
 from app.backend.api.v1.models.response.assignments import AssignmentResponse, SystemAssignmentResponse
 from app.backend.api.v1.models.response.certificates import SessionCertificate
+from app.backend.api.v1.models.response.posts import UnitRefResponse
+from app.backend.api.v1.models.response.users import HomeRefResponse, PostRefResponse, units_fields
 from app.backend.auth.assignments import AssignmentView
 from app.backend.auth.context import AuthContext
 from app.backend.auth.presence import online_threshold_seconds
@@ -67,6 +70,10 @@ class UserInfoResponse(AuthorizationInfo):
     certificate: Optional[SessionCertificate] = Field(
         default=None, description="The client certificate the current session was opened with (warn before it "
                                   "expires); null for a session bound to none (development login)")
+    home: Optional[HomeRefResponse] = Field(default=None, description="The node the user belongs to now; null without a home")
+    post: Optional[PostRefResponse] = Field(default=None, description="The home post of the user (post_id with its name and code); null without one")
+    brigade: Optional[UnitRefResponse] = Field(default=None, description="Brigade the home sits in now; null: outside any brigade")
+    corps: Optional[UnitRefResponse] = Field(default=None, description="Corps the home sits in now (directly or through a brigade); null: outside any corps")
 
 
 class SessionInfoResponse(BaseModel):
@@ -134,10 +141,11 @@ def _authorization_fields(auth: AuthContext, assignments: Iterable[AssignmentVie
 
 
 def build_user_info(auth: AuthContext, assignments: Iterable[AssignmentView], system_assignments: Iterable,
-                    certificate: Optional[UserCertificate] = None) -> UserInfoResponse:
+                    certificate: Optional[UserCertificate] = None,
+                    units: Optional[UserUnits] = None) -> UserInfoResponse:
     """assignments: auth/assignments.py assignment_views of the user; system_assignments:
     auth/system_assignments.py system_assignment_views; certificate: the one the session is bound to
-    (services/certificates.py session_certificate)"""
+    (services/certificates.py session_certificate); units: services/user_units.py users_units of the user"""
     user = auth.user
     return UserInfoResponse(
         id=user.id,
@@ -150,6 +158,7 @@ def build_user_info(auth: AuthContext, assignments: Iterable[AssignmentView], sy
         certificate=None if certificate is None else SessionCertificate(
             id=certificate.id, label=certificate.label, not_after=certificate.not_after,
             state=certificate_state(certificate)),
+        **units_fields(units or UserUnits()),
         **_authorization_fields(auth, assignments, system_assignments),
     )
 

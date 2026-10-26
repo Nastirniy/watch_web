@@ -34512,6 +34512,45 @@
         "title": "HealthResponse",
         "description": "Main health check response model"
       },
+      "HomeRefResponse": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "post",
+              "group"
+            ],
+            "title": "Kind"
+          },
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "group_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScopeGroupKind"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Kind of the group when kind is group; null for a post"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "id",
+          "name"
+        ],
+        "title": "HomeRefResponse",
+        "description": "The node a user belongs to: a post today (a scope group joins later)"
+      },
       "ImageTooLargeForThumbnailsProblem": {
         "properties": {
           "type": {
@@ -40476,6 +40515,30 @@
           "post_id"
         ],
         "title": "PostObservationStatsResponse"
+      },
+      "PostRefResponse": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "code"
+        ],
+        "title": "PostRefResponse",
+        "description": "A post: its id, today's name and code"
       },
       "PostResponse": {
         "properties": {
@@ -47672,6 +47735,50 @@
               }
             ],
             "description": "The client certificate the current session was opened with (warn before it expires); null for a session bound to none (development login)"
+          },
+          "home": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HomeRefResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The node the user belongs to now; null without a home"
+          },
+          "post": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PostRefResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The home post of the user (post_id with its name and code); null without one"
+          },
+          "brigade": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnitRefResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Brigade the home sits in now; null: outside any brigade"
+          },
+          "corps": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnitRefResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Corps the home sits in now (directly or through a brigade); null: outside any corps"
           }
         },
         "type": "object",
@@ -47966,6 +48073,50 @@
             "type": "boolean",
             "title": "Is Deleted",
             "default": false
+          },
+          "home": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HomeRefResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The node the user belongs to now; null without a home"
+          },
+          "post": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PostRefResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The home post of the user (post_id with its name and code); null without one"
+          },
+          "brigade": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnitRefResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Brigade the home sits in now; null: outside any brigade"
+          },
+          "corps": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnitRefResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Corps the home sits in now (directly or through a brigade); null: outside any corps"
           }
         },
         "additionalProperties": false,

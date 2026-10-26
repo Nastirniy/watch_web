@@ -44,7 +44,7 @@ from app.backend.utils.logging_config import get_api_logger
 from app.backend.api.v1.models.request.assignments import AssignmentCreate, SystemAssignmentCreate
 from app.backend.api.v1.models.request.users import UserCreateForm, UserUpdateForm
 from app.backend.api.v1.models.response.assignments import AssignmentResponse, SystemAssignmentResponse
-from app.backend.api.v1.models.response.users import UserResponse
+from app.backend.api.v1.models.response.users import UserResponse, user_to_response, users_to_response
 from app.backend.api.v1.models.query.users import UserFilterParams
 from app.backend.filters.user_filter import UserFilterService
 from app.backend.errors.problems import ApiError
@@ -137,7 +137,7 @@ async def list_users(
 
     _logger.info(f"User {current_user.username} listed {len(users)} users (scope={sorted(scope) if scope is not None else 'all'})")
 
-    return [UserResponse.model_validate(user) for user in users]
+    return await users_to_response(session, auth.tree, users)
 
 
 @router.post(
@@ -250,17 +250,7 @@ async def create_user(
         _logger.info(f"User {current_user.username} created user {user_data.username} ({user.user_type}), "
                      f"certificate_id={certificate_id}")
 
-        return UserResponse(
-            id=user.id,
-            username=user.username,
-            username_alias=user.username_alias,
-            post_id=user.post_id,
-            user_type=user.user_type,
-            is_active=user.is_active,
-            created_at=user.created_at,
-            updated_at=user.updated_at,
-            last_login_at=user.last_login_at
-        )
+        return await user_to_response(session, auth.tree, user)
     except (IntegrityError, DataError) as e:
         await session.rollback()
         if is_data_too_long(e):
@@ -350,7 +340,7 @@ async def get_user(
     if user.is_deleted and not auth.covers_user(Permissions.USER_ARCHIVE, user):
         raise ApiError(ErrorCode.USER_NOT_FOUND)
 
-    return UserResponse.model_validate(user)
+    return await user_to_response(session, auth.tree, user)
 
 
 @router.patch(
@@ -520,7 +510,7 @@ async def update_user(
 
         _logger.info(f"User {current_user.username} updated user {user.username}")
 
-        return UserResponse.model_validate(user)
+        return await user_to_response(session, auth.tree, user)
 
     except IntegrityError as e:
         await session.rollback()
@@ -591,7 +581,7 @@ async def archive_user(
     await session.commit()
     await session.refresh(user)
     _logger.info(f"User {current_user.username} archived user {user.username}")
-    return UserResponse.model_validate(user)
+    return await user_to_response(session, auth.tree, user)
 
 
 @router.post(
@@ -635,7 +625,7 @@ async def restore_user(
     await session.commit()
     await session.refresh(user)
     _logger.info(f"User {current_user.username} restored user {user.username}")
-    return UserResponse.model_validate(user)
+    return await user_to_response(session, auth.tree, user)
 
 
 @router.get(

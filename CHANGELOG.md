@@ -5,6 +5,13 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Users by unit
+
+### Added
+
+- Every user record (`GET /users/`, `/users/{id}`, `/search/users`, `/auth/me`) carries `home`, `post`, `brigade`, `corps`: the home node and the units around it
+  now.
+
 ## Authorization v3
 
 Tree roles at a node and system roles without one, the user type as a boundary applied at every request, no

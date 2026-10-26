@@ -50,7 +50,7 @@ from app.backend.filters.media_filter import MediaFilterService
 
 from app.backend.api.v1.models.response.observations import ObservationWithMedia, observations_to_response
 from app.backend.api.v1.models.response.posts import PostResponse, posts_to_response
-from app.backend.api.v1.models.response.users import UserResponse
+from app.backend.api.v1.models.response.users import UserResponse, users_to_response
 from app.backend.api.shared.helpers.roles_helper import permission_names_by_role
 from app.backend.api.v1.models.response.roles import RoleResponse, role_to_response
 from app.backend.api.v1.models.response.categories import CategoryResponse
@@ -170,7 +170,7 @@ async def search_users(
 
     await log_search(request, session, auth, "users", params.model_dump(exclude_none=True), len(items))
 
-    return SearchResponse[UserResponse].create("users", [UserResponse.model_validate(item) for item in items], total, params.page, params.page_size)
+    return SearchResponse[UserResponse].create("users", await users_to_response(session, auth.tree, items), total, params.page, params.page_size)
 
 
 # =============================================================================
