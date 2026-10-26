@@ -38,6 +38,10 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   gone. Removing a tree assignment never touches the administrator (it no longer answers `last_admin_required` or
   `cannot_remove_own_admin`). A type change gives and removes system base roles (audit `added_system_assignments`,
   `removed_system_assignments`).
+- `/auth/me` and the login response: new `system_assignments` and `system_permissions`; `root_permissions` holds the
+  tree permissions at the root only; `permissions` (the menu) stays the union.
+- `GET /user-types`: `base_roles` (`id`, `name`, `display_name`, `kind`, `at_root`), `tree_boundary` and
+  `system_boundary` replace `base_role`, `base_permissions` and `allowed_permissions`.
 
 ## Database backups
 

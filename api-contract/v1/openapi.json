@@ -29668,7 +29668,7 @@
           "USER_TYPES"
         ],
         "summary": "List User Types",
-        "description": "The catalog of user types, in catalog order: the tree base role, the permissions of every base role and the\nboundary (tree and system) of each.",
+        "description": "The catalog of user types, in catalog order: the base roles and the boundaries (tree and system) of each.",
         "operationId": "list_user_types",
         "responses": {
           "200": {
@@ -35049,13 +35049,29 @@
             "title": "Assignments",
             "description": "The role assignments of the user, as GET /users/{user_id}/assignments lists them (assignments of archived roles included: role.is_deleted, they grant nothing)"
           },
+          "system_assignments": {
+            "items": {
+              "$ref": "#/components/schemas/SystemAssignmentResponse"
+            },
+            "type": "array",
+            "title": "System Assignments",
+            "description": "The system role assignments of the user, as GET /users/{user_id}/system-assignments lists them"
+          },
+          "system_permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "System Permissions",
+            "description": "Permissions of the system roles: they act on the whole system (administration of roles, dictionaries, formats, audit, monitoring, backups)"
+          },
           "root_permissions": {
             "items": {
               "type": "string"
             },
             "type": "array",
             "title": "Root Permissions",
-            "description": "Permissions held at the root: in effect at every post"
+            "description": "Tree permissions held at the root: in effect at every post"
           },
           "post_permissions": {
             "additionalProperties": {
@@ -35111,6 +35127,8 @@
           "user_type",
           "permissions",
           "assignments",
+          "system_assignments",
+          "system_permissions",
           "root_permissions",
           "post_permissions",
           "group_permissions",
@@ -47485,13 +47503,29 @@
             "title": "Assignments",
             "description": "The role assignments of the user, as GET /users/{user_id}/assignments lists them (assignments of archived roles included: role.is_deleted, they grant nothing)"
           },
+          "system_assignments": {
+            "items": {
+              "$ref": "#/components/schemas/SystemAssignmentResponse"
+            },
+            "type": "array",
+            "title": "System Assignments",
+            "description": "The system role assignments of the user, as GET /users/{user_id}/system-assignments lists them"
+          },
+          "system_permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "System Permissions",
+            "description": "Permissions of the system roles: they act on the whole system (administration of roles, dictionaries, formats, audit, monitoring, backups)"
+          },
           "root_permissions": {
             "items": {
               "type": "string"
             },
             "type": "array",
             "title": "Root Permissions",
-            "description": "Permissions held at the root: in effect at every post"
+            "description": "Tree permissions held at the root: in effect at every post"
           },
           "post_permissions": {
             "additionalProperties": {
@@ -47585,6 +47619,8 @@
           "user_type",
           "permissions",
           "assignments",
+          "system_assignments",
+          "system_permissions",
           "root_permissions",
           "post_permissions",
           "group_permissions",
@@ -48117,6 +48153,42 @@
         "title": "UserType",
         "description": "The type of a user, a position: its base roles, its boundary and the pages of the web client\n(auth/user_types.py); never a place. The order is the order of the catalog."
       },
+      "UserTypeBaseRole": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RoleKind",
+            "description": "tree: given at the home node (or the root); system: a system assignment"
+          },
+          "at_root": {
+            "type": "boolean",
+            "title": "At Root",
+            "description": "A tree base role given at the root whatever the home post"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "display_name",
+          "kind",
+          "at_root"
+        ],
+        "title": "UserTypeBaseRole",
+        "description": "A built-in role every new user of the type gets"
+      },
       "UserTypeCeilingExceededProblem": {
         "properties": {
           "type": {
@@ -48224,25 +48296,29 @@
             "type": "string",
             "title": "Description"
           },
-          "base_role": {
-            "$ref": "#/components/schemas/UserTypeRole",
-            "description": "The built-in role of the type: every user of the type gets it by default"
+          "base_roles": {
+            "items": {
+              "$ref": "#/components/schemas/UserTypeBaseRole"
+            },
+            "type": "array",
+            "title": "Base Roles",
+            "description": "The built-in roles a new user of the type gets"
           },
-          "base_permissions": {
+          "tree_boundary": {
             "items": {
               "type": "string"
             },
             "type": "array",
-            "title": "Base Permissions",
-            "description": "Permissions of the base role, sorted"
+            "title": "Tree Boundary",
+            "description": "The most a user of the type can ever have in effect through tree roles, sorted: a tree role outside it is refused (role_exceeds_user_type) and its excess never acts"
           },
-          "allowed_permissions": {
+          "system_boundary": {
             "items": {
               "type": "string"
             },
             "type": "array",
-            "title": "Allowed Permissions",
-            "description": "The ceiling: a role assigned to a user of this type holds nothing outside it. Sorted, includes the base"
+            "title": "System Boundary",
+            "description": "The same for system roles, sorted (empty: no system role for this type)"
           }
         },
         "additionalProperties": false,
@@ -48251,35 +48327,11 @@
           "key",
           "display_name",
           "description",
-          "base_role",
-          "base_permissions",
-          "allowed_permissions"
+          "base_roles",
+          "tree_boundary",
+          "system_boundary"
         ],
         "title": "UserTypeResponse"
-      },
-      "UserTypeRole": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "display_name": {
-            "type": "string",
-            "title": "Display Name"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "id",
-          "name",
-          "display_name"
-        ],
-        "title": "UserTypeRole"
       },
       "UserUpdateForm": {
         "properties": {

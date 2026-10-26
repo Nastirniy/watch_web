@@ -52,7 +52,8 @@ async def test_admin_sees_every_post_record(db):
     for grant in auth.grants:
         assert "admin.true" not in grant.permissions and "post.access_all" not in grant.permissions
     assert auth.covers(P.USER_UPDATE, ROOT) and auth.covers_user(P.USER_UPDATE, admin)
-    assert auth.root_permissions == auth.held_anywhere and auth.post_permissions() == {}
+    assert auth.root_permissions | auth.system_permissions == auth.held_anywhere and auth.post_permissions() == {}
+    assert not auth.root_permissions & auth.system_permissions
     assert not hasattr(auth, "is_admin") and not hasattr(auth, "roles")   # the administrator: privileges.holds_admin_at_root
 
 

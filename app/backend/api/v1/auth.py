@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from sqlmodel import select
 from app.backend.auth.require import require
 from app.backend.auth.assignments import assignment_views
+from app.backend.auth.system_assignments import system_assignment_views
 from app.backend.auth.context import AuthContext, load_auth_context
 from app.backend.auth.require import Require
 from app.backend.auth.route_access import route_access_map, routes_allowed_for
@@ -152,7 +153,8 @@ async def login(
     )
 
     auth_context = await load_auth_context(session, user)
-    return build_login_response(auth_context, await assignment_views(session, user.id), access_token, refresh_token,
+    return build_login_response(auth_context, await assignment_views(session, user.id),
+                                await system_assignment_views(session, user.id), access_token, refresh_token,
                                 expires_in)
 
 
@@ -249,7 +251,8 @@ async def refresh_token(
     _logger.info(f"Token refreshed for user {user.username}")
 
     auth_context = await load_auth_context(session, user)
-    return build_login_response(auth_context, await assignment_views(session, user.id), access_token,
+    return build_login_response(auth_context, await assignment_views(session, user.id),
+                                await system_assignment_views(session, user.id), access_token,
                                 new_refresh_token, expires_in)
 
 
@@ -292,6 +295,7 @@ async def get_current_user_info(
     certificate: the client certificate of this session (id, label, not_after, state; null for a session bound to
     none, the development login), so the web client can warn before it expires"""
     return build_user_info(auth, await assignment_views(session, auth.user.id),
+                           await system_assignment_views(session, auth.user.id),
                            await session_certificate(session, auth.user.id, auth.session_id))
 
 

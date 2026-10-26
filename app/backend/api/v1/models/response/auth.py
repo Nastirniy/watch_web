@@ -6,7 +6,7 @@ from app.backend.enums.general import SessionEndReason, SessionRevokeCause, Sess
 from app.backend.models.user import UserSession
 from app.backend.models.user_certificate import UserCertificate
 from app.backend.services.certificates import certificate_state
-from app.backend.api.v1.models.response.assignments import AssignmentResponse
+from app.backend.api.v1.models.response.assignments import AssignmentResponse, SystemAssignmentResponse
 from app.backend.api.v1.models.response.certificates import SessionCertificate
 from app.backend.auth.assignments import AssignmentView
 from app.backend.auth.context import AuthContext
@@ -25,7 +25,12 @@ class AuthorizationInfo(PlainTextModel):
     assignments: List[AssignmentResponse] = Field(
         description="The role assignments of the user, as GET /users/{user_id}/assignments lists them (assignments of "
                     "archived roles included: role.is_deleted, they grant nothing)")
-    root_permissions: List[str] = Field(description="Permissions held at the root: in effect at every post")
+    system_assignments: List[SystemAssignmentResponse] = Field(
+        description="The system role assignments of the user, as GET /users/{user_id}/system-assignments lists them")
+    system_permissions: List[str] = Field(
+        description="Permissions of the system roles: they act on the whole system (administration of roles, "
+                    "dictionaries, formats, audit, monitoring, backups)")
+    root_permissions: List[str] = Field(description="Tree permissions held at the root: in effect at every post")
     post_permissions: Dict[str, List[str]] = Field(
         description="Post id -> the permissions the assignments at groups and posts put in effect at that post, for "
                     "every post they reach (an assignment on an archived post stops applying there, a group's keep "
@@ -112,21 +117,26 @@ class RouteAccessResponse(BaseModel):
     routes: List[RouteAccessEntryResponse]
 
 
-def _authorization_fields(auth: AuthContext, assignments: Iterable[AssignmentView]) -> dict:
+def _authorization_fields(auth: AuthContext, assignments: Iterable[AssignmentView],
+                          system_assignments: Iterable) -> dict:
     return {
         "post_id": auth.user.post_id,
         "user_type": auth.user.user_type,
         "permissions": sorted(auth.permissions),
         "assignments": [AssignmentResponse.model_validate(view, from_attributes=True) for view in assignments],
+        "system_assignments": [SystemAssignmentResponse.model_validate(view, from_attributes=True)
+                               for view in system_assignments],
+        "system_permissions": sorted(auth.system_permissions),
         "root_permissions": sorted(auth.root_permissions),
         "post_permissions": {str(post_id): sorted(held) for post_id, held in auth.post_permissions().items()},
         "group_permissions": {str(group_id): sorted(held) for group_id, held in auth.group_permissions().items()},
     }
 
 
-def build_user_info(auth: AuthContext, assignments: Iterable[AssignmentView],
+def build_user_info(auth: AuthContext, assignments: Iterable[AssignmentView], system_assignments: Iterable,
                     certificate: Optional[UserCertificate] = None) -> UserInfoResponse:
-    """assignments: auth/assignments.py assignment_views of the user; certificate: the one the session is bound to
+    """assignments: auth/assignments.py assignment_views of the user; system_assignments:
+    auth/system_assignments.py system_assignment_views; certificate: the one the session is bound to
     (services/certificates.py session_certificate)"""
     user = auth.user
     return UserInfoResponse(
@@ -140,20 +150,20 @@ def build_user_info(auth: AuthContext, assignments: Iterable[AssignmentView],
         certificate=None if certificate is None else SessionCertificate(
             id=certificate.id, label=certificate.label, not_after=certificate.not_after,
             state=certificate_state(certificate)),
-        **_authorization_fields(auth, assignments),
+        **_authorization_fields(auth, assignments, system_assignments),
     )
 
 
-def build_login_response(auth: AuthContext, assignments: Iterable[AssignmentView], access_token: str,
-                         refresh_token: str, expires_in: int) -> LoginResponse:
-    """assignments: auth/assignments.py assignment_views of the user"""
+def build_login_response(auth: AuthContext, assignments: Iterable[AssignmentView], system_assignments: Iterable,
+                         access_token: str, refresh_token: str, expires_in: int) -> LoginResponse:
+    """assignments: auth/assignments.py assignment_views of the user; system_assignments: system_assignment_views"""
     return LoginResponse(
         access_token=access_token,
         refresh_token=refresh_token,
         expires_in=expires_in,
         user_id=auth.user.id,
         username=auth.user.username,
-        **_authorization_fields(auth, assignments),
+        **_authorization_fields(auth, assignments, system_assignments),
     )
 
 

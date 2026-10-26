@@ -103,8 +103,9 @@ class AuthContext:
 
     @property
     def root_permissions(self) -> FrozenSet[str]:
-        """Permissions held at the root: in effect at every post"""
-        return frozenset().union(*(grant.permissions for grant in self.grants if grant.node == ROOT))
+        """Permissions of the tree grants at the root: in effect at every post (system grants: system_permissions)"""
+        return frozenset().union(*(grant.permissions for grant in self.grants
+                                   if grant.node == ROOT and grant.kind == "tree"))
 
     def post_permissions(self) -> Dict[int, FrozenSet[str]]:
         """post id -> the permissions the grants below the root (groups, posts) put in effect at that post, for every

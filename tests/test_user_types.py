@@ -98,12 +98,11 @@ async def test_user_types_catalog(client, db, headers):
     assert [t["key"] for t in body] == [
         "viewer", "operator", "senior_operator", "analyst", "administrator", "system_administrator"]
     operator = body[1]
-    assert operator["base_role"]["name"] == "operator" and operator["base_role"]["id"] > 0
-    assert set(operator["base_permissions"]) <= set(operator["allowed_permissions"])
-    assert operator["base_permissions"] == sorted(operator["base_permissions"])
+    assert [r["name"] for r in operator["base_roles"]] == ["operator"] and operator["base_roles"][0]["id"] > 0
+    assert operator["tree_boundary"] == sorted(operator["tree_boundary"])
     assert operator["display_name"] == "Оператор посту"
-    assert len(body[5]["base_permissions"]) == len(Permissions)
-    assert body[5]["base_role"]["name"] == "administrator"
+    assert len(body[5]["tree_boundary"]) + len(body[5]["system_boundary"]) == len(Permissions)
+    assert [r["name"] for r in body[5]["base_roles"]] == ["administrator", "system_administrator"]
 
 
 async def test_user_types_need_authentication(client, db):
