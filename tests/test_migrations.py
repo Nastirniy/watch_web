@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-HEAD = "029_authz_v3_schema"
+HEAD = "030_authorization_v3"
 
 
 def run_migrate(db_file: Path, cwd: Path = PROJECT_ROOT) -> subprocess.CompletedProcess:

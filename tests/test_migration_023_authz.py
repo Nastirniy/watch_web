@@ -16,6 +16,7 @@ from tests.test_column_bounds import _run_downgrade
 from tests.test_migrations import HEAD, PROJECT_ROOT, run_migrate
 
 PREVIOUS = "022_builtin_roles"
+V3_SCHEMA = "029_authz_v3_schema"     # before 030_authorization_v3
 STAMP = "2026-01-01 00:00:00"
 
 PERMISSIONS = {
@@ -97,9 +98,14 @@ def test_conversion_writes_assignments_types_and_log(tmp_path):
     db_file = legacy_database(tmp_path)
     result = run_migrate(db_file)
     assert result.returncode == 0, result.stdout + result.stderr
-
     conn = sqlite3.connect(db_file)
     assert conn.execute("select version_num from alembic_version").fetchone()[0] == HEAD
+    conn.close()
+    # The v2 result as 023 wrote it: 030 (authorization v3) converts it further, and its downgrade restores it exactly
+    down = _run_downgrade(db_file, V3_SCHEMA)
+    assert down.returncode == 0, down.stdout + down.stderr
+
+    conn = sqlite3.connect(db_file)
     assert dict(conn.execute("select id, user_type from users")) == {
         1: "admin", 2: "operator", 3: "admin", 4: "analyst", 5: "viewer"}
     assert assignments(conn) == {
@@ -131,7 +137,8 @@ def test_conversion_writes_assignments_types_and_log(tmp_path):
     assert {row[1]: row[3] for row in conn.execute("pragma table_info(users)")}["user_type"] == 1, "NOT NULL"
 
     audit = {user_id: json.loads(details) for user_id, details in conn.execute(
-        "select resource_id, details from audit_logs where action = 'migrate' and resource_type = 'user'")}
+        "select resource_id, details from audit_logs where action = 'migrate' and resource_type = 'user'"
+        " and details not like '%authorization_v3%'")}
     assert set(audit) == set(USERS)
     assert audit[2]["type"] == "operator"
     assert audit[2]["after"] == [{"role": "ops", "derived": False, "scope": "p:7"},
@@ -169,7 +176,9 @@ def rerun_023(db_file: Path) -> str:
 
 
 def migrate_audit_rows(conn) -> int:
-    return conn.execute("select count(*) from audit_logs where action = 'migrate'").fetchone()[0]
+    """The audit rows 023 wrote (030 writes one per user too, details under authorization_v3)"""
+    return conn.execute("select count(*) from audit_logs where action = 'migrate'"
+                        " and details not like '%authorization_v3%'").fetchone()[0]
 
 
 @pytest.mark.slow
@@ -179,6 +188,7 @@ def test_a_rerun_finishes_the_renames_without_converting_again(tmp_path):
     tables, tells a rerun that the data is converted, and each legacy table still under its old name is renamed"""
     db_file = legacy_database(tmp_path)
     assert run_migrate(db_file).returncode == 0
+    assert _run_downgrade(db_file, V3_SCHEMA).returncode == 0      # the v2 result, as 023 wrote it
     conn = sqlite3.connect(db_file)
     converted = assignments(conn)
     assert len(converted) == 7 and migrate_audit_rows(conn) == len(USERS)
@@ -193,6 +203,7 @@ def test_a_rerun_finishes_the_renames_without_converting_again(tmp_path):
 
         rerun = rerun_023(db_file)
         assert "already converted" in rerun and "converting" not in rerun, rerun
+        assert _run_downgrade(db_file, V3_SCHEMA).returncode == 0
         conn = sqlite3.connect(db_file)
         present = tables(conn)
         assert {"user_roles_v1", "user_post_access_v1"} <= present, (unrenamed, present)

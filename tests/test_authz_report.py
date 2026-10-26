@@ -47,8 +47,10 @@ def test_report_matches_migration(tmp_path):
 
     assert run_migrate(db_file).returncode == 0
     conn = sqlite3.connect(db_file)
-    audit = {user_id: json.loads(details) for user_id, details in conn.execute(
-        "select resource_id, details from audit_logs where action = 'migrate' and resource_type = 'user'")}
+    audit = {}
+    for user_id, details in conn.execute("select resource_id, details from audit_logs where action = 'migrate'"
+                                         " and resource_type = 'user' order by id"):
+        audit.setdefault(user_id, json.loads(details))      # 023's row; 030 writes its own after it
     conn.close()
     for entry in planned["users"]:
         written = audit[entry["user_id"]]

@@ -1,7 +1,13 @@
 """Dry run of migration 023_authorization_v2: the plan for every user of a database at revision 022_builtin_roles,
-read-only.
+read-only; with --v3 the dry run of migration 030_authorization_v3 on a database at 028 or 029.
 
     python -m app.backend.cli.authz_report [--json] [--url URL]
+    python -m app.backend.cli.authz_report --v3 [--json] [--url URL]
+
+--v3 prints, per user, the type after the conversion and the permissions in effect per node before and after it
+(v2: every live role at its node; v3: kinds, split roles, system assignments at the root, the boundary of the new
+type), every difference other than the unit management former post_admin holders gain (expected: none), the grants
+the conversion drops and the system administrators after it. Exit code 2: the database is not at 028 or 029.
 
 Run it on a copy of the production database before the upgrade. A database before 022 is refused: upgrade the copy
 first (`alembic upgrade 022_builtin_roles` from the project root, WATCH_WEB_ALEMBIC_URL pointing at the copy). For
@@ -120,7 +126,7 @@ NO_ROOT_ADMIN = (
     "WARNING: nobody active will hold the built-in admin role at the root after the conversion: archiving or "
     "deactivating a user will answer last_admin_required and nobody can assign the admin role. After the upgrade, "
     "create an administrator on the server: python -m app.backend.cli.init_user <certificate.pem> --username <name> "
-    "--alias <display name> --user-type admin (DEPLOYMENT.md)"
+    "--alias <display name> --user-type system_administrator (DEPLOYMENT.md)"
 )
 
 
@@ -157,10 +163,104 @@ def text_report(revision: str, report: dict) -> str:
     return "\n".join(lines)
 
 
+V3_REVISIONS = ("028_no_actor_foreign_keys", "029_authz_v3_schema")
+
+
+def _read_v3(conn):
+    """(revision, v2 data for the v3 conversion or None, inactive user ids); read-only like _read"""
+    from app.backend.migrations.support.authz_v3_data import load_v2
+    if conn.dialect.name == "sqlite":
+        conn.exec_driver_sql("PRAGMA query_only = ON")
+    elif conn.dialect.name in ("mysql", "mariadb"):
+        conn.exec_driver_sql("SET SESSION TRANSACTION READ ONLY")
+    if "alembic_version" not in sa.inspect(conn).get_table_names():
+        return None, None, frozenset()
+    version = conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar()
+    if version not in V3_REVISIONS:
+        return version, None, frozenset()
+    inactive = frozenset(user_id for user_id, is_active, is_deleted in conn.execute(
+        sa.select(USERS.c.id, USERS.c.is_active, USERS.c.is_deleted)) if not is_active or is_deleted)
+    return version, load_v2(conn), inactive
+
+
+def v3_report(data, inactive) -> dict:
+    """The v3 conversion of the data load_v2 read: per user, before and after"""
+    from app.backend.migrations.support.authz_v3 import ALLOWED_GAIN, effective, plan_v3
+    roles, assignments, users, taken = data
+    plan = plan_v3(roles, assignments, users, taken)
+    report_users, unexpected = [], []
+    for user in users:
+        before = effective(None, roles, assignments, users, user.id)
+        after = effective(plan, roles, assignments, users, user.id)
+        lost = {key: sorted(before[key] - after.get(key, frozenset())) for key in before
+                if before[key] - after.get(key, frozenset())}
+        gained = {key: sorted(after[key] - before.get(key, frozenset())) for key in after
+                  if after[key] - before.get(key, frozenset()) - ALLOWED_GAIN}
+        if lost or gained:
+            unexpected.append({"user_id": user.id, "lost": lost, "gained": gained})
+        report_users.append({
+            "user_id": user.id, "type_before": user.user_type, "type_after": plan.user_types[user.id],
+            "before": {key: sorted(names) for key, names in sorted(before.items())},
+            "after": {key: sorted(names) for key, names in sorted(after.items())},
+        })
+    admin_holders = sorted({planned.user_id for planned in plan.system_assignments
+                            if not isinstance(planned.role, str) and roles[planned.role].builtin_key == "admin"
+                            and planned.user_id not in inactive})
+    return {
+        "users": report_users,
+        "unexpected_differences": unexpected,
+        "split_roles": [{"name": s.name, "source_role_id": s.source_id, "permissions": sorted(s.permissions),
+                         "archived": s.is_deleted} for s in plan.split_roles],
+        "renamed_roles": {str(role_id): name for role_id, name in plan.role_renames.items()},
+        "dropped": [{"assignment_id": d.assignment_id, "reason": d.reason, "permissions": sorted(d.permissions)}
+                    for d in plan.dropped],
+        "system_administrators": admin_holders,
+    }
+
+
+def v3_text(revision: str, report: dict) -> str:
+    lines = [f"authz_report --v3: database at {revision}, {len(report['users'])} user(s)",
+             f"system administrators after the conversion (active): {len(report['system_administrators'])}"]
+    if not report["system_administrators"]:
+        lines.append(NO_ROOT_ADMIN)
+    lines.append(f"unexpected differences: {len(report['unexpected_differences'])}")
+    for item in report["unexpected_differences"]:
+        lines.append(f"  user {item['user_id']}: lost {item['lost'] or '-'}, gained {item['gained'] or '-'}")
+    lines.append("")
+    for user in report["users"]:
+        lines.append(f"user {user['user_id']}: type {user['type_before']} -> {user['type_after']}")
+        for key, names in user["after"].items():
+            lines.append(f"  {key}: {_list(names)}")
+    lines.append("split roles: " + _list(f"{s['name']} from {s['source_role_id']}" for s in report["split_roles"]))
+    lines.append("dropped grants: " + _list(f"{d['assignment_id']} ({d['reason']}: {', '.join(d['permissions'])})"
+                                            for d in report["dropped"]))
+    return "\n".join(lines)
+
+
+def read_v3(url: str):
+    if make_url(url).get_dialect().is_async:
+        async def run():
+            engine = create_async_engine(url)
+            try:
+                async with engine.connect() as conn:
+                    return await conn.run_sync(_read_v3)
+            finally:
+                await engine.dispose()
+        return asyncio.run(run())
+    engine = sa.create_engine(url)
+    try:
+        with engine.connect() as conn:
+            return _read_v3(conn)
+    finally:
+        engine.dispose()
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Dry run of migration 023_authorization_v2 on a database at 022")
     parser.add_argument("--json", action="store_true", help="print the report as JSON")
     parser.add_argument("--url", help="database URL (default: settings.database.url)")
+    parser.add_argument("--v3", action="store_true",
+                        help="dry run of 030_authorization_v3 on a database at 028 or 029")
     args = parser.parse_args(argv)
     if not sys.stdout.isatty():
         sys.stdout.reconfigure(encoding="utf-8")   # piped or redirected: UTF-8 whatever the console code page
@@ -173,6 +273,17 @@ def main(argv=None) -> int:
     if _missing_sqlite_file(url):
         print(f"authz_report: no database file at {make_url(url).database}", file=sys.stderr)
         return 2
+
+    if args.v3:
+        revision, data, inactive = read_v3(url)
+        if data is None:
+            print(f"authz_report: the database is at {revision or 'no alembic revision'}; --v3 reads a database at "
+                  f"{' or '.join(V3_REVISIONS)}", file=sys.stderr)
+            return 2
+        report = v3_report(data, inactive)
+        print(json.dumps({"revision": revision, **report}, ensure_ascii=False, indent=2) if args.json
+              else v3_text(revision, report))
+        return 0
 
     revision, data, inactive = read_database(url)
     if revision in converted_revisions():

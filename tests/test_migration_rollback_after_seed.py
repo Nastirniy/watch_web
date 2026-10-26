@@ -109,7 +109,8 @@ def upgrade_and_seed(db_file: Path) -> None:
     roles = {name: key for name, key in conn.execute("select name, builtin_key from roles")}
     # seeding ran: every built-in role exists, the custom roles carry the names 022 gave them, texts refreshed
     assert {key for key in roles.values() if key} == {"viewer", "operator", "senior_operator", "analyst",
-                                                       "post_admin", "admin"}
+                                                       "administrator", "system_administrator", "auditor",
+                                                       "dictionary_editor", "tag_editor"}
     assert roles["viewer_custom"] is None and roles["operator_custom_2"] is None and roles["operator_custom"] is None
     assert conn.execute("select display_name from roles where id = 1").fetchone()[0] != "Administrator"
     assert conn.execute("select display_name from permissions where name = 'post.view'").fetchone()[0] != "Legacy post.view"
@@ -118,7 +119,6 @@ def upgrade_and_seed(db_file: Path) -> None:
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(strict=True, reason="authorization v3: seeding at 029 without the conversion of 030 (plan Task 8) cannot be downgraded exactly")
 def test_downgrade_after_seeding_restores_the_legacy_tables(tmp_path):
     db_file = legacy_020(tmp_path)
     before = snapshot(db_file)
@@ -138,7 +138,6 @@ def test_downgrade_after_seeding_restores_the_legacy_tables(tmp_path):
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(strict=True, reason="authorization v3: seeding at 029 without the conversion of 030 (plan Task 8) cannot be downgraded exactly")
 def test_a_seeded_role_with_legacy_holders_is_kept(tmp_path):
     """A built-in role a legacy user_roles row refers to is not deleted (a line says so), and the custom role 022
     renamed away from that name keeps its new name (a line says so) instead of colliding"""

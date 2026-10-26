@@ -15,6 +15,8 @@ Rules (spec section 7), over every role, assignment and user:
 2. The built-in admin role becomes the system role system_administrator in place: its tree permissions leave it
    (role_permissions_removed), its assignments leave role_assignments (moved_assignment_ids) and come back as system
    assignments; each holder also gets administrator at the root (added_root_administrators) unless they hold it.
+   Without a built-in post_admin role (a database upgraded past 022 without seeding in between) administrator_role_id
+   is None: the migration creates the administrator role with every tree permission of TREE_BOUNDARY.
 3. A custom role named like a new built-in key (NEW_BUILTIN_KEYS, case-insensitive) is renamed <name>_custom.
 4. Every other role gets a kind from its permissions: system only -> system (assignments moved as in 2); tree and
    system -> tree, the system permissions leave it for a new split role <name>_system (display name
@@ -250,9 +252,6 @@ def plan_v3(roles: Mapping[int, V2Role], assignments: Sequence[V2Assignment], us
         has_administrator = {a.user_id for a in assignments
                              if a.role_id == administrator_id and a.scope_key == ROOT_KEY}
         root_administrators = [user_id for user_id in holders if user_id not in has_administrator]
-        if root_administrators and administrator_id is None:
-            raise ValueError("the database has holders of the built-in admin role but no built-in post_admin role: "
-                             "start the application once at revision 028 to seed it")
 
     user_types = {user.id: TYPE_MAP.get(user.user_type, user.user_type) for user in users}
     plan = V3Plan(
