@@ -26,6 +26,11 @@ class ScopeRef(SecureBaseModel):
         return Node(self.kind, self.id)
 
 
+class SystemAssignmentCreate(SecureBaseModel):
+    """A system role for the user: it acts on the whole system, without a node"""
+    role_id: PositiveInt
+
+
 class AssignmentCreate(SecureBaseModel):
     """A role for the user at a node of the scope tree"""
     role_id: PositiveInt

@@ -239,14 +239,14 @@ def test_r13_a_kept_schema_of_the_same_second_gets_the_next_name(tmp_path, monke
 # ---------------------------------------------------------------- A2: a system permission held at a post
 
 @pytest.mark.parametrize("permission", ["database.view", "backup.view"])
-def test_a2_a_role_with_database_or_backup_view_is_assignable_only_at_the_root(permission):
-    """The boundary is the assignment: a role holding a system permission is refused below the root (409
-    role_requires_root_scope), so database.view / backup.view are never in effect at a post through the API"""
-    from app.backend.auth.assignments import _check_level
-    from app.backend.auth.scope import ROOT, Node
-    from app.backend.errors.problems import ApiError
-    _check_level([permission, "post.view"], ROOT)
-    for node in (Node.post(7), Node.group(3)):
-        with pytest.raises(ApiError) as exc:
-            _check_level([permission, "post.view"], node)
-        assert exc.value.code.value == "role_requires_root_scope"
+def test_a2_database_or_backup_view_never_in_effect_through_a_tree_grant(permission):
+    """Authorization v3: database.view / backup.view are system permissions, held only through system roles (no
+    node). A tree grant holding one, at a post or at the root, puts it nowhere in effect (auth/integrity.py), whatever
+    wrote the row"""
+    from app.backend.auth.integrity import effective_permissions, other_level
+    from app.backend.enums.general import RoleKind, UserType
+    kept, left_out = effective_permissions(UserType.SYSTEM_ADMINISTRATOR, RoleKind.TREE, [permission, "post.view"])
+    assert kept == {"post.view"} and left_out == {permission}
+    assert other_level(RoleKind.TREE, [permission, "post.view"]) == [permission]
+    kept, _ = effective_permissions(UserType.SYSTEM_ADMINISTRATOR, RoleKind.SYSTEM, [permission])
+    assert kept == {permission}

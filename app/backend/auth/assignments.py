@@ -9,7 +9,7 @@ ids: the target user and the caller's scope answer before the existence or the s
             -> check_assign_at(user.update and the role's permissions, the node) 403 (an unknown or archived node
                outside the caller's scope is not covered: the same 403 as a live one, a role without permissions
                included) -> the node exists and is live 404
-            -> a role with a system permission only at the root 409 -> the ceiling of the user's type 409
+            -> (a system role 409 role_is_system, right after the role) -> the boundary of the user's type 409
             -> the same role at the same node 409
     delete: check_target_user(user.update) 403 -> archived user 404 -> the assignment of that user 404
             -> check_assign_at(user.update and its role's permissions, its node) 403
@@ -59,7 +59,6 @@ from app.backend.auth.privileges import (
 )
 from app.backend.auth.scope import Node, NodeKind, ROOT
 from app.backend.auth.user_types import USER_TYPES, excess_permissions
-from app.backend.bootstrap.permissions import permission_level
 from app.backend.config import settings
 from app.backend.enums.errors import ErrorCode
 from app.backend.enums.general import BuiltinRole, PermissionLevel, Permissions, RoleKind, UserType
@@ -70,6 +69,7 @@ from app.backend.models.role_assignment import RoleAssignment, scope_columns
 from app.backend.models.system_role_assignment import SystemRoleAssignment
 from app.backend.models.scope_group import ScopeGroup
 from app.backend.models.user import User
+from app.backend.utils.row_locks import lock
 
 
 @dataclass(frozen=True)
@@ -103,8 +103,11 @@ def _refuse_archived(target: User) -> None:
         raise ApiError(ErrorCode.USER_NOT_FOUND)
 
 
-async def _live_role(session: AsyncSession, role_id: int) -> Role:
-    role = (await session.exec(select(Role).where(Role.id == role_id, Role.is_deleted == False))).first()  # noqa: E712
+async def _live_role(session: AsyncSession, role_id: int, shared_lock: bool = False) -> Role:
+    """The live role; with shared_lock its row read with a shared lock (inside a write that began with lock_first): a
+    concurrent edit of the role's permissions runs before or after the assignment, never in between"""
+    query = select(Role).where(Role.id == role_id, Role.is_deleted == False)  # noqa: E712
+    role = await lock(session, query, shared=True) if shared_lock else (await session.exec(query)).first()
     if role is None:
         raise ApiError(ErrorCode.ROLE_NOT_FOUND, role_id=role_id)
     return role
@@ -124,15 +127,6 @@ async def _check_node_live(session: AsyncSession, node: Node) -> None:
             raise ApiError(ErrorCode.POST_NOT_FOUND, post_id=node.id)
 
 
-def _check_level(permissions: Iterable[str], node: Node) -> None:
-    """A role holding a system permission is assignable only at the root"""
-    if node == ROOT:
-        return
-    system = sorted(name for name in permissions if permission_level(name) is PermissionLevel.SYSTEM)
-    if system:
-        raise ApiError(ErrorCode.ROLE_REQUIRES_ROOT_SCOPE, system_permissions=system)
-
-
 async def _assignment_exists(session: AsyncSession, user_id: int, role_id: int, node: Node) -> bool:
     """The user already holds the role at the node (two requests may both see False: the unique index answers then)"""
     found = (await session.exec(
@@ -143,25 +137,32 @@ async def _assignment_exists(session: AsyncSession, user_id: int, role_id: int, 
     return found is not None
 
 
-async def _check_not_last(session: AsyncSession, target: User, assignment: RoleAssignment, role: Role) -> None:
-    """Spec section 6 rule 6: a user keeps at least one assignment. An assignment of an archived role grants nothing,
-    so the last assignment of a live role stays while only such assignments would remain; an assignment of an
-    archived role goes while any other assignment remains"""
-    others = (
+async def _check_not_last_of_user(session: AsyncSession, target: User, role: Role, tree_id: Optional[int] = None,
+                                  system_id: Optional[int] = None) -> None:
+    """Spec section 6 rule 6: a user keeps at least one assignment of either table (the one removed: tree_id or
+    system_id). An assignment of an archived role grants nothing, so the last assignment of a live role stays while
+    only such assignments would remain; an assignment of an archived role goes while any other assignment remains"""
+    tree = (
         select(func.count()).select_from(RoleAssignment)
         .join(Role, Role.id == RoleAssignment.role_id)
-        .where(RoleAssignment.user_id == target.id, RoleAssignment.id != assignment.id)
+        .where(RoleAssignment.user_id == target.id, RoleAssignment.id != (tree_id or 0))
+    )
+    system = (
+        select(func.count()).select_from(SystemRoleAssignment)
+        .join(Role, Role.id == SystemRoleAssignment.role_id)
+        .where(SystemRoleAssignment.user_id == target.id, SystemRoleAssignment.id != (system_id or 0))
     )
     if not role.is_deleted:
-        others = others.where(Role.is_deleted == False)  # noqa: E712
-    if (await session.exec(others)).one() == 0:
+        tree = tree.where(Role.is_deleted == False)  # noqa: E712
+        system = system.where(Role.is_deleted == False)  # noqa: E712
+    if (await session.exec(tree)).one() + (await session.exec(system)).one() == 0:
         raise ApiError(ErrorCode.LAST_ASSIGNMENT_REQUIRED)
 
 
 def _check_ceiling(target: User, permissions: Iterable[str]) -> None:
-    """Every role of a user fits the ceiling of the user's type"""
+    """Every tree role of a user fits the tree boundary of the user's type"""
     user_type = UserType(target.user_type)
-    excess = sorted(excess_permissions(user_type, permissions))
+    excess = sorted(excess_permissions(user_type, permissions, RoleKind.TREE))
     if excess:
         raise ApiError(ErrorCode.ROLE_EXCEEDS_USER_TYPE, user_type=user_type.value, excess_permissions=excess)
 
@@ -182,11 +183,12 @@ async def create_assignment(session: AsyncSession, auth: AuthContext, target: Us
     await _lock_user(session, target)
     await check_target_user(session, auth, target, Permissions.USER_UPDATE)
     _refuse_archived(target)
-    role = await _live_role(session, role_id)
+    role = await _live_role(session, role_id, shared_lock=True)
+    if role.kind != RoleKind.TREE.value:
+        raise ApiError(ErrorCode.ROLE_IS_SYSTEM, role_id=role.id)
     permissions = await role_permission_names(session, [role.id])
     check_assign_at(auth, permissions, node)
     await _check_node_live(session, node)
-    _check_level(permissions, node)
     _check_ceiling(target, permissions)
     if await _assignment_exists(session, target.id, role.id, node):
         raise ApiError(ErrorCode.ASSIGNMENT_EXISTS)
@@ -209,7 +211,7 @@ async def delete_assignment(session: AsyncSession, auth: AuthContext, target: Us
         raise ApiError(ErrorCode.ASSIGNMENT_NOT_FOUND)
     check_assign_at(auth, await role_permission_names(session, [assignment.role_id]), assignment.node)
     role = (await session.exec(select(Role).where(Role.id == assignment.role_id))).one()
-    await _check_not_last(session, target, assignment, role)
+    await _check_not_last_of_user(session, target, role, tree_id=assignment.id)
 
     removed = assignment.model_dump()
     session.expunge(assignment)

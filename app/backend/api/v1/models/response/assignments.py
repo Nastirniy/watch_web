@@ -21,6 +21,14 @@ class ScopeResponse(SecureBaseModel):
     name: str = Field(description="Name of the group or the post; the application name at the root")
 
 
+# Built from auth/system_assignments.py SystemAssignmentView
+class SystemAssignmentResponse(SecureBaseModel):
+    """A system role a user holds: it acts on the whole system (no node)"""
+    id: int
+    role: AssignmentRole
+    created_at: ResponseDatetime
+
+
 # Built from auth/assignments.py AssignmentView: AssignmentResponse.model_validate(view, from_attributes=True)
 class AssignmentResponse(SecureBaseModel):
     """A role a user holds at one node of the scope tree: it applies to the node and everything below it"""

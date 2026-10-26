@@ -267,11 +267,13 @@ class ErrorCode(ProblemType):
     # Every user keeps at least one assignment (spec section 6 rule 6)
     LAST_ASSIGNMENT_REQUIRED = ("last_assignment_required", problem(
         409, "The last role assignment of a user cannot be removed"))
-    # A role holding a system permission is assignable only at the root (spec section 3)
-    ROLE_REQUIRES_ROOT_SCOPE = ("role_requires_root_scope", problem(
-        409, "This role can be assigned only at the root",
-        "The role holds system permissions ({system_permissions}): it can be assigned only at the root",
-        system_permissions=List[str]))
+    # A system role is assigned without a node (system assignments), a tree role at a node (authorization v3)
+    ROLE_IS_SYSTEM = ("role_is_system", problem(
+        409, "A system role is given as a system assignment",
+        "Role {role_id} is a system role: use the system assignments of the user", role_id=int))
+    ROLE_IS_TREE = ("role_is_tree", problem(
+        409, "A tree role is given at a node",
+        "Role {role_id} is a tree role: use the assignments of the user", role_id=int))
     # A role holds permissions of one level: the level of its kind (authorization v3)
     PERMISSION_LEVEL_MISMATCH = ("permission_level_mismatch", problem(
         409, "A role holds permissions of its own level only",

@@ -28,6 +28,16 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   copies them into the audit row (`system_assignments`).
 - Evaluation: a grant puts in effect only the permissions of its kind's level inside the boundary of the user's
   type; anything else is left out (logged once per grant).
+- New: system role assignments, `GET` / `POST /users/{user_id}/system-assignments` (`{"role_id"}`) and
+  `DELETE /users/{user_id}/system-assignments/{assignment_id}`: user.view (+ user.update for writes) covering the user,
+  every permission of the role held at the root, the system boundary of the user's type (409
+  `role_exceeds_user_type`), 409 `role_is_tree`, `assignment_exists`, `last_assignment_required` (both kinds count),
+  `last_admin_required` / `cannot_remove_own_admin` for the built-in `system_administrator`; audit rows
+  `resource_type` `system_role_assignment`.
+- `POST /users/{user_id}/assignments` answers 409 `role_is_system` for a system role; `role_requires_root_scope` is
+  gone. Removing a tree assignment never touches the administrator (it no longer answers `last_admin_required` or
+  `cannot_remove_own_admin`). A type change gives and removes system base roles (audit `added_system_assignments`,
+  `removed_system_assignments`).
 
 ## Database backups
 

@@ -182,6 +182,9 @@ class UserRoutes(str, Enum):
     # Role assignments of a user: a role held at a node of the scope tree (root, scope group, post)
     USER_ASSIGNMENTS = "/{user_id}/assignments"
     USER_ASSIGNMENT_BY_ID = "/{user_id}/assignments/{assignment_id}"
+    # System role assignments of a user: a system role, without a node (authorization v3)
+    USER_SYSTEM_ASSIGNMENTS = "/{user_id}/system-assignments"
+    USER_SYSTEM_ASSIGNMENT_BY_ID = "/{user_id}/system-assignments/{assignment_id}"
     # Client certificates of a user (api/v1/user_certificates.py): list and issue, upload a file, one, re-download
     USER_CERTIFICATES = "/{user_id}/certificates"
     USER_CERTIFICATE_UPLOAD = "/{user_id}/certificates/upload"  # registered before /{certificate_id}

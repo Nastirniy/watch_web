@@ -262,18 +262,16 @@ async def test_a_role_without_permissions_needs_user_update_at_the_node(client, 
 
 
 # ----------------------------------------------------------------- level, ceiling, nodes
-async def test_system_role_only_at_root(client, db, headers, tree):
+async def test_system_role_never_a_tree_assignment(client, db, headers, tree):
+    """A system role has no node: the tree assignment API refuses it at any node, the root included"""
     admin = await make_admin(db)
     target = await typed_user(db, UserType.ADMINISTRATOR, post_id=tree.a.id)
-    tagger = await make_role(db, [Permissions.TAG_VIEW, Permissions.TAG_CREATE], allow_mixed=True)
+    taggers = await make_role(db, [Permissions.TAG_CREATE])
+    for scope in (("post", tree.a.id), ("group", tree.east.id), ("root",)):
+        refused = await client.post(assignments_url(target.id), json=body_of(taggers, *scope), headers=headers(admin))
+        assert problem(refused, 409, "role_is_system")["role_id"] == taggers.id
 
-    refused = await client.post(assignments_url(target.id), json=body_of(tagger, "post", tree.a.id), headers=headers(admin))
-    body = problem(refused, 409, "role_requires_root_scope")
-    assert body["system_permissions"] == ["tag.create"]
-    refused = await client.post(assignments_url(target.id), json=body_of(tagger, "group", tree.east.id),
-                                headers=headers(admin))
-    problem(refused, 409, "role_requires_root_scope")
-
+    tagger = await make_role(db, [Permissions.TAG_VIEW])
     created = await client.post(assignments_url(target.id), json=body_of(tagger, "root"), headers=headers(admin))
     assert created.status_code == 201, created.text
     assert created.json()["scope"] == {"kind": "root", "id": None, "name": settings.app.name}
