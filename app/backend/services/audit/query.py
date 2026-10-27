@@ -48,11 +48,17 @@ NOTHING = AuditVisibility(everything=False, posts=frozenset(), groups=frozenset(
 
 
 def visibility_of(auth: AuthContext) -> AuditVisibility:
-    """What the caller may read of the audit log: audit.view (system) is every row and every column. The one place
-    the scoped view (audit.view_scope, task 6) is added; without either permission nothing (the route's require()
-    answers 403 before)."""
+    """What the caller may read of the audit log. audit.view (system, held at the root through a system role): every
+    row and every column. Otherwise audit.view_scope (tree): the rows of the posts where it is in effect (posts_with:
+    a group grant reaches the archived posts below it, a grant on an archived post applies nowhere), the rows of the
+    groups inside a subtree where it is held (groups_with) and, held at the root, the rows at the root; never a row
+    without a scope, never the device fields. Without either permission nothing (the route's require() answers 403
+    before)."""
     if auth.has_anywhere(Permissions.AUDIT_VIEW):
         return EVERYTHING
+    if auth.has_anywhere(Permissions.AUDIT_VIEW_SCOPE):
+        return AuditVisibility(everything=False, posts=auth.posts_with(Permissions.AUDIT_VIEW_SCOPE),
+                               groups=auth.groups_with(Permissions.AUDIT_VIEW_SCOPE), device_fields=False)
     return NOTHING
 
 
@@ -263,8 +269,13 @@ async def list_entries(session: AsyncSession, criteria: AuditCriteria, visibilit
     return await _entries(session, rows, visibility)
 
 
+async def entry_exists(session: AsyncSession, audit_id: int) -> bool:
+    """A row with the id exists, visible or not (tells a hidden entry from a missing one)"""
+    return (await session.exec(select(AuditLog.id).where(AuditLog.id == audit_id))).first() is not None
+
+
 async def get_entry(session: AsyncSession, audit_id: int, visibility: AuditVisibility) -> Optional[AuditEntry]:
-    """One row by id, None when there is none or the caller may not see it"""
+    """One row by id, None when there is none or the caller may not see it (entry_exists tells which)"""
     row = (await session.exec(
         select(AuditLog).where(AuditLog.id == audit_id, visible_clause(visibility)))).first()
     if row is None:

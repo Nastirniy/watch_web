@@ -84,11 +84,13 @@ def test_other_types_match_spec():
         "observation.manage_any", "media.manage_any", "statistics.view", "export.create"}
     assert senior.allowed_permissions == senior.base_permissions | {"media.update", "tag.create", "tag.update", "user.view"}
     administrator = USER_TYPES[UserType.ADMINISTRATOR]
-    # the v2 post_admin base plus unit management (scope_group.create/update/archive): every tree permission
+    # the v2 post_admin base plus unit management (scope_group.create/update/archive) and the audit log of its node
+    # (audit.view_scope): every tree permission
     assert administrator.base_permissions == senior.base_permissions | {
         "media.update", "post.create", "post.update", "post.archive", "user.view", "user.create", "user.update",
         "user.archive", "role.view", "scope_group.view", "certificate.view", "certificate.create",
-        "certificate.revoke", "scope_group.create", "scope_group.update", "scope_group.archive"}
+        "certificate.revoke", "scope_group.create", "scope_group.update", "scope_group.archive",
+        "audit.view_scope"}
     assert administrator.allowed_permissions == administrator.base_permissions | {
         "tag.create", "tag.update", "category.create", "category.update", "signal_type.create", "signal_type.update"}
 

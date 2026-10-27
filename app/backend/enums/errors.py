@@ -184,6 +184,12 @@ class AccessErrorCode(ProblemType):
         "Cannot archive or restore media of an observation that is no longer active (status: {observation_status})",
         observation_status=str, **_ACCESS))
     HEALTH_HOST_NOT_ALLOWED = ("health_host_not_allowed", problem(403, "This host is not allowed to access the health endpoint", **_ACCESS))
+    # An audit entry that exists outside the nodes where the caller's audit.view_scope is in effect (a system row, a
+    # row at the root without the permission held there, a row of another post or group); a missing one is 404
+    AUDIT_ENTRY_ACCESS_DENIED = ("audit_entry_access_denied", problem(
+        403, "No access to this audit entry",
+        "Access denied: audit entry {audit_id} lies outside the nodes whose audit log you may view",
+        audit_id=int, **_ACCESS))
 
 
 class ErrorCode(ProblemType):

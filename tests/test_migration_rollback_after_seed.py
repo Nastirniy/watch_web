@@ -5,7 +5,9 @@ upgrade, seeding and downgrade leaves no orphan role.
 
 The legacy database is a fresh install downgraded to 020 (as 023's tests do at 022) filled with the catalog of the
 code before authorization v2: every permission of today but scope_group.* and media.monitor, plus admin.true and
-post.access_all."""
+post.access_all. Permissions the code added later by seeding alone (no migration owns them: SEEDED_LATER) were
+never in a legacy database: seeding inserts them at the upgrade and a downgrade leaves their rows, which the older
+code ignores (its check skips names it does not know, its seeding takes them off the built-in roles)."""
 import asyncio
 import sqlite3
 from pathlib import Path
@@ -23,7 +25,9 @@ from tests.test_migrations import HEAD, run_migrate
 LEGACY_REVISION = "020_post_archive"
 STAMP = "2026-01-01 00:00:00"
 ADDED_BY_V2 = {"scope_group.view", "scope_group.create", "scope_group.update", "scope_group.archive", "media.monitor"}
-LEGACY_PERMISSIONS = sorted(({p.value for p in Permissions} - ADDED_BY_V2) | {"admin.true", "post.access_all"})
+SEEDED_LATER = {"audit.view_scope"}
+LEGACY_PERMISSIONS = sorted(({p.value for p in Permissions} - ADDED_BY_V2 - SEEDED_LATER)
+                            | {"admin.true", "post.access_all"})
 PERMISSION_IDS = {name: index for index, name in enumerate(LEGACY_PERMISSIONS, start=1)}
 ROLES = {   # id: (name, display name, is_deleted, permissions)
     1: ("admin", "Administrator", 0, LEGACY_PERMISSIONS),
@@ -82,6 +86,8 @@ def snapshot(db_file: Path) -> Dict[str, List[dict]]:
     conn = sqlite3.connect(db_file)
     conn.row_factory = sqlite3.Row
     rows = {table: [dict(row) for row in conn.execute(f"select * from {table} order by id")] for table in TABLES}
+    later = {row["id"] for row in rows["permissions"] if row["name"] in SEEDED_LATER}
+    rows["permissions"] = [row for row in rows["permissions"] if row["id"] not in later]
     conn.close()
     return rows
 

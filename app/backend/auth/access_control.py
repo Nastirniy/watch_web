@@ -66,7 +66,8 @@ class AccessControlService:
     ) -> None:
         """The permission is in effect at the post, otherwise 403: no_post_assigned when it is in effect at no post
         at all (never held, or held only at groups without posts; a grant only on archived nodes is held nowhere and
-        require() answers first), post_access_denied for a *.view permission, post_write_denied for any other"""
+        require() answers first), post_access_denied for a read permission (*.view, *.view_scope), post_write_denied
+        for any other"""
         if auth.has_at_post(permission, post_id):
             return
         name = permission_name(permission)
@@ -75,7 +76,7 @@ class AccessControlService:
             logger.warning(f"User {auth.user.username} holds {name} at no post, tried {resource_type} of post {post_id}")
             raise access_denied(AccessErrorCode.NO_POST_ASSIGNED, required=required, missing=[name])
         logger.warning(f"User {auth.user.username} lacks {name} at post {post_id} ({resource_type})")
-        if name.endswith(".view"):
+        if name.endswith((".view", ".view_scope")):
             raise access_denied(AccessErrorCode.POST_ACCESS_DENIED, required=required, missing=[name],
                                 resource_type=resource_type, post_id=post_id)
         raise access_denied(AccessErrorCode.POST_WRITE_DENIED, required=required, missing=[name],

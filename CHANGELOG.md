@@ -36,6 +36,18 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - `before_id` pages by itself: with `page` other than 1 or an ascending `sort_order` it answers 422
   `validation_error` with the field code `before_id_needs_first_page_newest_first`.
 - Audit values are served as stored: the audit response models never strip or unescape strings.
+- The scoped view of the audit log: the new tree permission `audit.view_scope` (in the built-in `administrator`
+  role and in the boundary of the types `administrator` and `system_administrator`; seeding inserts it, no
+  migration). The three audit routes now require `audit.view` or `audit.view_scope`. A holder of only
+  `audit.view_scope` reads the entries of the posts where it is in effect (a group grant keeps its archived posts, a
+  grant on an archived post applies nowhere), of the groups inside the subtrees where it is held and, held at the
+  root, the entries at the root; never an entry without a scope (system-wide). `ip_address`, `user_agent`,
+  `session_id` and `request_url` are null for it (the `session_id` filter matches nothing). An entry that exists
+  outside its scope answers 403 `audit_entry_access_denied` (param `audit_id`; a missing one stays 404); a `post_id`
+  filter outside it 403 `post_access_denied` (or `no_post_assigned`), a `group_id` / `corps_id` / `brigade_id`
+  filter outside it 403 `permission_required_for_action` (`permission` `audit.view_scope`, `action`
+  `list_audit_entries`). `post_access_denied` is now also the answer of a `*.view_scope` permission (it was meant
+  for read permissions: `*.view`).
 
 ### Database
 

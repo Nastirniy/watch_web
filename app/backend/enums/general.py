@@ -35,6 +35,7 @@ class Permissions(Enum):
 
     # Administration (admin.true is gone since authorization v2: administration is these granular permissions)
     AUDIT_VIEW = "audit.view"
+    AUDIT_VIEW_SCOPE = "audit.view_scope"  # tree level: the audit log of the node and below, without device fields
     EXPORT_CREATE = "export.create"
 
     # Category permissions

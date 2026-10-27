@@ -30041,7 +30041,7 @@
           "AUDIT"
         ],
         "summary": "List Audit Entries",
-        "description": "Audit entries, newest first; the next page: before_id = the id of the last entry. params of each entry are\ntyped by its event; legacy.unknown is a row written before the event catalog.",
+        "description": "Audit entries, newest first; the next page: before_id = the id of the last entry. params of each entry are\ntyped by its event; legacy.unknown is a row written before the event catalog.\n\naudit.view: every entry. audit.view_scope: the entries of the posts where it is in effect and of the groups\ninside the subtrees where it is held (the root ones only held at the root; system entries never), the device\nfields null; post_id / group_id / corps_id / brigade_id outside them answer 403.",
         "operationId": "list_audit_entries",
         "security": [
           {
@@ -30873,11 +30873,33 @@
             }
           },
           "403": {
-            "description": "`permission_denied`: Insufficient permissions",
+            "description": "`no_post_assigned`: You are not assigned to any post. Please contact an administrator.; `permission_denied`: Insufficient permissions; `permission_required_for_action`: Permission required for this action; `post_access_denied`: No access to the data of this post",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PermissionDeniedProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/NoPostAssignedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionRequiredForActionProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PostAccessDeniedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "no_post_assigned": "#/components/schemas/NoPostAssignedProblem",
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem",
+                      "permission_required_for_action": "#/components/schemas/PermissionRequiredForActionProblem",
+                      "post_access_denied": "#/components/schemas/PostAccessDeniedProblem"
+                    }
+                  }
                 }
               }
             }
@@ -30996,7 +31018,7 @@
           "AUDIT"
         ],
         "summary": "Get Audit Entry",
-        "description": "One audit entry",
+        "description": "One audit entry; one that exists outside the caller's scope (audit.view_scope) answers 403",
         "operationId": "get_audit_entry",
         "security": [
           {
@@ -31413,11 +31435,25 @@
             }
           },
           "403": {
-            "description": "`permission_denied`: Insufficient permissions",
+            "description": "`audit_entry_access_denied`: No access to this audit entry; `permission_denied`: Insufficient permissions",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PermissionDeniedProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AuditEntryAccessDeniedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionDeniedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "audit_entry_access_denied": "#/components/schemas/AuditEntryAccessDeniedProblem",
+                      "permission_denied": "#/components/schemas/PermissionDeniedProblem"
+                    }
+                  }
                 }
               }
             }
@@ -31879,6 +31915,85 @@
           "audit"
         ],
         "title": "AuditCategory"
+      },
+      "AuditEntryAccessDeniedProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "No access to this audit entry",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 403,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Access denied: audit entry {audit_id} lies outside the nodes whose audit log you may view"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "audit_entry_access_denied",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          },
+          "audit_id": {
+            "type": "integer",
+            "title": "Audit Id"
+          },
+          "required": {
+            "$ref": "#/components/schemas/RequiredPermissions"
+          },
+          "missing": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code",
+          "audit_id"
+        ],
+        "title": "AuditEntryAccessDeniedProblem",
+        "description": "No access to this audit entry (HTTP 403). Problem type audit_entry_access_denied.",
+        "examples": [
+          {
+            "audit_id": "<audit_id>",
+            "code": "audit_entry_access_denied",
+            "detail": "Access denied: audit entry <audit_id> lies outside the nodes whose audit log you may view",
+            "instance": "/api/v1/...",
+            "status": 403,
+            "title": "No access to this audit entry",
+            "type": "https://example.org/problems/audit_entry_access_denied"
+          }
+        ]
       },
       "AuditEntryNotFoundProblem": {
         "properties": {

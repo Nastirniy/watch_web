@@ -1,9 +1,12 @@
 """The frozen conversion of authorization v2 data to v3 (migrations/support/authz_v3.py), on plain values."""
+from app.backend.bootstrap.permissions import PERMISSION_LEVELS
 from app.backend.enums.general import Permissions
 from app.backend.migrations.support.authz_v3 import (
     ALLOWED_GAIN, LEVELS, SplitRole, SystemAssignmentPlan, V2Assignment, V2Role, V2User, effective, plan_v3,
 )
 
+# Permissions added after migration 030 (not in its frozen copy)
+ADDED_AFTER_030 = frozenset({"audit.view_scope"})
 ALL = frozenset(LEVELS)
 TREE = frozenset(name for name, level in LEVELS.items() if level == "tree")
 SYSTEM = ALL - TREE
@@ -37,7 +40,9 @@ def test_levels_copy_matches_spec():
     assert LEVELS["scope_group.create"] == "tree"
     assert LEVELS["role.view"] == "tree"
     assert LEVELS["tag.create"] == "system"
-    assert set(LEVELS) == {member.value for member in Permissions}
+    # the copy is frozen at migration 030: a permission added later is seeded with its level, never converted
+    assert set(LEVELS) == {member.value for member in Permissions} - ADDED_AFTER_030
+    assert all(LEVELS[name] == PERMISSION_LEVELS[name].value for name in LEVELS)
 
 
 def test_admin_role_becomes_system_administrator():
