@@ -22,6 +22,7 @@ from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.context import AuthContext
 from app.backend.auth.scope import Node, ROOT, ScopeTree
+from app.backend.enums.audit import AuditEvent
 from app.backend.enums.errors import ErrorCode
 from app.backend.enums.general import Permissions, ScopeGroupKind, StatsGroupBy, UnitPlacement
 from app.backend.errors.coded import CodedError
@@ -83,14 +84,11 @@ async def audit_group(request: Request, session: AsyncSession, auth: AuthContext
                       old_values: Optional[dict]) -> None:
     """One audit row (resource_type scope_group) for a change of a group of any kind"""
     await create_audit_log(
-        session=session,
-        action=action,
-        resource_type="scope_group",
-        resource_id=group.id,
+        session, AuditEvent(f"scope_group.{action}"), scope=Node.group(group.id), resource_id=group.id,
+        params={"group_name": group.name, "group_kind": group.kind},
         user_id=auth.user.id,
         old_values=old_values,
         new_values=group.model_dump(),
-        details={"message": f"User {auth.user.username} {action}d {group.kind} '{group.name}'"},
         **client_info(request, auth)
     )
 
@@ -185,16 +183,21 @@ async def archive_unit(request: Request, session: AsyncSession, auth: AuthContex
         check_posts(auth, unit, action)
 
     for change in changes.rows:
+        # the snapshots come from the values the service recorded: no query per row
+        if change.resource_type == "post":
+            params = {"post_name": change.new_values["name"], "post_code": change.new_values["code"]}
+            node = Node.post(change.resource_id)
+        else:
+            params = {"group_name": change.new_values["name"], "group_kind": change.new_values["kind"]}
+            node = Node.group(change.resource_id)
+        if change.resource_id != unit.id or change.resource_type != "scope_group":
+            params["cascade_from"] = unit.id             # a row changed because the unit was archived
         await create_audit_log(
-            session=session,
-            action=change.action,
-            resource_type=change.resource_type,
-            resource_id=change.resource_id,
+            session, AuditEvent(f"{change.resource_type}.{change.action}"), scope=node,
+            resource_id=change.resource_id, params=params,
             user_id=auth.user.id,
             old_values=change.old_values,
             new_values=change.new_values,
-            details={"message": f"User {auth.user.username} archived {unit.kind} '{unit.name}'"
-                                f"{' with cascade' if cascade else ''}"},
             **client_info(request, auth)
         )
     await session.commit()

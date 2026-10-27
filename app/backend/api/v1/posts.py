@@ -16,6 +16,7 @@ from app.backend.api.v1.models.request.posts import PostCreate, PostUpdate
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.require import require
 from app.backend.auth.scope import Node, ROOT
+from app.backend.enums.audit import AuditEvent
 from app.backend.enums.general import Permissions, StatsGroupBy
 from app.backend.config import settings
 from app.backend.enums.routes import PostRoutes
@@ -132,13 +133,10 @@ async def create_post(
     post = Post(**post_data.model_dump())
     session.add(post)
     await _store_post(session, post, audit=lambda: create_audit_log(
-        session=session,
-        action="create",
-        resource_type="post",
-        resource_id=post.id,
+        session, AuditEvent.POST_CREATE, scope=Node.post(post.id), resource_id=post.id,
+        params={"post_name": post.name, "post_code": post.code},
         user_id=current_user.id,
         new_values=post.model_dump(),
-        details={"message": f"User {current_user.username} created new post '{post.name}' ({post.code})"},
         **client_info(request, auth)
     ))
 
@@ -274,14 +272,11 @@ async def update_post(
 
     session.add(post)
     await _store_post(session, post, audit=lambda: create_audit_log(
-        session=session,
-        action="update",
-        resource_type="post",
-        resource_id=post.id,
+        session, AuditEvent.POST_UPDATE, scope=Node.post(post.id), resource_id=post.id,
+        params={"post_name": post.name, "post_code": post.code},
         user_id=current_user.id,
         old_values=old_values,
         new_values=post.model_dump(),
-        details={"message": f"User {current_user.username} updated post '{post.name}'"},
         **client_info(request, auth)
     ))
 
@@ -312,20 +307,17 @@ async def _set_post_archived(
         # Like a group restored under an archived parent: restore the group first
         await _check_group(session, post.group_id)
 
-    action = "archive" if archived else "restore"
+    event = AuditEvent.POST_ARCHIVE if archived else AuditEvent.POST_RESTORE
     old_values = post.model_dump()
     post.is_deleted = archived
     post.updated_at = datetime.now(timezone.utc)
     session.add(post)
     await create_audit_log(
-        session=session,
-        action=action,
-        resource_type="post",
-        resource_id=post.id,
+        session, event, scope=Node.post(post.id), resource_id=post.id,
+        params={"post_name": post.name, "post_code": post.code},
         user_id=current_user.id,
         old_values=old_values,
         new_values=post.model_dump(),
-        details={"message": f"User {current_user.username} {action}d post '{post.name}' ({post.code})"},
         **client_info(request, auth)
     )
     await session.commit()

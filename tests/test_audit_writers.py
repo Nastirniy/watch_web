@@ -8,10 +8,12 @@ from app.backend.auth.service import AuthService
 from app.backend.enums.audit import AuditCategory, AuditEvent
 from app.backend.enums.general import BuiltinRole, SessionRevokeCause, UserType
 from app.backend.enums.routes import (
-    AuthRoutes, CategoryRoutes, MediaFormatRoutes, RoleRoutes, SignalTypeRoutes, TagRoutes, UserRoutes)
+    AuthRoutes, BrigadeRoutes, CategoryRoutes, CorpsRoutes, MediaFormatRoutes, ObservationRoutes, PostRoutes, RoleRoutes,
+    ScopeGroupRoutes, SignalTypeRoutes, TagRoutes, UserRoutes)
 from app.backend.models.audit import AuditLog
 from app.backend.models.role import Permission
-from tests.helpers import assign, builtin_role, issue, make_admin, make_post, make_user
+from app.backend.services.unit_history import fill_unit_history
+from tests.helpers import assign, builtin_role, issue, make_admin, make_dictionary, make_group, make_post, make_user, observation_payload
 
 
 async def rows_of_event(db, event: AuditEvent) -> list:
@@ -343,3 +345,114 @@ async def test_media_format_writes(client, db, headers):
     restores = await rows_of_event(db, AuditEvent.MEDIA_FORMAT_RESTORE)
     assert len(restores) == 2 and restores[-1].params == {"content_type": "video/x-test"}
     assert restores[-1].old_values["is_deleted"] is True and restores[-1].details is None
+
+
+# ---------------------------------------------------------------- posts, groups and units (part 3c)
+
+async def test_post_writes(client, db, headers):
+    h = headers(await make_admin(db))
+    created = await client.post(V1.path(PostRoutes.ROOT), headers=h, json={"name": "Alpha", "code": "AUD1"})
+    assert created.status_code == 200, created.text
+    post_id = created.json()["id"]
+    node = f"p:{post_id}"
+    (create,) = await rows_of_event(db, AuditEvent.POST_CREATE)
+    check_row(create, AuditEvent.POST_CREATE, node, {"post_name": "Alpha", "post_code": "AUD1"})
+    assert create.category == AuditCategory.STRUCTURE.value and create.resource_id == post_id
+    assert create.scope_post_id == post_id and create.details is None and create.new_values["name"] == "Alpha"
+
+    updated = await client.put(V1.path(PostRoutes.POST_BY_ID, post_id=post_id), headers=h, json={"name": "Beta"})
+    assert updated.status_code == 200, updated.text
+    (update,) = await rows_of_event(db, AuditEvent.POST_UPDATE)
+    check_row(update, AuditEvent.POST_UPDATE, node, {"post_name": "Beta", "post_code": "AUD1"})
+    assert update.old_values["name"] == "Alpha" and update.details is None
+
+    assert (await client.post(V1.path(PostRoutes.POST_ARCHIVE, post_id=post_id), headers=h)).status_code == 200
+    assert (await client.post(V1.path(PostRoutes.POST_RESTORE, post_id=post_id), headers=h)).status_code == 200
+    (archive,) = await rows_of_event(db, AuditEvent.POST_ARCHIVE)
+    (restore,) = await rows_of_event(db, AuditEvent.POST_RESTORE)
+    check_row(archive, AuditEvent.POST_ARCHIVE, node, {"post_name": "Beta", "post_code": "AUD1"})
+    check_row(restore, AuditEvent.POST_RESTORE, node, {"post_name": "Beta", "post_code": "AUD1"})
+    assert archive.details is None and restore.details is None
+
+
+async def test_scope_group_writes(client, db, headers):
+    h = headers(await make_admin(db))
+    created = await client.post(V1.path(ScopeGroupRoutes.ROOT), headers=h, json={"name": "East"})
+    assert created.status_code == 200, created.text
+    group_id = created.json()["id"]
+    node = f"g:{group_id}"
+    (create,) = await rows_of_event(db, AuditEvent.SCOPE_GROUP_CREATE)
+    check_row(create, AuditEvent.SCOPE_GROUP_CREATE, node, {"group_name": "East", "group_kind": "group"})
+    assert create.scope_group_id == group_id and create.resource_id == group_id and create.details is None
+
+    corps = await client.post(V1.path(CorpsRoutes.ROOT), headers=h, json={"name": "Corps A"})
+    assert corps.status_code == 201, corps.text
+    corps_id = corps.json()["id"]
+    renamed = await client.patch(V1.path(CorpsRoutes.CORPS_BY_ID, corps_id=corps_id), headers=h,
+                                 json={"name": "Corps B"})
+    assert renamed.status_code == 200, renamed.text
+    (update,) = await rows_of_event(db, AuditEvent.SCOPE_GROUP_UPDATE)
+    check_row(update, AuditEvent.SCOPE_GROUP_UPDATE, f"g:{corps_id}", {"group_name": "Corps B", "group_kind": "corps"})
+    assert update.old_values["name"] == "Corps A" and update.details is None
+
+    assert (await client.post(V1.path(ScopeGroupRoutes.GROUP_ARCHIVE, group_id=group_id), headers=h)).status_code == 200
+    assert (await client.post(V1.path(ScopeGroupRoutes.GROUP_RESTORE, group_id=group_id), headers=h)).status_code == 200
+    (archive,) = await rows_of_event(db, AuditEvent.SCOPE_GROUP_ARCHIVE)
+    (restore,) = await rows_of_event(db, AuditEvent.SCOPE_GROUP_RESTORE)
+    check_row(archive, AuditEvent.SCOPE_GROUP_ARCHIVE, node, {"group_name": "East", "group_kind": "group"})
+    check_row(restore, AuditEvent.SCOPE_GROUP_RESTORE, node, {"group_name": "East", "group_kind": "group"})
+
+
+async def test_unit_archive_cascade_rows(client, db, headers):
+    h = headers(await make_admin(db))
+    corps = await make_group(db, name="Corps 1", kind="corps")
+    brigade = await make_group(db, name="Brigade 10", parent_id=corps.id, kind="brigade")
+    in_brigade = await make_post(db, group_id=brigade.id)
+    direct = await make_post(db, group_id=corps.id)
+    corps_id, brigade_id = corps.id, brigade.id
+    archived = await client.post(V1.path(CorpsRoutes.CORPS_ARCHIVE, corps_id=corps_id), headers=h,
+                                 params={"cascade": "true"})
+    assert archived.status_code == 200, archived.text
+
+    posts = await rows_of_event(db, AuditEvent.POST_ARCHIVE)
+    assert [r.resource_id for r in posts] == [in_brigade.id, direct.id]
+    for row, post in zip(posts, (in_brigade, direct)):
+        check_row(row, AuditEvent.POST_ARCHIVE, f"p:{post.id}",
+                  {"post_name": post.name, "post_code": post.code, "cascade_from": corps_id})
+        assert row.details is None
+    groups = await rows_of_event(db, AuditEvent.SCOPE_GROUP_ARCHIVE)
+    assert [r.resource_id for r in groups] == [brigade_id, corps_id]
+    check_row(groups[0], AuditEvent.SCOPE_GROUP_ARCHIVE, f"g:{brigade_id}",
+              {"group_name": "Brigade 10", "group_kind": "brigade", "cascade_from": corps_id})
+    check_row(groups[1], AuditEvent.SCOPE_GROUP_ARCHIVE, f"g:{corps_id}",
+              {"group_name": "Corps 1", "group_kind": "corps"})      # the unit itself: not cascaded
+    assert all(r.details is None for r in groups)
+
+    # without cascade the posts move out of the unit: post.update rows that name the unit
+    other = await make_group(db, name="Corps 2", kind="corps")
+    moved = await make_post(db, group_id=other.id)
+    other_id = other.id
+    assert (await client.post(V1.path(CorpsRoutes.CORPS_ARCHIVE, corps_id=other_id), headers=h)).status_code == 200
+    (update,) = await rows_of_event(db, AuditEvent.POST_UPDATE)
+    check_row(update, AuditEvent.POST_UPDATE, f"p:{moved.id}",
+              {"post_name": moved.name, "post_code": moved.code, "cascade_from": other_id})
+
+
+async def test_fill_history_row(client, db, headers):
+    h = headers(await make_admin(db))
+    ids = await make_dictionary(db)
+    corps = await make_group(db, name="Corps 1", kind="corps")
+    brigade = await make_group(db, name="Brigade 1", parent_id=corps.id, kind="brigade")
+    post = await make_post(db)
+    for _ in range(2):
+        created = await client.post(V1.path(ObservationRoutes.CREATE), json=observation_payload(post.id, ids["signal_type_id"]),
+                                    headers=h)
+        assert created.status_code == 200, created.text
+    moved = await client.put(V1.path(PostRoutes.POST_BY_ID, post_id=post.id), json={"group_id": brigade.id}, headers=h)
+    assert moved.status_code == 200, moved.text
+
+    await fill_unit_history(db)
+    (row,) = await rows_of_event(db, AuditEvent.OBSERVATION_UNITS_FILL_HISTORY)
+    check_row(row, AuditEvent.OBSERVATION_UNITS_FILL_HISTORY, None, {"observation_count": 2, "row_count": 4})
+    assert row.category == AuditCategory.STRUCTURE.value and row.user_id is None and row.details is None
+    assert row.new_values == {"units": {str(brigade.id): 2, str(corps.id): 2}, "observations": 2, "rows": 4}

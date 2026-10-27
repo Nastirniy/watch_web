@@ -26,14 +26,12 @@ from app.backend.models.observation import Observation
 from app.backend.models.observation_unit import ObservationUnit
 from app.backend.models.post import Post
 from app.backend.models.scope_group import ScopeGroup
+from app.backend.enums.audit import AuditEvent
 from app.backend.services.audit import create_audit_log
 from app.backend.services.units import current_units_of_group
 from app.backend.utils.row_locks import lock_first
 
 CHUNK_SIZE = 1000
-
-AUDIT_ACTION = "fill_history"
-AUDIT_RESOURCE = "observation_units"
 
 
 @dataclass(frozen=True)
@@ -125,7 +123,8 @@ async def fill_unit_history(session: AsyncSession, dry_run: bool = False, chunk_
 
     if rows_total and not dry_run:
         await create_audit_log(
-            session, action=AUDIT_ACTION, resource_type=AUDIT_RESOURCE,
+            session, AuditEvent.OBSERVATION_UNITS_FILL_HISTORY,
+            params={"observation_count": filled, "row_count": rows_total},
             new_values={"units": {str(unit_id): count for unit_id, count in per_unit.items()},
                         "observations": filled, "rows": rows_total},
         )
