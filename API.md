@@ -460,6 +460,50 @@ built-in ones); only the `system_administrator` user type may hold them.
 - Values the database does not give (sqlite in development) are null; `rows_estimate` is InnoDB's estimate, not a
   count.
 
+## Audit log
+
+A page for administrators: `audit.view` (system) reads every entry and every field; `audit.view_scope` (tree, in
+the built-in `administrator` role) reads the entries of the nodes where it is in effect, never a system-wide one.
+
+| Operation | Permissions | Purpose |
+|-----------|-------------|---------|
+| `GET /api/v1/audit-logs/` | `audit.view` or `audit.view_scope` | Entries newest first; the next page with `before_id` = the id of the last entry |
+| `GET /api/v1/audit-logs/{audit_id}` | `audit.view` or `audit.view_scope` | One entry; 404 `audit_entry_not_found`, 403 `audit_entry_access_denied` (outside the caller's scope) |
+| `GET /api/v1/audit-logs/events` | `audit.view` or `audit.view_scope` | The event catalog: `code`, `category`, `switchable`, English `title` |
+
+- `event` is the key of exactly one message in the localisation package, like a problem `code`: the message takes
+  the entry's `params` (typed per event in the OpenAPI document, `<CamelCode>AuditParams`; openapi-typescript
+  narrows `params` by `event`). An optional param is absent, never null. The web must ship a message for every
+  code of `GET /audit-logs/events` before it shows the page.
+- `legacy.unknown` is an entry the catalog cannot describe, every row written before the event catalog among them
+  (all rows from before the deploy of migration 031): `params` `{action, resource_type, message?, stored_event?,
+  details?}`. `message` is the old English sentence, `stored_event` the code the row holds (only when it is
+  another one), `details` the old details object as stored (the facts the row kept, keys in English): show them
+  as they are.
+- Params whose values come from a fixed list are plain strings (a value may be dropped from the list later, the
+  old entries keep it): localise the known values and show an unknown one as it is.
+
+  | Param | Events | Values |
+  |-------|--------|--------|
+  | `cause` | `session.end` | `account_deactivated`, `account_archived`, `certificate_changed` (old rows only), `ended_by_admin`, `user_type_changed`, `certificate_revoked`, `database_restored` |
+  | `reason` | `user_certificate.revoke` | `unspecified`, `key_compromise`, `affiliation_changed`, `superseded`, `cessation_of_operation` |
+  | `role_kind` | `role.*` | `tree`, `system` |
+  | `group_kind` | `scope_group.*` | `group`, `corps`, `brigade` |
+  | `frequency_kind` | `observation_frequency.*` | `rc`, `video` |
+  | `user_type` | `user.create` | `viewer`, `operator`, `senior_operator`, `analyst`, `administrator`, `system_administrator` |
+  | `media_type` | `media.create`, `upload_session.*` | `image`, `video`, `audio`, `document` |
+  | `via` | `user.create`, `user_certificate.issue` | `cli` (made on the server's command line) |
+  | `via` | `media.create` | `multipart`, `nginx_offload`, `resumable` (how the file came) |
+
+- Device fields: `ip_address`, `user_agent`, `session_id` and `request_url` identify a device and are null without
+  `audit.view` (the `session_id` filter then matches nothing). The param `ended_session_id` of `session.end` is not
+  one of them: it is the id of the session that was ended, which holders of `user.view` already see in the
+  sessions of the user (`GET /users/{user_id}/sessions`), so every reader of the entry gets it.
+- Filters: `event`, `category` (lists), `user_id`, `resource_type`, `resource_id`, `success`, `created_from` /
+  `created_to`, `request_id`, `session_id`, `post_id`, `group_id`, `corps_id`, `brigade_id`, `before_id`
+  (`page_size` at most 200). A scoped reader's `post_id` / `group_id` / `corps_id` / `brigade_id` outside its scope
+  answers 403.
+
 ## Responses that are not JSON
 
 | Operation | Response |

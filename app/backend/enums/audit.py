@@ -3,7 +3,26 @@
 A code is the key of exactly ONE message in the web localization package (the rule of error codes). A member is
 X = ("<resource>.<action>", event(AuditCategory.Y, "Title", **params)): the title is the fallback text (the web
 localises by code), the params are what the message needs, SNAPSHOTTED when the row is written (a name as it was).
-A param typed Optional[...] may be left out; every other param is required at every write.
+A param typed Optional[...] may be left out (create_audit_log drops an Optional param passed as None: absent, never
+null); every other param is required at every write and never None.
+
+Params named by an enum are typed str, never the enum: a value removed from the enum later must not turn the rows
+that hold it into legacy.unknown. Their values (the web localises them; API.md, "Audit log", repeats this list):
+- cause (session.end): SessionRevokeCause (enums/general.py): account_deactivated, account_archived,
+  certificate_changed (rows before 024 only), ended_by_admin, user_type_changed, certificate_revoked,
+  database_restored
+- reason (user_certificate.revoke): RevocationReason: unspecified, key_compromise, affiliation_changed, superseded,
+  cessation_of_operation
+- role_kind (role.*): RoleKind: tree, system
+- group_kind (scope_group.*): ScopeGroupKind: group, corps, brigade
+- frequency_kind (observation_frequency.*): FrequencyKind: rc, video
+- user_type (user.create): UserType: viewer, operator, senior_operator, analyst, administrator, system_administrator
+- media_type (media.create, upload_session.*): MediaType: image, video, audio, document
+- via: how the change was made when it was not a request of the web client: cli (user.create, user_certificate.issue
+  from the command line); for media.create the upload transport: multipart, nginx_offload, resumable
+
+The events legacy.unknown and legacy.migrate are served only (SERVED_ONLY): create_audit_log refuses them, so the
+params stored_event and details of legacy.unknown are never written.
 """
 from enum import Enum
 from typing import Any, Dict, FrozenSet, NamedTuple, Optional
@@ -40,20 +59,24 @@ _DI, _R, _SY, _AU = (AuditCategory.DICTIONARIES, AuditCategory.READS, AuditCateg
 
 _USER = dict(username=str)
 _ASSIGN = dict(username=str, role_name=str)
-_CERT = dict(username=str, label=str, serial=str, sha256_fingerprint=Optional[str], not_after=Optional[str],
-             reason=Optional[str], via=Optional[str], export_count=Optional[int],
+# certificate_serial: legacy (migration 024) and configured rows have none
+_CERT = dict(username=str, certificate_label=str, certificate_serial=Optional[str], sha256_fingerprint=Optional[str],
+             not_after=Optional[str], reason=Optional[str], via=Optional[str], export_count=Optional[int],
              session_count=Optional[int])
 _ROLE = dict(role_name=str, role_kind=str, cloned_from=Optional[str], cloned_from_id=Optional[int],
              permission=Optional[str])
-_POST = dict(post_name=str, post_code=str, cascade_from=Optional[int])
-_GROUP = dict(group_name=str, group_kind=str, cascade_from=Optional[int])
+# cascade_group_id: the unit whose archiving changed this row (absent on the unit's own row)
+_POST = dict(post_name=str, post_code=str, cascade_group_id=Optional[int])
+_GROUP = dict(group_name=str, group_kind=str, cascade_group_id=Optional[int])
 _OBS = dict(post_name=str, observation_id=int, signal_type_code=str)
 _FREQ = dict(observation_id=int, frequency_kind=str)
 _MEDIA = dict(observation_id=Optional[int], ttl_seconds=Optional[int])   # media of old data may have no observation
-_NAME = dict(name=str)
+_CATEGORY = dict(category_name=str)
+_TAG = dict(tag_name=str)
 _SEARCH = dict(result_count=int)
-_COUNTS = dict(kept_schema=str, revocations=int, certificates_added=int, users_added=int, crl_number=int,
-               sessions_ended=int, ids_raised=int)
+# what a restore or undo-restore carried over (services/backups/carry_over.py) and how many AUTO_INCREMENTs it raised
+_COUNTS = dict(kept_schema=str, revocation_count=int, added_certificate_count=int, added_user_count=int,
+               crl_number=int, ended_session_count=int, raised_id_count=int)
 
 
 class AuditEvent(Enum):
@@ -142,7 +165,8 @@ class AuditEvent(Enum):
     OBSERVATION_FREQUENCY_ARCHIVE = ("observation_frequency.archive", event(_D, "Frequency band archived", **_FREQ))
     OBSERVATION_FREQUENCY_RESTORE = ("observation_frequency.restore", event(_D, "Frequency band restored", **_FREQ))
     MEDIA_CREATE = ("media.create", event(
-        _D, "Media uploaded", observation_id=int, file_name=str, media_type=str, via=Optional[str], upload_id=Optional[str]))
+        _D, "Media uploaded", observation_id=int, file_name=str, media_type=str, via=Optional[str],
+        upload_id=Optional[str]))
     MEDIA_ARCHIVE = ("media.archive", event(_D, "Media archived", **_MEDIA))
     MEDIA_RESTORE = ("media.restore", event(_D, "Media restored", **_MEDIA))
     MEDIA_SHARE = ("media.share", event(_D, "Media shared by link", **_MEDIA))
@@ -154,14 +178,14 @@ class AuditEvent(Enum):
         file_name=Optional[str]))
 
     # dictionaries
-    CATEGORY_CREATE = ("category.create", event(_DI, "Category created", **_NAME))
-    CATEGORY_UPDATE = ("category.update", event(_DI, "Category updated", **_NAME))
-    CATEGORY_ARCHIVE = ("category.archive", event(_DI, "Category archived", **_NAME))
-    CATEGORY_RESTORE = ("category.restore", event(_DI, "Category restored", **_NAME))
-    TAG_CREATE = ("tag.create", event(_DI, "Tag created", **_NAME))
-    TAG_UPDATE = ("tag.update", event(_DI, "Tag updated", **_NAME))
-    TAG_ARCHIVE = ("tag.archive", event(_DI, "Tag archived", **_NAME))
-    TAG_RESTORE = ("tag.restore", event(_DI, "Tag restored", **_NAME))
+    CATEGORY_CREATE = ("category.create", event(_DI, "Category created", **_CATEGORY))
+    CATEGORY_UPDATE = ("category.update", event(_DI, "Category updated", **_CATEGORY))
+    CATEGORY_ARCHIVE = ("category.archive", event(_DI, "Category archived", **_CATEGORY))
+    CATEGORY_RESTORE = ("category.restore", event(_DI, "Category restored", **_CATEGORY))
+    TAG_CREATE = ("tag.create", event(_DI, "Tag created", **_TAG))
+    TAG_UPDATE = ("tag.update", event(_DI, "Tag updated", **_TAG))
+    TAG_ARCHIVE = ("tag.archive", event(_DI, "Tag archived", **_TAG))
+    TAG_RESTORE = ("tag.restore", event(_DI, "Tag restored", **_TAG))
     SIGNAL_TYPE_CREATE = ("signal_type.create", event(_DI, "Signal type created", signal_type_code=str))
     SIGNAL_TYPE_UPDATE = ("signal_type.update", event(_DI, "Signal type updated", signal_type_code=str))
     SIGNAL_TYPE_ARCHIVE = ("signal_type.archive", event(_DI, "Signal type archived", signal_type_code=str))
@@ -191,18 +215,25 @@ class AuditEvent(Enum):
         returned_originals=int, missing_originals=int, orphan_packages=int, failed=int))
     LEGACY_UNKNOWN = ("legacy.unknown", event(
         _SY, "Event recorded before the event catalog", action=str, resource_type=str, message=Optional[str],
-        stored_event=Optional[str]))   # stored_event: the code the row holds, when it has one (served, never written)
+        stored_event=Optional[str], details=Optional[Dict[str, Any]]))
+    # served only: stored_event is the code the row holds when it has another one, details the stored details object
+    # (rows written before the catalog kept their facts there)
     LEGACY_MIGRATE = ("legacy.migrate", event(
         _SY, "Rows written by a data migration", user_id=Optional[int], role_id=Optional[int]))
 
     # audit (a restore replaces the audit table itself)
     DATABASE_RESTORE = ("database.restore", event(
-        _AU, "Database restored from a backup", backup_id=str, label=str, backup_revision=str, **_COUNTS))
+        _AU, "Database restored from a backup", backup_id=str, backup_label=str, backup_revision=str, **_COUNTS))
     DATABASE_UNDO_RESTORE = ("database.undo_restore", event(
         _AU, "Database restore undone", source_schema=str, **_COUNTS))
 
 
+# Served by the read API, never written by create_audit_log (migrations write legacy.migrate raw)
+SERVED_ONLY: FrozenSet[AuditEvent] = frozenset({AuditEvent.LEGACY_UNKNOWN, AuditEvent.LEGACY_MIGRATE})
+
+
 def audit_event(code: str) -> Optional[AuditEvent]:
+    """The catalog event of a stored code, None for a code the catalog does not have"""
     try:
         return AuditEvent(code)
     except ValueError:

@@ -9,13 +9,19 @@ audit_logs from the models on a fresh install, with the columns already there).
 Backfill, in batches of 10,000 ids, only rows whose event is still null (a second run changes nothing it wrote):
 - event and category from (resource_type, action) through the frozen mapping migrations/support/audit_events_v1.py
   (plural search resource types -> search.<entity>, migrate -> legacy.migrate, anything else -> legacy.unknown);
-  params only for legacy.unknown ({action, resource_type, message?}) and legacy.migrate ({user_id} / {role_id});
-  details stays untouched;
-- the scope where it is cheap and exact (rows whose scope_key is null): observation / observation_frequency / media
-  rows through their observation's post, post rows by resource_id, scope_group rows by resource_id, role_assignment
-  rows from the assignment snapshot the row holds (new_values of a create, old_values of a delete), else from the
-  assignment if it still exists. Everything else stays null: system-wide, only audit.view sees it.
-Correlated-subquery UPDATEs only (no UPDATE ... JOIN): SQLite and MariaDB run the same statements.
+  params for legacy.unknown ({action, resource_type, message?}) and legacy.migrate ({user_id} / {role_id}), and for
+  the events whose old rows kept their facts as keys of details (database.restore, database.undo_restore,
+  database.reconcile, media_posters.reconcile: DETAILS_PARAMS, the keys renamed to the catalog's names, message and
+  unknown keys left out); details stays untouched (the read API serves it with legacy.unknown rows);
+- the scope where it is cheap (rows whose scope_key is null): observation / observation_frequency / media rows
+  through the CURRENT post of their observation (an observation moved since keeps the post it has now), post rows by
+  resource_id, scope_group rows by resource_id, role_assignment rows from the assignment snapshot the row holds
+  (new_values of a create, old_values of a delete), else from the assignment if it still exists. Everything else
+  stays null: system-wide, only audit.view sees it.
+A backup taken before 031 and restored later comes back at 030: the restore writes its row's facts into details
+(services/backups/restore.py) and the next start runs 031 over it, which backfills that row the same way.
+Correlated-subquery UPDATEs only (no UPDATE ... JOIN): SQLite and MariaDB run the same statements. The backfill runs
+in an autocommit block (every statement commits on its own) and never past the highest id it read at its start.
 
 Downgrade drops the indexes and the columns (batch mode on SQLite).
 
@@ -29,7 +35,7 @@ from typing import Dict, Optional
 from alembic import op
 import sqlalchemy as sa
 
-from app.backend.migrations.support.audit_events_v1 import LEGACY_EVENTS, LEGACY_MIGRATE, LEGACY_UNKNOWN
+from app.backend.migrations.support.audit_events_v1 import DETAILS_PARAMS, LEGACY_EVENTS, LEGACY_MIGRATE, LEGACY_UNKNOWN
 
 revision = "031_audit_events"
 down_revision = "030_authorization_v3"
@@ -98,7 +104,13 @@ def upgrade() -> None:
     for name, columns in INDEXES:
         if name not in indexes:
             op.create_index(name, TABLE, list(columns))
-    _backfill(op.get_bind())
+    # Every statement of the backfill commits on its own: no transaction holds a read view across the batches. On
+    # MariaDB with innodb_snapshot_isolation an UPDATE of a long transaction fails (1020) as soon as its range scan
+    # meets a row inserted after the transaction's first read (an old writer still running, measured on 11.8), and
+    # its locks would hold such writers until the end. A run that stops halfway is completed by the next one (only
+    # rows whose event is still null are filled).
+    with op.get_context().autocommit_block():
+        _backfill(op.get_bind())
 
 
 def downgrade() -> None:
@@ -125,10 +137,13 @@ def _backfill(conn) -> None:
     tables = set(sa.inspect(conn).get_table_names())
     start, batches = low, 0
     while start <= high:
-        end = start + BATCH - 1
+        # never past the highest id read above: a row inserted meanwhile (an old writer still running) is not this
+        # run's (it keeps event null, served as legacy.unknown)
+        end = min(start + BATCH - 1, high)
         in_batch = AUDIT.c.id.between(start, end)
         _events(conn, in_batch)
         _legacy_params(conn, in_batch)
+        _details_params(conn, in_batch)
         _scopes(conn, in_batch, tables)
         start, batches = end + 1, batches + 1
     _log(f"backfilled ids {low}..{high} in {batches} batches")
@@ -162,6 +177,28 @@ def _legacy_params(conn, in_batch) -> None:
             name = {"user": "user_id", "role": "role_id"}.get(resource_type)
             params = {name: resource_id} if name and resource_id is not None else {}
         conn.execute(sa.update(AUDIT).where(AUDIT.c.id == row_id).values(params=params))
+
+
+def details_params(code: str, details) -> Optional[dict]:
+    """The params of an old row of an event in DETAILS_PARAMS: the keys of details it lists, renamed; None when there
+    is none of them"""
+    names = DETAILS_PARAMS.get(code, {})
+    if not isinstance(details, dict):
+        return None
+    params = {names[key]: value for key, value in details.items() if key in names}
+    return params or None
+
+
+def _details_params(conn, in_batch) -> None:
+    """Old rows of restores and reconciles: their counts were keys of details, now params"""
+    rows = conn.execute(
+        sa.select(AUDIT.c.id, AUDIT.c.event, AUDIT.c.details)
+        .where(in_batch, AUDIT.c.event.in_(sorted(DETAILS_PARAMS)), AUDIT.c.params.is_(None))
+    ).all()
+    for row_id, code, details in rows:
+        params = details_params(code, details)
+        if params is not None:
+            conn.execute(sa.update(AUDIT).where(AUDIT.c.id == row_id).values(params=params))
 
 
 def _no_scope(resource_type: str, in_batch):

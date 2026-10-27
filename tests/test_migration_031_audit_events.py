@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 from alembic.script import ScriptDirectory
 
+from app.backend.enums.audit import AuditEvent, audit_event
+from tests.helpers import audit_params_mismatch
 from tests.test_column_bounds import _run_downgrade
 from tests.test_migrations import HEAD, PROJECT_ROOT, run_migrate
 
@@ -42,7 +44,36 @@ ROWS = {
     15: ("delete", "role", 5, None, None, None),
     16: ("migrate", "role", 5, None, None, None),
     17: ("restore", "database", None, {"backup_id": "b1"}, None, None),
+    18: ("restore", "database", None, {"backup_id": "b2", "label": "scheduled", "backup_revision": "029_x",
+                                       "kept_schema": "db_before_1", "revocations": 1, "certificates_added": 2,
+                                       "users_added": 3, "crl_number": 4, "sessions_ended": 5, "ids_raised": 6},
+         None, None),
+    19: ("undo_restore", "database", None, {"source_schema": "db_before_1", "kept_schema": "db_before_2",
+                                            "revocations": 0, "certificates_added": 0, "users_added": 0,
+                                            "crl_number": 4, "sessions_ended": 2, "ids_raised": 9}, None, None),
+    20: ("reconcile", "database", None, {"orphan_files": 1, "stale_derived": 2, "returned_originals": 0,
+                                         "missing_originals": 3, "orphan_packages": 0, "failed": 0}, None, None),
+    21: ("reconcile", "media_posters", None, {"message": "User a reconciled posters", "failed_abandoned": 1,
+                                              "queued_untracked": 2, "requeued_missing": 3, "retried_failed": 0},
+         None, None),
+    # a backup taken before 031, restored by the code of 031: the restore tool wrote the catalog's names to details
+    22: ("restore", "database", None, {"backup_id": "b3", "backup_label": "manual", "backup_revision": "030_x",
+                                       "kept_schema": "db_before_3", "revocation_count": 0,
+                                       "added_certificate_count": 0, "added_user_count": 0, "crl_number": 1,
+                                       "ended_session_count": 7, "raised_id_count": 2}, None, None),
     FAR_ID: ("create", "tag", 1, None, None, None),
+}
+# the params 031 copies from details (DETAILS_PARAMS): the catalog's names, message and unknown keys left out
+DETAILS_BACKFILLED = {
+    18: {"backup_id": "b2", "backup_label": "scheduled", "backup_revision": "029_x", "kept_schema": "db_before_1",
+         "revocation_count": 1, "added_certificate_count": 2, "added_user_count": 3, "crl_number": 4,
+         "ended_session_count": 5, "raised_id_count": 6},
+    19: {"source_schema": "db_before_1", "kept_schema": "db_before_2", "revocation_count": 0,
+         "added_certificate_count": 0, "added_user_count": 0, "crl_number": 4, "ended_session_count": 2,
+         "raised_id_count": 9},
+    20: dict(ROWS[20][3]),
+    21: {"failed_abandoned": 1, "queued_untracked": 2, "requeued_missing": 3, "retried_failed": 0},
+    22: dict(ROWS[22][3]),
 }
 
 
@@ -146,6 +177,11 @@ def test_migration_backfills_events_and_post_scopes(tmp_path):
         15: ("role.delete", "access", None, None, None),
         16: ("legacy.migrate", "system", None, None, None),
         17: ("database.restore", "audit", None, None, None),
+        18: ("database.restore", "audit", None, None, None),
+        19: ("database.undo_restore", "audit", None, None, None),
+        20: ("database.reconcile", "system", None, None, None),
+        21: ("media_posters.reconcile", "system", None, None, None),
+        22: ("database.restore", "audit", None, None, None),
         FAR_ID: ("tag.create", "dictionaries", None, None, None),
     }
     assert {row_id: row[:5] for row_id, row in rows.items()} == expected
@@ -156,6 +192,14 @@ def test_migration_backfills_events_and_post_scopes(tmp_path):
     assert rows[1][5] is None
     assert rows[1][6] == {"message": "User a created observation #11"}
     assert rows[17][6] == {"backup_id": "b1"}
+    # restores and reconciles: their counts were details keys, now params that fit the event (row 17 lacks most of
+    # them: the read API serves it as legacy.unknown with its details)
+    assert rows[17][5] == {"backup_id": "b1"}
+    for row_id, params in DETAILS_BACKFILLED.items():
+        assert rows[row_id][5] == params, row_id
+        assert audit_params_mismatch(audit_event(rows[row_id][0]), params) is None, row_id
+        assert rows[row_id][6] == ROWS[row_id][3], row_id      # details untouched
+    assert audit_params_mismatch(AuditEvent.DATABASE_RESTORE, rows[17][5]) is not None
 
     down = _run_downgrade(db_file, PREVIOUS)
     assert down.returncode == 0, down.stdout + down.stderr

@@ -1,12 +1,20 @@
 """The audit events of the rows written before the event catalog (enums/audit.py): (resource_type, action) -> (event
-code, category). FROZEN once migration 031_audit_events has shipped: 031 backfills old rows with it, and
-create_audit_log maps the legacy keyword form (action=, resource_type=) through it until every writer names its
-event. Never import the catalog here; tests/test_audit_catalog.py checks that every code below is a catalog event of
-that category.
+code, category). FROZEN once migration 031_audit_events has shipped: 031 backfills old rows with it. Never import the
+catalog here; tests/test_audit_catalog.py checks that every code below is a catalog event of that category and that
+DETAILS_PARAMS names only params of its event.
 
 Search rows carry the PLURAL entity as resource_type: they map to search.<entity>. The rows of the data migrations
 023 / 030 (action migrate) map to legacy.migrate. A pair not listed (written by code that no longer exists, such as
 user_post_access or a hard delete before the archive rule) is legacy.unknown.
+
+The pairs the catalog's writers produce (resource_type and action of a new-form row, e.g. session / end, the singular
+search pairs) are listed too: after a downgrade of 031 and an upgrade again, the rows written in between map back to
+their events (their params are gone with the downgrade; the read API serves them as legacy.unknown).
+
+DETAILS_PARAMS: the events whose old rows kept their facts as keys of details (counts of restores and reconciles):
+the backfill copies those keys into params, renamed to the catalog's names (old key -> param). A key that already has
+the catalog's name maps to itself (a restore of an older backup writes the new names into details of a schema
+without params; the next start backfills them).
 """
 from typing import Dict, Tuple
 
@@ -57,4 +65,34 @@ LEGACY_EVENTS: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("role", "migrate"): LEGACY_MIGRATE,
     # audit: a restore replaces the audit table itself
     **_events("database", "audit", "restore", "undo_restore"),
+    # the pairs of the catalog's writers that differ from the old ones
+    ("session", "end"): ("session.end", "access"),
+    ("role", "clone"): ("role.clone", "access"),
+    ("role", "permission_add"): ("role.permission_add", "access"),
+    ("role", "permission_remove"): ("role.permission_remove", "access"),
+    ("observation", "disappear"): ("observation.disappear", "data"),
+    ("auth", "certificate_login"): ("auth.certificate_login", "authentication"),
+    **{(entity, "search"): (f"search.{plural}", "reads") for plural, entity in (
+        ("observations", "observation"), ("users", "user"), ("posts", "post"), ("roles", "role"),
+        ("categories", "category"), ("signal_types", "signal_type"), ("tags", "tag"),
+        ("media_formats", "media_format"))},     # media: singular and plural are the same word
+}
+
+_RESTORE_COUNTS = {
+    "kept_schema": "kept_schema", "crl_number": "crl_number",
+    "revocations": "revocation_count", "revocation_count": "revocation_count",
+    "certificates_added": "added_certificate_count", "added_certificate_count": "added_certificate_count",
+    "users_added": "added_user_count", "added_user_count": "added_user_count",
+    "sessions_ended": "ended_session_count", "ended_session_count": "ended_session_count",
+    "ids_raised": "raised_id_count", "raised_id_count": "raised_id_count",
+}
+
+DETAILS_PARAMS: Dict[str, Dict[str, str]] = {
+    "database.restore": {"backup_id": "backup_id", "label": "backup_label", "backup_label": "backup_label",
+                         "backup_revision": "backup_revision", **_RESTORE_COUNTS},
+    "database.undo_restore": {"source_schema": "source_schema", **_RESTORE_COUNTS},
+    "database.reconcile": {name: name for name in (
+        "orphan_files", "stale_derived", "returned_originals", "missing_originals", "orphan_packages", "failed")},
+    "media_posters.reconcile": {name: name for name in (
+        "failed_abandoned", "queued_untracked", "requeued_missing", "retried_failed")},
 }

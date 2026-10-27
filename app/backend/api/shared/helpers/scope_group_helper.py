@@ -191,7 +191,7 @@ async def archive_unit(request: Request, session: AsyncSession, auth: AuthContex
             params = {"group_name": change.new_values["name"], "group_kind": change.new_values["kind"]}
             node = Node.group(change.resource_id)
         if change.resource_id != unit.id or change.resource_type != "scope_group":
-            params["cascade_from"] = unit.id             # a row changed because the unit was archived
+            params["cascade_group_id"] = unit.id         # a row changed because the unit was archived
         await create_audit_log(
             session, AuditEvent(f"{change.resource_type}.{change.action}"), scope=node,
             resource_id=change.resource_id, params=params,

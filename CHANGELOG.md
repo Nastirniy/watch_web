@@ -17,7 +17,8 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
     `resource_id`, `success`, `created_from` / `created_to`, `request_id`, `session_id`, `post_id`, `group_id`
     (the group and everything below it in the scope tree as it is now), `corps_id`, `brigade_id` (the same for a
     unit; an id of another kind gives nothing). A page costs three queries (rows, usernames, node names).
-  - `GET /api/v1/audit-logs/{audit_id}`: one entry; 404 `audit_entry_not_found` (param `audit_id`).
+  - `GET /api/v1/audit-logs/{audit_id}`: one entry; 404 `audit_entry_not_found` (param `audit_id`). `audit_id` is at
+    least 1 (422 `validation_error` otherwise), as on the other routes.
   - `GET /api/v1/audit-logs/events`: the event catalog, every code with its `category`, `switchable` (every
     category but `audit`) and English `title`.
 - An entry is one schema per event, `<CamelCode>AuditEntry` (`event` const, `params` a `<CamelCode>AuditParams`
@@ -28,14 +29,18 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   the root; null for a system-wide event), `success`, `old_values`, `new_values`, `request_id`, `ip_address`,
   `user_agent`, `session_id`, `request_url`. A row the catalog cannot describe (no event, a code it no longer has,
   or params that do not fit the event, such as the rows migration 031 backfilled) is served as `legacy.unknown`
-  with `params` `{action, resource_type, message?, stored_event?}` (`message` from the old `details`,
-  `stored_event` the code the row holds, when it has one). The `event` filter matches the stored event (so
+  with `params` `{action, resource_type, message?, stored_event?, details?}` (`message` from the old `details`,
+  `stored_event` the code the row holds when it is another one than `legacy.unknown`, `details` the stored details
+  object as it is: the facts old rows kept there). The `event` filter matches the stored event (so
   `?event=user.login` also finds backfilled login rows, served as `legacy.unknown` with `stored_event`
   `user.login`); `?event=legacy.unknown` matches rows without an event, rows stored as `legacy.unknown` and rows
   of a code the catalog no longer has.
 - `before_id` pages by itself: with `page` other than 1 or an ascending `sort_order` it answers 422
   `validation_error` with the field code `before_id_needs_first_page_newest_first`.
 - Audit values are served as stored: the audit response models never strip or unescape strings.
+- The values of the params named by an enum (`cause`, `reason`, `role_kind`, `group_kind`, `frequency_kind`,
+  `user_type`, `media_type`, `via`) are listed in `enums/audit.py` and API.md, "Audit log"; they stay plain strings
+  in the document (an old entry keeps a value a later version may drop).
 - The scoped view of the audit log: the new tree permission `audit.view_scope` (in the built-in `administrator`
   role and in the boundary of the types `administrator` and `system_administrator`; seeding inserts it, no
   migration). The three audit routes now require `audit.view` or `audit.view_scope`. A holder of only
@@ -57,12 +62,21 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `ix_audit_logs_category_created` and `ix_audit_logs_scope_created`. It backfills `event` and `category` of
   existing rows from (resource_type, action) through the frozen mapping `migrations/support/audit_events_v1.py`
   (search rows -> `search.<entity>`, data migration rows -> `legacy.migrate`, anything else -> `legacy.unknown`)
-  and the scope where it is exact (observations, frequencies, media, posts, scope groups, role assignments), in
-  batches of 10,000 ids. Old `details` stay untouched. The downgrade drops the columns and indexes.
+  and the scope where it is cheap (observations, frequencies and media through the CURRENT post of their observation,
+  posts, scope groups, role assignments), in batches of 10,000 ids never past the highest id at its start. The old
+  rows of `database.restore`, `database.undo_restore`, `database.reconcile` and `media_posters.reconcile` get their
+  `params` from their `details` keys (renamed to the catalog's names, frozen in `DETAILS_PARAMS`), so they are served
+  as their events; a backup from before 031 restored later is backfilled the same way at the next start. Old
+  `details` stay untouched. The frozen mapping also lists the pairs the catalog's writers produce (a downgrade and an
+  upgrade again map rows written in between to their events). The downgrade drops the columns and indexes, and with
+  them the event, params, scope and request id of every row written since. Deployment (run with the api stopped,
+  duration, rollback): DEPLOYMENT.md, "Audit log (migration 031)".
 - `create_audit_log(session, AuditEvent.X, params=..., scope=...)` writes them on every new row; it is the one
   writer form: the keywords `action=`, `resource_type=` and `details=` are gone (`tests/test_audit_guard.py` scans
-  `app/backend` for them and for raw INSERTs into `audit_logs` outside migrations and the restore tool). No API
-  change.
+  `app/backend` for them and for raw INSERTs into `audit_logs` outside migrations and the restore tool). An optional
+  param passed as None is left out (absent, never null); None in a required param is a TypeError; the served-only
+  events `legacy.unknown` and `legacy.migrate` are refused. The test session checks every params dict written against
+  its v1 params model (`tests/conftest.py` `audit_params_are_served`). No API change.
 
 ### Changed (breaking for readers of audit rows)
 
@@ -72,12 +86,21 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - `force_logout` rows are now event `session.end` (action `end`, params `username`, `cause`, `session_count`,
   `ended_session_id`).
 - `pki_auth_attempt` is now `auth.certificate_login`, written once per attempt (params `certificate_cn`,
-  `certificate_serial`, `matched`, `certificate_id`).
+  `certificate_serial`, `matched`, `certificate_id`, `certificate_fingerprint_prefix`; `certificate_id` absent when
+  nothing matched).
 - Search rows: action `search`, `resource_type` the singular entity (`observation`, not `observations`), event
   `search.<entity>`.
 - Certificate rows carry `export_count` / `session_count` in `params` instead of the old `sessions_ended` /
   `export_count` details keys.
 - Role clone rows carry `cloned_from` (the source role's name) and `cloned_from_id`.
+- Param names (before the web localises them): certificate events `label` -> `certificate_label`, `serial` ->
+  `certificate_serial` (now optional: legacy and configured certificates have no serial; their revoke rows used to
+  be served as `legacy.unknown`); restore and undo-restore counts `revocations` -> `revocation_count`,
+  `certificates_added` -> `added_certificate_count`, `users_added` -> `added_user_count`, `sessions_ended` ->
+  `ended_session_count`, `ids_raised` -> `raised_id_count`, the restore's `label` -> `backup_label` (the restore
+  tool's output and `CarryOverResult` keep their names); category and tag events `name` -> `category_name` /
+  `tag_name`; post and group events `cascade_from` -> `cascade_group_id`; the upload transport in `via` of
+  `media.create` is an identifier (`nginx offload` -> `nginx_offload`; `multipart`, `resumable` unchanged).
 
 ## Users by unit
 

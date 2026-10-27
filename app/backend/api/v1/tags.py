@@ -81,7 +81,7 @@ async def create_tag(
         await session.refresh(tag)
         await create_audit_log(
             session, AuditEvent.TAG_CREATE,
-            params={"name": tag.name},
+            params={"tag_name": tag.name},
             resource_id=tag.id,
             user_id=current_user.id,
             old_values=None,
@@ -171,7 +171,7 @@ async def update_tag(
         await session.refresh(tag)
         await create_audit_log(
             session, AuditEvent.TAG_UPDATE,
-            params={"name": tag.name},
+            params={"tag_name": tag.name},
             resource_id=tag.id,
             user_id=current_user.id,
             old_values=old_values,
@@ -206,7 +206,7 @@ async def archive_tag(
     session.add(row)
     await create_audit_log(
         session, AuditEvent.TAG_ARCHIVE,
-        params={"name": row.name},
+        params={"tag_name": row.name},
         resource_id=row.id,
         user_id=current_user.id,
         old_values=old_values,
@@ -242,7 +242,7 @@ async def restore_tag(
     session.add(row)
     await create_audit_log(
         session, AuditEvent.TAG_RESTORE,
-        params={"name": row.name},
+        params={"tag_name": row.name},
         resource_id=row.id,
         user_id=current_user.id,
         old_values=old_values,

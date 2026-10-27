@@ -170,7 +170,7 @@ def certificate_audit_details(row: UserCertificate, certificate: Optional[x509.C
     or a password. The fingerprint needs the certificate itself (a column holds only its hash) and not_after is the
     row's: without them (a legacy or configured row, an uploaded file that was not stored) they are left out, never
     made up."""
-    details = {"label": row.label, "serial": row.serial}
+    details = {"certificate_label": row.label, "certificate_serial": row.serial}
     if certificate is not None:
         details["sha256_fingerprint"] = sha256_fingerprint(certificate)
     if row.not_after is not None:

@@ -31032,6 +31032,7 @@
             "required": true,
             "schema": {
               "type": "integer",
+              "minimum": 1,
               "title": "Audit Id"
             }
           }
@@ -33651,14 +33652,14 @@
       },
       "CategoryArchiveAuditParams": {
         "properties": {
-          "name": {
+          "category_name": {
             "type": "string",
-            "title": "Name"
+            "title": "Category Name"
           }
         },
         "type": "object",
         "required": [
-          "name"
+          "category_name"
         ],
         "title": "CategoryArchiveAuditParams",
         "description": "Params of category.archive (Category archived)"
@@ -33861,14 +33862,14 @@
       },
       "CategoryCreateAuditParams": {
         "properties": {
-          "name": {
+          "category_name": {
             "type": "string",
-            "title": "Name"
+            "title": "Category Name"
           }
         },
         "type": "object",
         "required": [
-          "name"
+          "category_name"
         ],
         "title": "CategoryCreateAuditParams",
         "description": "Params of category.create (Category created)"
@@ -34408,14 +34409,14 @@
       },
       "CategoryRestoreAuditParams": {
         "properties": {
-          "name": {
+          "category_name": {
             "type": "string",
-            "title": "Name"
+            "title": "Category Name"
           }
         },
         "type": "object",
         "required": [
-          "name"
+          "category_name"
         ],
         "title": "CategoryRestoreAuditParams",
         "description": "Params of category.restore (Category restored)"
@@ -34628,14 +34629,14 @@
       },
       "CategoryUpdateAuditParams": {
         "properties": {
-          "name": {
+          "category_name": {
             "type": "string",
-            "title": "Name"
+            "title": "Category Name"
           }
         },
         "type": "object",
         "required": [
-          "name"
+          "category_name"
         ],
         "title": "CategoryUpdateAuditParams",
         "description": "Params of category.update (Category updated)"
@@ -36714,9 +36715,9 @@
             "type": "string",
             "title": "Backup Id"
           },
-          "label": {
+          "backup_label": {
             "type": "string",
-            "title": "Label"
+            "title": "Backup Label"
           },
           "backup_revision": {
             "type": "string",
@@ -36726,43 +36727,43 @@
             "type": "string",
             "title": "Kept Schema"
           },
-          "revocations": {
+          "revocation_count": {
             "type": "integer",
-            "title": "Revocations"
+            "title": "Revocation Count"
           },
-          "certificates_added": {
+          "added_certificate_count": {
             "type": "integer",
-            "title": "Certificates Added"
+            "title": "Added Certificate Count"
           },
-          "users_added": {
+          "added_user_count": {
             "type": "integer",
-            "title": "Users Added"
+            "title": "Added User Count"
           },
           "crl_number": {
             "type": "integer",
             "title": "Crl Number"
           },
-          "sessions_ended": {
+          "ended_session_count": {
             "type": "integer",
-            "title": "Sessions Ended"
+            "title": "Ended Session Count"
           },
-          "ids_raised": {
+          "raised_id_count": {
             "type": "integer",
-            "title": "Ids Raised"
+            "title": "Raised Id Count"
           }
         },
         "type": "object",
         "required": [
           "backup_id",
-          "label",
+          "backup_label",
           "backup_revision",
           "kept_schema",
-          "revocations",
-          "certificates_added",
-          "users_added",
+          "revocation_count",
+          "added_certificate_count",
+          "added_user_count",
           "crl_number",
-          "sessions_ended",
-          "ids_raised"
+          "ended_session_count",
+          "raised_id_count"
         ],
         "title": "DatabaseRestoreAuditParams",
         "description": "Params of database.restore (Database restored from a backup)"
@@ -37175,41 +37176,41 @@
             "type": "string",
             "title": "Kept Schema"
           },
-          "revocations": {
+          "revocation_count": {
             "type": "integer",
-            "title": "Revocations"
+            "title": "Revocation Count"
           },
-          "certificates_added": {
+          "added_certificate_count": {
             "type": "integer",
-            "title": "Certificates Added"
+            "title": "Added Certificate Count"
           },
-          "users_added": {
+          "added_user_count": {
             "type": "integer",
-            "title": "Users Added"
+            "title": "Added User Count"
           },
           "crl_number": {
             "type": "integer",
             "title": "Crl Number"
           },
-          "sessions_ended": {
+          "ended_session_count": {
             "type": "integer",
-            "title": "Sessions Ended"
+            "title": "Ended Session Count"
           },
-          "ids_raised": {
+          "raised_id_count": {
             "type": "integer",
-            "title": "Ids Raised"
+            "title": "Raised Id Count"
           }
         },
         "type": "object",
         "required": [
           "source_schema",
           "kept_schema",
-          "revocations",
-          "certificates_added",
-          "users_added",
+          "revocation_count",
+          "added_certificate_count",
+          "added_user_count",
           "crl_number",
-          "sessions_ended",
-          "ids_raised"
+          "ended_session_count",
+          "raised_id_count"
         ],
         "title": "DatabaseUndoRestoreAuditParams",
         "description": "Params of database.undo_restore (Database restore undone)"
@@ -38827,6 +38828,11 @@
           "stored_event": {
             "type": "string",
             "title": "Stored Event"
+          },
+          "details": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Details"
           }
         },
         "type": "object",
@@ -47794,9 +47800,9 @@
             "type": "string",
             "title": "Post Code"
           },
-          "cascade_from": {
+          "cascade_group_id": {
             "type": "integer",
-            "title": "Cascade From"
+            "title": "Cascade Group Id"
           }
         },
         "type": "object",
@@ -48199,9 +48205,9 @@
             "type": "string",
             "title": "Post Code"
           },
-          "cascade_from": {
+          "cascade_group_id": {
             "type": "integer",
-            "title": "Cascade From"
+            "title": "Cascade Group Id"
           }
         },
         "type": "object",
@@ -48745,9 +48751,9 @@
             "type": "string",
             "title": "Post Code"
           },
-          "cascade_from": {
+          "cascade_group_id": {
             "type": "integer",
-            "title": "Cascade From"
+            "title": "Cascade Group Id"
           }
         },
         "type": "object",
@@ -49063,9 +49069,9 @@
             "type": "string",
             "title": "Post Code"
           },
-          "cascade_from": {
+          "cascade_group_id": {
             "type": "integer",
-            "title": "Cascade From"
+            "title": "Cascade Group Id"
           }
         },
         "type": "object",
@@ -52802,9 +52808,9 @@
             "type": "string",
             "title": "Group Kind"
           },
-          "cascade_from": {
+          "cascade_group_id": {
             "type": "integer",
-            "title": "Cascade From"
+            "title": "Cascade Group Id"
           }
         },
         "type": "object",
@@ -53039,9 +53045,9 @@
             "type": "string",
             "title": "Group Kind"
           },
-          "cascade_from": {
+          "cascade_group_id": {
             "type": "integer",
-            "title": "Cascade From"
+            "title": "Cascade Group Id"
           }
         },
         "type": "object",
@@ -53768,9 +53774,9 @@
             "type": "string",
             "title": "Group Kind"
           },
-          "cascade_from": {
+          "cascade_group_id": {
             "type": "integer",
-            "title": "Cascade From"
+            "title": "Cascade Group Id"
           }
         },
         "type": "object",
@@ -54010,9 +54016,9 @@
             "type": "string",
             "title": "Group Kind"
           },
-          "cascade_from": {
+          "cascade_group_id": {
             "type": "integer",
-            "title": "Cascade From"
+            "title": "Cascade Group Id"
           }
         },
         "type": "object",
@@ -59618,14 +59624,14 @@
       },
       "TagArchiveAuditParams": {
         "properties": {
-          "name": {
+          "tag_name": {
             "type": "string",
-            "title": "Name"
+            "title": "Tag Name"
           }
         },
         "type": "object",
         "required": [
-          "name"
+          "tag_name"
         ],
         "title": "TagArchiveAuditParams",
         "description": "Params of tag.archive (Tag archived)"
@@ -59846,14 +59852,14 @@
       },
       "TagCreateAuditParams": {
         "properties": {
-          "name": {
+          "tag_name": {
             "type": "string",
-            "title": "Name"
+            "title": "Tag Name"
           }
         },
         "type": "object",
         "required": [
-          "name"
+          "tag_name"
         ],
         "title": "TagCreateAuditParams",
         "description": "Params of tag.create (Tag created)"
@@ -60336,14 +60342,14 @@
       },
       "TagRestoreAuditParams": {
         "properties": {
-          "name": {
+          "tag_name": {
             "type": "string",
-            "title": "Name"
+            "title": "Tag Name"
           }
         },
         "type": "object",
         "required": [
-          "name"
+          "tag_name"
         ],
         "title": "TagRestoreAuditParams",
         "description": "Params of tag.restore (Tag restored)"
@@ -60543,14 +60549,14 @@
       },
       "TagUpdateAuditParams": {
         "properties": {
-          "name": {
+          "tag_name": {
             "type": "string",
-            "title": "Name"
+            "title": "Tag Name"
           }
         },
         "type": "object",
         "required": [
-          "name"
+          "tag_name"
         ],
         "title": "TagUpdateAuditParams",
         "description": "Params of tag.update (Tag updated)"
@@ -63326,13 +63332,13 @@
             "type": "string",
             "title": "Username"
           },
-          "label": {
+          "certificate_label": {
             "type": "string",
-            "title": "Label"
+            "title": "Certificate Label"
           },
-          "serial": {
+          "certificate_serial": {
             "type": "string",
-            "title": "Serial"
+            "title": "Certificate Serial"
           },
           "sha256_fingerprint": {
             "type": "string",
@@ -63362,8 +63368,7 @@
         "type": "object",
         "required": [
           "username",
-          "label",
-          "serial"
+          "certificate_label"
         ],
         "title": "UserCertificateExportAuditParams",
         "description": "Params of user_certificate.export (Certificate package exported)"
@@ -63547,13 +63552,13 @@
             "type": "string",
             "title": "Username"
           },
-          "label": {
+          "certificate_label": {
             "type": "string",
-            "title": "Label"
+            "title": "Certificate Label"
           },
-          "serial": {
+          "certificate_serial": {
             "type": "string",
-            "title": "Serial"
+            "title": "Certificate Serial"
           },
           "sha256_fingerprint": {
             "type": "string",
@@ -63583,8 +63588,7 @@
         "type": "object",
         "required": [
           "username",
-          "label",
-          "serial"
+          "certificate_label"
         ],
         "title": "UserCertificateIssueAuditParams",
         "description": "Params of user_certificate.issue (Certificate issued)"
@@ -63768,13 +63772,13 @@
             "type": "string",
             "title": "Username"
           },
-          "label": {
+          "certificate_label": {
             "type": "string",
-            "title": "Label"
+            "title": "Certificate Label"
           },
-          "serial": {
+          "certificate_serial": {
             "type": "string",
-            "title": "Serial"
+            "title": "Certificate Serial"
           },
           "sha256_fingerprint": {
             "type": "string",
@@ -63804,8 +63808,7 @@
         "type": "object",
         "required": [
           "username",
-          "label",
-          "serial"
+          "certificate_label"
         ],
         "title": "UserCertificateRevokeAuditParams",
         "description": "Params of user_certificate.revoke (Certificate revoked)"
@@ -63989,13 +63992,13 @@
             "type": "string",
             "title": "Username"
           },
-          "label": {
+          "certificate_label": {
             "type": "string",
-            "title": "Label"
+            "title": "Certificate Label"
           },
-          "serial": {
+          "certificate_serial": {
             "type": "string",
-            "title": "Serial"
+            "title": "Certificate Serial"
           },
           "sha256_fingerprint": {
             "type": "string",
@@ -64025,8 +64028,7 @@
         "type": "object",
         "required": [
           "username",
-          "label",
-          "serial"
+          "certificate_label"
         ],
         "title": "UserCertificateUploadAuditParams",
         "description": "Params of user_certificate.upload (Certificate uploaded)"

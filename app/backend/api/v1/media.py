@@ -477,7 +477,8 @@ async def nginx_upload_file(
         except OSError as exc:
             _logger.warning(f"Nginx upload: could not remove temp file {temp_file}: {exc!r}")
 
-    media_file = await record_upload(request, session, auth, media_file_id, observation_id, post_id, original_filename, background_tasks, "nginx offload")
+    media_file = await record_upload(request, session, auth, media_file_id, observation_id, post_id, original_filename,
+                                     background_tasks, "nginx_offload")
     return upload_result(media_file, "nginx offload")
 
 

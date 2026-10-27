@@ -5,7 +5,7 @@ from pydantic_core import to_jsonable_python
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.auth.scope import Node
-from app.backend.enums.audit import AuditEvent
+from app.backend.enums.audit import SERVED_ONLY, AuditEvent
 from app.backend.errors.coded import is_optional
 from app.backend.models.audit import AuditLog
 from app.backend.models.role_assignment import scope_columns
@@ -42,6 +42,17 @@ def serialize_for_audit(obj: Any) -> Any:
     return to_jsonable_python(obj)
 
 
+def present_params(event: AuditEvent, params: Dict[str, Any]) -> Dict[str, Any]:
+    """The params as stored: an Optional param passed as None is left out (absent, never null); None for a required
+    param is a TypeError (a row would hold a value its event says is always there)"""
+    nulls = sorted(name for name, value in params.items()
+                   if value is None and name in event.params and not is_optional(event.params[name]))
+    if nulls:
+        raise TypeError(f"{event.code}: required params {nulls} are None")
+    # an unknown name stays, None or not: check_event_params refuses it
+    return {name: value for name, value in params.items() if value is not None or name not in event.params}
+
+
 def check_event_params(event: AuditEvent, params: Dict[str, Any]) -> None:
     """Params must be exactly the ones the event declares, required ones present (the rule of problem params)"""
     unknown = set(params) - set(event.params)
@@ -72,14 +83,20 @@ async def create_audit_log(
 
     event: the catalog event (enums/audit.py); its code gives resource_type / action (resource_and_action), its
     category the category.
-    params: exactly the event's params (unknown or missing required one: TypeError; Optional ones may be left out),
-    snapshotted now. scope: the node the event happened at (None: system-wide). The request id comes from the
-    request's context. workspace is accepted and ignored until its column exists (part 5).
+    params: exactly the event's params (unknown or missing required one: TypeError; Optional ones may be left out, and
+    one passed as None is left out; a required one passed as None: TypeError), snapshotted now. The served-only events
+    (SERVED_ONLY: legacy.unknown, legacy.migrate) are refused (TypeError).
+    scope: the node the event happened at (None: system-wide). The request id comes from the request's context.
+    workspace is accepted and ignored until its column exists (part 5).
 
     Returns the row (already added to the session); the switches of phase B make it None for a category that is off.
     """
     if not isinstance(event, AuditEvent):
         raise TypeError(f"create_audit_log needs an AuditEvent, not {event!r}")
+    if event in SERVED_ONLY:
+        raise TypeError(f"{event.code} is served by the read API, never written")
+    if params is not None:
+        params = present_params(event, params)
     check_event_params(event, params or {})
     resource_type, action = resource_and_action(event)
     audit = AuditLog(

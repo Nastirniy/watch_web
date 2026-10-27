@@ -35,7 +35,7 @@ from app.backend.services.signer_client import use_signer_transport
 from app.backend.signer.app import create_app as create_signer_app
 from app.backend.signer.settings import SignerSettings
 from tests import helpers as factories
-from tests.helpers import errors_are_problems
+from tests.helpers import audit_params_mismatch, errors_are_problems
 from tests.pki_helpers import DownTransport, client_ca, write_ca_files
 
 
@@ -112,6 +112,30 @@ async def client(session_maker, db):
                            event_hooks={"response": [errors_are_problems]}) as async_client:
         yield async_client
     fastapi_app.dependency_overrides.clear()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def audit_params_are_served():
+    """Every params dict a test makes create_audit_log write must validate against its event's v1 params model, so
+    the read API serves the row as its event, never as legacy.unknown (tests/helpers.py audit_params_mismatch).
+
+    Wraps services/audit/writer.check_event_params (create_audit_log looks it up at every call) and checks what it
+    accepted; the mismatches fail the run when the session ends."""
+    from app.backend.services.audit import writer
+
+    mismatches = set()
+    original = writer.check_event_params
+
+    def checked(event, params):
+        original(event, params)
+        mismatch = audit_params_mismatch(event, params)
+        if mismatch is not None:
+            mismatches.add(mismatch)
+
+    writer.check_event_params = checked
+    yield mismatches
+    writer.check_event_params = original
+    assert not mismatches, "audit params the read API would serve as legacy.unknown:\n" + "\n".join(sorted(mismatches))
 
 
 @pytest.fixture(scope="session", autouse=True)

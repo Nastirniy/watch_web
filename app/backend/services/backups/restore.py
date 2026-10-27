@@ -33,7 +33,7 @@ from sqlalchemy.pool import NullPool
 from app.backend.config import BackupConfig, DatabaseConfig
 from app.backend.enums.audit import AuditEvent
 from app.backend.services.backups.carry_over import (
-    CarryOverResult, CarryOverUnsupported, _only, _reflect, carry_over, user_state_differences,
+    CarryOverResult, CarryOverUnsupported, carry_over, known_columns, reflect_table, user_state_differences,
 )
 from app.backend.services.backups.catalog import scan
 from app.backend.services.backups.client_tools import ClientTools, child_env, defaults_file
@@ -329,13 +329,13 @@ class MariaDbBackend:
                   "event": event.code, "category": event.category.value, "params": details,
                   "created_at": utcnow().replace(tzinfo=None)}
         with self.engine.begin() as conn:
-            table = _reflect(conn, "audit_logs", schema)
+            table = reflect_table(conn, "audit_logs", schema)
             if table is None:
                 _logger.warning(f"Backups: {schema} has no audit_logs; the {action} audit row is not written")
                 return
             if "params" not in table.c:
                 values["details"] = details
-            row = _only(table, values)
+            row = known_columns(table, values)
             for name in ("params", "details"):
                 # MariaDB reflects JSON as LONGTEXT: a dict would reach the driver raw
                 if name in row and not isinstance(table.c[name].type, sa.JSON):
@@ -472,10 +472,23 @@ def _drop_if_empty(backend: RestoreBackend, schema: str) -> None:
         _logger.error(f"Backups: {schema} holds tables after a failed swap; left in place (check, then undo-restore)")
 
 
-def _details(carry: CarryOverResult, keep_as: str, ids_raised: int) -> dict:
-    return {"kept_schema": keep_as, "revocations": carry.revocations, "certificates_added": carry.certificates_added,
-            "users_added": len(carry.users_added), "crl_number": carry.crl_number,
-            "sessions_ended": carry.sessions_ended, "ids_raised": ids_raised}
+def _counts(carry: CarryOverResult, keep_as: str, ids_raised: int) -> dict:
+    """The audit params of what a restore carried over (the catalog's names; CarryOverResult and the CLI output keep
+    their own)"""
+    return {"kept_schema": keep_as, "revocation_count": carry.revocations,
+            "added_certificate_count": carry.certificates_added, "added_user_count": len(carry.users_added),
+            "crl_number": carry.crl_number, "ended_session_count": carry.sessions_ended, "raised_id_count": ids_raised}
+
+
+def restore_params(manifest: Manifest, carry: CarryOverResult, keep_as: str, ids_raised: int) -> dict:
+    """The params of the database.restore row"""
+    return {"backup_id": manifest.id, "backup_label": manifest.label.value,
+            "backup_revision": manifest.migration_revision, **_counts(carry, keep_as, ids_raised)}
+
+
+def undo_restore_params(source: str, carry: CarryOverResult, keep_as: str, ids_raised: int) -> dict:
+    """The params of the database.undo_restore row"""
+    return {"source_schema": source, **_counts(carry, keep_as, ids_raised)}
 
 
 def restore_backup(cfg: BackupConfig, db: DatabaseConfig, ref: str, *, backend: RestoreBackend,
@@ -514,9 +527,7 @@ def restore_backup(cfg: BackupConfig, db: DatabaseConfig, ref: str, *, backend: 
                 if keep_as is not None:
                     _drop_if_empty(backend, keep_as)
         backend.drop_schema(staging)
-        backend.audit(db.name, "restore", {"backup_id": manifest.id, "label": manifest.label.value,
-                                           "backup_revision": manifest.migration_revision,
-                                           **_details(carry, keep_as, ids_raised)})
+        backend.audit(db.name, "restore", restore_params(manifest, carry, keep_as, ids_raised))
         _logger.info(f"Backups: restored {manifest.id}; the replaced tables are kept in {keep_as}")
         return RestoreResult(kept_schema=keep_as, carry=carry, user_differences=differences, ids_raised=ids_raised)
 
@@ -546,7 +557,7 @@ def undo_restore(cfg: BackupConfig, db: DatabaseConfig, schema: Optional[str], *
             _drop_if_empty(backend, keep_as)
             raise
         backend.drop_schema(source)
-        backend.audit(db.name, "undo_restore", {"source_schema": source, **_details(carry, keep_as, ids_raised)})
+        backend.audit(db.name, "undo_restore", undo_restore_params(source, carry, keep_as, ids_raised))
         _logger.info(f"Backups: swapped {source} back in; the replaced tables are kept in {keep_as}")
         return RestoreResult(kept_schema=keep_as, carry=carry, user_differences=differences, ids_raised=ids_raised)
 

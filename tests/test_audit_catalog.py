@@ -3,7 +3,7 @@ import re
 from typing import get_args
 
 from app.backend.enums.audit import (
-    SWITCHABLE, AuditCategory, AuditEvent, EventSpec, audit_event, event,
+    SERVED_ONLY, SWITCHABLE, AuditCategory, AuditEvent, EventSpec, audit_event, event,
 )
 from app.backend.errors.coded import RESERVED_MEMBERS
 
@@ -65,7 +65,8 @@ import pytest
 from sqlalchemy import text as sa_text
 
 from app.backend.auth.scope import Node
-from app.backend.migrations.support.audit_events_v1 import LEGACY_EVENTS, LEGACY_MIGRATE, LEGACY_UNKNOWN
+from app.backend.errors.coded import is_optional
+from app.backend.migrations.support.audit_events_v1 import DETAILS_PARAMS, LEGACY_EVENTS, LEGACY_MIGRATE, LEGACY_UNKNOWN
 from app.backend.models.audit import AuditLog
 from app.backend.services import audit as audit_service
 from app.backend.services.audit import create_audit_log
@@ -136,18 +137,60 @@ async def test_a_row_without_params_stores_sql_null(db):
 
 async def test_wrong_params_raise_type_error(db):
     with pytest.raises(TypeError, match="unknown"):
-        await create_audit_log(db, AuditEvent.TAG_CREATE, params={"name": "x", "colour": "red"})
+        await create_audit_log(db, AuditEvent.TAG_CREATE, params={"tag_name": "x", "colour": "red"})
     with pytest.raises(TypeError, match="missing"):
         await create_audit_log(db, AuditEvent.POST_CREATE, params={"post_name": "North"})
     with pytest.raises(TypeError, match="missing"):
         await create_audit_log(db, AuditEvent.TAG_CREATE)
     with pytest.raises(TypeError):
-        await create_audit_log(db, "tag.create", params={"name": "x"})
+        await create_audit_log(db, "tag.create", params={"tag_name": "x"})
     # Optional params may be left out; values go through serialize_for_audit; workspace is accepted and ignored
     row = await create_audit_log(db, AuditEvent.SESSION_END, workspace=Node.group(2),
                                  params={"username": "ivan", "cause": AuditCategory.ACCESS})
     stored = await _stored(db, row)
     assert stored.params == {"username": "ivan", "cause": "access"}
+
+
+async def test_none_params_are_absent_or_refused(db):
+    """An Optional param passed as None is left out (absent, never null); None in a required param or under an
+    unknown name is a TypeError"""
+    row = await create_audit_log(db, AuditEvent.USER_CERTIFICATE_REVOKE, params={
+        "username": "ivan", "certificate_label": "", "certificate_serial": None, "reason": "superseded"})
+    stored = await _stored(db, row)
+    assert stored.params == {"username": "ivan", "certificate_label": "", "reason": "superseded"}
+    with pytest.raises(TypeError, match="required params"):
+        await create_audit_log(db, AuditEvent.TAG_CREATE, params={"tag_name": None})
+    with pytest.raises(TypeError, match="unknown"):
+        await create_audit_log(db, AuditEvent.TAG_CREATE, params={"tag_name": "x", "colour": None})
+
+
+@pytest.mark.parametrize("served_only", sorted(SERVED_ONLY, key=lambda e: e.code), ids=lambda e: e.code)
+async def test_served_only_events_are_never_written(db, served_only):
+    """legacy.unknown and legacy.migrate are served by the read API, so their served params (stored_event, details)
+    can never be written either"""
+    with pytest.raises(TypeError, match="never written"):
+        await create_audit_log(db, served_only, params={"action": "x", "resource_type": "y"})
+    assert SERVED_ONLY == {AuditEvent.LEGACY_UNKNOWN, AuditEvent.LEGACY_MIGRATE}
+
+
+def test_every_written_event_maps_back_after_a_downgrade():
+    """The frozen mapping lists the (resource_type, action) pair every writer produces: a downgrade of 031 and an
+    upgrade again map the rows written in between to their events"""
+    for member in AuditEvent:
+        if member in SERVED_ONLY:
+            continue
+        pair = audit_service.writer.resource_and_action(member)
+        assert LEGACY_EVENTS.get(pair, (None,))[0] == member.code, (member.code, pair)
+
+
+def test_details_params_name_the_params_of_their_event():
+    """031 copies old details keys of these events into params: every target is a param of the event, and every
+    required param has a source key"""
+    for code, names in DETAILS_PARAMS.items():
+        member = audit_event(code)
+        assert set(names.values()) <= set(member.params), code
+        required = {name for name, annotation in member.params.items() if not is_optional(annotation)}
+        assert required <= set(names.values()), code
 
 
 def test_legacy_events_point_at_catalog_events():

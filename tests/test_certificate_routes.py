@@ -125,7 +125,7 @@ async def test_issue_returns_the_package_once(client, db, headers, pki):
 
     (audit,) = await audit_rows(db, "issue")
     assert audit.resource_id == row.id and audit.user_id == admin.id
-    assert audit.params["label"] == "Laptop" and audit.params["serial"] == row.serial
+    assert audit.params["certificate_label"] == "Laptop" and audit.params["certificate_serial"] == row.serial
     assert audit.params["sha256_fingerprint"] == sha256_fingerprint(cert) and audit.params["not_after"]
     stored = json.dumps([audit.params, audit.new_values, audit.old_values])
     assert body["password"] not in stored and body["p12_base64"][:40] not in stored and "PRIVATE KEY" not in stored
@@ -277,7 +277,8 @@ async def test_upload_route(client, db, headers, pki, monkeypatch):
     assert len(await rows_of(db, user.id)) == 3
     uploads = await audit_rows(db, "upload")
     assert len(uploads) == 3 and uploads[0].params["sha256_fingerprint"] == sha256_fingerprint(ours)
-    assert uploads[0].params["label"] == "Office PC" and uploads[0].params["serial"] == format(ours.serial_number, "x")
+    assert uploads[0].params["certificate_label"] == "Office PC"
+    assert uploads[0].params["certificate_serial"] == format(ours.serial_number, "x")
 
 
 async def test_upload_works_without_pki(client, db, headers):

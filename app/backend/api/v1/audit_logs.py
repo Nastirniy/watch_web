@@ -3,7 +3,7 @@ reads every row and every column; audit.view_scope (tree) reads the rows of the 
 the device fields (services/audit/query.py visibility_of)."""
 from typing import Annotated, List
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Path, Query
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.api.v1.models.query.audit import AuditFilterParams
@@ -79,7 +79,7 @@ async def list_audit_events(
 @router.get(AuditRoutes.ENTRY_BY_ID.value, response_model=AuditEntryResponse,
             responses=problems(ErrorCode.AUDIT_ENTRY_NOT_FOUND, AccessErrorCode.AUDIT_ENTRY_ACCESS_DENIED, *GUARDED))
 async def get_audit_entry(
-        audit_id: int,
+        audit_id: Annotated[int, Path(ge=1)],
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(any=READERS)),
 ):

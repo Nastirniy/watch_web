@@ -57,7 +57,7 @@ async def test_list_returns_newest_first_with_actor_and_scope(client, db, header
     h = headers(admin)
     post = await make_post(db, name="Post North")
     group = await make_group(db, name="Sector East")
-    first = await add_row(db, AuditEvent.TAG_CREATE, {"name": "Red"}, user_id=admin.id)
+    first = await add_row(db, AuditEvent.TAG_CREATE, {"tag_name": "Red"}, user_id=admin.id)
     second = await add_row(db, AuditEvent.POST_UPDATE, {"post_name": "Post North", "post_code": "PN"},
                            scope=Node.post(post.id), user_id=admin.id, resource_id=post.id,
                            old_values={"name": "Post N"}, new_values={"name": "Post North"})
@@ -73,7 +73,7 @@ async def test_list_returns_newest_first_with_actor_and_scope(client, db, header
     assert [e["id"] for e in entries] == [fourth.id, third.id, second.id, first.id]
 
     by_id = {e["id"]: e for e in entries}
-    assert by_id[first.id]["event"] == "tag.create" and by_id[first.id]["params"] == {"name": "Red"}
+    assert by_id[first.id]["event"] == "tag.create" and by_id[first.id]["params"] == {"tag_name": "Red"}
     assert by_id[first.id]["category"] == AuditCategory.DICTIONARIES.value
     assert by_id[first.id]["actor"] == {"id": admin.id, "username": admin.username}
     assert by_id[first.id]["scope"] is None
@@ -98,10 +98,10 @@ async def test_a_written_row_reads_back(client, db, headers):
     created = await client.post(V1.path(TagRoutes.CREATE), json={"name": "Blue"}, headers=h)
     assert created.status_code == 200, created.text
     (entry,) = (await client.get(ENTRIES, params={"event": "tag.create"}, headers=h)).json()
-    assert entry["params"] == {"name": created.json()["name"]}
+    assert entry["params"] == {"tag_name": created.json()["name"]}
     assert entry["actor"] == {"id": admin.id, "username": admin.username}
     assert entry["resource_id"] == created.json()["id"]
-    assert entry["request_id"] and len(entry["request_id"]) == 32
+    assert len(entry["request_id"]) == 32 and entry["request_id"] == created.headers["X-Request-ID"]
 
 
 async def test_optional_params_are_absent_never_null(client, db, headers):
@@ -122,15 +122,33 @@ async def test_rows_the_catalog_cannot_describe_are_legacy_unknown(client, db, h
 
     entries = {e["id"]: e for e in (await client.get(ENTRIES, headers=h)).json()}
     assert entries[old.id]["event"] == "legacy.unknown"
-    assert entries[old.id]["params"] == {"action": "frobnicate", "resource_type": "widget", "message": "Old text"}
+    # the stored details object is served with it: the facts an old row kept there
+    assert entries[old.id]["params"] == {"action": "frobnicate", "resource_type": "widget", "message": "Old text",
+                                         "details": {"message": "Old text"}}
     assert entries[bare.id]["params"] == {"action": "poke", "resource_type": "widget"}
     assert entries[backfilled.id]["event"] == "legacy.unknown"
     assert entries[backfilled.id]["params"] == {"action": "login", "resource_type": "user",
-                                                "message": "User logged in", "stored_event": "user.login"}
+                                                "message": "User logged in", "stored_event": "user.login",
+                                                "details": {"message": "User logged in"}}
     assert entries[backfilled.id]["category"] == AuditCategory.AUTHENTICATION.value
     assert entries[gone.id]["event"] == "legacy.unknown"
     assert entries[gone.id]["params"] == {"action": "removed_later", "resource_type": "thing",
                                           "stored_event": "thing.removed_later"}
+
+
+async def test_a_legacy_row_serves_its_stored_details(client, db, headers):
+    """A row stored as legacy.unknown (031 mapped it) serves its details too; a stored param that only the read API
+    fills (stored_event, details) is never taken from params"""
+    h = headers(await make_admin(db))
+    details = {"message": "Old grant", "user_id": 3, "post_ids": [1, 2]}
+    row = await add_row(db, AuditEvent.LEGACY_UNKNOWN,
+                        {"action": "grant", "resource_type": "user_post_access", "message": "Old grant",
+                         "stored_event": "forged", "details": {"forged": True}},
+                        action="grant", resource_type="user_post_access", details=details)
+    entry = (await client.get(_entry(row.id), headers=h)).json()
+    assert entry["event"] == "legacy.unknown"
+    assert entry["params"] == {"action": "grant", "resource_type": "user_post_access", "message": "Old grant",
+                               "details": details}
 
 
 async def _legacy_rows(db) -> dict:
@@ -164,17 +182,17 @@ async def test_the_legacy_filter_finds_null_mapped_and_gone_rows(client, db, hea
     entries = {e["id"]: e for e in response.json()}
     assert set(entries) == {rows["null"].id, rows["mapped"].id, rows["gone"].id}
     assert entries[rows["null"].id]["params"] == {"action": "frobnicate", "resource_type": "widget"}
-    assert entries[rows["mapped"].id]["params"] == {"action": "grant", "resource_type": "user_post_access",
-                                                    "stored_event": "legacy.unknown"}
+    # stored_event only when the row holds another code than the one served
+    assert entries[rows["mapped"].id]["params"] == {"action": "grant", "resource_type": "user_post_access"}
     assert entries[rows["gone"].id]["params"]["stored_event"] == "thing.removed_later"
 
 
 async def test_values_are_served_as_stored(client, db, headers):
     h = headers(await make_admin(db))
-    row = await add_row(db, AuditEvent.TAG_UPDATE, {"name": "Red "}, old_values={"note": "a &amp; b "},
+    row = await add_row(db, AuditEvent.TAG_UPDATE, {"tag_name": "Red "}, old_values={"note": "a &amp; b "},
                         new_values={"note": "x &lt;y&gt;"})
     entry = (await client.get(_entry(row.id), headers=h)).json()
-    assert entry["params"] == {"name": "Red "}
+    assert entry["params"] == {"tag_name": "Red "}
     assert entry["old_values"] == {"note": "a &amp; b "}
     assert entry["new_values"] == {"note": "x &lt;y&gt;"}
 
@@ -208,7 +226,7 @@ async def _dataset(db):
         "refused": await add_row(db, AuditEvent.AUTH_CERTIFICATE_LOGIN,
                                  {"certificate_cn": "cn", "certificate_serial": "0a", "matched": False},
                                  scope=ROOT, success=False, created_at=NOW - timedelta(days=1)),
-        "tag": await add_row(db, AuditEvent.TAG_CREATE, {"name": "T"}, resource_id=77, created_at=NOW),
+        "tag": await add_row(db, AuditEvent.TAG_CREATE, {"tag_name": "T"}, resource_id=77, created_at=NOW),
         "old": await add_row(db, None, action="frobnicate", resource_type="widget", created_at=NOW),
     }
     return {"corps": corps, "brigade": brigade, "plain": plain, "p1": p1, "p0": p0, "p3": p3, "actor": actor,
@@ -253,7 +271,7 @@ async def test_each_filter_narrows_the_list(client, db, headers, params, expecte
 
 async def test_before_id_pages_through_newest_first(client, db, headers):
     h = headers(await make_admin(db))
-    rows = [await add_row(db, AuditEvent.TAG_CREATE, {"name": f"t{n}"}) for n in range(5)]
+    rows = [await add_row(db, AuditEvent.TAG_CREATE, {"tag_name": f"t{n}"}) for n in range(5)]
     ids = sorted((row.id for row in rows), reverse=True)
     first = await _ids(client, h, page_size=2)
     assert first == ids[:2]
@@ -266,7 +284,7 @@ async def test_before_id_pages_through_newest_first(client, db, headers):
 
 async def test_before_id_with_another_filter(client, db, headers):
     h = headers(await make_admin(db))
-    tags = [await add_row(db, AuditEvent.TAG_CREATE, {"name": f"t{n}"}) for n in range(3)]
+    tags = [await add_row(db, AuditEvent.TAG_CREATE, {"tag_name": f"t{n}"}) for n in range(3)]
     await add_row(db, AuditEvent.USER_UPDATE, {"username": "u"})
     first = await _ids(client, h, page_size=2, event="tag.create")
     assert first == [tags[2].id, tags[1].id]
@@ -305,7 +323,7 @@ async def test_a_page_costs_a_constant_number_of_queries(client, db, headers, en
             post = await make_post(db)
             group = await make_group(db)
             actor = await make_user(db)
-            await add_row(db, AuditEvent.TAG_CREATE, {"name": f"t{k}"}, user_id=actor.id, scope=Node.post(post.id))
+            await add_row(db, AuditEvent.TAG_CREATE, {"tag_name": f"t{k}"}, user_id=actor.id, scope=Node.post(post.id))
             await add_row(db, AuditEvent.SCOPE_GROUP_UPDATE, {"group_name": "g", "group_kind": "group"},
                           user_id=actor.id, scope=Node.group(group.id))
             await add_row(db, AuditEvent.USER_UPDATE, {"username": "u"}, scope=ROOT, user_id=admin.id)
@@ -337,7 +355,7 @@ async def test_a_page_costs_a_constant_number_of_queries(client, db, headers, en
 
 async def test_one_entry_and_an_unknown_id(client, db, headers):
     h = headers(await make_admin(db))
-    row = await add_row(db, AuditEvent.TAG_CREATE, {"name": "Red"})
+    row = await add_row(db, AuditEvent.TAG_CREATE, {"tag_name": "Red"})
     found = await client.get(_entry(row.id), headers=h)
     assert found.status_code == 200, found.text
     assert found.json()["id"] == row.id and found.json()["event"] == "tag.create"
@@ -367,7 +385,7 @@ async def test_events_lists_every_code_with_its_category_and_switchable(client, 
 
 async def test_without_audit_view_every_route_is_403(client, db, headers):
     h = headers(await make_user(db, [Permissions.POST_VIEW]))
-    row = await add_row(db, AuditEvent.TAG_CREATE, {"name": "Red"})
+    row = await add_row(db, AuditEvent.TAG_CREATE, {"tag_name": "Red"})
     for path in (ENTRIES, EVENTS, _entry(row.id)):
         response = await client.get(path, headers=h)
         assert response.status_code == 403, path

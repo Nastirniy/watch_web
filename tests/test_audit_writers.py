@@ -169,8 +169,9 @@ async def test_certificate_rows(client, db, headers, pki):
     assert issued.status_code == 201, issued.text
     (row,) = await rows_of_event(db, AuditEvent.USER_CERTIFICATE_ISSUE)
     assert row.category == AuditCategory.ACCESS.value and row.scope_key == f"p:{post.id}"
-    assert set(row.params) == {"username", "label", "serial", "sha256_fingerprint", "not_after"}
-    assert row.params["username"] == user.username and row.params["label"] == "Laptop"
+    assert set(row.params) == {"username", "certificate_label", "certificate_serial", "sha256_fingerprint",
+                               "not_after"}
+    assert row.params["username"] == user.username and row.params["certificate_label"] == "Laptop"
     assert row.details is None and isinstance(row.params["not_after"], str)
 
     exported = await client.post(V1.path(UserRoutes.USER_CERTIFICATE_EXPORT, user_id=user.id,
@@ -313,7 +314,7 @@ async def test_category_writes(client, db, headers):
         lambda i: V1.path(CategoryRoutes.CATEGORY_BY_ID, category_id=i),
         lambda i: V1.path(CategoryRoutes.CATEGORY_ARCHIVE, category_id=i),
         lambda i: V1.path(CategoryRoutes.CATEGORY_RESTORE, category_id=i),
-        {"name": "Radar", "alias": "radar"}, {"alias": "radar2"}, "CATEGORY", {"name": "Radar"})
+        {"name": "Radar", "alias": "radar"}, {"alias": "radar2"}, "CATEGORY", {"category_name": "Radar"})
 
 
 async def test_tag_writes(client, db, headers):
@@ -323,7 +324,7 @@ async def test_tag_writes(client, db, headers):
         lambda i: V1.path(TagRoutes.TAG_BY_ID, tag_id=i),
         lambda i: V1.path(TagRoutes.TAG_ARCHIVE, tag_id=i),
         lambda i: V1.path(TagRoutes.TAG_RESTORE, tag_id=i),
-        {"name": "urgent"}, {"name": "urgent"}, "TAG", {"name": "urgent"})
+        {"name": "urgent"}, {"name": "urgent"}, "TAG", {"tag_name": "urgent"})
 
 
 async def test_signal_type_writes(client, db, headers):
@@ -427,12 +428,12 @@ async def test_unit_archive_cascade_rows(client, db, headers):
     assert [r.resource_id for r in posts] == [in_brigade.id, direct.id]
     for row, post in zip(posts, (in_brigade, direct)):
         check_row(row, AuditEvent.POST_ARCHIVE, f"p:{post.id}",
-                  {"post_name": post.name, "post_code": post.code, "cascade_from": corps_id})
+                  {"post_name": post.name, "post_code": post.code, "cascade_group_id": corps_id})
         assert row.details is None
     groups = await rows_of_event(db, AuditEvent.SCOPE_GROUP_ARCHIVE)
     assert [r.resource_id for r in groups] == [brigade_id, corps_id]
     check_row(groups[0], AuditEvent.SCOPE_GROUP_ARCHIVE, f"g:{brigade_id}",
-              {"group_name": "Brigade 10", "group_kind": "brigade", "cascade_from": corps_id})
+              {"group_name": "Brigade 10", "group_kind": "brigade", "cascade_group_id": corps_id})
     check_row(groups[1], AuditEvent.SCOPE_GROUP_ARCHIVE, f"g:{corps_id}",
               {"group_name": "Corps 1", "group_kind": "corps"})      # the unit itself: not cascaded
     assert all(r.details is None for r in groups)
@@ -444,7 +445,7 @@ async def test_unit_archive_cascade_rows(client, db, headers):
     assert (await client.post(V1.path(CorpsRoutes.CORPS_ARCHIVE, corps_id=other_id), headers=h)).status_code == 200
     (update,) = await rows_of_event(db, AuditEvent.POST_UPDATE)
     check_row(update, AuditEvent.POST_UPDATE, f"p:{moved.id}",
-              {"post_name": moved.name, "post_code": moved.code, "cascade_from": other_id})
+              {"post_name": moved.name, "post_code": moved.code, "cascade_group_id": other_id})
 
 
 async def test_fill_history_row(client, db, headers):
@@ -675,7 +676,8 @@ async def test_certificate_login_writes_one_row_at_the_end(client, db, headers, 
     unmatched = (await rows_of_event(db, AuditEvent.AUTH_CERTIFICATE_LOGIN))[1:]
     (miss,) = unmatched
     assert miss.success is False and miss.user_id is None and miss.scope_key is None
-    assert miss.params["matched"] is False and miss.params["certificate_id"] is None
+    # an optional param passed as None is absent, never null
+    assert miss.params["matched"] is False and "certificate_id" not in miss.params
 
 
 @pytest.mark.parametrize("refusal", ["revoked", "expired", "archived", "deactivated"])

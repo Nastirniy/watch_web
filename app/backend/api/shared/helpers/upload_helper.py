@@ -115,7 +115,9 @@ async def record_upload(
     When this transaction fails (500), the file and its row stay stored (a move cannot be rolled back) without
     metadata and audit row, and the poster job stays held: the hold runs out after jobs.UPLOAD_HOLD and the worker
     takes the poster like any other (it probes the metadata too; `media_tools probe-missing` fills metadata of
-    other media types)."""
+    other media types).
+
+    transport: how the file came (the audit param via, an identifier): multipart, nginx_offload or resumable."""
     media_file = (await session.exec(select(MediaFile).where(MediaFile.id == media_file_id))).one()
     await start_write(session)
     metadata = None

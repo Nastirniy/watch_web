@@ -325,6 +325,37 @@ are lost; the output counts them and names every user who got a placeholder. The
 certificate, otherwise the placeholder (the output names those users). Turn the PKI override off (`COMPOSE_FILE`)
 and put the old `ssl_client_certificate` / `ssl_crl` back in nginx.
 
+### Audit log (migration 031)
+
+Migration `031_audit_events` adds `event`, `category`, `request_id`, `scope_key`, `scope_post_id`,
+`scope_group_id` and `params` to `audit_logs`, six indexes, and backfills the existing rows (CHANGELOG, "Audit
+log"). The start runs it.
+
+1. Make a backup first (`BACKUPS.md`).
+2. Stop the api (and anything else that writes, such as a running `restore_reconcile` or `init_user`) and let the
+   start of the new version run the migration: `docker compose up -d` starts it, the api serves only after it.
+   The backfill commits every statement on its own, so a writer that is still running is not blocked (measured:
+   longest insert 0.07 s), but the rows it writes during the run keep no event (served as `legacy.unknown`) and its
+   changes to posts, observations or assignments could make a backfill statement fail on MariaDB (error 1020). A run
+   that stops halfway is finished by the next start (only rows without an event are filled).
+3. Expected duration: about 3.5 minutes per million audit rows (MariaDB 11.8 in Docker on a workstation, 1 GB buffer
+   pool, 1,000,000 rows / 462 MB: 201 s in all). Adding the columns is instant (no table copy, the JSON column
+   included), each index takes under a second per million rows, the rest is the backfill (UPDATEs in batches of
+   10,000 ids plus one UPDATE per old `legacy.unknown`, role assignment, restore and reconcile row). Count the rows
+   first: `SELECT COUNT(*) FROM audit_logs`.
+4. The web must ship a message for every event code (`GET /api/v1/audit-logs/events`) plus `legacy.unknown` before
+   it shows the audit page: every row written before the deploy is served as `legacy.unknown` except the restores
+   and reconciles, whose counts the backfill moved to `params`.
+
+Rollback: `alembic downgrade 030_authorization_v3`, then deploy the previous version. The downgrade drops the seven
+columns and the indexes, and with them the event, params, scope and request id of every row written since the
+upgrade (those rows keep only `action`, `resource_type` and their values; `details` is empty on them). The
+permission `audit.view_scope` is not owned by a migration (seeding inserts it): its `permissions` row and its grants
+stay after the downgrade, and the previous version answers 500 on the permission and role lists that meet it (an
+unknown permission name; seeding never deletes it). A rollback that must keep those lists working is the restore of
+the backup of step 1 (`BACKUPS.md`), which loses everything written since; otherwise stay on the new version and fix
+forward.
+
 ### Scheduled cleanup (cron)
 
 Every installation that accepts offloaded uploads needs this job; without it rejected upload bodies (up to the format

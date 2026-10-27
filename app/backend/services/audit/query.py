@@ -171,7 +171,8 @@ class AuditScope:
 @dataclass(frozen=True)
 class AuditEntry:
     """One audit row as a reader sees it. event / category as stored (None on old rows); message: the English
-    sentence old rows kept in details (None on new rows). The device fields are None without visibility of them."""
+    sentence old rows kept in details (None on new rows); details: the stored details object (None when the row has
+    none: new rows never write it). The device fields are None without visibility of them."""
     id: int
     created_at: datetime
     event: Optional[str]
@@ -181,6 +182,7 @@ class AuditEntry:
     resource_id: Optional[int]
     params: Optional[Dict[str, Any]]
     message: Optional[str]
+    details: Optional[Dict[str, Any]]
     actor: Optional[AuditActor]
     scope: Optional[AuditScope]
     success: bool
@@ -252,6 +254,7 @@ async def _entries(session: AsyncSession, rows: List[AuditLog], visibility: Audi
     return [AuditEntry(
         id=row.id, created_at=row.created_at, event=row.event, category=row.category, action=row.action,
         resource_type=row.resource_type, resource_id=row.resource_id, params=row.params, message=_message(row.details),
+        details=row.details if isinstance(row.details, dict) else None,
         actor=None if row.user_id is None else AuditActor(id=row.user_id, username=usernames.get(row.user_id)),
         scope=scope_of(nodes[row.id]), success=row.success, old_values=row.old_values, new_values=row.new_values,
         request_id=row.request_id,

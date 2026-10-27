@@ -43,15 +43,17 @@ class CarryOverResult:
     sessions_ended: int
 
 
-def _reflect(conn: sa.Connection, name: str, schema: Optional[str]) -> Optional[sa.Table]:
-    """The table as the schema has it (a backup may be at an older migration), None when it has none"""
+def reflect_table(conn: sa.Connection, name: str, schema: Optional[str]) -> Optional[sa.Table]:
+    """The table as the schema has it (a backup may be at an older migration), None when it has none. Public: the
+    restore tool reflects audit_logs with it to write its own row (restore.py)."""
     if not sa.inspect(conn).has_table(name, schema=schema):
         return None
     return sa.Table(name, sa.MetaData(), schema=schema, autoload_with=conn)
 
 
-def _only(table: sa.Table, values: dict) -> dict:
-    """The values of the columns the table has"""
+def known_columns(table: sa.Table, values: dict) -> dict:
+    """The values of the columns the table has (the others are left out: an older schema lacks them). Public, like
+    reflect_table."""
     return {key: value for key, value in values.items() if key in table.c}
 
 
@@ -85,15 +87,15 @@ def _add_placeholders(conn: sa.Connection, outgoing: Optional[str], incoming: Op
     the incoming data lacks, a username taken in the incoming data suffixed with ~<id>"""
     if not user_ids:
         return ()
-    out_users, in_users = _reflect(conn, USERS, outgoing), _reflect(conn, USERS, incoming)
-    posts = _reflect(conn, POSTS, incoming)
+    out_users, in_users = reflect_table(conn, USERS, outgoing), reflect_table(conn, USERS, incoming)
+    posts = reflect_table(conn, POSTS, incoming)
     post_ids = set() if posts is None else set(conn.execute(sa.select(posts.c.id)).scalars())
     taken = {_name_key(name) for name in conn.execute(sa.select(in_users.c.username)).scalars()}
     added = []
     for row in conn.execute(sa.select(out_users).where(out_users.c.id.in_(sorted(user_ids)))
                             .order_by(out_users.c.id)).mappings():
-        values = _only(in_users, dict(row))
-        values.update(_only(in_users, {"is_active": False, "is_deleted": True}))
+        values = known_columns(in_users, dict(row))
+        values.update(known_columns(in_users, {"is_active": False, "is_deleted": True}))
         if values.get("post_id") is not None and values["post_id"] not in post_ids:
             values["post_id"] = None
         values["username"] = _free_name(values["username"], row["id"], taken)
@@ -106,14 +108,14 @@ def _add_placeholders(conn: sa.Connection, outgoing: Optional[str], incoming: Op
 def carry_over(conn: sa.Connection, outgoing: Optional[str], incoming: Optional[str],
                now: datetime) -> CarryOverResult:
     stamp = _naive_utc(now)
-    out_certs, in_certs = _reflect(conn, CERTIFICATES, outgoing), _reflect(conn, CERTIFICATES, incoming)
+    out_certs, in_certs = reflect_table(conn, CERTIFICATES, outgoing), reflect_table(conn, CERTIFICATES, incoming)
     outgoing_rows = [] if out_certs is None else [
         dict(row) for row in conn.execute(sa.select(out_certs).order_by(out_certs.c.id)).mappings()]
     if in_certs is None and any(row["revoked_at"] is not None or row.get("ca_issued") for row in outgoing_rows):
         raise CarryOverUnsupported(CERTIFICATES)
     revoke, missing, users_added = [], [], ()
     if in_certs is not None:
-        in_users = _reflect(conn, USERS, incoming)
+        in_users = reflect_table(conn, USERS, incoming)
         incoming_by_fp = {row["fingerprint_hash"]: row for row in conn.execute(sa.select(in_certs)).mappings()}
         incoming_ids = {row["id"] for row in incoming_by_fp.values()}
         user_ids = set(conn.execute(sa.select(in_users.c.id)).scalars())
@@ -128,7 +130,7 @@ def carry_over(conn: sa.Connection, outgoing: Optional[str], incoming: Optional[
 
     for row in revoke:
         conn.execute(sa.update(in_certs).where(in_certs.c.fingerprint_hash == row["fingerprint_hash"]).values(
-            **_only(in_certs, {"revoked_at": row["revoked_at"], "revoked_by": row.get("revoked_by"),
+            **known_columns(in_certs, {"revoked_at": row["revoked_at"], "revoked_by": row.get("revoked_by"),
                                "revocation_reason": row.get("revocation_reason")})))
     added = 0
     for row in missing:
@@ -138,26 +140,26 @@ def carry_over(conn: sa.Connection, outgoing: Optional[str], incoming: Optional[
         if values["revoked_at"] is None:
             values.update(revoked_at=stamp, revoked_by=None,
                           revocation_reason=RevocationReason.CESSATION_OF_OPERATION.value)
-        conn.execute(sa.insert(in_certs).values(**_only(in_certs, values)))
+        conn.execute(sa.insert(in_certs).values(**known_columns(in_certs, values)))
         added += 1
 
     # The CRL state of the newer number, with its dates: /health compares revocations with published_at
-    out_ca, in_ca = _reflect(conn, CA_STATE, outgoing), _reflect(conn, CA_STATE, incoming)
+    out_ca, in_ca = reflect_table(conn, CA_STATE, outgoing), reflect_table(conn, CA_STATE, incoming)
     out_state = None if out_ca is None else conn.execute(
         sa.select(out_ca).order_by(out_ca.c.crl_number.desc())).mappings().first()
     in_number = None if in_ca is None else conn.execute(sa.select(sa.func.max(in_ca.c.crl_number))).scalar()
     out_number = out_state["crl_number"] if out_state else 0
     crl_number = max(out_number, in_number or 0)
     if in_number is not None and out_number > in_number:
-        conn.execute(sa.update(in_ca).values(**_only(in_ca, {
+        conn.execute(sa.update(in_ca).values(**known_columns(in_ca, {
             key: out_state[key] for key in ("crl_number", "this_update", "next_update", "published_at",
                                             "revoked_count") if key in out_state})))
 
     # Sessions of the backup end; a schema from before migration 015 has is_active instead of ended_at
-    sessions = _reflect(conn, SESSIONS, incoming)
+    sessions = reflect_table(conn, SESSIONS, incoming)
     ended = 0
     if sessions is not None and "ended_at" in sessions.c:
-        ended = conn.execute(sa.update(sessions).where(sessions.c.ended_at.is_(None)).values(**_only(sessions, {
+        ended = conn.execute(sa.update(sessions).where(sessions.c.ended_at.is_(None)).values(**known_columns(sessions, {
             "ended_at": stamp, "end_reason": SessionEndReason.REVOKED.value,
             "revoke_cause": SessionRevokeCause.DATABASE_RESTORED.value}))).rowcount
     elif sessions is not None and "is_active" in sessions.c:
@@ -169,7 +171,7 @@ def carry_over(conn: sa.Connection, outgoing: Optional[str], incoming: Optional[
 def user_state_differences(conn: sa.Connection, outgoing: Optional[str],
                            incoming: Optional[str]) -> list[tuple[int, str, str]]:
     """Users whose is_active / is_deleted differ (outgoing -> incoming): reported, never changed"""
-    out_users, in_users = _reflect(conn, USERS, outgoing), _reflect(conn, USERS, incoming)
+    out_users, in_users = reflect_table(conn, USERS, outgoing), reflect_table(conn, USERS, incoming)
     rows = conn.execute(
         sa.select(out_users.c.id, out_users.c.username, out_users.c.is_active, out_users.c.is_deleted,
                   in_users.c.is_active.label("in_active"), in_users.c.is_deleted.label("in_deleted"))

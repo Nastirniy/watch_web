@@ -52,6 +52,20 @@ async def errors_are_problems(response: httpx.Response) -> None:
             f"without application/problem+json ({content_type or 'no content type'})")
 
 
+def audit_params_mismatch(event, params: dict) -> Optional[str]:
+    """Why the read API would not serve these params (as create_audit_log stores them) as their event, None when it
+    would: they must validate, strictly, against the event's v1 params model (api/v1/models/response/audit.py)"""
+    from pydantic import ValidationError
+    from app.backend.api.v1.models.response.audit import audit_event_models
+    from app.backend.services.audit.writer import serialize_for_audit
+    model = audit_event_models()[event].model_fields["params"].annotation
+    try:
+        model.model_validate(serialize_for_audit(params) or {}, strict=True)
+    except ValidationError as exc:
+        return f"{event.code}: {[(error['loc'], error['type']) for error in exc.errors()]}"
+    return None
+
+
 def _next() -> int:
     return next(_counter)
 

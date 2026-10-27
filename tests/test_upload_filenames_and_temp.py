@@ -265,4 +265,4 @@ async def test_nginx_upload_audit_row_names_the_transport(client, db, headers, s
     row = (await db.exec(select(AuditLog).where(AuditLog.event == "media.create"))).one()
     assert row.scope_key == f"p:{observation.post_id}"
     assert row.params == {"observation_id": observation.id, "file_name": "photo.png", "media_type": "image",
-                          "via": "nginx offload"}
+                          "via": "nginx_offload"}

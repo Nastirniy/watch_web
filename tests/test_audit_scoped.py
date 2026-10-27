@@ -57,7 +57,7 @@ async def _dataset(db):
         "b": await add_row(db, *_group_row(brigade, "brigade"), scope=Node.group(brigade.id), resource_id=brigade.id),
         "c": await add_row(db, *_group_row(corps, "corps"), scope=Node.group(corps.id), resource_id=corps.id),
         "root": await add_row(db, AuditEvent.USER_UPDATE, {"username": "nobody"}, scope=ROOT),
-        "system": await add_row(db, AuditEvent.TAG_CREATE, {"name": "Red"}, resource_id=77),
+        "system": await add_row(db, AuditEvent.TAG_CREATE, {"tag_name": "Red"}, resource_id=77),
     }
     return {"corps": corps, "brigade": brigade, "p1": p1, "p2": p2, "p0": p0, "rows": rows}
 

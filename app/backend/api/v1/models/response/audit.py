@@ -3,7 +3,8 @@
 (typed params; an optional param is absent, never null). AuditEntryResponse is their union, discriminated by event,
 so openapi-typescript narrows params by event. Rows the catalog cannot describe (no event, an unknown code, params
 that do not fit the event: rows written before the catalog) are served as legacy.unknown, with the stored code in
-params.stored_event. Values are served as stored: these models never strip or unescape strings."""
+params.stored_event (when it is not legacy.unknown itself) and the stored details object in params.details. Values are
+served as stored: these models never strip or unescape strings."""
 import dataclasses
 from functools import lru_cache
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union
@@ -107,14 +108,23 @@ class AuditEventResponse(AuditModel):
     title: str = Field(description="English fallback text")
 
 
+# Params of legacy.unknown the read API fills from the row itself (never stored: create_audit_log refuses the event)
+_SERVED_PARAMS = ("stored_event", "details")
+
+
 def _served(entry: AuditEntry):
-    """(event, params) the entry is served as: its own event when its params fit, legacy.unknown otherwise"""
+    """(event, params) the entry is served as: its own event when its params fit, legacy.unknown otherwise. A
+    legacy.unknown entry carries the stored details object and, when the row holds another code, that code
+    (stored_event)."""
     event = audit_event(entry.event) if entry.event else None
     if event is not None:
         params_model = audit_event_models()[event].model_fields["params"].annotation
         stored = dict(entry.params) if isinstance(entry.params, dict) else {}
         if event is AuditEvent.LEGACY_UNKNOWN:
-            stored["stored_event"] = entry.event
+            for name in _SERVED_PARAMS:
+                stored.pop(name, None)
+            if entry.details is not None:
+                stored["details"] = entry.details
         try:
             return event, params_model.model_validate(stored)
         except ValidationError:
@@ -122,8 +132,10 @@ def _served(entry: AuditEntry):
     legacy = {"action": entry.action, "resource_type": entry.resource_type}
     if entry.message is not None:
         legacy["message"] = entry.message
-    if entry.event is not None:
+    if entry.event is not None and entry.event != AuditEvent.LEGACY_UNKNOWN.code:
         legacy["stored_event"] = entry.event
+    if entry.details is not None:
+        legacy["details"] = entry.details
     return AuditEvent.LEGACY_UNKNOWN, legacy
 
 

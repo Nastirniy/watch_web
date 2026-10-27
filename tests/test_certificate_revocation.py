@@ -11,7 +11,7 @@ from app.backend.api.v1 import V1
 from app.backend.auth.scope import Node, ROOT
 from app.backend.config import settings
 from app.backend.enums.general import CertificateSource, Permissions
-from app.backend.enums.routes import SystemRoutes, UserRoutes
+from app.backend.enums.routes import AuditRoutes, SystemRoutes, UserRoutes
 from app.backend.models.user import UserSession
 from app.backend.pki.authority import sha256_fingerprint
 from app.backend.pki.crl import split_pem_crls
@@ -58,7 +58,7 @@ async def test_revoke_lists_the_serial_on_the_crl(client, db, headers, pki):
     assert entry.extensions.get_extension_for_class(x509.CRLReason).value.reason == x509.ReasonFlags.key_compromise
     (audit,) = await audit_rows(db, "revoke")
     assert audit.resource_id == certificate_id and audit.user_id == admin.id
-    assert audit.params["reason"] == "key_compromise" and audit.params["serial"] == row.serial
+    assert audit.params["reason"] == "key_compromise" and audit.params["certificate_serial"] == row.serial
     # Like every certificate audit row: the fingerprint (of the stored certificate) and the expiry
     assert audit.params["sha256_fingerprint"] == sha256_fingerprint(cert)
     assert datetime.fromisoformat(audit.params["not_after"]) == cert.not_valid_after_utc
@@ -151,8 +151,12 @@ async def test_revoking_a_legacy_row_works_without_pki(client, db, headers):
     r = await revoke(client, headers, admin, user.id, row.id)
     assert r.status_code == 200 and r.json()["state"] == "revoked", r.text
     (audit,) = await audit_rows(db, "revoke")
-    # A legacy row has only hashes: no fingerprint, no expiry (left out, never invented)
+    # A legacy row has only hashes: no serial, no fingerprint, no expiry (left out, never invented or null)
     assert "sha256_fingerprint" not in audit.params and "not_after" not in audit.params
+    assert "certificate_serial" not in audit.params and audit.params["certificate_label"] == ""
+    # ... and the read API serves it as the revoke it is, not as legacy.unknown
+    entry = (await client.get(V1.path(AuditRoutes.ENTRY_BY_ID, audit_id=audit.id), headers=headers(admin))).json()
+    assert entry["event"] == "user_certificate.revoke" and "certificate_serial" not in entry["params"]
 
 
 async def test_revocation_while_the_signer_is_down_reaches_the_next_crl(client, db, headers, pki):

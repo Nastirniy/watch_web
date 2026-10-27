@@ -86,7 +86,7 @@ async def create_category(
         await session.refresh(category)
         await create_audit_log(
             session, AuditEvent.CATEGORY_CREATE,
-            params={"name": category.name},
+            params={"category_name": category.name},
             resource_id=category.id,
             user_id=current_user.id,
             old_values=None,
@@ -176,7 +176,7 @@ async def update_category(
         await session.refresh(category)
         await create_audit_log(
             session, AuditEvent.CATEGORY_UPDATE,
-            params={"name": category.name},
+            params={"category_name": category.name},
             resource_id=category.id,
             user_id=current_user.id,
             old_values=old_values,
@@ -217,7 +217,7 @@ async def archive_category(
     session.add(row)
     await create_audit_log(
         session, AuditEvent.CATEGORY_ARCHIVE,
-        params={"name": row.name},
+        params={"category_name": row.name},
         resource_id=row.id,
         user_id=current_user.id,
         old_values=old_values,
@@ -253,7 +253,7 @@ async def restore_category(
     session.add(row)
     await create_audit_log(
         session, AuditEvent.CATEGORY_RESTORE,
-        params={"name": row.name},
+        params={"category_name": row.name},
         resource_id=row.id,
         user_id=current_user.id,
         old_values=old_values,

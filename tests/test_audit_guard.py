@@ -1,8 +1,19 @@
 """One writer of audit rows: create_audit_log(session, AuditEvent.X, params=...). An AST scan of app/backend fails on
-the legacy keywords and on a raw INSERT into audit_logs outside the places that are raw by design."""
+the legacy keywords and on a raw INSERT into audit_logs outside the places that are raw by design. The params of every
+row the tests write are checked against the v1 params models (tests/conftest.py audit_params_are_served); the raw
+restore rows are checked here."""
 import ast
 import re
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from app.backend.enums.audit import AuditEvent
+from app.backend.services.audit.writer import check_event_params
+from app.backend.services.backups.carry_over import CarryOverResult
+from app.backend.services.backups.restore import restore_params, undo_restore_params
+from tests.helpers import audit_params_mismatch
 
 BACKEND = Path(__file__).resolve().parents[1] / "app" / "backend"
 LEGACY_KEYWORDS = {"action", "resource_type", "details"}
@@ -81,3 +92,29 @@ def test_no_raw_insert_into_audit_logs_outside_migrations_and_restore():
 def test_services_do_not_import_the_frozen_legacy_mapping():
     for path, source in _sources(skip=(("migrations",),)):
         assert "audit_events_v1" not in source, str(path.relative_to(BACKEND))
+
+
+def test_the_params_guard_finds_a_mismatch():
+    """The session guard is not vacuous: a value of the wrong type or a None where a str is required is found"""
+    assert audit_params_mismatch(AuditEvent.TAG_CREATE, {"tag_name": "Red"}) is None
+    assert audit_params_mismatch(AuditEvent.TAG_CREATE, {"tag_name": 5}) is not None
+    assert audit_params_mismatch(AuditEvent.USER_CERTIFICATE_REVOKE,
+                                 {"username": "u", "certificate_label": None}) is not None
+    assert audit_params_mismatch(AuditEvent.USER_CERTIFICATE_REVOKE, {"username": "u", "certificate_label": ""}) is None
+
+
+CARRY = CarryOverResult(revocations=1, certificates_added=2, users_added=((5, "u5"),), crl_number=7, sessions_ended=3)
+MANIFEST = SimpleNamespace(id="20261022-120000-scheduled", label=SimpleNamespace(value="scheduled"),
+                           migration_revision="031_audit_events")
+
+
+@pytest.mark.parametrize("event,params", [
+    (AuditEvent.DATABASE_RESTORE, restore_params(MANIFEST, CARRY, "db_before_x", 4)),
+    (AuditEvent.DATABASE_UNDO_RESTORE, undo_restore_params("db_before_y", CARRY, "db_before_x", 4)),
+], ids=["restore", "undo_restore"])
+def test_restore_rows_fit_the_catalog(event, params):
+    """The restore tool writes its row with a raw INSERT (services/backups/restore.py), past create_audit_log: its
+    params must still be exactly the event's and validate against the v1 model"""
+    check_event_params(event, params)
+    assert audit_params_mismatch(event, params) is None
+    assert params["added_user_count"] == 1 and params["raised_id_count"] == 4
