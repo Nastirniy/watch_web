@@ -15,6 +15,7 @@ from app.backend.auth.require import require
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import TagRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
+from app.backend.enums.audit import AuditEvent
 from app.backend.services.audit import create_audit_log
 from app.backend.api.v1.models.request.tags import TagCreate, TagUpdate
 from app.backend.api.v1.models.response.tags import TagResponse
@@ -79,14 +80,12 @@ async def create_tag(
         await session.flush()
         await session.refresh(tag)
         await create_audit_log(
-            session=session,
-            action="create",
-            resource_type="tag",
+            session, AuditEvent.TAG_CREATE,
+            params={"name": tag.name},
             resource_id=tag.id,
             user_id=current_user.id,
             old_values=None,
             new_values=tag.model_dump(),
-            details={"message": f"User {current_user.username} created tag '{tag.name}'"},
             **client_info(request, auth)
         )
         await session.commit()
@@ -171,14 +170,12 @@ async def update_tag(
         await session.flush()
         await session.refresh(tag)
         await create_audit_log(
-            session=session,
-            action="update",
-            resource_type="tag",
+            session, AuditEvent.TAG_UPDATE,
+            params={"name": tag.name},
             resource_id=tag.id,
             user_id=current_user.id,
             old_values=old_values,
             new_values=tag.model_dump(),
-            details={"message": f"User {current_user.username} updated tag '{tag.name}'"},
             **client_info(request, auth)
         )
         await session.commit()
@@ -208,14 +205,12 @@ async def archive_tag(
     row.is_deleted = True
     session.add(row)
     await create_audit_log(
-        session=session,
-        action="archive",
-        resource_type="tag",
+        session, AuditEvent.TAG_ARCHIVE,
+        params={"name": row.name},
         resource_id=row.id,
         user_id=current_user.id,
         old_values=old_values,
         new_values=row.model_dump(),
-        details={"message": f"User {current_user.username} archived tag '{row.name}'"},
         **client_info(request, auth),
     )
     await session.commit()
@@ -246,14 +241,12 @@ async def restore_tag(
     row.is_deleted = False
     session.add(row)
     await create_audit_log(
-        session=session,
-        action="restore",
-        resource_type="tag",
+        session, AuditEvent.TAG_RESTORE,
+        params={"name": row.name},
         resource_id=row.id,
         user_id=current_user.id,
         old_values=old_values,
         new_values=row.model_dump(),
-        details={"message": f"User {current_user.username} restored tag '{row.name}'"},
         **client_info(request, auth),
     )
     await session.commit()

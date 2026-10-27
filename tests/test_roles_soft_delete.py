@@ -163,7 +163,7 @@ async def test_permanent_delete_preconditions_and_effect(client, db, headers):
     (copied,) = log.old_values["assignments"]
     assert set(copied) == set(RoleAssignment.__table__.columns.keys())
     assert {**copied, "created_at": datetime.fromisoformat(copied["created_at"])} == expected_assignment
-    assert log.details["permanent"] is True
+    assert log.event == "role.delete" and log.params == {"role_name": "temporary", "role_kind": "tree"}
     assert log.old_values["user_roles_v1"] == [], "no user_roles_v1 table (a fresh install): nothing to copy"
 
 

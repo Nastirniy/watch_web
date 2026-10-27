@@ -105,8 +105,8 @@ async def test_clone_builtin_role(client, db, headers):
     assert await permission_names(db, body["id"]) == await permission_names(db, operator.id)
 
     log = (await db.exec(select(AuditLog).where(
-        AuditLog.resource_type == "role", AuditLog.resource_id == body["id"], AuditLog.action == "create"))).one()
-    assert log.details["cloned_from"] == operator.id
+        AuditLog.resource_type == "role", AuditLog.resource_id == body["id"], AuditLog.action == "clone"))).one()
+    assert log.params["cloned_from"] == operator.name
 
     taken = await client.post(CLONE.format(role_id=operator.id), headers=headers(admin),
                               json={"name": "operator_night", "display_name": "Again"})

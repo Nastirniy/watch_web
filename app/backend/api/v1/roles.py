@@ -22,6 +22,7 @@ from app.backend.auth.privileges import check_grant, check_role_grant, role_node
 from app.backend.enums.general import Permissions, RoleKind
 from app.backend.enums.routes import RoleRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
+from app.backend.enums.audit import AuditEvent
 from app.backend.services.audit import create_audit_log
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.api.v1.models.query.roles import RoleFilterParams
@@ -126,13 +127,11 @@ async def create_role(
         await session.flush()
         await session.refresh(role)
         await create_audit_log(
-            session=session,
-            action="create",
-            resource_type="role",
+            session, AuditEvent.ROLE_CREATE,
+            params={"role_name": role.name, "role_kind": role.kind},
             resource_id=role.id,
             user_id=current_user.id,
             new_values=role.model_dump(),
-            details={"message": f"User {current_user.username} created new role '{role.name}'"},
             **client_info(request, auth)
         )
         await session.commit()
@@ -265,14 +264,12 @@ async def update_role(
         await session.flush()
         await session.refresh(role)
         await create_audit_log(
-            session=session,
-            action="update",
-            resource_type="role",
+            session, AuditEvent.ROLE_UPDATE,
+            params={"role_name": role.name, "role_kind": role.kind},
             resource_id=role.id,
             user_id=current_user.id,
             old_values=old_values,
             new_values=role.model_dump(),
-            details={"message": f"User {current_user.username} updated role '{role.name}'"},
             **client_info(request, auth)
         )
         await session.commit()
@@ -313,14 +310,12 @@ async def archive_role(
     role.updated_at = datetime.now(timezone.utc)
     session.add(role)
     await create_audit_log(
-        session=session,
-        action="archive",
-        resource_type="role",
+        session, AuditEvent.ROLE_ARCHIVE,
+        params={"role_name": role.name, "role_kind": role.kind},
         resource_id=role.id,
         user_id=current_user.id,
         old_values=old_values,
         new_values=role.model_dump(),
-        details={"message": f"User {current_user.username} archived role '{role.name}'"},
         **client_info(request, auth),
     )
     await session.commit()
@@ -357,14 +352,12 @@ async def restore_role(
     role.updated_at = datetime.now(timezone.utc)
     session.add(role)
     await create_audit_log(
-        session=session,
-        action="restore",
-        resource_type="role",
+        session, AuditEvent.ROLE_RESTORE,
+        params={"role_name": role.name, "role_kind": role.kind},
         resource_id=role.id,
         user_id=current_user.id,
         old_values=old_values,
         new_values=role.model_dump(),
-        details={"message": f"User {current_user.username} restored role '{role.name}'"},
         **client_info(request, auth),
     )
     await session.commit()
@@ -399,7 +392,7 @@ async def clone_role(
     await check_role_name_exists(session, role_data.name)
     names = await role_permission_names(session, [source.id])
     check_grant(auth, names)
-    source_id = source.id
+    source_id, source_name = source.id, source.name
 
     role = Role(**role_data.model_dump(), kind=source.kind)
     session.add(role)
@@ -411,16 +404,11 @@ async def clone_role(
         await session.flush()
         await session.refresh(role)
         await create_audit_log(
-            session=session,
-            action="create",
-            resource_type="role",
+            session, AuditEvent.ROLE_CLONE,
+            params={"role_name": role.name, "role_kind": role.kind, "cloned_from": source_name},
             resource_id=role.id,
             user_id=current_user.id,
             new_values=role.model_dump(),
-            details={
-                "message": f"User {current_user.username} cloned role {source_id} as '{role.name}'",
-                "cloned_from": source_id,
-            },
             **client_info(request, auth)
         )
         await session.commit()
@@ -514,21 +502,11 @@ async def delete_role(
     await delete_legacy_holder_rows(session, role_id)
     await session.execute(sa_delete(Role).where(Role.id == role_id))
     await create_audit_log(
-        session=session,
-        action="delete",
-        resource_type="role",
+        session, AuditEvent.ROLE_DELETE,
+        params={"role_name": old_values["name"], "role_kind": old_values["kind"]},
         resource_id=role_id,
         user_id=current_user.id,
         old_values=old_values,
-        details={
-            "message": (
-                f"User {current_user.username} permanently deleted role '{old_values['name']}' "
-                f"({len(permission_names)} permissions, {len(assignments) + len(system_assignments)} assignments of "
-                f"{len(archived_users)} "
-                f"archived users, {len(legacy_holders)} legacy user_roles_v1 rows)"
-            ),
-            "permanent": True,
-        },
         **client_info(request, auth),
     )
     await session.commit()
@@ -607,7 +585,8 @@ async def add_role_permission(
         check_role_grant(auth, await role_nodes(session, role_id), added=[permission.name])
         await check_role_permissions_added(session, role_id, [permission.name])
         # A rollback expires every loaded object: keep what is needed afterwards as plain values
-        actor_id, actor_name, role_name, permission_name = current_user.id, current_user.username, role.name, permission.name
+        actor_id, actor_name, role_name, role_kind, permission_name = (
+            current_user.id, current_user.username, role.name, role.kind, permission.name)
         session.add(RolePermission(role_id=role_id, permission_id=permission_id))
         role.updated_at = datetime.now(timezone.utc)
         session.add(role)
@@ -615,13 +594,11 @@ async def add_role_permission(
             # One transaction: the grant and its audit row
             await session.flush()
             await create_audit_log(
-                session=session,
-                action="update",
-                resource_type="role",
+                session, AuditEvent.ROLE_PERMISSION_ADD,
+                params={"role_name": role_name, "role_kind": role_kind, "permission": permission_name},
                 resource_id=role_id,
                 user_id=actor_id,
                 new_values={"permission_added": permission_name},
-                details={"message": f"User {actor_name} granted '{permission_name}' to role '{role_name}'"},
                 **client_info(request, auth)
             )
             await session.commit()
@@ -672,13 +649,11 @@ async def remove_role_permission(
     role.updated_at = datetime.now(timezone.utc)
     session.add(role)
     await create_audit_log(
-        session=session,
-        action="update",
-        resource_type="role",
+        session, AuditEvent.ROLE_PERMISSION_REMOVE,
+        params={"role_name": role.name, "role_kind": role.kind, "permission": permission.name},
         resource_id=role.id,
         user_id=current_user.id,
         old_values={"permission_removed": permission.name},
-        details={"message": f"User {current_user.username} revoked '{permission.name}' from role '{role.name}'"},
         **client_info(request, auth)
     )
     await session.commit()

@@ -7,8 +7,10 @@ from app.backend.auth.scope import Node, ROOT
 from app.backend.auth.service import AuthService
 from app.backend.enums.audit import AuditCategory, AuditEvent
 from app.backend.enums.general import BuiltinRole, SessionRevokeCause, UserType
-from app.backend.enums.routes import AuthRoutes, UserRoutes
+from app.backend.enums.routes import (
+    AuthRoutes, CategoryRoutes, MediaFormatRoutes, RoleRoutes, SignalTypeRoutes, TagRoutes, UserRoutes)
 from app.backend.models.audit import AuditLog
+from app.backend.models.role import Permission
 from tests.helpers import assign, builtin_role, issue, make_admin, make_post, make_user
 
 
@@ -207,3 +209,136 @@ async def test_cli_rows(db, session_maker, monkeypatch, tmp_path, pki):
     (issued,) = await rows_of_event(db, AuditEvent.USER_CERTIFICATE_ISSUE)
     assert issued.scope_key == f"p:{post.id}" and issued.params["via"] == "cli"
     assert issued.params["username"] == user.username and issued.user_id is None
+
+
+# ---------------------------------------------------------------- api/v1/roles.py (part 3b)
+
+async def test_role_writes(client, db, headers):
+    admin = await make_admin(db)
+    h = headers(admin)
+    created = await client.post(V1.path(RoleRoutes.ROOT), headers=h, json={
+        "name": "night_watch", "display_name": "Night watch", "kind": "tree"})
+    assert created.status_code == 201, created.text
+    role_id = created.json()["id"]
+    (row,) = await rows_of_event(db, AuditEvent.ROLE_CREATE)
+    check_row(row, AuditEvent.ROLE_CREATE, None, {"role_name": "night_watch", "role_kind": "tree"})
+    assert row.category == AuditCategory.ACCESS.value and row.details is None and row.resource_id == role_id
+    assert row.new_values["name"] == "night_watch" and row.user_id == admin.id
+
+    url = V1.path(RoleRoutes.ROLE_BY_ID, role_id=role_id)
+    assert (await client.patch(url, headers=h, json={"description": "note"})).status_code == 200
+    (row,) = await rows_of_event(db, AuditEvent.ROLE_UPDATE)
+    check_row(row, AuditEvent.ROLE_UPDATE, None, {"role_name": "night_watch", "role_kind": "tree"})
+    assert row.details is None
+
+    permission = (await db.exec(select(Permission).where(Permission.name == "tag.view"))).one()
+    perm_url = V1.path(RoleRoutes.ROLE_PERMISSION_BY_ID, role_id=role_id, permission_id=permission.id)
+    assert (await client.put(perm_url, headers=h)).status_code == 200
+    (row,) = await rows_of_event(db, AuditEvent.ROLE_PERMISSION_ADD)
+    check_row(row, AuditEvent.ROLE_PERMISSION_ADD, None, {
+        "role_name": "night_watch", "role_kind": "tree", "permission": "tag.view"})
+    assert row.new_values == {"permission_added": "tag.view"} and row.details is None
+    assert (await client.delete(perm_url, headers=h)).status_code == 200
+    (row,) = await rows_of_event(db, AuditEvent.ROLE_PERMISSION_REMOVE)
+    check_row(row, AuditEvent.ROLE_PERMISSION_REMOVE, None, {
+        "role_name": "night_watch", "role_kind": "tree", "permission": "tag.view"})
+    assert row.old_values == {"permission_removed": "tag.view"}
+
+    clone = await client.post(V1.path(RoleRoutes.ROLE_CLONE, role_id=role_id), headers=h, json={
+        "name": "night_copy", "display_name": "Night copy"})
+    assert clone.status_code == 201, clone.text
+    (row,) = await rows_of_event(db, AuditEvent.ROLE_CLONE)
+    check_row(row, AuditEvent.ROLE_CLONE, None, {
+        "role_name": "night_copy", "role_kind": "tree", "cloned_from": "night_watch"})
+    assert row.details is None and row.resource_id == clone.json()["id"]
+
+    assert (await client.post(V1.path(RoleRoutes.ROLE_ARCHIVE, role_id=role_id), headers=h)).status_code == 200
+    (row,) = await rows_of_event(db, AuditEvent.ROLE_ARCHIVE)
+    check_row(row, AuditEvent.ROLE_ARCHIVE, None, {"role_name": "night_watch", "role_kind": "tree"})
+    assert row.old_values["is_deleted"] is False and row.new_values["is_deleted"] is True
+    assert (await client.post(V1.path(RoleRoutes.ROLE_RESTORE, role_id=role_id), headers=h)).status_code == 200
+    (row,) = await rows_of_event(db, AuditEvent.ROLE_RESTORE)
+    check_row(row, AuditEvent.ROLE_RESTORE, None, {"role_name": "night_watch", "role_kind": "tree"})
+
+    assert (await client.post(V1.path(RoleRoutes.ROLE_ARCHIVE, role_id=role_id), headers=h)).status_code == 200
+    assert (await client.delete(url, headers=h)).status_code == 204
+    (row,) = await rows_of_event(db, AuditEvent.ROLE_DELETE)
+    check_row(row, AuditEvent.ROLE_DELETE, None, {"role_name": "night_watch", "role_kind": "tree"})
+    assert row.details is None and row.old_values["name"] == "night_watch" and "assignments" in row.old_values
+
+
+# ---------------------------------------------------------------- dictionaries (part 3b)
+
+async def check_lifecycle(client, db, h, base, by_id, archive, restore, create_body, update_body, prefix, params):
+    created = await client.post(base, headers=h, json=create_body)
+    assert created.status_code in (200, 201), created.text
+    item_id = created.json()["id"]
+    (row,) = await rows_of_event(db, AuditEvent[f"{prefix}_CREATE"])
+    check_row(row, AuditEvent[f"{prefix}_CREATE"], None, params)
+    assert row.category == AuditCategory.DICTIONARIES.value and row.details is None
+    assert row.resource_id == item_id and row.old_values is None and row.new_values["id"] == item_id
+
+    assert (await client.put(by_id(item_id), headers=h, json=update_body)).status_code == 200
+    (row,) = await rows_of_event(db, AuditEvent[f"{prefix}_UPDATE"])
+    check_row(row, AuditEvent[f"{prefix}_UPDATE"], None, params)
+    assert row.details is None and row.old_values is not None
+
+    assert (await client.post(archive(item_id), headers=h)).status_code == 200
+    (row,) = await rows_of_event(db, AuditEvent[f"{prefix}_ARCHIVE"])
+    check_row(row, AuditEvent[f"{prefix}_ARCHIVE"], None, params)
+    assert row.new_values["is_deleted"] is True and row.details is None
+    assert (await client.post(restore(item_id), headers=h)).status_code == 200
+    (row,) = await rows_of_event(db, AuditEvent[f"{prefix}_RESTORE"])
+    check_row(row, AuditEvent[f"{prefix}_RESTORE"], None, params)
+    assert row.new_values["is_deleted"] is False
+    return item_id
+
+
+async def test_category_writes(client, db, headers):
+    h = headers(await make_admin(db))
+    await check_lifecycle(
+        client, db, h, V1.path(CategoryRoutes.CREATE),
+        lambda i: V1.path(CategoryRoutes.CATEGORY_BY_ID, category_id=i),
+        lambda i: V1.path(CategoryRoutes.CATEGORY_ARCHIVE, category_id=i),
+        lambda i: V1.path(CategoryRoutes.CATEGORY_RESTORE, category_id=i),
+        {"name": "Radar", "alias": "radar"}, {"alias": "radar2"}, "CATEGORY", {"name": "Radar"})
+
+
+async def test_tag_writes(client, db, headers):
+    h = headers(await make_admin(db))
+    await check_lifecycle(
+        client, db, h, V1.path(TagRoutes.CREATE),
+        lambda i: V1.path(TagRoutes.TAG_BY_ID, tag_id=i),
+        lambda i: V1.path(TagRoutes.TAG_ARCHIVE, tag_id=i),
+        lambda i: V1.path(TagRoutes.TAG_RESTORE, tag_id=i),
+        {"name": "urgent"}, {"name": "urgent"}, "TAG", {"name": "urgent"})
+
+
+async def test_signal_type_writes(client, db, headers):
+    h = headers(await make_admin(db))
+    await check_lifecycle(
+        client, db, h, V1.path(SignalTypeRoutes.CREATE),
+        lambda i: V1.path(SignalTypeRoutes.SIGNAL_TYPE_BY_ID, signal_type_id=i),
+        lambda i: V1.path(SignalTypeRoutes.SIGNAL_TYPE_ARCHIVE, signal_type_id=i),
+        lambda i: V1.path(SignalTypeRoutes.SIGNAL_TYPE_RESTORE, signal_type_id=i),
+        {"code": "LTE", "name": "LTE uplink"}, {"name": "LTE uplink 2"}, "SIGNAL_TYPE", {"signal_type_code": "LTE"})
+
+
+async def test_media_format_writes(client, db, headers):
+    h = headers(await make_admin(db))
+    body = {"media_type": "video", "content_type": "video/x-test", "label": "Test", "extensions": [".tst"],
+            "max_file_size_bytes": 1000}
+    item_id = await check_lifecycle(
+        client, db, h, V1.path(MediaFormatRoutes.CREATE),
+        lambda i: V1.path(MediaFormatRoutes.FORMAT_BY_ID, format_id=i),
+        lambda i: V1.path(MediaFormatRoutes.FORMAT_ARCHIVE, format_id=i),
+        lambda i: V1.path(MediaFormatRoutes.FORMAT_RESTORE, format_id=i),
+        body, {"label": "Test 2"}, "MEDIA_FORMAT", {"content_type": "video/x-test"})
+
+    # create over an archived content type restores it: the restore event (second row)
+    assert (await client.post(V1.path(MediaFormatRoutes.FORMAT_ARCHIVE, format_id=item_id), headers=h)).status_code == 200
+    again = await client.post(V1.path(MediaFormatRoutes.CREATE), headers=h, json=body)
+    assert again.status_code == 200, again.text
+    restores = await rows_of_event(db, AuditEvent.MEDIA_FORMAT_RESTORE)
+    assert len(restores) == 2 and restores[-1].params == {"content_type": "video/x-test"}
+    assert restores[-1].old_values["is_deleted"] is True and restores[-1].details is None

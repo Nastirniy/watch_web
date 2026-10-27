@@ -17,6 +17,7 @@ from app.backend.auth.require import require
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import SignalTypeRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
+from app.backend.enums.audit import AuditEvent
 from app.backend.services.audit import create_audit_log
 from app.backend.api.v1.models.request.signal_types import SignalTypeCreate, SignalTypeUpdate
 from app.backend.api.v1.models.response.signal_types import SignalTypeResponse, SignalTypeWithCategoryResponse
@@ -105,14 +106,12 @@ async def create_signal_type(
         await session.flush()
         await session.refresh(signal_type)
         await create_audit_log(
-            session=session,
-            action="create",
-            resource_type="signal_type",
+            session, AuditEvent.SIGNAL_TYPE_CREATE,
+            params={"signal_type_code": signal_type.code},
             resource_id=signal_type.id,
             user_id=current_user.id,
             old_values=None,
             new_values=signal_type.model_dump(),
-            details={"message": f"User {current_user.username} created signal type '{signal_type.name}' ({signal_type.code})"},
             **client_info(request, auth)
         )
         await session.commit()
@@ -211,14 +210,12 @@ async def update_signal_type(
         await session.flush()
         await session.refresh(signal_type)
         await create_audit_log(
-            session=session,
-            action="update",
-            resource_type="signal_type",
+            session, AuditEvent.SIGNAL_TYPE_UPDATE,
+            params={"signal_type_code": signal_type.code},
             resource_id=signal_type.id,
             user_id=current_user.id,
             old_values=old_values,
             new_values=signal_type.model_dump(),
-            details={"message": f"User {current_user.username} updated signal type '{signal_type.name}'"},
             **client_info(request, auth)
         )
         await session.commit()
@@ -254,14 +251,12 @@ async def archive_signal_type(
     row.is_deleted = True
     session.add(row)
     await create_audit_log(
-        session=session,
-        action="archive",
-        resource_type="signal_type",
+        session, AuditEvent.SIGNAL_TYPE_ARCHIVE,
+        params={"signal_type_code": row.code},
         resource_id=row.id,
         user_id=current_user.id,
         old_values=old_values,
         new_values=row.model_dump(),
-        details={"message": f"User {current_user.username} archived signal type '{row.name}'"},
         **client_info(request, auth),
     )
     await session.commit()
@@ -300,14 +295,12 @@ async def restore_signal_type(
     row.is_deleted = False
     session.add(row)
     await create_audit_log(
-        session=session,
-        action="restore",
-        resource_type="signal_type",
+        session, AuditEvent.SIGNAL_TYPE_RESTORE,
+        params={"signal_type_code": row.code},
         resource_id=row.id,
         user_id=current_user.id,
         old_values=old_values,
         new_values=row.model_dump(),
-        details={"message": f"User {current_user.username} restored signal type '{row.name}'"},
         **client_info(request, auth),
     )
     await session.commit()

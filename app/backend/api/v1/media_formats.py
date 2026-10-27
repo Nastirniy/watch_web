@@ -28,6 +28,7 @@ from app.backend.services.media.formats import find_conflict, hard_limit_bytes, 
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import MediaFormatRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
+from app.backend.enums.audit import AuditEvent
 from app.backend.services.audit import create_audit_log
 from app.backend.utils.datetime_utils import get_default_timezone_datetime
 from app.backend.api.v1.models.request.media_formats import MediaFormatCreate, MediaFormatUpdate
@@ -145,17 +146,16 @@ async def create_media_format(
         existing.is_deleted = False
         existing.updated_at = get_default_timezone_datetime()
         row = existing
-        action = "restore"
+        event = AuditEvent.MEDIA_FORMAT_RESTORE
     else:
         row = MediaFormat(**data.model_dump())
         old_values = None
-        action = "create"
+        event = AuditEvent.MEDIA_FORMAT_CREATE
 
     session.add(row)
     await _store_with_audit(session, row, data.content_type, audit=lambda: create_audit_log(
-        session=session, action=action, resource_type="media_format", resource_id=row.id,
+        session, event, params={"content_type": row.content_type}, resource_id=row.id,
         user_id=current_user.id, old_values=old_values, new_values=row.model_dump(),
-        details={"message": f"User {current_user.username} {action}d media format '{row.content_type}'"},
         **client_info(request, auth),
     ))
     invalidate_registry_cache()
@@ -224,9 +224,8 @@ async def update_media_format(
     row.updated_at = get_default_timezone_datetime()
     session.add(row)
     await _store_with_audit(session, row, content_type, audit=lambda: create_audit_log(
-        session=session, action="update", resource_type="media_format", resource_id=row.id,
+        session, AuditEvent.MEDIA_FORMAT_UPDATE, params={"content_type": row.content_type}, resource_id=row.id,
         user_id=current_user.id, old_values=old_values, new_values=row.model_dump(),
-        details={"message": f"User {current_user.username} updated media format '{row.content_type}'"},
         **client_info(request, auth),
     ))
     invalidate_registry_cache()
@@ -253,9 +252,8 @@ async def archive_media_format(
     row.updated_at = get_default_timezone_datetime()
     session.add(row)
     await create_audit_log(
-        session=session, action="archive", resource_type="media_format", resource_id=row.id,
+        session, AuditEvent.MEDIA_FORMAT_ARCHIVE, params={"content_type": row.content_type}, resource_id=row.id,
         user_id=current_user.id, old_values=old_values, new_values=row.model_dump(),
-        details={"message": f"User {current_user.username} archived media format '{row.content_type}'"},
         **client_info(request, auth),
     )
     await session.commit()
@@ -291,9 +289,8 @@ async def restore_media_format(
     row.updated_at = get_default_timezone_datetime()
     session.add(row)
     await create_audit_log(
-        session=session, action="restore", resource_type="media_format", resource_id=row.id,
+        session, AuditEvent.MEDIA_FORMAT_RESTORE, params={"content_type": row.content_type}, resource_id=row.id,
         user_id=current_user.id, old_values=old_values, new_values=row.model_dump(),
-        details={"message": f"User {current_user.username} restored media format '{row.content_type}'"},
         **client_info(request, auth),
     )
     await session.commit()
