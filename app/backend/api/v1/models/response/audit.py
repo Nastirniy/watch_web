@@ -2,40 +2,45 @@
 (errors/openapi.py problem_models): <CamelCode>AuditEntry with event: Literal[code] and params: <CamelCode>AuditParams
 (typed params; an optional param is absent, never null). AuditEntryResponse is their union, discriminated by event,
 so openapi-typescript narrows params by event. Rows the catalog cannot describe (no event, an unknown code, params
-that do not fit the event: rows written before the catalog) are served as legacy.unknown."""
+that do not fit the event: rows written before the catalog) are served as legacy.unknown, with the stored code in
+params.stored_event. Values are served as stored: these models never strip or unescape strings."""
 import dataclasses
 from functools import lru_cache
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
-from pydantic import ConfigDict, Field, ValidationError, create_model, model_serializer
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model, model_serializer
 
+from app.backend.api.v1.models.query.audit import AuditEventCode
 from app.backend.auth.scope import NodeKind
 from app.backend.enums.audit import AuditCategory, AuditEvent, audit_event
 from app.backend.errors.coded import is_optional
 from app.backend.errors.openapi import absent_not_null
 from app.backend.services.audit.query import AuditEntry
-from app.backend.utils.validators import PlainTextModel, ResponseDatetime, SecureBaseModel
-
-AuditEventCode = Literal[tuple(event.code for event in AuditEvent)]  # type: ignore[valid-type]
+from app.backend.utils.validators import ResponseDatetime
 
 _CODE_DOC = "Key of exactly this message in the localization package"
 _DEVICE = "null without audit.view (it identifies a device)"
 
 
-class AuditActorResponse(SecureBaseModel):
+class AuditModel(BaseModel):
+    """Base of the audit response models: values as stored (no strip, no unescape: a record is never rewritten)"""
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+
+class AuditActorResponse(AuditModel):
     """Who acted"""
     id: int
     username: Optional[str] = Field(description="The username now; null for an id no user has")
 
 
-class AuditScopeResponse(SecureBaseModel):
+class AuditScopeResponse(AuditModel):
     """The node of the scope tree the event happened at"""
     kind: NodeKind
     id: Optional[int] = Field(description="Id of the group or the post; null at the root")
     name: Optional[str] = Field(description="Name of the group or the post now; the application name at the root")
 
 
-class AuditParamsBase(PlainTextModel):
+class AuditParamsBase(BaseModel):
     """What the message of the event needs, as it was when the row was written"""
     model_config = ConfigDict(extra="ignore", json_schema_extra=lambda schema, cls: absent_not_null(schema))
 
@@ -44,7 +49,7 @@ class AuditParamsBase(PlainTextModel):
         return {name: value for name, value in handler(self).items() if value is not None}
 
 
-class AuditEntryBase(SecureBaseModel):
+class AuditEntryBase(AuditModel):
     """The fields every audit entry has"""
     id: int
     created_at: ResponseDatetime
@@ -94,7 +99,7 @@ def audit_event_models() -> Dict[AuditEvent, type]:
 AuditEntryResponse = Annotated[Union[tuple(audit_event_models().values())], Field(discriminator="event")]
 
 
-class AuditEventResponse(SecureBaseModel):
+class AuditEventResponse(AuditModel):
     """An event of the catalog (its params are typed in its <CamelCode>AuditParams schema)"""
     code: AuditEventCode = Field(description=_CODE_DOC)
     category: AuditCategory
@@ -107,13 +112,18 @@ def _served(entry: AuditEntry):
     event = audit_event(entry.event) if entry.event else None
     if event is not None:
         params_model = audit_event_models()[event].model_fields["params"].annotation
+        stored = dict(entry.params) if isinstance(entry.params, dict) else {}
+        if event is AuditEvent.LEGACY_UNKNOWN:
+            stored["stored_event"] = entry.event
         try:
-            return event, params_model.model_validate(entry.params if entry.params is not None else {})
+            return event, params_model.model_validate(stored)
         except ValidationError:
             pass
     legacy = {"action": entry.action, "resource_type": entry.resource_type}
     if entry.message is not None:
         legacy["message"] = entry.message
+    if entry.event is not None:
+        legacy["stored_event"] = entry.event
     return AuditEvent.LEGACY_UNKNOWN, legacy
 
 

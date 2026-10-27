@@ -28,7 +28,14 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   the root; null for a system-wide event), `success`, `old_values`, `new_values`, `request_id`, `ip_address`,
   `user_agent`, `session_id`, `request_url`. A row the catalog cannot describe (no event, a code it no longer has,
   or params that do not fit the event, such as the rows migration 031 backfilled) is served as `legacy.unknown`
-  with `params` `{action, resource_type, message?}` (`message` from the old `details`).
+  with `params` `{action, resource_type, message?, stored_event?}` (`message` from the old `details`,
+  `stored_event` the code the row holds, when it has one). The `event` filter matches the stored event (so
+  `?event=user.login` also finds backfilled login rows, served as `legacy.unknown` with `stored_event`
+  `user.login`); `?event=legacy.unknown` matches rows without an event, rows stored as `legacy.unknown` and rows
+  of a code the catalog no longer has.
+- `before_id` pages by itself: with `page` other than 1 or an ascending `sort_order` it answers 422
+  `validation_error` with the field code `before_id_needs_first_page_newest_first`.
+- Audit values are served as stored: the audit response models never strip or unescape strings.
 
 ### Database
 

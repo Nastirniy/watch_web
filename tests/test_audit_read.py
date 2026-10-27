@@ -126,9 +126,57 @@ async def test_rows_the_catalog_cannot_describe_are_legacy_unknown(client, db, h
     assert entries[bare.id]["params"] == {"action": "poke", "resource_type": "widget"}
     assert entries[backfilled.id]["event"] == "legacy.unknown"
     assert entries[backfilled.id]["params"] == {"action": "login", "resource_type": "user",
-                                                "message": "User logged in"}
+                                                "message": "User logged in", "stored_event": "user.login"}
     assert entries[backfilled.id]["category"] == AuditCategory.AUTHENTICATION.value
     assert entries[gone.id]["event"] == "legacy.unknown"
+    assert entries[gone.id]["params"] == {"action": "removed_later", "resource_type": "thing",
+                                          "stored_event": "thing.removed_later"}
+
+
+async def _legacy_rows(db) -> dict:
+    """A row without an event, a row 031 mapped to legacy.unknown (its params backfilled), a row of a code the
+    catalog no longer has, a row 031 backfilled with a known event and no params, and a current row"""
+    return {
+        "null": await add_row(db, None, action="frobnicate", resource_type="widget"),
+        "mapped": await add_row(db, AuditEvent.LEGACY_UNKNOWN, {"action": "grant", "resource_type": "user_post_access"},
+                                action="grant", resource_type="user_post_access"),
+        "gone": await add_row(db, None, code="thing.removed_later", action="removed_later", resource_type="thing"),
+        "backfilled": await add_row(db, AuditEvent.USER_LOGIN, None),
+        "current": await add_row(db, AuditEvent.USER_LOGIN, {"username": "u1"}),
+    }
+
+
+async def test_the_event_filter_matches_the_stored_event(client, db, headers):
+    h = headers(await make_admin(db))
+    rows = await _legacy_rows(db)
+    response = await client.get(ENTRIES, params={"event": "user.login"}, headers=h)
+    entries = {e["id"]: e for e in response.json()}
+    assert set(entries) == {rows["backfilled"].id, rows["current"].id}
+    assert entries[rows["backfilled"].id]["event"] == "legacy.unknown"
+    assert entries[rows["backfilled"].id]["params"]["stored_event"] == "user.login"
+    assert entries[rows["current"].id]["event"] == "user.login"
+
+
+async def test_the_legacy_filter_finds_null_mapped_and_gone_rows(client, db, headers):
+    h = headers(await make_admin(db))
+    rows = await _legacy_rows(db)
+    response = await client.get(ENTRIES, params={"event": "legacy.unknown"}, headers=h)
+    entries = {e["id"]: e for e in response.json()}
+    assert set(entries) == {rows["null"].id, rows["mapped"].id, rows["gone"].id}
+    assert entries[rows["null"].id]["params"] == {"action": "frobnicate", "resource_type": "widget"}
+    assert entries[rows["mapped"].id]["params"] == {"action": "grant", "resource_type": "user_post_access",
+                                                    "stored_event": "legacy.unknown"}
+    assert entries[rows["gone"].id]["params"]["stored_event"] == "thing.removed_later"
+
+
+async def test_values_are_served_as_stored(client, db, headers):
+    h = headers(await make_admin(db))
+    row = await add_row(db, AuditEvent.TAG_UPDATE, {"name": "Red "}, old_values={"note": "a &amp; b "},
+                        new_values={"note": "x &lt;y&gt;"})
+    entry = (await client.get(_entry(row.id), headers=h)).json()
+    assert entry["params"] == {"name": "Red "}
+    assert entry["old_values"] == {"note": "a &amp; b "}
+    assert entry["new_values"] == {"note": "x &lt;y&gt;"}
 
 
 # ---------------------------------------------------------------- filters
@@ -214,6 +262,26 @@ async def test_before_id_pages_through_newest_first(client, db, headers):
     third = await _ids(client, h, page_size=2, before_id=second[-1])
     assert third == ids[4:]
     assert await _ids(client, h, page_size=2, before_id=third[-1]) == []
+
+
+async def test_before_id_with_another_filter(client, db, headers):
+    h = headers(await make_admin(db))
+    tags = [await add_row(db, AuditEvent.TAG_CREATE, {"name": f"t{n}"}) for n in range(3)]
+    await add_row(db, AuditEvent.USER_UPDATE, {"username": "u"})
+    first = await _ids(client, h, page_size=2, event="tag.create")
+    assert first == [tags[2].id, tags[1].id]
+    assert await _ids(client, h, page_size=2, event="tag.create", before_id=first[-1]) == [tags[0].id]
+
+
+@pytest.mark.parametrize("params", [{"page": 2}, {"sort_order": "ascending"}], ids=["page_2", "ascending"])
+async def test_before_id_needs_the_first_page_newest_first(client, db, headers, params):
+    h = headers(await make_admin(db))
+    response = await client.get(ENTRIES, params={"before_id": 10, **params}, headers=h)
+    assert response.status_code == 422, response.text
+    (error,) = response.json()["errors"]
+    assert error["code"] == "before_id_needs_first_page_newest_first"
+    assert error["parameter"] == "before_id"
+    assert (await client.get(ENTRIES, params=params, headers=h)).status_code == 200
 
 
 async def test_page_size_is_at_most_200(client, db, headers):

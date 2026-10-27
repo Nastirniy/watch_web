@@ -534,6 +534,8 @@ class FieldErrorCode(FieldCode):
     FREQUENCY_CENTER_OUT_OF_RANGE = ("frequency_center_out_of_range", field("frequency_center must lie between frequency_min and frequency_max"))
     DISAPPEARED_BEFORE_OBSERVED = ("disappeared_before_observed", field("disappeared_at must not be before observed_at"))
     OBSERVED_AFTER_DISAPPEARED = ("observed_after_disappeared", field("observed_at must not be after disappeared_at"))
+    BEFORE_ID_NEEDS_FIRST_PAGE_NEWEST_FIRST = ("before_id_needs_first_page_newest_first", field(
+        "before_id pages by itself: use it with page 1 and a descending sort_order"))
     TIME_OUT_OF_RANGE = ("time_out_of_range", field(
         "Time must be between {earliest} and {latest}", earliest=str, latest=str))
 

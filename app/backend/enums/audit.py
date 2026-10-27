@@ -190,7 +190,8 @@ class AuditEvent(Enum):
         _SY, "Files reconciled after a database restore", orphan_files=int, stale_derived=int,
         returned_originals=int, missing_originals=int, orphan_packages=int, failed=int))
     LEGACY_UNKNOWN = ("legacy.unknown", event(
-        _SY, "Event recorded before the event catalog", action=str, resource_type=str, message=Optional[str]))
+        _SY, "Event recorded before the event catalog", action=str, resource_type=str, message=Optional[str],
+        stored_event=Optional[str]))   # stored_event: the code the row holds, when it has one (served, never written)
     LEGACY_MIGRATE = ("legacy.migrate", event(
         _SY, "Rows written by a data migration", user_id=Optional[int], role_id=Optional[int]))
 

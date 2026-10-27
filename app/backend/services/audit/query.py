@@ -26,6 +26,7 @@ from app.backend.models.user import User
 from app.backend.services.units import is_unit
 
 ROOT_KEY = Node.root().key
+CATALOG_CODES = tuple(event.code for event in AuditEvent)
 _DESCENDING = (SortOrder.DESCENDING, SortOrder.DESCENDING_NULLS_FIRST, SortOrder.DESCENDING_NULLS_LAST)
 
 
@@ -77,7 +78,8 @@ def visible_clause(visibility: AuditVisibility) -> ColumnElement:
 class AuditCriteria(ListCriteria):
     """What the audit log is filtered by; each API version converts its query model into it (the same names).
 
-    event / category: any of these (legacy.unknown also matches rows without an event). post_id: rows at that post.
+    event / category: any of these stored values (legacy.unknown also matches rows without an event or with a code
+    the catalog does not have). post_id: rows at that post.
     group_id, corps_id, brigade_id: rows at the node or below it in the scope tree as it is now (corps_id / brigade_id
     of a group of another kind: nothing). Several given: all must hold. session_id needs the device fields (without
     them it matches nothing). before_id: rows with a smaller id (the keyset of the default order, id descending)."""
@@ -122,7 +124,7 @@ class AuditFilterService(SimpleFilterEngine):
             codes = [stored_value(code) for code in params.event]
             matches = AuditLog.event.in_(codes)
             if AuditEvent.LEGACY_UNKNOWN.code in codes:
-                matches = or_(matches, AuditLog.event.is_(None))
+                matches = or_(matches, AuditLog.event.is_(None), AuditLog.event.not_in(CATALOG_CODES))
             query = query.where(matches)
         query = cls._apply_in_list(query, AuditLog.category, params.category)
         query = cls._apply_exact(query, AuditLog.user_id, params.user_id)

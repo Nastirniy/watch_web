@@ -30204,10 +30204,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Any of these events: ?event=user.login&event=session.logout; legacy.unknown also matches rows written before the catalog",
+              "description": "Any of these events: ?event=user.login&event=session.logout. Matches the stored event; a row served as legacy.unknown carries it in params.stored_event. legacy.unknown also matches rows without an event or with a code the catalog no longer has",
               "title": "Event"
             },
-            "description": "Any of these events: ?event=user.login&event=session.logout; legacy.unknown also matches rows written before the catalog"
+            "description": "Any of these events: ?event=user.login&event=session.logout. Matches the stored event; a row served as legacy.unknown carries it in params.stored_event. legacy.unknown also matches rows without an event or with a code the catalog no longer has"
           },
           {
             "name": "category",
@@ -30465,10 +30465,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Only entries with a smaller id: the id of the last entry of the previous page",
+              "description": "Only entries with a smaller id: the id of the last entry of the previous page. It pages by itself: only with page 1 and a descending sort_order (otherwise 422 before_id_needs_first_page_newest_first)",
               "title": "Before Id"
             },
-            "description": "Only entries with a smaller id: the id of the last entry of the previous page"
+            "description": "Only entries with a smaller id: the id of the last entry of the previous page. It pages by itself: only with page 1 and a descending sort_order (otherwise 422 before_id_needs_first_page_newest_first)"
           }
         ],
         "responses": {
@@ -37322,6 +37322,7 @@
           "frequency_center_out_of_range",
           "disappeared_before_observed",
           "observed_after_disappeared",
+          "before_id_needs_first_page_newest_first",
           "time_out_of_range"
         ],
         "title": "FieldErrorCode",
@@ -38707,6 +38708,10 @@
           "message": {
             "type": "string",
             "title": "Message"
+          },
+          "stored_event": {
+            "type": "string",
+            "title": "Stored Event"
           }
         },
         "type": "object",
