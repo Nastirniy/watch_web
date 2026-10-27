@@ -1,5 +1,4 @@
 """create_audit_log: the one writer of audit rows (raw INSERTs aside: the restore tool and frozen migrations)."""
-import sys
 from typing import Any, Dict, Optional
 
 from pydantic_core import to_jsonable_python
@@ -10,7 +9,6 @@ from app.backend.enums.audit import AuditEvent
 from app.backend.errors.coded import is_optional
 from app.backend.models.audit import AuditLog
 from app.backend.models.role_assignment import scope_columns
-from app.backend.services.audit import legacy
 from app.backend.utils.logging_config import request_id_context
 from app.backend.utils.text import fit_column
 
@@ -54,7 +52,7 @@ def check_event_params(event: AuditEvent, params: Dict[str, Any]) -> None:
 
 async def create_audit_log(
     session: AsyncSession,
-    event: Optional[AuditEvent] = None,
+    event: AuditEvent,
     *,
     params: Optional[Dict[str, Any]] = None,
     scope: Optional[Node] = None,
@@ -68,9 +66,6 @@ async def create_audit_log(
     user_agent: Optional[str] = None,
     request_url: Optional[str] = None,
     workspace: Optional[Node] = None,
-    action: Optional[str] = None,
-    resource_type: Optional[str] = None,
-    details: Optional[Dict] = None,
 ) -> Optional[AuditLog]:
     """Add the audit row of an event to the session of the change (the caller commits; a failure to write it fails
     the request).
@@ -81,22 +76,12 @@ async def create_audit_log(
     snapshotted now. scope: the node the event happened at (None: system-wide). The request id comes from the
     request's context. workspace is accepted and ignored until its column exists (part 5).
 
-    Legacy form, until every writer names its event: action= and resource_type= (and details=) instead of the
-    event, mapped through migrations/support/audit_events_v1.py LEGACY_EVENTS; details is still written for it.
-
     Returns the row (already added to the session); the switches of phase B make it None for a category that is off.
     """
-    if action is not None or resource_type is not None or details is not None:
-        if event is not None or params is not None or action is None or resource_type is None:
-            raise TypeError("create_audit_log takes either an AuditEvent with params or the legacy "
-                            "action= / resource_type= (details=)")
-        legacy.warn_once(sys._getframe(1), action, resource_type)
-        event, params = legacy.legacy_event(action, resource_type, details)
-    else:
-        if not isinstance(event, AuditEvent):
-            raise TypeError(f"create_audit_log needs an AuditEvent, not {event!r}")
-        check_event_params(event, params or {})
-        resource_type, action = resource_and_action(event)
+    if not isinstance(event, AuditEvent):
+        raise TypeError(f"create_audit_log needs an AuditEvent, not {event!r}")
+    check_event_params(event, params or {})
+    resource_type, action = resource_and_action(event)
     audit = AuditLog(
         event=event.code,
         category=event.category.value,
@@ -108,7 +93,6 @@ async def create_audit_log(
         params=serialize_for_audit(params),
         old_values=serialize_for_audit(old_values),
         new_values=serialize_for_audit(new_values),
-        details=serialize_for_audit(details),
         ip_address=ip_address,
         user_agent=fit_column(AuditLog.user_agent, user_agent),
         request_url=fit_column(AuditLog.request_url, request_url),

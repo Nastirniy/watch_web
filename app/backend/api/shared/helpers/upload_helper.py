@@ -2,8 +2,8 @@
 problems, the observation an upload goes to, and what every upload does once the file is stored."""
 
 import asyncio
-from typing import Optional
 from pathlib import Path
+from typing import Optional
 
 from fastapi import BackgroundTasks, Request
 from sqlmodel import select

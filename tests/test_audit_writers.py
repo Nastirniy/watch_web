@@ -21,8 +21,8 @@ from app.backend.services.media.manager import reset_media_manager
 from app.backend.models.role import Permission
 from app.backend.services.unit_history import fill_unit_history
 from tests.helpers import (
-    assign, builtin_role, issue, make_admin, make_certificate, make_certificate_row, nginx_headers, make_dictionary, make_group, make_media, make_observation, make_post, make_user,
-    observation_payload)
+    assign, builtin_role, issue, make_admin, make_certificate, make_certificate_row, nginx_headers, make_dictionary,
+    make_group, make_media, make_observation, make_post, make_user, observation_payload)
 
 
 async def rows_of_event(db, event: AuditEvent) -> list:

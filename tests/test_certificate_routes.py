@@ -23,7 +23,8 @@ from app.backend.models.role import Role
 from app.backend.models.user import User
 from app.backend.models.user_certificate import UserCertificate
 from app.backend.pki.authority import is_signed_by, sha256_fingerprint
-from tests.helpers import assign, give, issue, make_admin, make_certificate_row, make_group, make_post, make_role, make_user
+from tests.helpers import (
+    assign, give, issue, make_admin, make_certificate_row, make_group, make_post, make_role, make_user)
 from tests.pki_helpers import legacy_root, make_leaf, pem
 from tests.test_pki_login import CYRILLIC_CN, _login, nginx_headers  # noqa: F401
 

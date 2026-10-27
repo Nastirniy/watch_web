@@ -127,7 +127,7 @@ async def test_search_events_keep_action_search_with_the_singular_entity(db):
 
 async def test_a_row_without_params_stores_sql_null(db):
     row = await create_audit_log(db, AuditEvent.SEARCH_TAGS, params={"result_count": 1})
-    empty = await create_audit_log(db, action="create", resource_type="tag", details={"message": "x"})
+    empty = await create_audit_log(db, AuditEvent.MEDIA_ARCHIVE)
     await db.commit()
     found = (await db.execute(sa_text("select id from audit_logs where params is null"))).all()
     assert {row_id for (row_id,) in found} == {empty.id}
@@ -143,40 +143,11 @@ async def test_wrong_params_raise_type_error(db):
         await create_audit_log(db, AuditEvent.TAG_CREATE)
     with pytest.raises(TypeError):
         await create_audit_log(db, "tag.create", params={"name": "x"})
-    with pytest.raises(TypeError):     # the event and the legacy pair together
-        await create_audit_log(db, AuditEvent.TAG_CREATE, params={"name": "x"}, action="create", resource_type="tag")
     # Optional params may be left out; values go through serialize_for_audit; workspace is accepted and ignored
     row = await create_audit_log(db, AuditEvent.SESSION_END, workspace=Node.group(2),
                                  params={"username": "ivan", "cause": AuditCategory.ACCESS})
     stored = await _stored(db, row)
     assert stored.params == {"username": "ivan", "cause": "access"}
-
-
-async def test_legacy_keywords_map_through_legacy_events(db, monkeypatch):
-    warnings = []
-    monkeypatch.setattr(audit_service.legacy, "_warned", set())
-    monkeypatch.setattr(audit_service.legacy.logger, "warning", lambda message, *a, **k: warnings.append(message))
-    rows = []
-    for _ in range(3):     # one call site: one warning
-        rows.append(await create_audit_log(session=db, action="create", resource_type="observation", resource_id=5,
-                                           details={"message": "User a created observation #5"}))
-    unknown = await create_audit_log(db, action="frobnicate", resource_type="widget",
-                                     details={"message": "old text"})
-    search = await create_audit_log(db, action="search", resource_type="observations")
-    assert len(warnings) == 3
-
-    stored = await _stored(db, rows[0])
-    assert (stored.event, stored.category, stored.action, stored.resource_type) == (
-        "observation.create", "data", "create", "observation")
-    assert stored.details == {"message": "User a created observation #5"}
-    assert stored.params is None
-    odd = await db.get(AuditLog, unknown.id)
-    assert (odd.event, odd.category, odd.action, odd.resource_type) == (
-        "legacy.unknown", "system", "frobnicate", "widget")
-    assert odd.params == {"action": "frobnicate", "resource_type": "widget", "message": "old text"}
-    found = await db.get(AuditLog, search.id)
-    assert (found.event, found.category, found.action, found.resource_type) == (
-        "search.observations", "reads", "search", "observations")
 
 
 def test_legacy_events_point_at_catalog_events():

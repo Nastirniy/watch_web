@@ -1,18 +1,14 @@
 """Production login with the client certificate as nginx forwards it (X-SSL-Client-*), and its sessions."""
-import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pytest
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives import serialization
 from cryptography.x509.oid import NameOID
 from sqlmodel import select
 
 from app.backend.api.v1 import V1
 from app.backend.auth.certificates import hash_data, parse_cn
-from app.backend.config import settings
-from app.backend.enums.general import AppEnvironment
 from app.backend.enums.routes import AuthRoutes, UserRoutes
 from app.backend.models.user import User, UserSession
 from app.backend.models.user_certificate import UserCertificate

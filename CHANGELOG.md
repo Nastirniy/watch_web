@@ -17,9 +17,25 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   (search rows -> `search.<entity>`, data migration rows -> `legacy.migrate`, anything else -> `legacy.unknown`)
   and the scope where it is exact (observations, frequencies, media, posts, scope groups, role assignments), in
   batches of 10,000 ids. Old `details` stay untouched. The downgrade drops the columns and indexes.
-- `create_audit_log(session, AuditEvent.X, params=..., scope=...)` writes them on every new row; the old keyword
-  form (`action=`, `resource_type=`) is mapped through the same table until every writer names its event. No API
+- `create_audit_log(session, AuditEvent.X, params=..., scope=...)` writes them on every new row; it is the one
+  writer form: the keywords `action=`, `resource_type=` and `details=` are gone (`tests/test_audit_guard.py` scans
+  `app/backend` for them and for raw INSERTs into `audit_logs` outside migrations and the restore tool). No API
   change.
+
+### Changed (breaking for readers of audit rows)
+
+- Every new row has `event`, `category`, `params`, `request_id`, `scope_key` / `scope_post_id` / `scope_group_id`.
+  `details` is no longer written (old rows keep theirs). The human `message` texts are gone: the web localises the
+  event code with its params.
+- `force_logout` rows are now event `session.end` (action `end`, params `username`, `cause`, `session_count`,
+  `ended_session_id`).
+- `pki_auth_attempt` is now `auth.certificate_login`, written once per attempt (params `certificate_cn`,
+  `certificate_serial`, `matched`, `certificate_id`).
+- Search rows: action `search`, `resource_type` the singular entity (`observation`, not `observations`), event
+  `search.<entity>`.
+- Certificate rows carry `export_count` / `session_count` in `params` instead of the old `sessions_ended` /
+  `export_count` details keys.
+- Role clone rows carry `cloned_from` (the source role's name) and `cloned_from_id`.
 
 ## Users by unit
 
@@ -233,7 +249,7 @@ management) and downgrade exactly.
   conditional update, no read before it; a refresh rolls its token claim back first): every request answers 401
   `account_deactivated` / `account_deleted`, one `force_logout` audit row. The flags are checked again on the locked
   user row: an account reactivated since the request read it ends nothing and the request (a refresh: once more)
-  goes on as for an active user.
+  goes on as for an active user. (Since Audit log: the row is event `session.end`.)
 - `POST /auth/login` checked the account and stored the session in two transactions: a deactivation, an archive or a
   revocation of the login certificate committed in between left a 200 with tokens and a live session of a
   deactivated account. The session is now stored after a shared lock on the user row and a check of the committed
@@ -639,7 +655,7 @@ the accepted values.
 - Audit rows `resource_type` `user_certificate`, actions `issue`, `upload`, `export`, `revoke` (also `reason`, `sessions_ended`): label, serial,
   `sha256_fingerprint`, `not_after` (never a key, a `.p12` or a password; `export` also `export_count`). A `revoke`
   row has `sha256_fingerprint` only when the certificate file is stored (issued here) and `not_after` only when the
-  row has one: left out for a `legacy` or `configured` row, never made up.
+  row has one: left out for a `legacy` or `configured` row, never made up. (Since Audit log: `params` carry `export_count` / `session_count` instead of `sessions_ended`.)
 - `python -m app.backend.cli.pki issue --username U --label L [--days N] --out DIR`: issues for an existing user
   exactly like the API (folder, audit row with `via: cli`, `created_by` null) and writes `<label>.p12` and
   `password.txt` into `DIR` (a new or empty directory).
@@ -1952,7 +1968,7 @@ Deactivating (`PATCH /users/{id}` with `is_active=false`) or archiving a user al
 ### Changed for API clients
 
 - Every authenticated request and `POST /auth/refresh` reject a deactivated account with 401 `account_deactivated` and an archived one with 401 `account_deleted` before looking at the session, so a client sees the account status instead of `session_expired` (which used to come first when the session had been ended). A refresh attempt with those tokens fails with the same codes: do not retry, send the user to login.
-- A session still live for such an account (flag changed directly in the database, restored backup) is ended on the first request or refresh carrying its token, so it stops counting towards presence (`is_online`, `online_user_count`). Audit action `force_logout` with `details.reason` `account_deactivated` / `account_deleted`.
+- A session still live for such an account (flag changed directly in the database, restored backup) is ended on the first request or refresh carrying its token, so it stops counting towards presence (`is_online`, `online_user_count`). Audit action `force_logout` with `details.reason` `account_deactivated` / `account_deleted`. (Since Audit log: the row is event `session.end`, action `end`, params `cause`.)
 - `PATCH /users/{id}` with `is_active=false` ends the user's sessions in the same transaction as the flag change, after every validation of the request (certificate, roles): a rejected update no longer leaves the user logged out. Re-sending `is_active=false` for an inactive user is a no-op. Deactivating your own account answers 400, like archiving it.
 - Reactivation (`is_active=true`, or `POST /users/{id}/restore`) does not revive ended sessions: old tokens keep answering 401 `session_expired`, the user logs in again.
 - Tests: `tests/test_user_deactivation.py`.
