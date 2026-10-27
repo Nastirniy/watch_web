@@ -24,6 +24,8 @@ from app.backend.api.shared.helpers.db_errors import is_write_conflict
 from app.backend.services.scope_groups import UNIT_KINDS
 from app.backend.services.units import (current_units_of_group, observation_unit_labels, observation_unit_rows,
                                         observation_units_any, observation_units_filter, unit_labels, visible_unit_ids)
+from app.backend.auth.scope import Node
+from app.backend.enums.audit import AuditEvent
 from app.backend.services.audit import create_audit_log
 from app.backend.api.v1.models.request.observations import (
     ObservationCreate,
@@ -227,13 +229,12 @@ async def create_observation(
         # The audit row in the same transaction as the observation (one commit): a failure before it stores neither, so
         # the client never gets a 500 for an observation that exists (a retry would create it twice)
         await create_audit_log(
-            session=session,
-            action="create",
-            resource_type="observation",
+            session, AuditEvent.OBSERVATION_CREATE,
+            params={"post_name": post.name, "observation_id": observation.id, "signal_type_code": signal_type.code},
+            scope=Node.post(observation_data.post_id),
             resource_id=observation.id,
             user_id=user_id,
             new_values=observation_audit_values(observation),
-            details={"message": f"User {username} created new observation #{observation.id}"},
             **audit_client
         )
         await session.commit()
@@ -337,14 +338,13 @@ async def update_observation(
     await session.refresh(observation)
 
     await create_audit_log(
-        session=session,
-        action="update",
-        resource_type="observation",
+        session, AuditEvent.OBSERVATION_UPDATE,
+        params=await _observation_params(session, observation),
+        scope=Node.post(observation.post_id),
         resource_id=observation.id,
         user_id=current_user.id,
         old_values=old_values,
         new_values=observation_audit_values(observation),
-        details={"message": f"User {current_user.username} updated observation #{observation.id}"},
         **client_info(request, auth)
     )
     await session.commit()
@@ -402,14 +402,13 @@ async def mark_observation_disappeared(
     
     # Create audit log
     await create_audit_log(
-        session=session,
-        action="update",
-        resource_type="observation",
+        session, AuditEvent.OBSERVATION_DISAPPEAR,
+        params=await _observation_params(session, observation),
+        scope=Node.post(observation.post_id),
         resource_id=observation.id,
         user_id=current_user.id,
         old_values=old_values,
         new_values=observation.model_dump(),
-        details={"message": f"User {current_user.username} marked observation #{observation.id} as disappeared"},
         **client_info(request, auth)
     )
     
@@ -517,6 +516,15 @@ async def generate_observation_report(
     )
 
 
+async def _observation_params(session: AsyncSession, observation: Observation) -> dict:
+    """Params of an observation event: the post name and signal type code as they are now (one small read of the two
+    columns; create has both rows loaded and names them itself)"""
+    post_name, signal_type_code = (await session.exec(
+        select(Post.name, SignalType.code).where(Post.id == observation.post_id, SignalType.id == observation.signal_type_id)
+    )).one()
+    return {"post_name": post_name, "observation_id": observation.id, "signal_type_code": signal_type_code}
+
+
 async def _set_observation_archived(
         request: Request,
         session: AsyncSession,
@@ -562,14 +570,13 @@ async def _set_observation_archived(
     await session.flush()
 
     await create_audit_log(
-        session=session,
-        action=action,
-        resource_type="observation",
+        session, AuditEvent.OBSERVATION_ARCHIVE if archived else AuditEvent.OBSERVATION_RESTORE,
+        params=await _observation_params(session, observation),
+        scope=Node.post(observation.post_id),
         resource_id=observation.id,
         user_id=current_user.id,
         old_values=old_values,
         new_values=observation.model_dump(),
-        details={"message": f"User {current_user.username} {action}d observation #{observation.id}"},
         **client_info(request, auth)
     )
     await session.commit()
@@ -630,22 +637,19 @@ async def _audit_frequency(
         request: Request,
         session: AsyncSession,
         auth: AuthContext,
-        action: str,
+        event: AuditEvent,
+        observation,
         frequency,
         old_values: Optional[dict] = None,
 ) -> None:
     await create_audit_log(
-        session=session,
-        action=action,
-        resource_type="observation_frequency",
+        session, event,
+        params={"observation_id": observation.id, "frequency_kind": frequency.kind},
+        scope=Node.post(observation.post_id),
         resource_id=frequency.id,
         user_id=auth.user.id,
         old_values=old_values,
         new_values=frequency_audit_values(frequency),
-        details={
-            "observation_id": frequency.observation_id,
-            "message": f"User {auth.user.username} {action}d frequency #{frequency.id} of observation #{frequency.observation_id}",
-        },
         **client_info(request, auth)
     )
 
@@ -706,7 +710,7 @@ async def add_observation_frequency(
     # One commit: flush gives the band its id (and the generated bandwidth) for the audit row, so a failure stores no
     # band (a second transaction answered 500 for a stored band and a retry added another)
     await session.flush()
-    await _audit_frequency(request, session, auth, "create", frequency)
+    await _audit_frequency(request, session, auth, AuditEvent.OBSERVATION_FREQUENCY_CREATE, observation, frequency)
     await session.commit()
     return ObservationFrequencyResponse.model_validate(frequency)
 
@@ -756,7 +760,7 @@ async def update_observation_frequency(
     observation.updated_at = now
     session.add(observation)
     await session.flush()
-    await _audit_frequency(request, session, auth, "update", frequency, old_values=old_values)
+    await _audit_frequency(request, session, auth, AuditEvent.OBSERVATION_FREQUENCY_UPDATE, observation, frequency, old_values=old_values)
     await session.commit()
     return ObservationFrequencyResponse.model_validate(frequency)
 
@@ -789,7 +793,10 @@ async def _set_frequency_archived(
     observation.updated_at = now
     session.add(observation)
     await session.flush()
-    await _audit_frequency(request, session, auth, action, frequency, old_values=old_values)
+    await _audit_frequency(
+        request, session, auth,
+        AuditEvent.OBSERVATION_FREQUENCY_ARCHIVE if archived else AuditEvent.OBSERVATION_FREQUENCY_RESTORE,
+        observation, frequency, old_values=old_values)
     await session.commit()
     logger.info(f"User {auth.user.username} {action}d frequency {frequency.id} of observation {observation.id}")
     return ObservationFrequencyResponse.model_validate(frequency)

@@ -20,6 +20,8 @@ from app.backend.database import get_session
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import MediaRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
+from app.backend.auth.scope import Node
+from app.backend.enums.audit import AuditEvent
 from app.backend.services.audit import create_audit_log
 from app.backend.models.upload_session import UploadSession
 from app.backend.api.shared.helpers.media_helper import storage_root
@@ -208,9 +210,9 @@ async def create_upload_session(
     await session.refresh(row)
     # The session and its audit row in one transaction
     await create_audit_log(
-        session=session, action="create", resource_type="upload_session", resource_id=None,
+        session, AuditEvent.UPLOAD_SESSION_CREATE,
+        params={"upload_id": row.id, "media_type": row.media_type}, scope=Node.post(row.post_id),
         user_id=auth.user.id, new_values={"upload_id": row.id, "expected_size": row.expected_size, "media_type": row.media_type},
-        details={"message": f"User {auth.user.username} opened upload session {row.id} for observation #{observation.id} ({body.original_filename}, {body.expected_size} bytes)"},
         **client_info(request, auth),
     )
     await session.commit()
@@ -401,7 +403,7 @@ async def complete_upload_session(
         await uploads.release_completion(session, upload_id, token)
         raise
 
-    media_file = await record_upload(request, session, auth, media_file_id, row.observation_id, row.original_filename, background_tasks, "resumable")
+    media_file = await record_upload(request, session, auth, media_file_id, row.observation_id, row.post_id, row.original_filename, background_tasks, "resumable")
     return upload_result(media_file, "resumable", upload_id=row.id)
 
 
@@ -506,8 +508,10 @@ async def abort_upload_session(
     if row.status in (uploads.STATUS_OPEN, uploads.STATUS_COMPLETING):
         async def audit() -> None:
             await create_audit_log(
-                session=session, action="abort", resource_type="upload_session", resource_id=None,
-                user_id=auth.user.id, details={"message": f"User {auth.user.username} aborted upload session {row.id} at {row.received_bytes}/{row.expected_size} bytes", "upload_id": row.id},
+                session, AuditEvent.UPLOAD_SESSION_ABORT,
+                params={"upload_id": row.id, "media_type": row.media_type}, scope=Node.post(row.post_id),
+                user_id=auth.user.id,
+                new_values={"received_bytes": row.received_bytes, "expected_size": row.expected_size},
                 **client_info(request, auth),
             )
 

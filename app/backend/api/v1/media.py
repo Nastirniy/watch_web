@@ -21,7 +21,8 @@ from app.backend.models.storyboard import VideoStoryboard
 from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
 from app.backend.auth.access_control import AccessControlService
-from app.backend.auth.scope import ROOT
+from app.backend.auth.scope import Node, ROOT
+from app.backend.enums.audit import AuditEvent
 from app.backend.services.units import observation_units_filter
 from app.backend.services.media.manager import get_media_manager
 from app.backend.services.media import formats, jobs, renderer, uploads, urls as thumb_urls
@@ -274,14 +275,14 @@ async def _set_media_archived(request: Request, session: AsyncSession, auth: Aut
     if not archived and not media_file.is_deleted:
         raise ApiError(ErrorCode.MEDIA_NOT_ARCHIVED)
 
-    action = "archive" if archived else "restore"
     old_values = media_file.model_dump()
     media_file.is_deleted = archived
     session.add(media_file)
     await create_audit_log(
-        session=session, action=action, resource_type="media", resource_id=media_id,
+        session, AuditEvent.MEDIA_ARCHIVE if archived else AuditEvent.MEDIA_RESTORE,
+        params={"observation_id": media_file.observation_id},
+        scope=Node.post(observation.post_id) if observation is not None else None, resource_id=media_id,
         user_id=current_user.id, old_values=old_values, new_values=media_file.model_dump(),
-        details={"message": f"User {current_user.username} {action}d media file '{old_values.get('original_filename')}'"},
         **client_info(request, auth),
     )
     await session.commit()
@@ -362,7 +363,7 @@ async def upload_complete_file(
     while streaming; it is never held in memory. Users can only upload for observations of their post; an archived
     post: 409 post_archived.
     """
-    await load_observation_for_upload(session, auth, observation_id)
+    post_id = (await load_observation_for_upload(session, auth, observation_id)).post_id
 
     original_filename = file.filename or "uploaded_file"
     registry = await formats.load_registry(session)
@@ -400,7 +401,7 @@ async def upload_complete_file(
     finally:
         temp_path.unlink(missing_ok=True)
 
-    media_file = await record_upload(request, session, auth, media_file_id, observation_id, original_filename, background_tasks, "multipart")
+    media_file = await record_upload(request, session, auth, media_file_id, observation_id, post_id, original_filename, background_tasks, "multipart")
     return upload_result(media_file, "multipart")
 
 
@@ -448,7 +449,7 @@ async def nginx_upload_file(
         spec = check_declared_format(registry, media_type, original_filename, request.headers.get("content-type"))
         media_type = spec.media_type
 
-        await load_observation_for_upload(session, auth, observation_id)
+        post_id = (await load_observation_for_upload(session, auth, observation_id)).post_id
 
         try:
             media_file_id = await get_media_manager().store_file_from_path(
@@ -476,7 +477,7 @@ async def nginx_upload_file(
         except OSError as exc:
             _logger.warning(f"Nginx upload: could not remove temp file {temp_file}: {exc!r}")
 
-    media_file = await record_upload(request, session, auth, media_file_id, observation_id, original_filename, background_tasks, "nginx offload")
+    media_file = await record_upload(request, session, auth, media_file_id, observation_id, post_id, original_filename, background_tasks, "nginx offload")
     return upload_result(media_file, "nginx offload")
 
 
@@ -720,9 +721,10 @@ async def share_media_thumbnail(
     )
 
     await create_audit_log(
-        session=session, action="share", resource_type="media", resource_id=media_id,
+        session, AuditEvent.MEDIA_SHARE,
+        params={"observation_id": media_file.observation_id, "ttl_seconds": ttl},
+        scope=Node.post(observation.post_id), resource_id=media_id,
         user_id=auth.user.id,
-        details={"message": f"User {auth.user.username} shared a {body.size.value} thumbnail of media #{media_id}", "ttl_seconds": ttl},
         **client_info(request, auth),
     )
     await session.commit()

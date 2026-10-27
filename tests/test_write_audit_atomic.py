@@ -402,7 +402,7 @@ async def test_an_abort_and_its_audit_row_are_stored(client, db, headers, sessio
     assert response.status_code == 200 and response.json()["status"] == "aborted", response.text
     assert not part.exists()
     (audit,) = await _audit_rows(session_maker, "upload_session", "abort")
-    assert audit.details["upload_id"] == upload_id
+    assert audit.params["upload_id"] == upload_id and audit.details is None
 
 
 def _upload_video(client, headers, user, observation):

@@ -48,7 +48,7 @@ _POST = dict(post_name=str, post_code=str, cascade_from=Optional[int])
 _GROUP = dict(group_name=str, group_kind=str, cascade_from=Optional[int])
 _OBS = dict(post_name=str, observation_id=int, signal_type_code=str)
 _FREQ = dict(observation_id=int, frequency_kind=str)
-_MEDIA = dict(observation_id=int, ttl_seconds=Optional[int])
+_MEDIA = dict(observation_id=Optional[int], ttl_seconds=Optional[int])   # media of old data may have no observation
 _NAME = dict(name=str)
 _SEARCH = dict(result_count=int)
 _COUNTS = dict(kept_schema=str, revocations=int, certificates_added=int, users_added=int, crl_number=int,

@@ -1,5 +1,9 @@
 """Audit writers of authentication and access (part 6, task 3a): one write per module, its event, category, scope and
 params as the catalog declares them (enums/audit.py)."""
+import io
+from datetime import datetime, timezone
+
+import pytest
 from sqlmodel import select
 
 from app.backend.api.v1 import V1
@@ -8,12 +12,17 @@ from app.backend.auth.service import AuthService
 from app.backend.enums.audit import AuditCategory, AuditEvent
 from app.backend.enums.general import BuiltinRole, SessionRevokeCause, UserType
 from app.backend.enums.routes import (
-    AuthRoutes, BrigadeRoutes, CategoryRoutes, CorpsRoutes, MediaFormatRoutes, ObservationRoutes, PostRoutes, RoleRoutes,
+    AuthRoutes, BrigadeRoutes, CategoryRoutes, CorpsRoutes, MediaFormatRoutes, MediaRoutes, ObservationRoutes, PostRoutes, RoleRoutes,
     ScopeGroupRoutes, SignalTypeRoutes, TagRoutes, UserRoutes)
+from app.backend.config import settings
 from app.backend.models.audit import AuditLog
+from app.backend.models.observation import SignalType
+from app.backend.services.media.manager import reset_media_manager
 from app.backend.models.role import Permission
 from app.backend.services.unit_history import fill_unit_history
-from tests.helpers import assign, builtin_role, issue, make_admin, make_dictionary, make_group, make_post, make_user, observation_payload
+from tests.helpers import (
+    assign, builtin_role, issue, make_admin, make_dictionary, make_group, make_observation, make_post, make_user,
+    observation_payload)
 
 
 async def rows_of_event(db, event: AuditEvent) -> list:
@@ -456,3 +465,131 @@ async def test_fill_history_row(client, db, headers):
     check_row(row, AuditEvent.OBSERVATION_UNITS_FILL_HISTORY, None, {"observation_count": 2, "row_count": 4})
     assert row.category == AuditCategory.STRUCTURE.value and row.user_id is None and row.details is None
     assert row.new_values == {"units": {str(brigade.id): 2, str(corps.id): 2}, "observations": 2, "rows": 4}
+
+
+# ---------------------------------------------------------------- observations, frequencies, media (part 3d)
+
+async def test_observation_writes(client, db, headers):
+    post = await make_post(db, name="North")
+    ids = await make_dictionary(db)
+    h = headers(await make_admin(db))
+    created = await client.post(V1.path(ObservationRoutes.CREATE), json=observation_payload(post.id, ids["signal_type_id"]),
+                                headers=h)
+    assert created.status_code == 200, created.text
+    obs_id = created.json()["id"]
+    signal_code = (await db.get(SignalType, ids["signal_type_id"])).code
+    params = {"post_name": "North", "observation_id": obs_id, "signal_type_code": signal_code}
+    node = f"p:{post.id}"
+
+    (create,) = await rows_of_event(db, AuditEvent.OBSERVATION_CREATE)
+    check_row(create, AuditEvent.OBSERVATION_CREATE, node, params)
+    assert create.category == AuditCategory.DATA.value and create.resource_id == obs_id and create.details is None
+    assert create.new_values["frequencies"]
+
+    base = V1.path(ObservationRoutes.OBSERVATION_BY_ID, observation_id=obs_id)
+    assert (await client.put(base, json={"comment": "changed"}, headers=h)).status_code == 200
+    (update,) = await rows_of_event(db, AuditEvent.OBSERVATION_UPDATE)
+    check_row(update, AuditEvent.OBSERVATION_UPDATE, node, params)
+    assert update.old_values is not None and update.details is None
+
+    disappeared = await client.post(V1.path(ObservationRoutes.MARK_DISAPPEARED, observation_id=obs_id), headers=h,
+                                    json={"disappeared_at": datetime.now(timezone.utc).isoformat()})
+    assert disappeared.status_code == 200, disappeared.text
+    (gone,) = await rows_of_event(db, AuditEvent.OBSERVATION_DISAPPEAR)
+    check_row(gone, AuditEvent.OBSERVATION_DISAPPEAR, node, params)
+
+    assert (await client.post(V1.path(ObservationRoutes.OBSERVATION_ARCHIVE, observation_id=obs_id), headers=h)).status_code == 200
+    assert (await client.post(V1.path(ObservationRoutes.OBSERVATION_RESTORE, observation_id=obs_id), headers=h)).status_code == 200
+    (archive,) = await rows_of_event(db, AuditEvent.OBSERVATION_ARCHIVE)
+    (restore,) = await rows_of_event(db, AuditEvent.OBSERVATION_RESTORE)
+    check_row(archive, AuditEvent.OBSERVATION_ARCHIVE, node, params)
+    check_row(restore, AuditEvent.OBSERVATION_RESTORE, node, params)
+    assert archive.details is None and restore.details is None
+
+
+async def test_frequency_writes(client, db, headers):
+    post = await make_post(db)
+    ids = await make_dictionary(db)
+    user = await make_admin(db)
+    observation = await make_observation(db, user, post, ids["signal_type_id"])
+    obs_id = observation.id
+    h = headers(user)
+    node, params = f"p:{post.id}", {"observation_id": obs_id, "frequency_kind": "rc"}
+
+    added = await client.post(V1.path(ObservationRoutes.OBSERVATION_FREQUENCIES, observation_id=obs_id), headers=h,
+                              json={"kind": "rc", "frequency_min": "300", "frequency_max": "400"})
+    assert added.status_code == 200, added.text
+    band_id = added.json()["id"]
+    band = V1.path(ObservationRoutes.OBSERVATION_FREQUENCY_BY_ID, observation_id=obs_id, frequency_id=band_id)
+    assert (await client.put(band, headers=h, json={"frequency_max": "450"})).status_code == 200
+    for route in (ObservationRoutes.OBSERVATION_FREQUENCY_ARCHIVE, ObservationRoutes.OBSERVATION_FREQUENCY_RESTORE):
+        done = await client.post(V1.path(route, observation_id=obs_id, frequency_id=band_id), headers=h)
+        assert done.status_code == 200, done.text
+    for event in (AuditEvent.OBSERVATION_FREQUENCY_CREATE, AuditEvent.OBSERVATION_FREQUENCY_UPDATE,
+                  AuditEvent.OBSERVATION_FREQUENCY_ARCHIVE, AuditEvent.OBSERVATION_FREQUENCY_RESTORE):
+        (row,) = await rows_of_event(db, event)
+        check_row(row, event, node, params)
+        assert row.category == AuditCategory.DATA.value and row.resource_id == band_id and row.details is None
+
+
+@pytest.fixture
+def storage(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings.storage, "upload_path", str(tmp_path))
+    monkeypatch.setattr(settings.storage, "temp_path", str(tmp_path / "_tmp"))
+    reset_media_manager()
+    yield tmp_path
+    reset_media_manager()
+
+
+async def test_media_writes(client, db, headers, storage):
+    post = await make_post(db)
+    ids = await make_dictionary(db)
+    user = await make_user(db, perms=["media.view", "media.create", "media.archive", "observation.view"], post_id=post.id)
+    observation = await make_observation(db, user, post, ids["signal_type_id"])
+    obs_id, node, h = observation.id, f"p:{post.id}", headers(user)
+
+    from PIL import Image
+    buffer = io.BytesIO()
+    Image.new("RGB", (32, 24)).save(buffer, format="PNG")
+    uploaded = await client.post(V1.path(MediaRoutes.UPLOAD), headers=h, data={"observation_id": obs_id, "media_type": "image"},
+                                 files={"file": ("shot.png", buffer.getvalue(), "image/png")})
+    assert uploaded.status_code in (200, 201), uploaded.text
+    (create,) = await rows_of_event(db, AuditEvent.MEDIA_CREATE)
+    media_id = create.resource_id
+    check_row(create, AuditEvent.MEDIA_CREATE, node, {"observation_id": obs_id, "file_name": "shot.png", "media_type": "image"})
+    assert create.category == AuditCategory.DATA.value and create.details is None and create.new_values["id"] == media_id
+
+    for route in (MediaRoutes.MEDIA_ARCHIVE, MediaRoutes.MEDIA_RESTORE):
+        assert (await client.post(V1.path(route, media_id=media_id), headers=h)).status_code == 200
+    (archive,) = await rows_of_event(db, AuditEvent.MEDIA_ARCHIVE)
+    (restore,) = await rows_of_event(db, AuditEvent.MEDIA_RESTORE)
+    check_row(archive, AuditEvent.MEDIA_ARCHIVE, node, {"observation_id": obs_id})
+    check_row(restore, AuditEvent.MEDIA_RESTORE, node, {"observation_id": obs_id})
+    assert archive.details is None and archive.resource_id == media_id
+
+    shared = await client.post(V1.path(MediaRoutes.MEDIA_SHARE, media_id=media_id), headers=h, json={"ttl_seconds": 600})
+    assert shared.status_code == 200, shared.text
+    (share,) = await rows_of_event(db, AuditEvent.MEDIA_SHARE)
+    check_row(share, AuditEvent.MEDIA_SHARE, node, {"observation_id": obs_id, "ttl_seconds": 600})
+    assert share.details is None
+
+
+async def test_upload_session_writes(client, db, headers, storage):
+    post = await make_post(db)
+    ids = await make_dictionary(db)
+    user = await make_user(db, perms=["media.view", "media.create"], post_id=post.id)
+    observation = await make_observation(db, user, post, ids["signal_type_id"])
+    h = headers(user)
+    created = await client.post(V1.path(MediaRoutes.UPLOADS), headers=h, json={
+        "observation_id": observation.id, "media_type": "image", "original_filename": "photo.png",
+        "expected_size": 100, "content_type": "image/png"})
+    assert created.status_code == 201, created.text
+    upload_id = created.json()["id"]
+    (create,) = await rows_of_event(db, AuditEvent.UPLOAD_SESSION_CREATE)
+    check_row(create, AuditEvent.UPLOAD_SESSION_CREATE, f"p:{post.id}", {"upload_id": upload_id, "media_type": "image"})
+    assert create.resource_id is None and create.details is None and create.new_values["upload_id"] == upload_id
+
+    assert (await client.post(V1.path(MediaRoutes.UPLOAD_SESSION_ABORT, upload_id=upload_id), headers=h)).status_code == 200
+    (abort,) = await rows_of_event(db, AuditEvent.UPLOAD_SESSION_ABORT)
+    check_row(abort, AuditEvent.UPLOAD_SESSION_ABORT, f"p:{post.id}", {"upload_id": upload_id, "media_type": "image"})
+    assert abort.resource_id is None and abort.details is None

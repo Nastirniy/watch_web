@@ -17,6 +17,8 @@ from app.backend.services.media import formats, jobs, renderer, urls as thumb_ur
 from app.backend.services.media.probe import has_no_video_stream, metadata_for, resolve_tools
 from app.backend.enums.general import MediaType, Permissions, ThumbnailFormat, ThumbnailSize
 from app.backend.api.shared.helpers.audit_helper import client_info
+from app.backend.auth.scope import Node
+from app.backend.enums.audit import AuditEvent
 from app.backend.services.audit import create_audit_log
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.config import settings
@@ -98,6 +100,7 @@ async def record_upload(
     auth: AuthContext,
     media_file_id: int,
     observation_id: int,
+    post_id: int,
     original_filename: str,
     background_tasks: BackgroundTasks,
     transport: str,
@@ -134,9 +137,10 @@ async def record_upload(
         await session.refresh(media_file)
 
     await create_audit_log(
-        session=session, action="create", resource_type="media", resource_id=media_file_id,
+        session, AuditEvent.MEDIA_CREATE,
+        params={"observation_id": observation_id, "file_name": original_filename, "media_type": media_file.media_type},
+        scope=Node.post(post_id), resource_id=media_file_id,
         user_id=auth.user.id, new_values=media_file.model_dump(),
-        details={"message": f"User {auth.user.username} uploaded media file '{original_filename}' ({transport}) for observation #{observation_id}"},
         **client_info(request, auth),
     )
     await session.commit()
