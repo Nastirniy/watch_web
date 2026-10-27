@@ -21,7 +21,7 @@ from tests.pki_helpers import legacy_root, make_leaf, pem
 from tests.test_certificate_routes import (
     _post_admin, audit_rows, loaded_package, problem_code, rows_of, upload,
 )
-from tests.test_pki_login import _login, nginx_headers, production  # noqa: F401
+from tests.test_pki_login import _login, nginx_headers  # noqa: F401
 from app.backend.enums.routes import AuthRoutes
 
 LOGIN = V1.path(AuthRoutes.LOGIN)

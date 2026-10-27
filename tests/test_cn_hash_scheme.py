@@ -23,7 +23,7 @@ from app.backend.services.certificates import register_certificate
 from tests.helpers import make_admin
 from tests.test_column_bounds import _run_downgrade
 from tests.test_migrations import HEAD, run_migrate
-from tests.test_pki_login import _create_user, _login, make_certificate, openssl_rfc2253, pem, production  # noqa: F401
+from tests.test_pki_login import _create_user, _login, make_certificate, openssl_rfc2253, pem  # noqa: F401
 
 LOGIN = V1.path(AuthRoutes.LOGIN)
 ME = V1.path(AuthRoutes.ME)

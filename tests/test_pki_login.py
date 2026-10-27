@@ -16,7 +16,7 @@ from app.backend.enums.general import AppEnvironment
 from app.backend.enums.routes import AuthRoutes, UserRoutes
 from app.backend.models.user import User, UserSession
 from app.backend.models.user_certificate import UserCertificate
-from tests.helpers import make_admin, make_certificate_row
+from tests.helpers import make_admin, make_certificate, make_certificate_row, nginx_headers, openssl_rfc2253  # noqa: F401
 
 LOGIN = V1.path(AuthRoutes.LOGIN)
 REFRESH = V1.path(AuthRoutes.REFRESH)
@@ -24,65 +24,13 @@ ME = V1.path(AuthRoutes.ME)
 CREATE_USER = V1.path(UserRoutes.ROOT)
 
 
-def make_certificate(common_name: str, serial: int) -> x509.Certificate:
-    key = ec.generate_private_key(ec.SECP256R1())
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
-    now = datetime.now(timezone.utc)
-    return (
-        x509.CertificateBuilder()
-        .subject_name(name).issuer_name(name).public_key(key.public_key())
-        .serial_number(serial)
-        .not_valid_before(now).not_valid_after(now + timedelta(days=1))
-        .sign(key, hashes.SHA256())
-    )
-
-
 def pem(cert: x509.Certificate) -> bytes:
     return cert.public_bytes(serialization.Encoding.PEM)
-
-
-_RFC2253_SPECIALS = ',+"\\<>;'
-
-
-def openssl_rfc2253(name: x509.Name) -> str:
-    """$ssl_client_s_dn as nginx writes it (OpenSSL X509_NAME_print_ex, XN_FLAG_RFC2253): RDNs last first (the
-    attributes of a multi-valued RDN too, XN_FLAG_DN_REV reverses every entry), the
-    specials of RFC 2253 and a leading '#' or space escaped with a backslash, every byte of a character above 0x7F
-    (and every control character) as \\XX. rfc4514_string() leaves non-ASCII characters as they are."""
-    def escape(value: str) -> str:
-        out = []
-        for index, char in enumerate(value):
-            if ord(char) > 0x7E or ord(char) < 0x20:
-                out.extend(f"\\{byte:02X}" for byte in char.encode("utf-8"))
-            elif char in _RFC2253_SPECIALS or (index == 0 and char in "# ") or (index == len(value) - 1 and char == " "):
-                out.append("\\" + char)
-            else:
-                out.append(char)
-        return "".join(out)
-    return ",".join("+".join(f"{attribute.rfc4514_attribute_name}={escape(attribute.value)}" for attribute in reversed(list(rdn)))
-                    for rdn in reversed(name.rdns))
 
 
 # openssl x509 -noout -subject -nameopt RFC2253 of a certificate with CN "Ivan Petrenko" written in Cyrillic
 CYRILLIC_CN = "\u0406\u0432\u0430\u043d \u041f\u0435\u0442\u0440\u0435\u043d\u043a\u043e"
 CYRILLIC_DN = r"CN=\D0\86\D0\B2\D0\B0\D0\BD \D0\9F\D0\B5\D1\82\D1\80\D0\B5\D0\BD\D0\BA\D0\BE"
-
-
-def nginx_headers(cert: x509.Certificate) -> dict:
-    """What nginx sets after ssl_verify_client: $ssl_client_s_dn (OpenSSL RFC 2253 form), $ssl_client_serial (OpenSSL
-    i2a_ASN1_INTEGER: two upper-case hex digits per byte), $ssl_client_fingerprint (SHA-1 of the DER, lower case)"""
-    serial = cert.serial_number
-    return {
-        "X-SSL-Client-Verify": "SUCCESS",
-        "X-SSL-Client-DN": openssl_rfc2253(cert.subject),
-        "X-SSL-Client-Serial": serial.to_bytes((serial.bit_length() + 7) // 8, "big").hex().upper(),
-        "X-SSL-Client-Fingerprint": hashlib.sha1(cert.public_bytes(serialization.Encoding.DER)).hexdigest(),
-    }
-
-
-@pytest.fixture
-def production(monkeypatch):
-    monkeypatch.setattr(settings.app, "environment", AppEnvironment.PRODUCTION.value)
 
 
 async def _create_user(client, db, headers, username: str, cert: x509.Certificate) -> int:

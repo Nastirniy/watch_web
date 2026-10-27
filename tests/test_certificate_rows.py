@@ -16,7 +16,7 @@ from app.backend.models.user_certificate import UserCertificate
 from app.backend.utils.datetime_utils import assume_utc
 from tests.helpers import make_admin, make_certificate_row, make_user
 from tests.pki_helpers import client_ca, legacy_root, make_leaf, pem
-from tests.test_pki_login import _login, make_certificate, nginx_headers, production  # noqa: F401
+from tests.test_pki_login import _login, make_certificate, nginx_headers  # noqa: F401
 
 CREATE_USER = V1.path(UserRoutes.ROOT)
 USER = V1.path(UserRoutes.USER_BY_ID)

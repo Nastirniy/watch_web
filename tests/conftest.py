@@ -30,6 +30,7 @@ from app.backend.auth import sessions as session_lifetimes
 from app.backend.auth.service import AuthService
 from app.backend.models.user import UserSession
 from app.backend.config import settings
+from app.backend.enums.general import AppEnvironment
 from app.backend.services.signer_client import use_signer_transport
 from app.backend.signer.app import create_app as create_signer_app
 from app.backend.signer.settings import SignerSettings
@@ -199,3 +200,8 @@ def pki(tmp_path, monkeypatch) -> PkiEnv:
     env.signer_up()
     yield env
     use_signer_transport(None)
+
+
+@pytest.fixture
+def production(monkeypatch):
+    monkeypatch.setattr(settings.app, "environment", AppEnvironment.PRODUCTION.value)

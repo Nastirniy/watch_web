@@ -1,12 +1,15 @@
 """Factories for test data. Every object is created directly in the database."""
+import hashlib
 import itertools
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Dict, Iterable, Optional
 
 import httpx
 from cryptography import x509
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509.oid import NameOID
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -420,3 +423,51 @@ async def issue(client, headers, caller, user, label: str = "Laptop", **body):
     from app.backend.enums.routes import UserRoutes
     return await client.post(V1.path(UserRoutes.USER_CERTIFICATES, user_id=user.id), json={"label": label, **body},
                              headers=headers(caller))
+
+
+# ---------------------------------------------------------------- client certificates as nginx forwards them
+def make_certificate(common_name: str, serial: int) -> x509.Certificate:
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+    now = datetime.now(timezone.utc)
+    return (
+        x509.CertificateBuilder()
+        .subject_name(name).issuer_name(name).public_key(key.public_key())
+        .serial_number(serial)
+        .not_valid_before(now).not_valid_after(now + timedelta(days=1))
+        .sign(key, hashes.SHA256())
+    )
+
+
+_RFC2253_SPECIALS = ',+"\\<>;'
+
+
+def openssl_rfc2253(name: x509.Name) -> str:
+    """$ssl_client_s_dn as nginx writes it (OpenSSL X509_NAME_print_ex, XN_FLAG_RFC2253): RDNs last first (the
+    attributes of a multi-valued RDN too, XN_FLAG_DN_REV reverses every entry), the
+    specials of RFC 2253 and a leading '#' or space escaped with a backslash, every byte of a character above 0x7F
+    (and every control character) as \\XX. rfc4514_string() leaves non-ASCII characters as they are."""
+    def escape(value: str) -> str:
+        out = []
+        for index, char in enumerate(value):
+            if ord(char) > 0x7E or ord(char) < 0x20:
+                out.extend(f"\\{byte:02X}" for byte in char.encode("utf-8"))
+            elif char in _RFC2253_SPECIALS or (index == 0 and char in "# ") or (index == len(value) - 1 and char == " "):
+                out.append("\\" + char)
+            else:
+                out.append(char)
+        return "".join(out)
+    return ",".join("+".join(f"{attribute.rfc4514_attribute_name}={escape(attribute.value)}" for attribute in reversed(list(rdn)))
+                    for rdn in reversed(name.rdns))
+
+
+def nginx_headers(cert: x509.Certificate) -> dict:
+    """What nginx sets after ssl_verify_client: $ssl_client_s_dn (OpenSSL RFC 2253 form), $ssl_client_serial (OpenSSL
+    i2a_ASN1_INTEGER: two upper-case hex digits per byte), $ssl_client_fingerprint (SHA-1 of the DER, lower case)"""
+    serial = cert.serial_number
+    return {
+        "X-SSL-Client-Verify": "SUCCESS",
+        "X-SSL-Client-DN": openssl_rfc2253(cert.subject),
+        "X-SSL-Client-Serial": serial.to_bytes((serial.bit_length() + 7) // 8, "big").hex().upper(),
+        "X-SSL-Client-Fingerprint": hashlib.sha1(cert.public_bytes(serialization.Encoding.DER)).hexdigest(),
+    }

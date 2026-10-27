@@ -1,7 +1,7 @@
 """Audit writers of authentication and access (part 6, task 3a): one write per module, its event, category, scope and
 params as the catalog declares them (enums/audit.py)."""
 import io
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlmodel import select
@@ -20,9 +20,8 @@ from app.backend.models.observation import SignalType
 from app.backend.services.media.manager import reset_media_manager
 from app.backend.models.role import Permission
 from app.backend.services.unit_history import fill_unit_history
-from tests.test_pki_login import make_certificate, nginx_headers, production  # noqa: F401
 from tests.helpers import (
-    assign, builtin_role, issue, make_admin, make_certificate_row, make_dictionary, make_group, make_media, make_observation, make_post, make_user,
+    assign, builtin_role, issue, make_admin, make_certificate, make_certificate_row, nginx_headers, make_dictionary, make_group, make_media, make_observation, make_post, make_user,
     observation_payload)
 
 
@@ -679,7 +678,27 @@ async def test_certificate_login_writes_one_row_at_the_end(client, db, headers, 
     assert miss.params["matched"] is False and miss.params["certificate_id"] is None
 
 
-@pytest.mark.xfail(reason="phase B, Task 8: the authentication category switch", strict=True)
-async def test_certificate_login_with_authentication_off_writes_nothing(client, db, headers, production):
-    from app.backend.services.audit import switches  # noqa: F401  (exists from Task 8)
-    raise AssertionError("switch not implemented yet")
+@pytest.mark.parametrize("refusal", ["revoked", "expired", "archived", "deactivated"])
+async def test_refused_certificate_login_writes_one_row(client, db, production, refusal):
+    post = await make_post(db)
+    user = await make_user(db, post_id=post.id)
+    cert = make_certificate(f"cn-refused-{refusal}", 0x7B00 + len(refusal))
+    values = {}
+    if refusal == "revoked":
+        values = {"revoked_at": datetime.now(timezone.utc), "revocation_reason": "key_compromise"}
+    elif refusal == "expired":
+        values = {"not_after": datetime.now(timezone.utc) - timedelta(days=1)}
+    row = await make_certificate_row(db, user, cert=cert, **values)
+    if refusal == "archived":
+        user.is_deleted = True
+    elif refusal == "deactivated":
+        user.is_active = False
+    db.add(user)
+    await db.commit()
+
+    response = await client.post(V1.path(AuthRoutes.LOGIN), headers=nginx_headers(cert))
+    assert response.status_code == 401, response.text
+    (attempt,) = await rows_of_event(db, AuditEvent.AUTH_CERTIFICATE_LOGIN)
+    assert attempt.success is False and attempt.user_id == user.id and attempt.scope_key == f"p:{post.id}"
+    assert attempt.params["matched"] is True and attempt.params["certificate_id"] == row.id
+    assert attempt.params["certificate_cn"] == f"cn-refused-{refusal}"
