@@ -9,6 +9,7 @@ from typing import get_args
 
 import pytest
 
+from app.backend.api.v1.models.query.audit import AuditFilterParams, AuditSortField
 from app.backend.api.v1.models.query.categories import CategoryFilterParams, CategorySortField
 from app.backend.api.v1.models.query.certificates import CertificateFilterParams, CertificateSortField
 from app.backend.api.v1.models.query.media import MediaFilterParams, MediaSortField
@@ -33,8 +34,10 @@ from app.backend.filters.signal_type_filter import SignalTypeFilterService
 from app.backend.filters.simple_engine import as_criteria
 from app.backend.filters.tag_filter import TagFilterService
 from app.backend.filters.user_filter import UserFilterService
+from app.backend.services.audit.query import AuditFilterService
 
 V1_LISTS = [
+    (AuditFilterParams, AuditSortField, AuditFilterService),
     (CategoryFilterParams, CategorySortField, CategoryFilterService),
     (CertificateFilterParams, CertificateSortField, CertificateFilterService),
     (MediaFilterParams, MediaSortField, MediaFilterService),

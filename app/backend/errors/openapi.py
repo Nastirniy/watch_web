@@ -2,6 +2,8 @@
 
 - problem_models(): one pydantic model per problem type of enums/errors.py: const code / title / status and
   typed params; an optional param is absent from the body, never null, and its schema says so.
+- absent_not_null(schema): the schema rule of optional members (also used by the audit params models of a
+  version, api/v1/models/response/audit.py).
 - problems(*codes): the `responses=` of a route, a router or the app. A route declares the codes it answers
   on its decorator; generic ones are declared once: internal_error on the app, the 401 set and
   validation_error on each version router (FastAPI merges them per status).
@@ -42,7 +44,7 @@ def schema_name(code: ProblemType) -> str:
     return f"{_camel(code.value)}Problem"
 
 
-def _absent_not_null(schema: Dict[str, Any]) -> None:
+def absent_not_null(schema: Dict[str, Any]) -> None:
     """An optional member is left out of the body, never null: no null variant and no default in its schema,
     so generators type it as optional (post_id?: number) and not as a present nullable value"""
     required = set(schema.get("required", ()))
@@ -60,7 +62,7 @@ class FieldError(BaseModel):
     """One invalid value of a validation_error. Codes of the API are listed in FieldErrorCode; built-in
     checks keep pydantic's codes (missing, string_too_short, int_parsing, json_invalid, ...). Other
     members are the params of the code (min_length, max_length, accepted, ...)."""
-    model_config = ConfigDict(extra="allow", json_schema_extra=lambda schema, cls: _absent_not_null(schema))
+    model_config = ConfigDict(extra="allow", json_schema_extra=lambda schema, cls: absent_not_null(schema))
 
     # FieldErrorCode lists the codes of the API (a component of its own in OpenAPI); pydantic's come on top
     code: Union[FieldErrorCode, str] = Field(description="Key of exactly this message in the localization package")
@@ -111,7 +113,7 @@ def _example(code: ProblemType) -> Dict[str, Any]:
 
 def _problem_schema_extra(code: ProblemType):
     def extra(schema: Dict[str, Any], cls: type) -> None:
-        _absent_not_null(schema)
+        absent_not_null(schema)
         schema["examples"] = [_example(code)]
     return extra
 

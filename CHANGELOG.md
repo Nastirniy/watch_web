@@ -7,6 +7,29 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## Audit log
 
+### Added
+
+- The read API of the audit log (`api/v1/audit_logs.py`, `services/audit/query.py`), `audit.view` (system) on every
+  route: every row and every column.
+  - `GET /api/v1/audit-logs/`: entries newest first (`sort_order` descending by default, `page_size` at most 200),
+    the next page with `before_id` (the id of the last entry). Filters (all given must hold): `event` and
+    `category` (lists; `legacy.unknown` also matches rows without an event), `user_id`, `resource_type`,
+    `resource_id`, `success`, `created_from` / `created_to`, `request_id`, `session_id`, `post_id`, `group_id`
+    (the group and everything below it in the scope tree as it is now), `corps_id`, `brigade_id` (the same for a
+    unit; an id of another kind gives nothing). A page costs three queries (rows, usernames, node names).
+  - `GET /api/v1/audit-logs/{audit_id}`: one entry; 404 `audit_entry_not_found` (param `audit_id`).
+  - `GET /api/v1/audit-logs/events`: the event catalog, every code with its `category`, `switchable` (every
+    category but `audit`) and English `title`.
+- An entry is one schema per event, `<CamelCode>AuditEntry` (`event` const, `params` a `<CamelCode>AuditParams`
+  with the typed params of the event; an optional param is absent, never null), and the list and the entry answer
+  their union discriminated by `event` (openapi-typescript narrows `params` by `event`). Every entry has `id`,
+  `created_at`, `category`, `actor` (`{id, username}`, the username now, null for an id no user has; null when no
+  user acted), `resource_type`, `resource_id`, `scope` (`{kind, id, name}`, the name now, the application name at
+  the root; null for a system-wide event), `success`, `old_values`, `new_values`, `request_id`, `ip_address`,
+  `user_agent`, `session_id`, `request_url`. A row the catalog cannot describe (no event, a code it no longer has,
+  or params that do not fit the event, such as the rows migration 031 backfilled) is served as `legacy.unknown`
+  with `params` `{action, resource_type, message?}` (`message` from the old `details`).
+
 ### Database
 
 - Migration `031_audit_events` adds to `audit_logs`: `event` (catalog code, `enums/audit.py`), `category`,

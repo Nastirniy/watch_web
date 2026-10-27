@@ -331,6 +331,18 @@ class DatabaseRoutes(str, Enum):
         return "DATABASE"
 
 
+class AuditRoutes(str, Enum):
+    """The audit log (read-only here; the settings, purge and export routes come with phase B)"""
+    BASE = "/audit-logs"
+    ROOT = "/"  # collection: list, newest first
+    EVENTS = "/events"  # the event catalog; registered before /{audit_id}
+    ENTRY_BY_ID = "/{audit_id}"
+
+    @staticmethod
+    def tag() -> str:
+        return "AUDIT"
+
+
 class SignerRoutes(str, Enum):
     """Paths of the signing service (a separate app on a Unix socket, not part of the main app)"""
     SIGN_CLIENT = "/sign/client"
@@ -361,3 +373,4 @@ class Routes:
     TAGS = TagRoutes
     SEARCH = SearchRoutes
     DATABASE = DatabaseRoutes
+    AUDIT = AuditRoutes

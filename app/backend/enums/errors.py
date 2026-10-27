@@ -376,6 +376,10 @@ class ErrorCode(ProblemType):
     # backup.dir is set but cannot be read (share not mounted, permissions); the path is in the log only
     BACKUP_DIRECTORY_UNAVAILABLE = ("backup_directory_unavailable", problem(503, "Backup directory unavailable"))
 
+    # ---------------------------------------------------------------- audit log
+    AUDIT_ENTRY_NOT_FOUND = ("audit_entry_not_found", problem(
+        404, "Audit entry not found", "Audit entry {audit_id} not found", audit_id=int))
+
     # ---------------------------------------------------------------- media files
     MEDIA_NOT_FOUND = ("media_not_found", problem(404, "Media file not found"))
     MEDIA_NOT_ARCHIVED = ("media_not_archived", problem(409, "Media file is not archived"))
