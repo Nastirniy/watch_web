@@ -140,14 +140,17 @@ class AuditEvent(Enum):
     OBSERVATION_FREQUENCY_UPDATE = ("observation_frequency.update", event(_D, "Frequency band updated", **_FREQ))
     OBSERVATION_FREQUENCY_ARCHIVE = ("observation_frequency.archive", event(_D, "Frequency band archived", **_FREQ))
     OBSERVATION_FREQUENCY_RESTORE = ("observation_frequency.restore", event(_D, "Frequency band restored", **_FREQ))
-    MEDIA_CREATE = ("media.create", event(_D, "Media uploaded", observation_id=int, file_name=str, media_type=str))
+    MEDIA_CREATE = ("media.create", event(
+        _D, "Media uploaded", observation_id=int, file_name=str, media_type=str, via=Optional[str], upload_id=Optional[str]))
     MEDIA_ARCHIVE = ("media.archive", event(_D, "Media archived", **_MEDIA))
     MEDIA_RESTORE = ("media.restore", event(_D, "Media restored", **_MEDIA))
     MEDIA_SHARE = ("media.share", event(_D, "Media shared by link", **_MEDIA))
     UPLOAD_SESSION_CREATE = ("upload_session.create", event(
-        _D, "Upload session opened", upload_id=str, media_type=Optional[str]))
+        _D, "Upload session opened", upload_id=str, media_type=Optional[str], observation_id=Optional[int],
+        file_name=Optional[str]))
     UPLOAD_SESSION_ABORT = ("upload_session.abort", event(
-        _D, "Upload session aborted", upload_id=str, media_type=Optional[str]))
+        _D, "Upload session aborted", upload_id=str, media_type=Optional[str], observation_id=Optional[int],
+        file_name=Optional[str]))
 
     # dictionaries
     CATEGORY_CREATE = ("category.create", event(_DI, "Category created", **_NAME))

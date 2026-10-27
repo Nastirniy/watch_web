@@ -253,3 +253,16 @@ async def test_same_file_name_in_the_same_second_as_an_upload_in_flight(client, 
         files={"file": ("photo.png", make_png(), "image/png")}, headers=headers(user),
     )
     assert response.status_code in (200, 201), response.text
+
+
+@pytest.mark.asyncio
+async def test_nginx_upload_audit_row_names_the_transport(client, db, headers, storage, temp_dir):
+    from sqlmodel import select
+    from app.backend.models.audit import AuditLog
+    post, user, observation = await _scene(db)
+    response = await _nginx_post(client, headers, user, observation, _temp_file(temp_dir, "0000000042"))
+    assert response.status_code in (200, 201), response.text
+    row = (await db.exec(select(AuditLog).where(AuditLog.event == "media.create"))).one()
+    assert row.scope_key == f"p:{observation.post_id}"
+    assert row.params == {"observation_id": observation.id, "file_name": "photo.png", "media_type": "image",
+                          "via": "nginx offload"}

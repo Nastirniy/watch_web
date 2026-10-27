@@ -669,3 +669,15 @@ async def test_head_applies_the_expiry_like_get(client, db, headers, storage, cl
     assert head.status_code == 200 and head.headers["upload-status"] == "expired"
     assert not part.exists()
     assert (await client.get(SESSION.format(upload_id=upload_id), headers=headers(user))).json()["status"] == "expired"
+
+
+@pytest.mark.asyncio
+async def test_resumable_completion_audit_row_names_the_session(client, db, headers, storage):
+    """media.create of a resumable upload: scope of the post, via and upload_id in params"""
+    _, user, observation = await _scene(db)
+    upload_id = await _received_session(client, headers, user, observation, make_png())
+    assert (await client.post(COMPLETE.format(upload_id=upload_id), headers=headers(user))).status_code == 200
+    row = (await db.exec(select(AuditLog).where(AuditLog.event == "media.create"))).one()
+    assert row.scope_key == f"p:{observation.post_id}"
+    assert row.params["via"] == "resumable" and row.params["upload_id"] == upload_id
+    assert row.params["observation_id"] == observation.id

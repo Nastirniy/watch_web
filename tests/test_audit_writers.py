@@ -21,7 +21,7 @@ from app.backend.services.media.manager import reset_media_manager
 from app.backend.models.role import Permission
 from app.backend.services.unit_history import fill_unit_history
 from tests.helpers import (
-    assign, builtin_role, issue, make_admin, make_dictionary, make_group, make_observation, make_post, make_user,
+    assign, builtin_role, issue, make_admin, make_dictionary, make_group, make_media, make_observation, make_post, make_user,
     observation_payload)
 
 
@@ -556,7 +556,8 @@ async def test_media_writes(client, db, headers, storage):
     assert uploaded.status_code in (200, 201), uploaded.text
     (create,) = await rows_of_event(db, AuditEvent.MEDIA_CREATE)
     media_id = create.resource_id
-    check_row(create, AuditEvent.MEDIA_CREATE, node, {"observation_id": obs_id, "file_name": "shot.png", "media_type": "image"})
+    check_row(create, AuditEvent.MEDIA_CREATE, node, {"observation_id": obs_id, "file_name": "shot.png", "media_type": "image",
+                                                                  "via": "multipart"})
     assert create.category == AuditCategory.DATA.value and create.details is None and create.new_values["id"] == media_id
 
     for route in (MediaRoutes.MEDIA_ARCHIVE, MediaRoutes.MEDIA_RESTORE):
@@ -571,7 +572,8 @@ async def test_media_writes(client, db, headers, storage):
     assert shared.status_code == 200, shared.text
     (share,) = await rows_of_event(db, AuditEvent.MEDIA_SHARE)
     check_row(share, AuditEvent.MEDIA_SHARE, node, {"observation_id": obs_id, "ttl_seconds": 600})
-    assert share.details is None
+    assert share.details is None and share.resource_id == media_id
+    assert share.new_values["size"] and share.new_values["format"] and share.new_values["expires_at"]
 
 
 async def test_upload_session_writes(client, db, headers, storage):
@@ -586,10 +588,26 @@ async def test_upload_session_writes(client, db, headers, storage):
     assert created.status_code == 201, created.text
     upload_id = created.json()["id"]
     (create,) = await rows_of_event(db, AuditEvent.UPLOAD_SESSION_CREATE)
-    check_row(create, AuditEvent.UPLOAD_SESSION_CREATE, f"p:{post.id}", {"upload_id": upload_id, "media_type": "image"})
+    check_row(create, AuditEvent.UPLOAD_SESSION_CREATE, f"p:{post.id}", {"upload_id": upload_id, "media_type": "image", "observation_id": observation.id,
+                                                                    "file_name": "photo.png"})
     assert create.resource_id is None and create.details is None and create.new_values["upload_id"] == upload_id
 
     assert (await client.post(V1.path(MediaRoutes.UPLOAD_SESSION_ABORT, upload_id=upload_id), headers=h)).status_code == 200
     (abort,) = await rows_of_event(db, AuditEvent.UPLOAD_SESSION_ABORT)
-    check_row(abort, AuditEvent.UPLOAD_SESSION_ABORT, f"p:{post.id}", {"upload_id": upload_id, "media_type": "image"})
+    check_row(abort, AuditEvent.UPLOAD_SESSION_ABORT, f"p:{post.id}", {"upload_id": upload_id, "media_type": "image", "observation_id": observation.id,
+                                                                    "file_name": "photo.png"})
     assert abort.resource_id is None and abort.details is None
+
+
+async def test_media_without_an_observation_is_written_at_the_root(client, db, headers):
+    post = await make_post(db)
+    ids = await make_dictionary(db)
+    admin = await make_admin(db)
+    media = await make_media(db, await make_observation(db, admin, post, ids["signal_type_id"]), admin)
+    media.observation_id = None
+    db.add(media)
+    await db.commit()
+    done = await client.post(V1.path(MediaRoutes.MEDIA_ARCHIVE, media_id=media.id), headers=headers(admin))
+    assert done.status_code == 200, done.text
+    (row,) = await rows_of_event(db, AuditEvent.MEDIA_ARCHIVE)
+    check_row(row, AuditEvent.MEDIA_ARCHIVE, ROOT.key, {})

@@ -280,8 +280,8 @@ async def _set_media_archived(request: Request, session: AsyncSession, auth: Aut
     session.add(media_file)
     await create_audit_log(
         session, AuditEvent.MEDIA_ARCHIVE if archived else AuditEvent.MEDIA_RESTORE,
-        params={"observation_id": media_file.observation_id},
-        scope=Node.post(observation.post_id) if observation is not None else None, resource_id=media_id,
+        params={"observation_id": media_file.observation_id} if media_file.observation_id is not None else {},
+        scope=Node.post(observation.post_id) if observation is not None else ROOT, resource_id=media_id,
         user_id=current_user.id, old_values=old_values, new_values=media_file.model_dump(),
         **client_info(request, auth),
     )
@@ -725,6 +725,7 @@ async def share_media_thumbnail(
         params={"observation_id": media_file.observation_id, "ttl_seconds": ttl},
         scope=Node.post(observation.post_id), resource_id=media_id,
         user_id=auth.user.id,
+        new_values={"size": body.size.value, "format": body.format.value, "expires_at": expires_at},
         **client_info(request, auth),
     )
     await session.commit()

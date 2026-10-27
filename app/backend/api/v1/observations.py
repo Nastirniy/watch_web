@@ -12,7 +12,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.config import settings
 from app.backend.database import get_session
 from app.backend.utils.row_locks import lock_first
-from app.backend.models.observation import Observation, SignalType, Tag
+from app.backend.models.observation import Observation, ObservationFrequency, SignalType, Tag
 from app.backend.models.post import Post
 from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
@@ -638,8 +638,8 @@ async def _audit_frequency(
         session: AsyncSession,
         auth: AuthContext,
         event: AuditEvent,
-        observation,
-        frequency,
+        observation: Observation,
+        frequency: ObservationFrequency,
         old_values: Optional[dict] = None,
 ) -> None:
     await create_audit_log(

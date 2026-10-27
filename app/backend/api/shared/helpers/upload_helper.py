@@ -2,6 +2,7 @@
 problems, the observation an upload goes to, and what every upload does once the file is stored."""
 
 import asyncio
+from typing import Optional
 from pathlib import Path
 
 from fastapi import BackgroundTasks, Request
@@ -104,6 +105,7 @@ async def record_upload(
     original_filename: str,
     background_tasks: BackgroundTasks,
     transport: str,
+    upload_id: Optional[str] = None,
 ) -> MediaFile:
     """The last transaction of an upload, once the file is in storage: probed video/audio metadata, the release of
     the poster hold and the audit row, committed together; then the medium thumbnail is pre-warmed.
@@ -138,7 +140,8 @@ async def record_upload(
 
     await create_audit_log(
         session, AuditEvent.MEDIA_CREATE,
-        params={"observation_id": observation_id, "file_name": original_filename, "media_type": media_file.media_type},
+        params={"observation_id": observation_id, "file_name": original_filename, "media_type": media_file.media_type,
+                "via": transport, **({"upload_id": upload_id} if upload_id else {})},
         scope=Node.post(post_id), resource_id=media_file_id,
         user_id=auth.user.id, new_values=media_file.model_dump(),
         **client_info(request, auth),

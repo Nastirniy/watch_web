@@ -211,8 +211,9 @@ async def create_upload_session(
     # The session and its audit row in one transaction
     await create_audit_log(
         session, AuditEvent.UPLOAD_SESSION_CREATE,
-        params={"upload_id": row.id, "media_type": row.media_type}, scope=Node.post(row.post_id),
-        user_id=auth.user.id, new_values={"upload_id": row.id, "expected_size": row.expected_size, "media_type": row.media_type},
+        params={"upload_id": row.id, "media_type": row.media_type, "observation_id": row.observation_id,
+                "file_name": row.original_filename},
+        scope=Node.post(row.post_id), user_id=auth.user.id, new_values={"upload_id": row.id, "expected_size": row.expected_size, "media_type": row.media_type},
         **client_info(request, auth),
     )
     await session.commit()
@@ -403,7 +404,7 @@ async def complete_upload_session(
         await uploads.release_completion(session, upload_id, token)
         raise
 
-    media_file = await record_upload(request, session, auth, media_file_id, row.observation_id, row.post_id, row.original_filename, background_tasks, "resumable")
+    media_file = await record_upload(request, session, auth, media_file_id, row.observation_id, row.post_id, row.original_filename, background_tasks, "resumable", upload_id=row.id)
     return upload_result(media_file, "resumable", upload_id=row.id)
 
 
@@ -509,8 +510,9 @@ async def abort_upload_session(
         async def audit() -> None:
             await create_audit_log(
                 session, AuditEvent.UPLOAD_SESSION_ABORT,
-                params={"upload_id": row.id, "media_type": row.media_type}, scope=Node.post(row.post_id),
-                user_id=auth.user.id,
+                params={"upload_id": row.id, "media_type": row.media_type, "observation_id": row.observation_id,
+                        "file_name": row.original_filename},
+                scope=Node.post(row.post_id), user_id=auth.user.id,
                 new_values={"received_bytes": row.received_bytes, "expected_size": row.expected_size},
                 **client_info(request, auth),
             )
