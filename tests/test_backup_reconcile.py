@@ -162,7 +162,8 @@ async def test_cli_dry_run_then_apply(db, media, capsys):
     assert await run(db, apply=True, upload_path=media, store_dir=None, now=NOW) == 0
     assert not (media / "f/8_orphan.jpg").exists()
     row = (await db.exec(select(AuditLog).where(AuditLog.action == "reconcile"))).one()
-    assert row.resource_type == "database" and row.details["orphan_files"] == 1
+    assert row.resource_type == "database" and row.event == "database.reconcile"
+    assert row.params["orphan_files"] == 1 and row.details is None
 
 
 async def test_fresh_derived_file_kept(db, media):

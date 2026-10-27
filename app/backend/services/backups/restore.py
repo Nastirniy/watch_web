@@ -30,9 +30,9 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.pool import NullPool
 
 from app.backend.config import BackupConfig, DatabaseConfig
-from app.backend.models.audit import AuditLog
+from app.backend.enums.audit import AuditEvent
 from app.backend.services.backups.carry_over import (
-    CarryOverResult, CarryOverUnsupported, carry_over, user_state_differences,
+    CarryOverResult, CarryOverUnsupported, _only, _reflect, carry_over, user_state_differences,
 )
 from app.backend.services.backups.catalog import scan
 from app.backend.services.backups.client_tools import ClientTools, child_env, defaults_file
@@ -54,6 +54,7 @@ _UNSAFE = re.compile(
     r"^[ \t]*(?:USE\b|CONNECT\b|SYSTEM\b|SOURCE\b|\\|(?:CREATE|DROP|ALTER)[ \t]+(?:DATABASE|SCHEMA)\b)",
     re.MULTILINE | re.IGNORECASE)
 AUDIT_RESOURCE = "database"
+RESTORE_EVENTS = {"restore": AuditEvent.DATABASE_RESTORE, "undo_restore": AuditEvent.DATABASE_UNDO_RESTORE}
 CHUNK = 1024 * 1024
 STDERR_LOG_LIMIT = 2000
 
@@ -320,10 +321,19 @@ class MariaDbBackend:
             conn.exec_driver_sql(rename_statement(db, live, incoming, source, keep_as))
 
     def audit(self, schema: str, action: str, details: dict) -> None:
-        table = AuditLog.__table__.to_metadata(sa.MetaData(), schema=schema)
+        """The restore's audit row, a raw INSERT into the swapped-in schema: it may be an older backup, so event,
+        category and params are written only when its audit_logs has those columns; details stays for an old one"""
+        event = RESTORE_EVENTS[action]
+        values = {"action": action, "resource_type": AUDIT_RESOURCE, "success": True,
+                  "event": event.code, "category": event.category.value, "params": details,
+                  "created_at": utcnow().replace(tzinfo=None)}
         with self.engine.begin() as conn:
-            conn.execute(sa.insert(table).values(action=action, resource_type=AUDIT_RESOURCE, success=True,
-                                                 details=details, created_at=utcnow().replace(tzinfo=None)))
+            table = _reflect(conn, "audit_logs", schema)
+            if table is None:
+                return
+            if "params" not in table.c:
+                values["details"] = details
+            conn.execute(sa.insert(table).values(**_only(table, values)))
 
     def kept_schemas(self, db: str) -> list[KeptSchema]:
         with self.engine.connect() as conn:

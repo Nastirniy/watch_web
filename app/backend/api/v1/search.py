@@ -12,6 +12,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.database import get_session
 from app.backend.auth.context import AuthContext
 from app.backend.auth.access_control import AccessControlService
+from app.backend.enums.audit import AuditEvent
 from app.backend.enums.routes import SearchRoutes
 from app.backend.enums.general import Permissions
 from app.backend.auth.require import require
@@ -70,7 +71,7 @@ async def log_search(
     request: Request,
     session: AsyncSession,
     auth: AuthContext,
-    entity: str,
+    event: AuditEvent,
     params: Dict,
     results_count: int
 ) -> None:
@@ -81,10 +82,9 @@ async def log_search(
     await create_audit_log(
         session=session,
         user_id=auth.user.id,
-        action="search",
-        resource_type=entity,
+        event=event,
+        params={"result_count": results_count},
         new_values={"params": params, "results": results_count},
-        details={"message": f"User {auth.user.username} searched for {entity} with {results_count} results"},
         success=True,
         **client_info(request, auth),
     )
@@ -128,7 +128,7 @@ async def search_observations(
                                                                    unit_condition=units)
     total = (await session.exec(count_query)).one()
 
-    await log_search(request, session, auth, "observations", params.model_dump(exclude_none=True), len(items))
+    await log_search(request, session, auth, AuditEvent.SEARCH_OBSERVATIONS, params.model_dump(exclude_none=True), len(items))
 
     return SearchResponse[ObservationWithMedia].create("observations", processed_items, total, params.page, params.page_size)
 
@@ -171,7 +171,7 @@ async def search_users(
     )
     total = (await session.exec(count_query)).one()
 
-    await log_search(request, session, auth, "users", params.model_dump(exclude_none=True), len(items))
+    await log_search(request, session, auth, AuditEvent.SEARCH_USERS, params.model_dump(exclude_none=True), len(items))
 
     return SearchResponse[UserResponse].create("users", await users_to_response(session, auth.tree, items), total, params.page, params.page_size)
 
@@ -209,7 +209,7 @@ async def search_posts(
                                                             unit_post_ids=units)
     total = (await session.exec(count_query)).one()
 
-    await log_search(request, session, auth, "posts", params.model_dump(exclude_none=True), len(items))
+    await log_search(request, session, auth, AuditEvent.SEARCH_POSTS, params.model_dump(exclude_none=True), len(items))
 
     return SearchResponse[PostResponse].create("posts", await posts_to_response(session, auth.tree, list(items)), total, params.page, params.page_size)
 
@@ -241,7 +241,7 @@ async def search_roles(
     total = (await session.exec(count_query)).one()
 
     names = await permission_names_by_role(session, [item.id for item in items])
-    await log_search(request, session, auth, "roles", params.model_dump(exclude_none=True), len(items))
+    await log_search(request, session, auth, AuditEvent.SEARCH_ROLES, params.model_dump(exclude_none=True), len(items))
 
     return SearchResponse[RoleResponse].create("roles", [role_to_response(item, names.get(item.id, ())) for item in items], total, params.page, params.page_size)
 
@@ -272,7 +272,7 @@ async def search_categories(
     count_query = CategoryFilterService.apply_filters_for_count(count_query, params)
     total = (await session.exec(count_query)).one()
 
-    await log_search(request, session, auth, "categories", params.model_dump(exclude_none=True), len(items))
+    await log_search(request, session, auth, AuditEvent.SEARCH_CATEGORIES, params.model_dump(exclude_none=True), len(items))
 
     return SearchResponse[CategoryResponse].create("categories", [CategoryResponse.model_validate(item) for item in items], total, params.page, params.page_size)
 
@@ -303,7 +303,7 @@ async def search_signal_types(
     count_query = SignalTypeFilterService.apply_filters_for_count(count_query, params)
     total = (await session.exec(count_query)).one()
 
-    await log_search(request, session, auth, "signal_types", params.model_dump(exclude_none=True), len(items))
+    await log_search(request, session, auth, AuditEvent.SEARCH_SIGNAL_TYPES, params.model_dump(exclude_none=True), len(items))
 
     return SearchResponse[SignalTypeResponse].create("signal_types", [SignalTypeResponse.model_validate(item) for item in items], total, params.page, params.page_size)
 
@@ -334,7 +334,7 @@ async def search_tags(
     count_query = TagFilterService.apply_filters_for_count(count_query, params)
     total = (await session.exec(count_query)).one()
 
-    await log_search(request, session, auth, "tags", params.model_dump(exclude_none=True), len(items))
+    await log_search(request, session, auth, AuditEvent.SEARCH_TAGS, params.model_dump(exclude_none=True), len(items))
 
     return SearchResponse[TagResponse].create("tags", [TagResponse.model_validate(item) for item in items], total, params.page, params.page_size)
 
@@ -371,7 +371,7 @@ async def search_media(
                                                              unit_condition=units)
     total = (await session.exec(count_query)).one()
 
-    await log_search(request, session, auth, "media", params.model_dump(exclude_none=True), len(items))
+    await log_search(request, session, auth, AuditEvent.SEARCH_MEDIA, params.model_dump(exclude_none=True), len(items))
 
     return SearchResponse[MediaFileInfo].create("media", [MediaFileInfo.model_validate(item) for item in items], total, params.page, params.page_size)
 
@@ -403,6 +403,6 @@ async def search_media_formats(
     count_query = MediaFormatFilterService.apply_filters_for_count(count_query, params)
     total = (await session.exec(count_query)).one()
 
-    await log_search(request, session, auth, "media_formats", params.model_dump(exclude_none=True), len(items))
+    await log_search(request, session, auth, AuditEvent.SEARCH_MEDIA_FORMATS, params.model_dump(exclude_none=True), len(items))
 
     return SearchResponse[MediaFormatResponse].create("media_formats", [MediaFormatResponse.model_validate(item) for item in items], total, params.page, params.page_size)

@@ -463,3 +463,42 @@ def test_deep_verify_checks_the_space_too(cfg):
     with pytest.raises(RestoreRefused) as exc:
         verify_backup(cfg, DB, "latest", deep=True, backend=FakeBackend())
     assert exc.value.code == "space_unknown"
+
+
+# ---- the raw audit row into the swapped-in schema (new or older audit_logs)
+
+def _audit_target(tmp_path, with_new_columns: bool):
+    import sqlalchemy as sa
+    from sqlalchemy.pool import StaticPool
+    engine = sa.create_engine("sqlite://", poolclass=StaticPool)
+    with engine.begin() as conn:
+        conn.exec_driver_sql("ATTACH DATABASE ':memory:' AS tgt")
+        extra = ", event VARCHAR(64), category VARCHAR(24), params JSON" if with_new_columns else ""
+        conn.exec_driver_sql("CREATE TABLE tgt.audit_logs (id INTEGER PRIMARY KEY, action VARCHAR(100) NOT NULL, "
+                             "resource_type VARCHAR(50) NOT NULL, success BOOLEAN, details JSON, "
+                             f"created_at DATETIME{extra})")
+    return engine
+
+
+@pytest.mark.parametrize("action,event", [("restore", "database.restore"), ("undo_restore", "database.undo_restore")])
+def test_restore_audit_row_with_the_event_columns(tmp_path, action, event):
+    from app.backend.services.backups.restore import MariaDbBackend
+    engine = _audit_target(tmp_path, True)
+    params = {"kept_schema": "db_before_x", "revocations": 1}
+    MariaDbBackend(None, None, 1, engine=engine).audit("tgt", action, params)
+    with engine.connect() as conn:
+        row = conn.exec_driver_sql("SELECT action, resource_type, event, category, params, details FROM tgt.audit_logs").one()
+    assert row[:3] == (action, "database", event) and row[3] == "audit"
+    import json
+    assert json.loads(row[4]) == params and row[5] is None
+
+
+def test_restore_audit_row_into_an_older_schema_keeps_details(tmp_path):
+    from app.backend.services.backups.restore import MariaDbBackend
+    engine = _audit_target(tmp_path, False)
+    params = {"kept_schema": "db_before_x", "revocations": 1}
+    MariaDbBackend(None, None, 1, engine=engine).audit("tgt", "restore", params)
+    with engine.connect() as conn:
+        row = conn.exec_driver_sql("SELECT action, resource_type, details FROM tgt.audit_logs").one()
+    import json
+    assert row[:2] == ("restore", "database") and json.loads(row[2]) == params

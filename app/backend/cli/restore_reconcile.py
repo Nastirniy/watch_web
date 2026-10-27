@@ -21,10 +21,10 @@ from typing import Optional
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.config import settings
+from app.backend.enums.audit import AuditEvent
 from app.backend.services.audit import create_audit_log
 from app.backend.services.backups.reconcile import ReconcileReport, apply_reconcile, plan_reconcile
 
-AUDIT_ACTION = "reconcile"
 SECTIONS = (
     ("orphan_files", "media file without a row", "moved to _orphaned"),
     ("stale_derived", "derived file of an id without a row", "deleted"),
@@ -53,7 +53,7 @@ async def run(session: AsyncSession, *, apply: bool, upload_path: Path, store_di
         return 0
     done = await asyncio.to_thread(apply_reconcile, report, upload_path, store_dir, now)
     _print(done, applied=True)
-    await create_audit_log(session, action=AUDIT_ACTION, resource_type="database", details={
+    await create_audit_log(session, AuditEvent.DATABASE_RECONCILE, params={
         "orphan_files": len(done.orphan_files), "stale_derived": len(done.stale_derived),
         "returned_originals": len(done.returned_originals), "missing_originals": len(done.missing_originals),
         "orphan_packages": len(done.orphan_packages), "failed": len(done.failed)})

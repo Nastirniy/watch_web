@@ -12,7 +12,7 @@ from app.backend.auth.service import AuthService
 from app.backend.enums.audit import AuditCategory, AuditEvent
 from app.backend.enums.general import BuiltinRole, SessionRevokeCause, UserType
 from app.backend.enums.routes import (
-    AuthRoutes, BrigadeRoutes, CategoryRoutes, CorpsRoutes, MediaFormatRoutes, MediaRoutes, ObservationRoutes, PostRoutes, RoleRoutes,
+    AuthRoutes, BrigadeRoutes, SearchRoutes, CategoryRoutes, CorpsRoutes, MediaFormatRoutes, MediaRoutes, ObservationRoutes, PostRoutes, RoleRoutes,
     ScopeGroupRoutes, SignalTypeRoutes, TagRoutes, UserRoutes)
 from app.backend.config import settings
 from app.backend.models.audit import AuditLog
@@ -611,3 +611,42 @@ async def test_media_without_an_observation_is_written_at_the_root(client, db, h
     assert done.status_code == 200, done.text
     (row,) = await rows_of_event(db, AuditEvent.MEDIA_ARCHIVE)
     check_row(row, AuditEvent.MEDIA_ARCHIVE, ROOT.key, {})
+
+
+# ---------------------------------------------------------------- part 3e: searches, reconciles
+
+async def test_search_row(client, db, headers):
+    user = await make_admin(db)
+    assert (await client.get(V1.path(SearchRoutes.TAGS), headers=headers(user))).status_code == 200
+    (row,) = await rows_of_event(db, AuditEvent.SEARCH_TAGS)
+    check_row(row, AuditEvent.SEARCH_TAGS, None, {"result_count": 0})
+    assert row.category == AuditCategory.READS.value and (row.action, row.resource_type) == ("search", "tag")
+    assert row.details is None and row.user_id == user.id
+    assert row.new_values["results"] == 0 and "params" in row.new_values
+
+
+async def test_media_posters_reconcile_row(client, db, headers):
+    admin = await make_admin(db)
+    response = await client.post(V1.path(MediaRoutes.POSTERS_RECONCILE), json={"retry_failed": False}, headers=headers(admin))
+    assert response.status_code == 200, response.text
+    (row,) = await rows_of_event(db, AuditEvent.MEDIA_POSTERS_RECONCILE)
+    check_row(row, AuditEvent.MEDIA_POSTERS_RECONCILE, None, {
+        "failed_abandoned": 0, "queued_untracked": 0, "requeued_missing": 0, "retried_failed": 0})
+    assert row.category == AuditCategory.SYSTEM.value and row.details is None and row.user_id == admin.id
+
+
+async def test_database_reconcile_row(db, tmp_path):
+    from app.backend.cli.restore_reconcile import run
+    media = tmp_path / "uploads"
+    (media / "f").mkdir(parents=True)
+    (media / "f" / "8_orphan.jpg").write_bytes(b"x")
+    import os
+    old = datetime(2026, 10, 22, 11, 0, tzinfo=timezone.utc).timestamp()
+    os.utime(media / "f" / "8_orphan.jpg", (old, old))
+    assert await run(db, apply=True, upload_path=media, store_dir=None,
+                     now=datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc)) == 0
+    (row,) = await rows_of_event(db, AuditEvent.DATABASE_RECONCILE)
+    check_row(row, AuditEvent.DATABASE_RECONCILE, None, {
+        "orphan_files": 1, "stale_derived": 0, "returned_originals": 0, "missing_originals": 0,
+        "orphan_packages": 0, "failed": 0})
+    assert row.category == AuditCategory.SYSTEM.value and row.details is None

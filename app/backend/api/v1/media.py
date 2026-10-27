@@ -162,8 +162,8 @@ async def reconcile_posters(
     media.view and media.update plus media.monitor (system level, held at the root)."""
     counts = await jobs.reconcile_posters(session, storage_root(), retry_failed=body.retry_failed)
     await create_audit_log(
-        session=session, action="reconcile", resource_type="media_posters",
-        user_id=auth.user.id, details={"message": f"User {auth.user.username} reconciled posters", **counts},
+        session=session, event=AuditEvent.MEDIA_POSTERS_RECONCILE, params={k: int(v) for k, v in counts.items()},
+        user_id=auth.user.id,
         **client_info(request, auth),
     )
     await session.commit()
