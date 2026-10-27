@@ -43,7 +43,7 @@ _ASSIGN = dict(username=str, role_name=str)
 _CERT = dict(username=str, label=str, serial=str, sha256_fingerprint=Optional[str], not_after=Optional[str],
              reason=Optional[str], via=Optional[str], export_count=Optional[int],
              session_count=Optional[int])
-_ROLE = dict(role_name=str, role_kind=str, cloned_from=Optional[str], permission=Optional[str])
+_ROLE = dict(role_name=str, role_kind=str, cloned_from=Optional[str], cloned_from_id=Optional[int], permission=Optional[str])
 _POST = dict(post_name=str, post_code=str, cascade_from=Optional[int])
 _GROUP = dict(group_name=str, group_kind=str, cascade_from=Optional[int])
 _OBS = dict(post_name=str, observation_id=int, signal_type_code=str)

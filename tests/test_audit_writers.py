@@ -249,7 +249,8 @@ async def test_role_writes(client, db, headers):
     assert clone.status_code == 201, clone.text
     (row,) = await rows_of_event(db, AuditEvent.ROLE_CLONE)
     check_row(row, AuditEvent.ROLE_CLONE, None, {
-        "role_name": "night_copy", "role_kind": "tree", "cloned_from": "night_watch"})
+        "role_name": "night_copy", "role_kind": "tree", "cloned_from": "night_watch",
+        "cloned_from_id": role_id})
     assert row.details is None and row.resource_id == clone.json()["id"]
 
     assert (await client.post(V1.path(RoleRoutes.ROLE_ARCHIVE, role_id=role_id), headers=h)).status_code == 200

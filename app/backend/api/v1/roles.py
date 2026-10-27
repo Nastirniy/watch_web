@@ -405,7 +405,8 @@ async def clone_role(
         await session.refresh(role)
         await create_audit_log(
             session, AuditEvent.ROLE_CLONE,
-            params={"role_name": role.name, "role_kind": role.kind, "cloned_from": source_name},
+            params={"role_name": role.name, "role_kind": role.kind, "cloned_from": source_name,
+                    "cloned_from_id": source_id},
             resource_id=role.id,
             user_id=current_user.id,
             new_values=role.model_dump(),
