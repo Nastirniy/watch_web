@@ -20,8 +20,9 @@ from app.backend.models.observation import SignalType
 from app.backend.services.media.manager import reset_media_manager
 from app.backend.models.role import Permission
 from app.backend.services.unit_history import fill_unit_history
+from tests.test_pki_login import make_certificate, nginx_headers, production  # noqa: F401
 from tests.helpers import (
-    assign, builtin_role, issue, make_admin, make_dictionary, make_group, make_media, make_observation, make_post, make_user,
+    assign, builtin_role, issue, make_admin, make_certificate_row, make_dictionary, make_group, make_media, make_observation, make_post, make_user,
     observation_payload)
 
 
@@ -650,3 +651,35 @@ async def test_database_reconcile_row(db, tmp_path):
         "orphan_files": 1, "stale_derived": 0, "returned_originals": 0, "missing_originals": 0,
         "orphan_packages": 0, "failed": 0})
     assert row.category == AuditCategory.SYSTEM.value and row.details is None
+
+
+# ---------------------------------------------------------------- auth/service.py: certificate login attempts
+
+async def test_certificate_login_writes_one_row_at_the_end(client, db, headers, production):
+    post = await make_post(db)
+    user = await make_user(db, post_id=post.id)
+    cert = make_certificate("cn-audit-login", 0x7A01)
+    row = await make_certificate_row(db, user, cert=cert)
+
+    ok = await client.post(V1.path(AuthRoutes.LOGIN), headers=nginx_headers(cert))
+    assert ok.status_code == 200, ok.text
+    (attempt,) = await rows_of_event(db, AuditEvent.AUTH_CERTIFICATE_LOGIN)
+    check_row(attempt, AuditEvent.AUTH_CERTIFICATE_LOGIN, f"p:{post.id}", {
+        "certificate_cn": "cn-audit-login", "certificate_serial": "7A01", "matched": True, "certificate_id": row.id,
+        "certificate_fingerprint_prefix": attempt.params["certificate_fingerprint_prefix"]})
+    assert len(attempt.params["certificate_fingerprint_prefix"]) == 16
+    assert attempt.success is True and attempt.user_id == user.id and attempt.details is None
+
+    stranger = make_certificate("cn-audit-unknown", 0x7A02)
+    refused = await client.post(V1.path(AuthRoutes.LOGIN), headers=nginx_headers(stranger))
+    assert refused.status_code == 401
+    unmatched = (await rows_of_event(db, AuditEvent.AUTH_CERTIFICATE_LOGIN))[1:]
+    (miss,) = unmatched
+    assert miss.success is False and miss.user_id is None and miss.scope_key is None
+    assert miss.params["matched"] is False and miss.params["certificate_id"] is None
+
+
+@pytest.mark.xfail(reason="phase B, Task 8: the authentication category switch", strict=True)
+async def test_certificate_login_with_authentication_off_writes_nothing(client, db, headers, production):
+    from app.backend.services.audit import switches  # noqa: F401  (exists from Task 8)
+    raise AssertionError("switch not implemented yet")

@@ -18,7 +18,6 @@ from app.backend.auth.certificates import (
     validate_certificate_data,
     hash_certificate_data,
     serial_hashes,
-    create_pki_auth_audit_details,
     cn_hash_matches,
 )
 from app.backend.errors.coded import CodedError
@@ -255,19 +254,6 @@ class AuthService:
         )
         stored_serial_forms = await serial_hashes(certificate_serial)
 
-        # Create audit log for authentication attempt using helper
-        audit_details = await create_pki_auth_audit_details(
-            certificate_cn, certificate_serial, fingerprint_hash
-        )
-        audit = await create_audit_log(
-            session=session,
-            action="pki_auth_attempt",
-            resource_type="auth",
-            success=False,
-            ip_address=ip_address,
-            details=audit_details
-        )
-
         # Find the certificate and its user (without status filters first); the fingerprint hash is unique
         result = await session.exec(
             select(UserCertificate, User).join(User, User.id == UserCertificate.user_id).where(
@@ -280,17 +266,35 @@ class AuthService:
         )
         found = result.first()
 
+        async def attempt(matched_user: Optional[User], certificate_id: Optional[int], success: bool) -> None:
+            # The one row of the attempt, written from what the match found, just before the commit of the exit
+            await create_audit_log(
+                session,
+                AuditEvent.AUTH_CERTIFICATE_LOGIN,
+                params={
+                    "certificate_cn": certificate_cn,
+                    "certificate_serial": certificate_serial,
+                    "matched": matched_user is not None,
+                    "certificate_id": certificate_id,
+                    "certificate_fingerprint_prefix": fingerprint_hash[:16],
+                },
+                scope=home_scope(matched_user) if matched_user is not None else None,
+                success=success,
+                user_id=matched_user.id if matched_user is not None else None,
+                ip_address=ip_address,
+            )
+
         if not found:
             _logger.warning(f"No user found for certificate CN: {certificate_cn}")
+            await attempt(None, None, False)
             await session.commit()
             return None, AuthErrorCode.CERTIFICATE_NOT_RECOGNIZED
 
         certificate, user = found
-        audit.user_id = user.id
-        audit.details = {**audit_details, "certificate_id": certificate.id}
         state = certificate_state(certificate)
         if state is not CertificateState.ACTIVE:
             _logger.warning(f"Login with a {state.value} certificate: certificate_id={certificate.id}, user_id={user.id}")
+            await attempt(user, certificate.id, False)
             await session.commit()
             if state is CertificateState.REVOKED:
                 return None, AuthErrorCode.CERTIFICATE_REVOKED
@@ -299,16 +303,18 @@ class AuthService:
         # Check account status separately for distinct error codes
         if user.is_deleted:
             _logger.warning(f"Deleted user attempted login: user_id={user.id}, username={user.username}")
+            await attempt(user, certificate.id, False)
             await session.commit()
             return None, AuthErrorCode.ACCOUNT_DELETED
 
         if not user.is_active:
             _logger.warning(f"Deactivated user attempted login: user_id={user.id}, username={user.username}")
+            await attempt(user, certificate.id, False)
             await session.commit()
             return None, AuthErrorCode.ACCOUNT_DEACTIVATED
 
         # Success
-        audit.success = True
+        await attempt(user, certificate.id, True)
         _logger.info(f"Successful PKI authentication for user {user.username}")
 
         await session.commit()

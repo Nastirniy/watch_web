@@ -256,26 +256,3 @@ async def cn_hash_matches(certificate_cn: str):
         and_(UserCertificate.cn_hash_scheme == CN_SCHEME_CURRENT,
              UserCertificate.cn_hash == await hash_cn(certificate_cn)),
     )
-
-
-async def create_pki_auth_audit_details(
-    certificate_cn: str,
-    certificate_serial: str,
-    fingerprint_hash: str
-) -> Dict[str, str]:
-    """
-    Create details dictionary for PKI authentication audit log
-
-    Args:
-        certificate_cn: Certificate Common Name
-        certificate_serial: Certificate Serial Number
-        fingerprint_hash: Hashed certificate fingerprint
-
-    Returns:
-        Dictionary with certificate details for audit log
-    """
-    return {
-        "certificate_cn": certificate_cn,
-        "certificate_serial": certificate_serial,
-        "certificate_fingerprint_hash": fingerprint_hash[:16]
-    }

@@ -88,7 +88,7 @@ class AuditEvent(Enum):
     USER_LOGIN = ("user.login", event(_A, "User logged in", **_USER))
     AUTH_CERTIFICATE_LOGIN = ("auth.certificate_login", event(
         _A, "Certificate login attempt", certificate_cn=str, certificate_serial=str, matched=bool,
-        certificate_id=Optional[int]))
+        certificate_id=Optional[int], certificate_fingerprint_prefix=Optional[str]))
     SESSION_LOGOUT = ("session.logout", event(_A, "User logged out", **_USER))
 
     # access
