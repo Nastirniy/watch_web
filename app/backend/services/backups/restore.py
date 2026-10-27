@@ -10,6 +10,7 @@ mariadb client), the tests use a recording fake.
 """
 import gzip
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -330,10 +331,16 @@ class MariaDbBackend:
         with self.engine.begin() as conn:
             table = _reflect(conn, "audit_logs", schema)
             if table is None:
+                _logger.warning(f"Backups: {schema} has no audit_logs; the {action} audit row is not written")
                 return
             if "params" not in table.c:
                 values["details"] = details
-            conn.execute(sa.insert(table).values(**_only(table, values)))
+            row = _only(table, values)
+            for name in ("params", "details"):
+                # MariaDB reflects JSON as LONGTEXT: a dict would reach the driver raw
+                if name in row and not isinstance(table.c[name].type, sa.JSON):
+                    row[name] = json.dumps(row[name])
+            conn.execute(sa.insert(table).values(**row))
 
     def kept_schemas(self, db: str) -> list[KeptSchema]:
         with self.engine.connect() as conn:

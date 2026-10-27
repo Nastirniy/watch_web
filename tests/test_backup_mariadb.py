@@ -424,3 +424,30 @@ def test_c8_without_process_the_same_account_is_still_counted(cfg, edge):
         assert limited.other_connections(EDGE) == 0
     finally:
         other.close()
+
+
+def _restore_audit_row(cfg, edge, backend, old_schema: bool):
+    """Restore a backup whose audit_logs has (or, old_schema, lacks) the event columns; the audit row it gets"""
+    if old_schema:
+        for index in ("ix_audit_logs_category_created", "ix_audit_logs_event"):
+            q(f"DROP INDEX `{index}` ON audit_logs")
+        q("ALTER TABLE audit_logs DROP COLUMN event, DROP COLUMN category, DROP COLUMN params")
+    make_backup(cfg, edge, backend)
+    restore(cfg, edge, backend)
+    columns = "action, resource_type, details" if old_schema else "action, resource_type, event, category, params"
+    rows = q(f"SELECT {columns} FROM audit_logs WHERE action = 'restore'")
+    print("AUDIT ROW", "older schema" if old_schema else "new columns", rows)
+    return rows
+
+
+def test_restore_audit_row_into_a_schema_with_the_event_columns(cfg, edge, backend):
+    import json
+    ((action, resource, event, category, params),) = _restore_audit_row(cfg, edge, backend, old_schema=False)
+    assert (action, resource, event, category) == ("restore", "database", "database.restore", "audit")
+    assert json.loads(params)["kept_schema"].startswith(f"{EDGE}_before_")
+
+
+def test_restore_audit_row_into_an_older_schema_keeps_details(cfg, edge, backend):
+    import json
+    ((action, resource, details),) = _restore_audit_row(cfg, edge, backend, old_schema=True)
+    assert (action, resource) == ("restore", "database") and "backup_id" in json.loads(details)

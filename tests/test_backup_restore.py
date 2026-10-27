@@ -502,3 +502,24 @@ def test_restore_audit_row_into_an_older_schema_keeps_details(tmp_path):
         row = conn.exec_driver_sql("SELECT action, resource_type, details FROM tgt.audit_logs").one()
     import json
     assert row[:2] == ("restore", "database") and json.loads(row[2]) == params
+
+
+@pytest.mark.parametrize("new_columns", [True, False])
+def test_restore_audit_row_serialises_json_for_a_text_column(new_columns):
+    """MariaDB reflects JSON as LONGTEXT: the dict is written as JSON text, not handed to the driver"""
+    import json
+    import sqlalchemy as sa
+    from sqlalchemy.pool import StaticPool
+    from app.backend.services.backups.restore import MariaDbBackend
+    engine = sa.create_engine("sqlite://", poolclass=StaticPool)
+    with engine.begin() as conn:
+        conn.exec_driver_sql("ATTACH DATABASE ':memory:' AS tgt")
+        extra = ", event VARCHAR(64), category VARCHAR(24), params TEXT" if new_columns else ""
+        conn.exec_driver_sql("CREATE TABLE tgt.audit_logs (id INTEGER PRIMARY KEY, action VARCHAR(100) NOT NULL, "
+                             f"resource_type VARCHAR(50) NOT NULL, success BOOLEAN, details TEXT, created_at DATETIME{extra})")
+    params = {"kept_schema": "db_before_x", "revocations": 1}
+    MariaDbBackend(None, None, 1, engine=engine).audit("tgt", "restore", params)
+    column = "params" if new_columns else "details"
+    with engine.connect() as conn:
+        text = conn.exec_driver_sql(f"SELECT {column} FROM tgt.audit_logs").scalar()
+    assert isinstance(text, str) and json.loads(text) == params
