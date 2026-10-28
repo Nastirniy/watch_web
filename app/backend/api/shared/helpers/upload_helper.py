@@ -2,7 +2,6 @@
 problems, the observation an upload goes to, and what every upload does once the file is stored."""
 
 import asyncio
-from pathlib import Path
 from typing import Optional
 
 from fastapi import BackgroundTasks, Request
@@ -15,6 +14,7 @@ from app.backend.auth.context import AuthContext
 from app.backend.auth.access_control import AccessControlService
 from app.backend.services.media_manager import FileValidationConfig
 from app.backend.services.files import formats
+from app.backend.services.files.names import extension_of
 from app.backend.services.media import jobs, renderer, urls as thumb_urls
 from app.backend.services.media.probe import has_no_video_stream, metadata_for, resolve_tools
 from app.backend.enums.general import MediaType, Permissions, UploadPurpose, ThumbnailFormat, ThumbnailSize
@@ -34,13 +34,11 @@ from app.backend.utils.row_locks import lock_first, start_write
 _logger = get_api_logger()
 
 
-def validation_config_for(registry: formats.FormatRegistry, spec: formats.FormatSpec) -> FileValidationConfig:
-    """Manager-side checks (size, extension, detected MIME) driven by the resolved format"""
+def validation_config_for(spec: formats.FormatSpec) -> FileValidationConfig:
+    """Manager-side checks (size, extension, sniffed type) driven by the resolved format"""
     return FileValidationConfig(
         max_size=spec.effective_limit_bytes,
         sanitize_filename=True,
-        validate_content_headers=True,
-        strict_mime_validation=True,
         allowed_extensions=set(spec.extensions),
         allowed_mime_types=set(spec.all_mimes),
     )
@@ -74,7 +72,7 @@ def check_declared_format(registry: formats.FormatRegistry, media_type: str, fil
     if spec is not None and spec.media_type != media_type:
         spec = None
     if spec is None:
-        raise _unsupported(registry, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, media_type, extension=Path(filename or "").suffix.lower())
+        raise _unsupported(registry, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, media_type, extension=extension_of(filename))
     declared = formats.normalise_content_type(content_type)
     if declared and declared not in formats.OPAQUE_CONTENT_TYPES and declared not in spec.all_mimes:
         if declared in registry.mime_set(media_type):

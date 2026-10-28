@@ -20,16 +20,18 @@ ARCHIVE = V1.path(MediaFormatRoutes.FORMAT_ARCHIVE)
 RESTORE = V1.path(MediaFormatRoutes.FORMAT_RESTORE)
 BACKEND = Path(__file__).resolve().parent.parent / "app" / "backend"
 
+# Aliases are what Debian's libmagic (the api image, 5.46) reports for real samples (tests/test_file_sniff.py):
+# OOXML, ODF and Word 97 files by their own types, Markdown as text/plain, short CSV files as text/plain, RTF as text/rtf
 DOCUMENTS = {
     "application/pdf": ([".pdf"], []),
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ([".docx"], ["application/zip"]),
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ([".xlsx"], ["application/zip"]),
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ([".pptx"], ["application/zip"]),
-    "application/vnd.oasis.opendocument.text": ([".odt"], ["application/zip"]),
-    "application/msword": ([".doc"], ["application/x-ole-storage", "application/CDFV2"]),
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ([".docx"], []),
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ([".xlsx"], []),
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ([".pptx"], []),
+    "application/vnd.oasis.opendocument.text": ([".odt"], []),
+    "application/msword": ([".doc"], []),
     "text/markdown": ([".md", ".markdown"], ["text/plain"]),
     "text/plain": ([".txt"], []),
-    "text/csv": ([".csv"], ["text/plain", "application/csv"]),
+    "text/csv": ([".csv"], ["text/plain"]),
     "application/rtf": ([".rtf"], ["text/rtf"]),
 }
 

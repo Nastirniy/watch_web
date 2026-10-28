@@ -1,0 +1,3 @@
+User guide
+
+Open the post, create an observation, attach a photo and save it.

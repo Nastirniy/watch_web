@@ -4,46 +4,41 @@ import shutil
 import hashlib
 import uuid
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Set
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from typing import Optional, Dict, Any, Set
 from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 import aiofiles
 import aiofiles.os
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from app.backend.models.media import MediaFile
 from app.backend.services.media.jobs import enqueue_poster
-from app.backend.services.files.formats import UnsupportedMediaFormat, FileTooLarge
-from app.backend.services.files.names import sanitize_filename
+from app.backend.services.files.formats import UnsupportedMediaFormat, FileTooLarge, hard_limit_bytes
+from app.backend.services.files.names import extension_of, sanitize_filename
+from app.backend.services.files.sniff import detect_content_type
 from app.backend.services.media.probe import image_dimensions
 from app.backend.enums.general import MediaType
 from app.backend.utils.logging_config import get_logger
-from app.backend.utils.mime_detector import mime_detector
 from app.backend.errors.coded import CodedError
 from app.backend.enums.errors import ErrorCode
 
 _logger = get_logger("media_manager")
 
-# Security and validation configurations
-MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
-# Accepted formats live in app/backend/services/files/formats.py (single registry)
-
-DANGEROUS_EXTENSIONS = {
+# Accepted formats live in app/backend/services/files/formats.py (single registry), the sniffer in
+# services/files/sniff.py; these extensions are refused whatever a format lists
+DANGEROUS_EXTENSIONS = frozenset({
     '.exe', '.bat', '.cmd', '.com', '.pif', '.scr', '.vbs', '.js', '.jar',
-    '.app', '.deb', '.pkg', '.dmg', '.iso', '.msi', '.run', '.deb', '.rpm'
-}
+    '.app', '.deb', '.pkg', '.dmg', '.iso', '.msi', '.run', '.rpm'
+})
 
 
 class FileValidationConfig(BaseModel):
-    max_size: int = MAX_FILE_SIZE
+    """What store_file_from_path holds a file to, built from its format (upload_helper.validation_config_for)"""
+    max_size: int = Field(default_factory=hard_limit_bytes)
     allowed_extensions: Set[str] = set()
     allowed_mime_types: Set[str] = set()
-    validate_content_headers: bool = True
     sanitize_filename: bool = True
-    strict_mime_validation: bool = True
 
     @field_validator('allowed_extensions', mode='before')
     @classmethod
@@ -55,32 +50,8 @@ class FileValidationConfig(BaseModel):
     @field_validator('allowed_mime_types', mode='before')
     @classmethod
     def validate_mime_types(cls, v):
-        if isinstance(v, (list, tuple)):
-            return set(v)
-        return v or set()
-
-
-@dataclass
-class FileValidationResult:
-    is_valid: bool
-    issues: List[str]
-    sanitized_filename: Optional[str] = None
-    detected_mime_type: Optional[str] = None
-    file_size: Optional[int] = None
-    metadata: Dict[str, Any] = None
-
-
-@dataclass
-class FileIntegrityCheck:
-    media_file_id: int
-    original_filename: str
-    expected_size: int
-    filesystem_exists: bool
-    filesystem_size: Optional[int]
-    hash_matches: bool
-    status: str  # 'ok', 'missing', 'corrupted'
-    issues: List[str]
-    security_validated: bool = True
+        # Compared with the sniffed type, which is lower case (libmagic says application/CDFV2)
+        return {mime.lower() for mime in v} if v else set()
 
 
 def _move_into_place(source: Path, destination: Path) -> None:
@@ -127,13 +98,11 @@ class MediaManager:
     def __init__(self,
                  storage_path: str = "uploads",
                  temp_path: str = "temp",
-                 auto_cleanup: bool = True,
                  enable_deduplication: bool = True,
                  _max_concurrent_uploads: int = 10,
                  enable_nginx: bool = False):
         self.storage_path = Path(storage_path)
         self.temp_path = Path(temp_path)
-        self.auto_cleanup = auto_cleanup
         self.enable_deduplication = enable_deduplication
         self.enable_nginx = enable_nginx
 
@@ -151,50 +120,6 @@ class MediaManager:
     def sanitize_filename(self, filename: str) -> str:
         """Delegates to services.files.names.sanitize_filename (the one implementation)"""
         return sanitize_filename(filename)
-
-    def validate_full_path_length(self, full_path: str) -> bool:
-        """Validate that the full file path doesn't exceed filesystem limits"""
-        max_path_length = 250  # Conservative limit
-        return len(str(full_path)) <= max_path_length
-
-    def _validate_content_headers(self, file_data: bytes, mime_type: str) -> List[str]:
-        """Validate file headers match MIME type"""
-        issues = []
-
-        if len(file_data) < 16:
-            return issues  # Too small to validate headers
-
-        header = file_data[:16]
-
-        # Common file type validations
-        if mime_type.startswith('image/'):
-            if not self._is_valid_image_header(header, mime_type):
-                issues.append(f"Invalid image header for MIME type {mime_type}")
-        elif mime_type.startswith('video/'):
-            if not self._is_valid_video_header(header, mime_type):
-                issues.append(f"Invalid video header for MIME type {mime_type}")
-
-        return issues
-
-    def _is_valid_image_header(self, header: bytes, mime_type: str) -> bool:
-        """Validate image file headers"""
-        if mime_type == 'image/jpeg':
-            return header.startswith(b'\xff\xd8\xff')
-        elif mime_type == 'image/png':
-            return header.startswith(b'\x89PNG\r\n\x1a\n')
-        elif mime_type == 'image/gif':
-            return header.startswith(b'GIF87a') or header.startswith(b'GIF89a')
-        elif mime_type == 'image/webp':
-            return b'WEBP' in header[:12]
-        return True  # Allow other image types
-
-    def _is_valid_video_header(self, header: bytes, mime_type: str) -> bool:
-        """Validate video file headers"""
-        if mime_type == 'video/mp4':
-            return b'ftyp' in header[:16]
-        elif mime_type == 'video/webm':
-            return header.startswith(b'\x1a\x45\xdf\xa3')
-        return True  # Allow other video types
 
     async def _check_for_duplicate(self, session: AsyncSession, file_hash: str, observation_id: int) -> Optional[int]:
         """Check if file already exists based on hash and confirm the file is on disk."""
@@ -243,160 +168,6 @@ class MediaManager:
 
         return organized_path
 
-    async def check_file_integrity(self, session: AsyncSession, media_file_id: int) -> FileIntegrityCheck:
-        """Check file integrity on filesystem"""
-
-        # Get media file info
-        media_query = select(MediaFile).where(MediaFile.id == media_file_id)
-        media_result = await session.exec(media_query)
-        media_file = media_result.first()
-
-        if not media_file:
-            return FileIntegrityCheck(
-                media_file_id=media_file_id,
-                original_filename="Unknown",
-                expected_size=0,
-                filesystem_exists=False,
-                filesystem_size=None,
-                hash_matches=False,
-                status="missing",
-                issues=["Media file record not found in database"],
-                security_validated=False
-            )
-
-        # Check filesystem
-        filesystem_exists = False
-        filesystem_size = None
-        hash_matches = False
-        issues = []
-
-        file_path = media_file.resolve_path(self.storage_path)
-        filesystem_exists = file_path.exists() and file_path.is_file()
-
-        if filesystem_exists:
-            try:
-                filesystem_size = file_path.stat().st_size
-            except OSError:
-                filesystem_size = None
-
-            # Verify hash
-            try:
-                file_hash = await self._compute_file_hash(file_path)
-                hash_matches = file_hash == media_file.file_hash
-            except OSError as e:
-                issues.append(f"Error during integrity check: {str(e)}")
-
-            if not hash_matches:
-                issues.append("File hash mismatch - data corruption detected")
-
-            if filesystem_size != media_file.file_size:
-                issues.append(f"Filesystem size mismatch: expected {media_file.file_size}, got {filesystem_size}")
-        else:
-            issues.append("Filesystem file missing")
-
-        # Determine overall status
-        if not issues:
-            status = "ok"
-        elif not filesystem_exists:
-            status = "missing"
-        elif not hash_matches:
-            status = "corrupted"
-        else:
-            status = "warning"
-
-        return FileIntegrityCheck(
-            media_file_id=media_file_id,
-            original_filename=media_file.original_filename,
-            expected_size=media_file.file_size,
-            filesystem_exists=filesystem_exists,
-            filesystem_size=filesystem_size,
-            hash_matches=hash_matches,
-            status=status,
-            issues=issues,
-            security_validated=not bool(issues)
-        )
-
-    async def repair_file(self, session: AsyncSession, media_file_id: int) -> bool:
-        """Attempt to repair a corrupted or missing file (no-op if file is intact)"""
-
-        integrity = await self.check_file_integrity(session, media_file_id)
-
-        if integrity.status == "ok":
-            _logger.info(f"File {media_file_id} is already intact")
-            return True
-
-        _logger.warning(f"Could not repair file {media_file_id} - no backup source available")
-        return False
-
-    async def cleanup_orphaned_files(self, session: AsyncSession) -> tuple[int, int]:
-        """Clean up orphaned files and database records"""
-
-        db_cleaned = 0
-        fs_cleaned = 0
-
-        # Find orphaned database records (files without observation)
-        if self.auto_cleanup:
-            from app.backend.models.observation import Observation
-
-            orphaned_query = select(MediaFile).join(
-                Observation, isouter=True
-            ).where(
-                MediaFile.observation_id == None,
-                MediaFile.is_deleted == False
-            )
-
-            orphaned_result = await session.exec(orphaned_query)
-            orphaned_files = orphaned_result.all()
-
-            for media_file in orphaned_files:
-                _logger.info(f"Cleaning up orphaned media file: {media_file.original_filename}")
-
-                # Delete filesystem file if exists
-                try:
-                    file_path = media_file.resolve_path(self.storage_path)
-                    if file_path.exists():
-                        file_path.unlink()
-                        fs_cleaned += 1
-                except OSError as e:
-                    _logger.warning(f"Could not delete orphaned filesystem file {media_file.file_path}: {e}")
-
-                # Delete media file record
-                await session.delete(media_file)
-                db_cleaned += 1
-
-            if db_cleaned > 0:
-                await session.commit()
-
-        # Clean up orphaned filesystem files
-        if self.storage_path.exists():
-            try:
-                for observation_dir in self.storage_path.iterdir():
-                    if observation_dir.is_dir():
-                        for file_path in observation_dir.iterdir():
-                            if file_path.is_file():
-                                # Check if file exists in database
-                                filename = file_path.name
-                                file_query = select(MediaFile).where(
-                                    MediaFile.stored_filename == filename
-                                )
-                                file_result = await session.exec(file_query)
-
-                                if not file_result.first():
-                                    _logger.info(f"Removing orphaned filesystem file: {file_path}")
-                                    file_path.unlink()
-                                    fs_cleaned += 1
-
-                        # Remove empty directories
-                        if not any(observation_dir.iterdir()):
-                            observation_dir.rmdir()
-
-            except OSError as e:
-                # A filesystem failure stops this pass; a database error propagates
-                _logger.error(f"Error during filesystem cleanup: {e}")
-
-        _logger.info(f"Cleanup completed: {db_cleaned} database records, {fs_cleaned} filesystem files")
-        return db_cleaned, fs_cleaned
-
     async def _compute_file_hash(self, file_path: Path, chunk_size: int = 1024 * 1024) -> str:
         """Compute SHA256 hash by streaming the file in chunks (default 1MB), never loading entirely into memory"""
         sha256 = hashlib.sha256()
@@ -407,13 +178,6 @@ class MediaManager:
                     break
                 sha256.update(chunk)
         return sha256.hexdigest()
-
-    async def _detect_mime_from_path(self, file_path: Path, filename: str) -> str:
-        """Detect MIME type from file header without loading the entire file"""
-        async with aiofiles.open(file_path, 'rb') as f:
-            header = await f.read(8192)
-        detected_mime, _ = mime_detector.detect_mime_type(header, filename)
-        return detected_mime
 
     async def _move_file_to_storage(self, source: Path, destination: Path):
         """Move file to storage. Uses rename if same filesystem, copy+delete otherwise; in a thread, never on the
@@ -435,7 +199,7 @@ class MediaManager:
         it into storage, and removes it on failure.
         """
         self.temp_path.mkdir(parents=True, exist_ok=True)
-        suffix = Path(upload.filename or "").suffix.lower()[:10]
+        suffix = extension_of(sanitize_filename(upload.filename or ""))[:10]
         target = self.temp_path / f"upload_{uuid.uuid4().hex}{suffix}"
         async with aiofiles.open(target, 'wb') as out:
             while True:
@@ -458,8 +222,9 @@ class MediaManager:
         """
         Store a file from a filesystem path (Nginx upload offloading, or a multipart body spooled by spool_upload).
         The file is never loaded entirely into memory -- hash is computed by streaming,
-        MIME type is detected from the first 8KB, and the file is moved (not copied)
-        to its final storage location.
+        MIME type is detected from the first 8KB (services/files/sniff.py), and the file is moved (not copied)
+        to its final storage location. Checks, in order: size, extension, the sniffed type against the format's
+        content type and aliases.
 
         Commits the new row before the move (a file in storage always has its row) and deletes it again when the
         move fails. A new video row keeps its poster hold (enqueue_poster): the caller releases it once the file is
@@ -489,7 +254,7 @@ class MediaManager:
 
             # -- Filename sanitization --
             safe_filename = self.sanitize_filename(original_filename) if config.sanitize_filename else original_filename
-            file_ext = Path(safe_filename).suffix.lower()
+            file_ext = extension_of(safe_filename)
 
             if file_ext in DANGEROUS_EXTENSIONS:
                 raise UnsupportedMediaFormat(ErrorCode.MEDIA_EXTENSION_DANGEROUS, media_type, extension=file_ext)
@@ -502,19 +267,10 @@ class MediaManager:
             except ValueError:
                 raise UnsupportedMediaFormat(ErrorCode.MEDIA_TYPE_UNKNOWN, media_type)
 
-            # -- MIME detection (first 8KB only) --
-            mime_type = await self._detect_mime_from_path(source, original_filename)
+            # -- Content type from the bytes (first 8KB, libmagic): never from the name --
+            mime_type = await asyncio.to_thread(detect_content_type, source)
             if config.allowed_mime_types and mime_type not in config.allowed_mime_types:
                 raise UnsupportedMediaFormat(ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED, media_type, content_type=mime_type)
-
-            # -- Content header validation (first 16 bytes) --
-            if config.validate_content_headers:
-                async with aiofiles.open(source, 'rb') as f:
-                    header_bytes = await f.read(16)
-                content_issues = self._validate_content_headers(header_bytes, mime_type)
-                if content_issues:
-                    _logger.warning(f"Content validation failed for {original_filename!r}: {'; '.join(content_issues)}")
-                    raise CodedError(ErrorCode.MEDIA_CONTENT_INVALID)
 
             # -- Hash computation (streaming, 1MB chunks) --
             file_hash = await self._compute_file_hash(source)

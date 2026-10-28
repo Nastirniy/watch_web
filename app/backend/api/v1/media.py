@@ -342,7 +342,7 @@ async def restore_media_file(
     MediaRoutes.UPLOAD.value,
     response_model=UploadResultResponse,
     responses=problems(
-        ErrorCode.MEDIA_CONTENT_INVALID, ErrorCode.MEDIA_FILE_EMPTY, ErrorCode.MEDIA_UPLOAD_SOURCE_MISSING,
+        ErrorCode.MEDIA_FILE_EMPTY, ErrorCode.MEDIA_UPLOAD_SOURCE_MISSING,
         AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED,
         ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.POST_ARCHIVED, ErrorCode.MEDIA_FILE_TOO_LARGE,
         ErrorCode.MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED,
@@ -389,7 +389,7 @@ async def upload_complete_file(
             original_filename=original_filename,
             media_type=media_type,
             user_id=auth.user.id,
-            validation_config=validation_config_for(registry, spec),
+            validation_config=validation_config_for(spec),
         )
     except FileTooLarge as e:
         raise too_large(spec, e.actual_bytes)
@@ -410,7 +410,7 @@ async def upload_complete_file(
     MediaRoutes.NGINX_UPLOAD.value,
     response_model=UploadResultResponse,
     responses=problems(
-        ErrorCode.MEDIA_CONTENT_INVALID, ErrorCode.MEDIA_FILE_EMPTY, ErrorCode.MEDIA_UPLOAD_SOURCE_MISSING,
+        ErrorCode.MEDIA_FILE_EMPTY, ErrorCode.MEDIA_UPLOAD_SOURCE_MISSING,
         ErrorCode.NGINX_FILE_NAME_MISSING, ErrorCode.NGINX_FILE_NAME_INVALID, AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED,
         AccessErrorCode.POST_WRITE_DENIED, ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.POST_ARCHIVED, ErrorCode.MEDIA_FILE_TOO_LARGE,
         ErrorCode.MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED,
@@ -460,7 +460,7 @@ async def nginx_upload_file(
                 original_filename=original_filename,
                 media_type=media_type,
                 user_id=auth.user.id,
-                validation_config=validation_config_for(registry, spec),
+                validation_config=validation_config_for(spec),
             )
         except FileTooLarge as e:
             raise too_large(spec, e.actual_bytes)

@@ -9,13 +9,19 @@ import pytest
 from sqlalchemy import event
 from sqlmodel import select
 
+from app.backend.api.shared.helpers.upload_helper import validation_config_for
 from app.backend.enums.errors import ErrorCode
+from app.backend.enums.general import UploadPurpose
 from app.backend.errors.coded import CodedError
+from app.backend.services.files.formats import FormatRegistry, UnsupportedMediaFormat, default_formats
 from app.backend.models.media import MediaFile
 from app.backend.services import media_manager
 from app.backend.services.media_manager import MediaManager
 from tests.helpers import make_post, make_user, make_dictionary, make_observation, make_media
+from tests.test_media_formats import PNG_BYTES
 from tests.test_poster_jobs import MP4_BYTES
+
+OBSERVATION_FORMATS = FormatRegistry(list(default_formats())).restricted(UploadPurpose.OBSERVATION_MEDIA)
 
 
 @pytest.mark.asyncio
@@ -101,6 +107,57 @@ async def test_a_move_the_storage_refuses_removes_the_row(db, tmp_path, monkeypa
         await manager.store_file_from_path(db, observation.id, str(source), "clip.mp4", "video", user_id=user.id)
     assert refused.value.code == ErrorCode.MEDIA_STORE_FAILED
     assert (await db.exec(select(MediaFile).where(MediaFile.observation_id == observation.id))).all() == []
+
+
+def _spec(filename: str):
+    return OBSERVATION_FORMATS.resolve(UploadPurpose.OBSERVATION_MEDIA, filename)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("data", [b"\x01\x02\x03\x04" * 64, b"plain words, not a photo\n" * 8],
+                         ids=["unknown-bytes", "text"])
+async def test_the_detected_type_decides_never_the_extension(db, tmp_path, data):
+    """The bytes are sniffed once (libmagic): bytes it cannot name are application/octet-stream, never guessed
+    from the extension, so a .jpg that is not a JPEG is 415 media_content_type_not_accepted"""
+    manager = MediaManager(storage_path=str(tmp_path / "media"), temp_path=str(tmp_path / "temp"))
+    source = tmp_path / "temp" / "upload_photo.jpg"
+    source.write_bytes(data)
+    with pytest.raises(UnsupportedMediaFormat) as refused:
+        await manager.store_file_from_path(db, 1, str(source), "photo.jpg", "image",
+                                           validation_config=validation_config_for(_spec("photo.jpg")))
+    assert refused.value.code == ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED
+    assert refused.value.params["content_type"] in ("application/octet-stream", "text/plain")
+    assert (await db.exec(select(MediaFile))).all() == []
+
+
+@pytest.mark.asyncio
+async def test_a_stored_file_keeps_the_detected_type(db, tmp_path):
+    post = await make_post(db)
+    ids = await make_dictionary(db)
+    user = await make_user(db, post_id=post.id)
+    observation = await make_observation(db, user, post, ids["signal_type_id"])
+    manager = MediaManager(storage_path=str(tmp_path / "media"), temp_path=str(tmp_path / "temp"))
+    source = tmp_path / "temp" / "upload_photo.png"
+    source.write_bytes(PNG_BYTES)
+    spec = _spec("photo.png")
+    media_id = await manager.store_file_from_path(db, observation.id, str(source), "Photo.PNG", "image",
+                                                  user_id=user.id, validation_config=validation_config_for(spec))
+    row = (await db.exec(select(MediaFile).where(MediaFile.id == media_id))).one()
+    assert (row.mime_type, row.file_extension) == ("image/png", ".png")
+
+
+def test_dead_upload_code_is_gone():
+    """One sniffer: no second MIME table, no magic-byte checks, no unused helpers on the manager"""
+    import importlib.util
+    assert importlib.util.find_spec("app.backend.utils.mime_detector") is None
+    for name in ("_validate_content_headers", "_is_valid_image_header", "_is_valid_video_header",
+                 "check_file_integrity", "repair_file", "cleanup_orphaned_files", "validate_full_path_length",
+                 "_detect_mime_from_path"):
+        assert not hasattr(MediaManager, name), name
+    for name in ("FileValidationResult", "FileIntegrityCheck", "MAX_FILE_SIZE"):
+        assert not hasattr(media_manager, name), name
+    assert set(media_manager.FileValidationConfig.model_fields) == {
+        "max_size", "allowed_extensions", "allowed_mime_types", "sanitize_filename"}
 
 
 @pytest.mark.asyncio

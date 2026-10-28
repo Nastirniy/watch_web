@@ -332,7 +332,7 @@ async def test_lowered_ceiling_caps_every_limit(client, db, headers, monkeypatch
     spec = registry.resolve(UploadPurpose.OBSERVATION_MEDIA, "clip.mp4")
     assert spec.max_file_size_bytes == 5 * formats.GB and spec.effective_limit_bytes == formats.GB
     from app.backend.api.shared.helpers.upload_helper import validation_config_for
-    assert validation_config_for(registry, spec).max_size == formats.GB
+    assert validation_config_for(spec).max_size == formats.GB
 
     listed = (await client.get(FORMATS, headers=headers(user))).json()
     assert listed["max_file_size_bytes"] == formats.GB

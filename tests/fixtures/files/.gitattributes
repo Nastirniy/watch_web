@@ -1,0 +1,2 @@
+# Fixture bytes are what the tests sniff: never converted on checkout
+* -text

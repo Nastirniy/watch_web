@@ -21857,14 +21857,11 @@
             }
           },
           "400": {
-            "description": "`media_content_invalid`: File content does not match its type; `media_file_empty`: File is empty; `media_upload_source_missing`: Uploaded file not found",
+            "description": "`media_file_empty`: File is empty; `media_upload_source_missing`: Uploaded file not found",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/MediaContentInvalidProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/MediaFileEmptyProblem"
                     },
@@ -21875,7 +21872,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "media_content_invalid": "#/components/schemas/MediaContentInvalidProblem",
                       "media_file_empty": "#/components/schemas/MediaFileEmptyProblem",
                       "media_upload_source_missing": "#/components/schemas/MediaUploadSourceMissingProblem"
                     }
@@ -22127,14 +22123,11 @@
             }
           },
           "400": {
-            "description": "`media_content_invalid`: File content does not match its type; `media_file_empty`: File is empty; `media_upload_source_missing`: Uploaded file not found; `nginx_file_name_invalid`: X-File-Name is not a file in the upload temp directory; `nginx_file_name_missing`: Missing X-File-Name header",
+            "description": "`media_file_empty`: File is empty; `media_upload_source_missing`: Uploaded file not found; `nginx_file_name_invalid`: X-File-Name is not a file in the upload temp directory; `nginx_file_name_missing`: Missing X-File-Name header",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/MediaContentInvalidProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/MediaFileEmptyProblem"
                     },
@@ -22151,7 +22144,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "media_content_invalid": "#/components/schemas/MediaContentInvalidProblem",
                       "media_file_empty": "#/components/schemas/MediaFileEmptyProblem",
                       "media_upload_source_missing": "#/components/schemas/MediaUploadSourceMissingProblem",
                       "nginx_file_name_invalid": "#/components/schemas/NginxFileNameInvalidProblem",
@@ -24313,14 +24305,11 @@
             }
           },
           "400": {
-            "description": "`media_content_invalid`: File content does not match its type; `media_file_empty`: File is empty; `media_upload_source_missing`: Uploaded file not found",
+            "description": "`media_file_empty`: File is empty; `media_upload_source_missing`: Uploaded file not found",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/MediaContentInvalidProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/MediaFileEmptyProblem"
                     },
@@ -24331,7 +24320,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "media_content_invalid": "#/components/schemas/MediaContentInvalidProblem",
                       "media_file_empty": "#/components/schemas/MediaFileEmptyProblem",
                       "media_upload_source_missing": "#/components/schemas/MediaUploadSourceMissingProblem"
                     }
@@ -39338,69 +39326,6 @@
         "type": "object",
         "title": "MediaArchiveAuditParams",
         "description": "Params of media.archive (Media archived)"
-      },
-      "MediaContentInvalidProblem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "title": "Type",
-            "description": "URI of the problem type; dereference it for its documentation"
-          },
-          "title": {
-            "type": "string",
-            "const": "File content does not match its type",
-            "title": "Title",
-            "description": "Summary of the problem type"
-          },
-          "status": {
-            "type": "integer",
-            "const": 400,
-            "title": "Status",
-            "description": "HTTP status code"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "Explanation of this occurrence",
-            "examples": [
-              "File content does not match its type"
-            ]
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "description": "Path of the request that failed"
-          },
-          "code": {
-            "type": "string",
-            "const": "media_content_invalid",
-            "title": "Code",
-            "description": "Key of exactly this problem in the localization package"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "code"
-        ],
-        "title": "MediaContentInvalidProblem",
-        "description": "File content does not match its type (HTTP 400). Problem type media_content_invalid.",
-        "examples": [
-          {
-            "code": "media_content_invalid",
-            "detail": "File content does not match its type",
-            "instance": "/api/v1/...",
-            "status": 400,
-            "title": "File content does not match its type",
-            "type": "https://example.org/problems/media_content_invalid"
-          }
-        ]
       },
       "MediaContentTypeExtensionMismatchProblem": {
         "properties": {

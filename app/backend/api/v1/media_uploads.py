@@ -356,7 +356,7 @@ async def append_upload_chunk(
     MediaRoutes.UPLOAD_SESSION_COMPLETE.value,
     response_model=UploadResultResponse,
     responses=problems(
-        ErrorCode.MEDIA_CONTENT_INVALID, ErrorCode.MEDIA_FILE_EMPTY, ErrorCode.MEDIA_UPLOAD_SOURCE_MISSING,
+        ErrorCode.MEDIA_FILE_EMPTY, ErrorCode.MEDIA_UPLOAD_SOURCE_MISSING,
         AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED,
         AccessErrorCode.UPLOAD_SESSION_NOT_OWNER, ErrorCode.UPLOAD_SESSION_NOT_FOUND, ErrorCode.UPLOAD_INCOMPLETE,
         ErrorCode.UPLOAD_BYTES_MISSING, ErrorCode.UPLOAD_SESSION_CLOSED, ErrorCode.MEDIA_FILE_TOO_LARGE,
@@ -464,7 +464,7 @@ async def _store_claimed(session: AsyncSession, row: UploadSession, token: str) 
         media_file_id = await get_media_manager().store_file_from_path(
             session=session, observation_id=row.observation_id, source_path=str(part),
             original_filename=row.original_filename, media_type=spec.media_type, user_id=row.user_id,
-            validation_config=validation_config_for(registry, spec),
+            validation_config=validation_config_for(spec),
         )
     except FileTooLarge as e:
         await _abort_claimed(session, await _rolled_back(session, upload_id), token, ErrorCode.MEDIA_FILE_TOO_LARGE, str(e))

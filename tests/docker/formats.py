@@ -1,4 +1,4 @@
-"""Format matrix against the compose.test.yml stack: every accepted image and video format through nginx.
+"""Format matrix against the compose.test.yml stack: every accepted image, video and audio format through nginx.
 
     docker build -t watch-web .
     docker compose -f tests/docker/compose.test.yml up -d
@@ -16,7 +16,11 @@ VP9, no audio, a 90 degree display rotation, a really odd size, 4K, one keyframe
 grid, one cue per step, no cue on a black tile), statuses. A video file with only audio is unsupported at once
 (no_video_stream), a truncated one fails after its attempts (poster_failed). /stream through nginx's auth cache:
 bytes, the API's headers on a miss and a hit, refusals as the API's problems, logout and archive stop a stream within
-the 30 s of the cache. Exit code 0 when every check passes.
+the 30 s of the cache. Audio (MP3, WAV, FLAC, Ogg Vorbis, Opus, M4A): stored with the type the sniffer names (libmagic
+in the api image, one of the format's content type and aliases). Bytes the sniffer cannot name, or names otherwise,
+are refused whatever the extension says (415 media_content_type_not_accepted). Document formats are checked by
+tests/test_file_sniff.py run inside the api image (task report): no observation route takes a document.
+Exit code 0 when every check passes.
 Needs ffmpeg on the host (imageio-ffmpeg) and Pillow; the stack's worker runs with a short retry backoff.
 """
 from __future__ import annotations
@@ -193,6 +197,43 @@ def run_image(headers: dict, observation_id: int, name: str, ctype: str, data: b
     if check(name, bool(public), "signed public url in info"):
         anon = requests.get(f"{NGINX}{public}", timeout=60)
         check(name, anon.status_code == 200, "public url without token", f"{anon.status_code}")
+
+
+# --------------------------------------------------------------------------- audio
+
+AUDIO = [   # (file name, ffmpeg codec arguments, the format's content type and aliases)
+    ("audio.mp3", ["-c:a", "libmp3lame", "-b:a", "96k"], {"audio/mpeg", "audio/mp3"}),
+    ("audio.wav", ["-c:a", "pcm_s16le"], {"audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave"}),
+    ("audio.flac", ["-c:a", "flac"], {"audio/flac", "audio/x-flac"}),
+    ("audio_vorbis.ogg", ["-c:a", "libvorbis"], {"audio/ogg", "audio/opus", "application/ogg"}),
+    ("audio.opus", ["-c:a", "libopus"], {"audio/ogg", "audio/opus", "application/ogg"}),
+    ("audio_aac.m4a", ["-c:a", "aac"], {"audio/mp4", "audio/x-m4a", "audio/aac"}),
+]
+
+
+def run_audio(ffmpeg: str, tmp: Path, headers: dict, observation_id: int) -> None:
+    for name, codec, accepted in AUDIO:
+        path = tmp / name
+        subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                        "sine=frequency=440:duration=3", *codec, str(path)], check=True, timeout=120)
+        up = requests.post(f"{API}/media/upload", headers=headers, timeout=120,
+                           data={"observation_id": observation_id, "media_type": "audio"},
+                           files={"file": (name, path.read_bytes(), "application/octet-stream")})
+        if not check(name, up.status_code == 200, "upload", f"{up.status_code} {'' if up.ok else up.text[:160]}"):
+            continue
+        info = requests.get(f"{API}/media/{up.json()['media_file_id']}/info", headers=headers, timeout=10).json()
+        check(name, info.get("mime_type") in accepted, "stored with the sniffed type", str(info.get("mime_type")))
+
+
+def run_refusals(headers: dict, observation_id: int) -> None:
+    """The sniffer decides, never the extension: bytes it cannot name and text named as a photo are 415"""
+    for name, data in (("random_bytes.jpg", bytes(range(256)) * 16), ("text.png", b"not a picture\n" * 64),
+                       ("html_page.webp", b"<!DOCTYPE html><html><body><script>alert(1)</script></body></html>\n")):
+        r = requests.post(f"{API}/media/upload", headers=headers, timeout=60,
+                          data={"observation_id": observation_id, "media_type": "image"},
+                          files={"file": (name, data, "application/octet-stream")})
+        check(name, r.status_code == 415 and problem_code(r) == "media_content_type_not_accepted",
+              "refused: media_content_type_not_accepted", f"{r.status_code} {problem_code(r)} {r.text[:120] if r.status_code != 415 else ''}")
 
 
 # --------------------------------------------------------------------------- videos
@@ -519,6 +560,8 @@ def main() -> int:
         videos = build_videos(ffmpeg, Path(tmp))
         for name, content_type, data, display, renderable in build_images():
             run_image(headers, observation["id"], name, content_type, data, display, renderable)
+        run_audio(ffmpeg, Path(tmp), headers, observation["id"])
+        run_refusals(headers, observation["id"])
         run_videos(headers, observation["id"], videos)
         streamed = next((video for video in videos if video["expect"] == "ok" and video.get("id")), None)
         if check("stream", streamed is not None, "a stored video to stream", ""):

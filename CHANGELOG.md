@@ -26,6 +26,23 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   unchanged).
 - The details of `content_type_outside_media_type` and `media_format_content_type_mismatch` say the content type must
   belong to the families of the media type (no longer "must start with '{media_type}/'"); params unchanged.
+- One content sniffer for every upload, `services/files/sniff.py`: libmagic on the first 8 KB, compared with the
+  format's content type and aliases. The extension and the declared Content-Type never name the bytes any more: a
+  file libmagic cannot name is `application/octet-stream`, which no format accepts, so a `.jpg` that is not a JPEG
+  answers 415 `media_content_type_not_accepted` (was 400 `media_content_invalid` after an extension guess). Removed:
+  `utils/mime_detector.py` (its own extension table, the `mimetypes` fallback, a signature table), the magic-byte
+  checks of `MediaManager` and its unused helpers (`check_file_integrity`, `repair_file`, `cleanup_orphaned_files`,
+  `validate_full_path_length`, `FileValidationResult`, `FileIntegrityCheck`, the 500 MB default size).
+- Removed problem code `media_content_invalid` (400): nothing raises it since the sniffer decides; gone from
+  `POST /media/upload`, `POST /media/nginx-upload`, `POST /media/uploads/{id}/complete` and the contract (schema
+  `MediaContentInvalidProblem`). An upload session aborted with it before this change shows `error: null`.
+- The text rule for `text/*` document formats (UTF-8 only, no NUL byte; problem `document_text_invalid`) arrives with
+  the user guide upload, the first route that can store a text format.
+- The aliases of the seeded document formats are what Debian's libmagic (5.46, the api image) reports for real
+  files: docx, xlsx, pptx, odt and doc lose `application/zip` / `application/x-ole-storage` / `application/CDFV2`,
+  CSV loses `application/csv` (keeps `text/plain`); Markdown keeps `text/plain`, RTF `text/rtf`. Seeding never
+  updates a row: a database seeded by the previous commit keeps the old aliases until they are edited through
+  `PUT /media-formats/{id}`.
 
 ## Authorization fixes (moves, type change, user writes)
 

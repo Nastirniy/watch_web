@@ -1,0 +1,5 @@
+<!DOCTYPE html>
+<html>
+<head><title>Not a PDF</title></head>
+<body><script>alert(document.cookie)</script><p>An HTML page named like a PDF.</p></body>
+</html>

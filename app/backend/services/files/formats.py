@@ -1,8 +1,9 @@
 """Accepted file formats (media and documents): the registry read from media_formats and the checks built on it.
 
 Every upload is checked against the active rows four times: the declared
-Content-Type, the file extension, the MIME type detected from the bytes, and
-the size against the format's max_file_size_bytes. Anything outside is
+Content-Type, the file extension, the MIME type detected from the bytes
+(services/files/sniff.py, the one sniffer), and the size against the format's
+max_file_size_bytes. Anything outside is
 answered with 415 (format) or 413 (size), with an Accept-Post header naming
 what is accepted. GET /media/formats returns the same list for clients;
 administrators manage the rows through /media-formats.
@@ -132,15 +133,17 @@ def default_formats() -> Tuple[FormatSpec, ...]:
         (audio, "audio/flac", (".flac",), "FLAC", ("audio/x-flac",)),
         (audio, "audio/ogg", (".ogg", ".oga", ".opus"), "Ogg Vorbis / Opus", ("audio/opus", "application/ogg")),
         (audio, "audio/mp4", (".m4a",), "AAC in MP4 (M4A)", ("audio/x-m4a", "audio/aac")),
+        # Document aliases are what Debian's libmagic (the api image) reports for real files: OOXML, ODF and Word 97
+        # by their own types, Markdown as text/plain, a CSV of fewer than three lines as text/plain, RTF as text/rtf
         (document, "application/pdf", (".pdf",), "PDF", ()),
-        (document, wordml + "wordprocessingml.document", (".docx",), "Word DOCX", ("application/zip",)),
-        (document, wordml + "spreadsheetml.sheet", (".xlsx",), "Excel XLSX", ("application/zip",)),
-        (document, wordml + "presentationml.presentation", (".pptx",), "PowerPoint PPTX", ("application/zip",)),
-        (document, "application/vnd.oasis.opendocument.text", (".odt",), "OpenDocument text", ("application/zip",)),
-        (document, "application/msword", (".doc",), "Word 97-2003", ("application/x-ole-storage", "application/CDFV2")),
+        (document, wordml + "wordprocessingml.document", (".docx",), "Word DOCX", ()),
+        (document, wordml + "spreadsheetml.sheet", (".xlsx",), "Excel XLSX", ()),
+        (document, wordml + "presentationml.presentation", (".pptx",), "PowerPoint PPTX", ()),
+        (document, "application/vnd.oasis.opendocument.text", (".odt",), "OpenDocument text", ()),
+        (document, "application/msword", (".doc",), "Word 97-2003", ()),
         (document, "text/markdown", (".md", ".markdown"), "Markdown", ("text/plain",)),
         (document, "text/plain", (".txt",), "Plain text", ()),
-        (document, "text/csv", (".csv",), "CSV", ("text/plain", "application/csv")),
+        (document, "text/csv", (".csv",), "CSV", ("text/plain",)),
         (document, "application/rtf", (".rtf",), "RTF", ("text/rtf",)),
     )
     return tuple(

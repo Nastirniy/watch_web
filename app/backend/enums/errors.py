@@ -415,7 +415,6 @@ class ErrorCode(ProblemType):
         413, "File too large for its format", "File exceeds the {max_file_size_bytes} byte limit for {content_type}",
         content_type=str, max_file_size_bytes=int, file_size_bytes=Optional[int]))
     MEDIA_FILE_EMPTY = ("media_file_empty", problem(400, "File is empty"))
-    MEDIA_CONTENT_INVALID = ("media_content_invalid", problem(400, "File content does not match its type"))
     MEDIA_UPLOADS_BUSY = ("media_uploads_busy", problem(503, "Too many concurrent uploads, try again later"))
     MEDIA_UPLOAD_SOURCE_MISSING = ("media_upload_source_missing", problem(400, "Uploaded file not found"))
     MEDIA_STORE_FAILED = ("media_store_failed", problem(500, "Failed to store the file"))
