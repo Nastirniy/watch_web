@@ -195,6 +195,13 @@ class MediaType(Enum):
     DOCUMENT = "document"
 
 
+class UploadPurpose(str, Enum):
+    """What an upload is for; it decides which media types of the format registry apply
+    (PURPOSE_MEDIA_TYPES in services/files/formats.py)"""
+    OBSERVATION_MEDIA = "observation_media"
+    USER_GUIDE = "user_guide"
+
+
 class ThumbnailSize(str, Enum):
     """Bounding boxes rendered on demand by imgproxy (see ThumbnailSettings)"""
     SMALL = "small"

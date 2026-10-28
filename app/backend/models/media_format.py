@@ -10,7 +10,7 @@ class MediaFormat(SQLModel, table=True):
 
     Uploads are checked against the active, non-deleted rows: declared
     Content-Type, file extension, detected MIME type and file size. Defaults
-    are seeded from DEFAULT_FORMATS in services/media/formats.py.
+    are seeded from DEFAULT_FORMATS in services/files/formats.py.
     """
     __tablename__ = "media_formats"
 

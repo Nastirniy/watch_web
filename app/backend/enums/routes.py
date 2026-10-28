@@ -225,7 +225,7 @@ class UserTypeRoutes(str, Enum):
 
 
 class MediaFormatRoutes(str, Enum):
-    """Accepted upload formats (administration dictionary)"""
+    """Accepted file formats: media and documents (administration dictionary)"""
     BASE = "/media-formats"
     LIST_ALL = "/list-all"
     CREATE = "/create"

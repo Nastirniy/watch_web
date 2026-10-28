@@ -7,8 +7,9 @@ from app.backend.enums.general import MediaType
 from app.backend.utils.validators import SecureBaseModel, SecurityValidators, not_null
 from app.backend.errors.coded import invalid
 from app.backend.enums.errors import FieldErrorCode
+from app.backend.services.files.formats import FORBIDDEN_CONTENT_TYPES, content_type_allowed
 
-ACCEPTED_MEDIA_TYPES = (MediaType.IMAGE.value, MediaType.VIDEO.value, MediaType.AUDIO.value)
+ACCEPTED_MEDIA_TYPES = (MediaType.IMAGE.value, MediaType.VIDEO.value, MediaType.AUDIO.value, MediaType.DOCUMENT.value)
 # RFC 6838 type/subtype, lower case only
 CONTENT_TYPE_RE = re.compile(r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$")
 EXTENSION_RE = re.compile(r"^\.[a-z0-9]{1,10}$")
@@ -18,6 +19,8 @@ def _clean_content_type(value: str) -> str:
     value = value.strip().lower()
     if not CONTENT_TYPE_RE.match(value):
         raise invalid(FieldErrorCode.CONTENT_TYPE_INVALID)
+    if value in FORBIDDEN_CONTENT_TYPES:
+        raise invalid(FieldErrorCode.CONTENT_TYPE_FORBIDDEN, content_type=value)
     return value
 
 
@@ -46,7 +49,7 @@ def _clean_aliases(values: List[str]) -> List[str]:
 
 
 class MediaFormatCreate(SecureBaseModel):
-    media_type: str = Field(..., description="image, video or audio")
+    media_type: str = Field(..., description="image, video, audio or document")
     content_type: str = Field(..., min_length=3, max_length=100, description="Canonical Content-Type, e.g. video/mp4")
     label: str = Field(..., min_length=1, max_length=255)
     extensions: List[str] = Field(..., min_length=1, max_length=20, description="File extensions with the dot, e.g. ['.mp4', '.m4v']")
@@ -85,7 +88,7 @@ class MediaFormatCreate(SecureBaseModel):
 
     @model_validator(mode="after")
     def content_type_matches_media_type(self):
-        if not self.content_type.startswith(f"{self.media_type}/"):
+        if not content_type_allowed(self.media_type, self.content_type):
             raise invalid(FieldErrorCode.CONTENT_TYPE_OUTSIDE_MEDIA_TYPE, media_type=self.media_type)
         return self
 

@@ -3,10 +3,11 @@ import pytest
 from sqlmodel import select
 
 from app.backend.config import settings
+from app.backend.enums.general import UploadPurpose
 from app.backend.enums.routes import MediaRoutes, MediaFormatRoutes
 from app.backend.api.v1 import V1
 from app.backend.models.media_format import MediaFormat
-from app.backend.services.media import formats
+from app.backend.services.files import formats
 from app.backend.auth.scope import ROOT
 from tests.helpers import assign, give, make_admin, make_dictionary, make_observation, make_post, make_role, make_user
 
@@ -28,7 +29,7 @@ PNG_BYTES = (b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + b"\x00\x00\x00\x01\x
 @pytest.mark.asyncio
 async def test_seeded_registry_is_limited_and_consistent(db):
     registry = await formats.load_registry(db, use_cache=False)
-    assert registry.media_types() == ["image", "video", "audio"]
+    assert registry.media_types() == ["image", "video", "audio", "document"]
     assert registry.content_types("image") == ["image/jpeg", "image/png", "image/webp", "image/gif"]
     assert ".bmp" not in registry.extensions("image") and ".avi" not in registry.extensions("video")
     canonical = registry.content_types()
@@ -36,13 +37,10 @@ async def test_seeded_registry_is_limited_and_consistent(db):
     all_ext = registry.extensions()
     assert len(all_ext) == len(set(all_ext)), "an extension maps to one format only"
     assert registry.accept_post_header("video") == "video/mp4, video/webm, video/quicktime, video/x-matroska"
-    assert registry.media_type_for_mime("audio/x-wav") == "audio"
-    assert registry.is_accepted_content_type("image", "application/octet-stream")
-    assert registry.is_accepted_content_type("image", "IMAGE/JPEG; charset=binary")
-    assert not registry.is_accepted_content_type("image", "video/mp4")
-    assert registry.resolve("video", "clip.MOV").content_type == "video/quicktime"
-    assert registry.resolve("video", "clip") is None
-    jpeg = registry.resolve("image", "a.jpg")
+    observation = UploadPurpose.OBSERVATION_MEDIA
+    assert registry.resolve(observation, "clip.MOV").content_type == "video/quicktime"
+    assert registry.resolve(observation, "clip") is None
+    jpeg = registry.resolve(observation, "a.jpg")
     assert jpeg.max_file_size_bytes == 50 * formats.MB and jpeg.id is not None
     # seeding again adds nothing and never edits rows
     assert await formats.seed_media_formats(db) == 0
@@ -152,7 +150,7 @@ async def test_media_format_crud(client, db, headers):
     granular = await make_user(db, perms=["media_format.view", "media_format.create", "media_format.update", "media_format.archive"], post_id=post.id)
 
     listing = await client.get(LIST, headers=headers(viewer))
-    assert listing.status_code == 200 and len(listing.json()) == 13
+    assert listing.status_code == 200 and len(listing.json()) == 23
     assert (await client.get(LIST, params={"include_deleted": "true"}, headers=headers(viewer))).status_code == 403
     assert (await client.get(LIST, params={"media_type": "audio"}, headers=headers(viewer))).json().__len__() == 5
 
@@ -328,7 +326,7 @@ async def test_lowered_ceiling_caps_every_limit(client, db, headers, monkeypatch
     monkeypatch.setattr(settings.storage, "max_file_size_gb", 1)
 
     registry = await formats.load_registry(db, use_cache=False)
-    spec = registry.resolve("video", "clip.mp4")
+    spec = registry.resolve(UploadPurpose.OBSERVATION_MEDIA, "clip.mp4")
     assert spec.max_file_size_bytes == 5 * formats.GB and spec.effective_limit_bytes == formats.GB
     from app.backend.api.shared.helpers.upload_helper import validation_config_for
     assert validation_config_for(registry, spec).max_size == formats.GB

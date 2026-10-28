@@ -39,7 +39,7 @@ from app.backend.enums.general import Permissions
 from app.backend.enums.routes import (BrigadeRoutes, CorpsRoutes, MediaRoutes, ObservationRoutes, PostRoutes,
                                       ScopeGroupRoutes, SearchRoutes, UserRoutes)
 from app.backend.models.user import UserSession
-from app.backend.services.media.formats import invalidate_registry_cache, seed_media_formats
+from app.backend.services.files.formats import invalidate_registry_cache, seed_media_formats
 from app.main import fastapi_app
 from tests.conftest import _TestSession
 from app.backend.models.observation import Observation

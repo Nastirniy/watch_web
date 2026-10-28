@@ -24679,7 +24679,7 @@
           "MEDIA_FORMATS"
         ],
         "summary": "List Media Formats",
-        "description": "Accepted formats with filters; include_deleted (archived rows too) requires media_format.archive.",
+        "description": "Accepted file formats (media and documents) with filters; include_deleted (archived rows too) requires media_format.archive.",
         "operationId": "list_media_formats",
         "security": [
           {
@@ -24988,7 +24988,7 @@
           "MEDIA_FORMATS"
         ],
         "summary": "Create Media Format",
-        "description": "Add an accepted format. Creating an archived content_type again restores it with the new values, which needs\nmedia_format.archive as well (as POST /{format_id}/restore does): 403 permission_denied without it.",
+        "description": "Add an accepted file format (media and documents). Creating an archived content_type again restores it with the new values, which needs\nmedia_format.archive as well (as POST /{format_id}/restore does): 403 permission_denied without it.",
         "operationId": "create_media_format",
         "requestBody": {
           "content": {
@@ -37493,6 +37493,7 @@
           "extensions_required",
           "media_type_not_accepted",
           "content_type_outside_media_type",
+          "content_type_forbidden",
           "confidence_level_invalid",
           "pagination_negative",
           "date_filters_conflict",
@@ -40736,7 +40737,7 @@
           "media_type": {
             "type": "string",
             "title": "Media Type",
-            "description": "image, video or audio"
+            "description": "image, video, audio or document"
           },
           "content_type": {
             "type": "string",

@@ -25,7 +25,7 @@ from app.backend.api.versioning import PublishedVersion
 from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.database import get_session
 from app.backend.bootstrap.permissions import seed_roles_and_permissions
-from app.backend.services.media.formats import seed_media_formats, invalidate_registry_cache
+from app.backend.services.files.formats import seed_media_formats, invalidate_registry_cache
 from app.backend.auth import sessions as session_lifetimes
 from app.backend.auth.service import AuthService
 from app.backend.models.user import UserSession

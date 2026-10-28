@@ -1,4 +1,4 @@
-"""Accepted media formats: the registry read from media_formats and the checks built on it.
+"""Accepted file formats (media and documents): the registry read from media_formats and the checks built on it.
 
 Every upload is checked against the active rows four times: the declared
 Content-Type, the file extension, the MIME type detected from the bytes, and
@@ -14,13 +14,14 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, FrozenSet, Iterable, List, Optional, Tuple, Union
 
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.config import settings
-from app.backend.enums.general import MediaType
+from app.backend.enums.general import MediaType, UploadPurpose
+from app.backend.services.files.names import extension_of
 from app.backend.enums.errors import ErrorCode
 from app.backend.models.media_format import MediaFormat
 from app.backend.errors.coded import CodedError
@@ -33,6 +34,33 @@ OPAQUE_CONTENT_TYPES = {"application/octet-stream", "binary/octet-stream"}
 
 MB = 1024 * 1024
 GB = 1024 * MB
+
+# Which media types of the registry an upload purpose may use
+PURPOSE_MEDIA_TYPES: Dict[UploadPurpose, FrozenSet[str]] = {
+    UploadPurpose.OBSERVATION_MEDIA: frozenset({MediaType.IMAGE.value, MediaType.VIDEO.value, MediaType.AUDIO.value}),
+    UploadPurpose.USER_GUIDE: frozenset({MediaType.DOCUMENT.value}),
+}
+
+# The top-level Content-Type types a format of each media type may have (the one family rule)
+ALLOWED_TOP_LEVEL: Dict[str, FrozenSet[str]] = {
+    MediaType.IMAGE.value: frozenset({"image"}),
+    MediaType.VIDEO.value: frozenset({"video"}),
+    MediaType.AUDIO.value: frozenset({"audio"}),
+    MediaType.DOCUMENT.value: frozenset({"application", "text"}),
+}
+
+# Types that run code in a browser or on a desktop when opened: never a format's content type or alias
+FORBIDDEN_CONTENT_TYPES: FrozenSet[str] = frozenset({
+    "text/html", "application/xhtml+xml", "image/svg+xml", "application/javascript", "text/javascript",
+    "application/x-msdownload", "application/x-sh", "application/java-archive",
+})
+
+
+def content_type_allowed(media_type: str, content_type: str) -> bool:
+    """True when the Content-Type belongs to the family of the media type (image/* for image, application/* or text/*
+    for document, ...)"""
+    top = (content_type or "").split("/", 1)[0].strip().lower()
+    return top in ALLOWED_TOP_LEVEL.get((media_type or "").strip().lower(), frozenset())
 
 # Registry cache: uploads are rare compared with reads, but a query per upload
 # is still avoidable; writes call invalidate_registry_cache() so the process
@@ -81,12 +109,15 @@ def _default_size(media_type: str) -> int:
         MediaType.IMAGE.value: 50 * MB,
         MediaType.AUDIO.value: 1 * GB,
         MediaType.VIDEO.value: hard_limit_bytes(),
+        MediaType.DOCUMENT.value: 100 * MB,
     }[media_type]
 
 
 def default_formats() -> Tuple[FormatSpec, ...]:
     """Seed data: keep it short, every entry must be renderable by imgproxy, decodable by ffmpeg or playable in a browser"""
     image, video, audio = MediaType.IMAGE.value, MediaType.VIDEO.value, MediaType.AUDIO.value
+    document = MediaType.DOCUMENT.value
+    wordml = "application/vnd.openxmlformats-officedocument."
     rows = (
         (image, "image/jpeg", (".jpg", ".jpeg"), "JPEG", ("image/pjpeg",)),
         (image, "image/png", (".png",), "PNG", ()),
@@ -101,6 +132,16 @@ def default_formats() -> Tuple[FormatSpec, ...]:
         (audio, "audio/flac", (".flac",), "FLAC", ("audio/x-flac",)),
         (audio, "audio/ogg", (".ogg", ".oga", ".opus"), "Ogg Vorbis / Opus", ("audio/opus", "application/ogg")),
         (audio, "audio/mp4", (".m4a",), "AAC in MP4 (M4A)", ("audio/x-m4a", "audio/aac")),
+        (document, "application/pdf", (".pdf",), "PDF", ()),
+        (document, wordml + "wordprocessingml.document", (".docx",), "Word DOCX", ("application/zip",)),
+        (document, wordml + "spreadsheetml.sheet", (".xlsx",), "Excel XLSX", ("application/zip",)),
+        (document, wordml + "presentationml.presentation", (".pptx",), "PowerPoint PPTX", ("application/zip",)),
+        (document, "application/vnd.oasis.opendocument.text", (".odt",), "OpenDocument text", ("application/zip",)),
+        (document, "application/msword", (".doc",), "Word 97-2003", ("application/x-ole-storage", "application/CDFV2")),
+        (document, "text/markdown", (".md", ".markdown"), "Markdown", ("text/plain",)),
+        (document, "text/plain", (".txt",), "Plain text", ()),
+        (document, "text/csv", (".csv",), "CSV", ("text/plain", "application/csv")),
+        (document, "application/rtf", (".rtf",), "RTF", ("text/rtf",)),
     )
     return tuple(
         FormatSpec(media_type=mt, content_type=ct, extensions=exts, label=label,
@@ -131,13 +172,6 @@ def normalise_content_type(value: Optional[str]) -> Optional[str]:
     if not value:
         return None
     return value.split(";", 1)[0].strip().lower() or None
-
-
-def extension_of(filename: Optional[str]) -> Optional[str]:
-    if not filename or "." not in filename:
-        return None
-    ext = "." + filename.rsplit(".", 1)[1].lower()
-    return ext if len(ext) > 1 else None
 
 
 class FormatRegistry:
@@ -178,31 +212,26 @@ class FormatRegistry:
             result.extend(ext for ext in spec.extensions if ext not in result)
         return result
 
-    def accept_post_header(self, media_type: Optional[str] = None) -> str:
-        return ", ".join(self.content_types(media_type))
+    def restricted(self, purpose: UploadPurpose) -> "FormatRegistry":
+        """The same registry limited to the media types of an upload purpose"""
+        allowed = PURPOSE_MEDIA_TYPES[purpose]
+        return FormatRegistry([spec for spec in self.specs if spec.media_type in allowed])
 
-    def resolve(self, media_type: str, filename: Optional[str]) -> Optional[FormatSpec]:
-        """The format an upload falls under, by media_type and file extension"""
+    def accept_post_header(self, scope: Union[UploadPurpose, str, None] = None) -> str:
+        """Accept-Post value: the Content-Types of a purpose, of one media type, or of every format"""
+        if isinstance(scope, UploadPurpose):
+            return self.restricted(scope).accept_post_header()
+        return ", ".join(self.content_types(scope))
+
+    def resolve(self, purpose: UploadPurpose, filename: Optional[str]) -> Optional[FormatSpec]:
+        """The format an upload falls under, by purpose and file extension"""
         ext = extension_of(filename)
-        if ext is None:
+        if not ext:
             return None
-        for spec in self.formats_for(media_type):
-            if ext in spec.extensions:
-                return spec
-        return None
-
-    def is_accepted_content_type(self, media_type: str, content_type: Optional[str]) -> bool:
-        """True when the declared Content-Type is one of the accepted formats or opaque (detect from bytes)"""
-        ct = normalise_content_type(content_type)
-        if ct is None or ct in OPAQUE_CONTENT_TYPES:
-            return True
-        return ct in self.mime_set(media_type)
-
-    def media_type_for_mime(self, mime: Optional[str]) -> Optional[str]:
-        ct = normalise_content_type(mime)
+        allowed = PURPOSE_MEDIA_TYPES[purpose]
         for spec in self.specs:
-            if ct in spec.all_mimes:
-                return spec.media_type
+            if spec.media_type in allowed and ext in spec.extensions:
+                return spec
         return None
 
     def payload(self) -> Dict[str, List[Dict[str, object]]]:
@@ -272,7 +301,7 @@ def find_conflict(rows: Iterable[MediaFormat], extensions: Iterable[str], aliase
 
 async def seed_media_formats(session: AsyncSession) -> int:
     """Insert every default format whose content_type is missing and whose extensions and aliases no live row owns
-    (an admin may have renamed a default). Never touches existing rows. Returns the count added."""
+    (an admin may have renamed a default; rows added by this same call do not count). Never touches existing rows. Returns the count added."""
     rows = list((await session.exec(select(MediaFormat))).all())
     existing = {row.content_type for row in rows}
     added = 0
@@ -291,7 +320,8 @@ async def seed_media_formats(session: AsyncSession) -> int:
             is_active=True, sort_order=spec.sort_order,
         )
         session.add(row)
-        rows.append(row)
+        # not appended to rows: defaults may share aliases among themselves (application/zip, text/plain);
+        # only rows that existed before this call can make a default skip
         existing.add(spec.content_type)
         added += 1
     if added:

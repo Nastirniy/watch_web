@@ -25,10 +25,11 @@ from app.backend.auth.scope import Node, ROOT
 from app.backend.enums.audit import AuditEvent
 from app.backend.services.units import observation_units_filter
 from app.backend.services.media.manager import get_media_manager
-from app.backend.services.media import formats, jobs, renderer, uploads, urls as thumb_urls
+from app.backend.services.files import formats
+from app.backend.services.media import jobs, renderer, uploads, urls as thumb_urls
 from app.backend.services.media.storyboards import build_vtt, layout_usable, status_for
-from app.backend.services.media.formats import UnsupportedMediaFormat, FileTooLarge
-from app.backend.enums.general import Permissions, PosterStatus, StoryboardStatus, ThumbnailFormat, ThumbnailSize, ThumbnailStatus
+from app.backend.services.files.formats import UnsupportedMediaFormat, FileTooLarge
+from app.backend.enums.general import Permissions, PosterStatus, UploadPurpose, StoryboardStatus, ThumbnailFormat, ThumbnailSize, ThumbnailStatus
 from app.backend.enums.routes import MediaRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.services.audit import create_audit_log
@@ -87,7 +88,7 @@ async def get_media_formats(
     auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW]))
 ):
     """Accepted upload formats (active rows of media_formats): Content-Type, extensions and size limit per media type. Also sent as Accept-Post."""
-    registry = await formats.load_registry(session)
+    registry = (await formats.load_registry(session)).restricted(UploadPurpose.OBSERVATION_MEDIA)
     response.headers["Accept-Post"] = registry.accept_post_header()
     return MediaFormatsResponse(
         media_types=registry.media_types(),

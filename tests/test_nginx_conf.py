@@ -13,7 +13,7 @@ import yaml
 
 from app.backend.api.v1.auth import login
 from app.backend.config import settings
-from app.backend.services.media.formats import hard_limit_bytes
+from app.backend.services.files.formats import hard_limit_bytes
 from app.main import fastapi_app
 
 ROOT = Path(__file__).resolve().parent.parent

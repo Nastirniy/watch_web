@@ -5,6 +5,22 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## User guides and file formats
+
+### Changed
+
+- One registry of file formats for media and documents: `services/files/formats.py` (moved from
+  `services/media/formats.py`; no other module keeps a copy), `services/files/names.py` (`extension_of`,
+  `sanitize_filename`). The `media_formats` table and `/media-formats` keep their names.
+- `media_type` of a format may be `document` (content type `application/*` or `text/*`); ten document formats are
+  seeded (pdf, docx, xlsx, pptx, odt, doc, md, txt, csv, rtf; 100 MB each). Observation uploads are unchanged: they
+  use only image, video and audio (`UploadPurpose.OBSERVATION_MEDIA`), so a `.pdf` answers 415
+  `media_extension_not_accepted` and `GET /media/formats` lists the three media types.
+- A format's content type and aliases `text/html`, `application/xhtml+xml`, `image/svg+xml`,
+  `application/javascript`, `text/javascript`, `application/x-msdownload`, `application/x-sh`,
+  `application/java-archive` are refused with 422 `validation_error` item `content_type_forbidden` (create and update).
+- The rule "content type belongs to the media type" is one function, `content_type_allowed`.
+
 ## Authorization fixes (moves, type change, user writes)
 
 ### Changed

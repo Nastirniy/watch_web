@@ -3,8 +3,6 @@ import asyncio
 import shutil
 import hashlib
 import uuid
-import re
-import unicodedata
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Set
 from dataclasses import dataclass
@@ -18,7 +16,8 @@ from pydantic import BaseModel, field_validator
 
 from app.backend.models.media import MediaFile
 from app.backend.services.media.jobs import enqueue_poster
-from app.backend.services.media.formats import UnsupportedMediaFormat, FileTooLarge
+from app.backend.services.files.formats import UnsupportedMediaFormat, FileTooLarge
+from app.backend.services.files.names import sanitize_filename
 from app.backend.services.media.probe import image_dimensions
 from app.backend.enums.general import MediaType
 from app.backend.utils.logging_config import get_logger
@@ -30,8 +29,7 @@ _logger = get_logger("media_manager")
 
 # Security and validation configurations
 MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
-MAX_FILENAME_LENGTH = 255
-# Accepted formats live in app/backend/services/media/formats.py (single registry)
+# Accepted formats live in app/backend/services/files/formats.py (single registry)
 
 DANGEROUS_EXTENSIONS = {
     '.exe', '.bat', '.cmd', '.com', '.pif', '.scr', '.vbs', '.js', '.jar',
@@ -151,63 +149,8 @@ class MediaManager:
         self._hash_cache: Dict[str, int] = {}
 
     def sanitize_filename(self, filename: str) -> str:
-        """Enhanced filename sanitization for cross-platform compatibility"""
-        if not filename:
-            return f"upload_{uuid.uuid4().hex[:8]}"
-
-        # The extension comes from the original name (as check_declared_format reads it); only the
-        # stem is reduced to ASCII, so a stem without ASCII letters cannot swallow the extension
-        name, ext = os.path.splitext(filename)
-        name, ext = (
-            unicodedata.normalize('NFKD', part).encode('ascii', 'ignore').decode('ascii')
-            for part in (name, ext)
-        )
-
-        # Remove dangerous characters and patterns (Windows + Unix) + spaces
-        dangerous_chars = r'[<>:"/\\|?*\x00-\x1f\x7f-\x9f\s]'
-        name = re.sub(dangerous_chars, '_', name)
-        ext = re.sub(dangerous_chars, '_', ext)
-
-        # Remove multiple dots and normalize
-        name = re.sub(r'\.{2,}', '_', name)
-        name = re.sub(r'[_]{2,}', '_', name)  # Normalize multiple underscores
-
-        # Remove leading/trailing problematic characters
-        name = name.strip('. _-')
-        ext = ext.strip('. _-')
-
-        # Ensure extension starts with dot if present
-        if ext and not ext.startswith('.'):
-            ext = f'.{ext}'
-
-        # Handle reserved Windows filenames
-        reserved_names = {
-            'CON', 'PRN', 'AUX', 'NUL', 'COM1', 'COM2', 'COM3', 'COM4', 'COM5',
-            'COM6', 'COM7', 'COM8', 'COM9', 'LPT1', 'LPT2', 'LPT3', 'LPT4',
-            'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'
-        }
-        if name.upper() in reserved_names:
-            name = f"{name}_file"
-
-        # Reconstruct filename
-        sanitized = f"{name}{ext}" if name else ext
-
-        # Apply length limits (account for full path later)
-        max_filename_len = min(MAX_FILENAME_LENGTH, 200)  # Conservative limit
-        if len(sanitized) > max_filename_len:
-            # Preserve extension, truncate name
-            if ext:
-                max_name_len = max_filename_len - len(ext) - 1
-                name = name[:max_name_len]
-                sanitized = f"{name}{ext}"
-            else:
-                sanitized = sanitized[:max_filename_len]
-
-        # Final validation: an empty stem becomes a generated one, the extension is kept
-        if not name or name in ['.', '..', '_']:
-            sanitized = f"upload_{uuid.uuid4().hex[:8]}{ext}"
-
-        return sanitized
+        """Delegates to services.files.names.sanitize_filename (the one implementation)"""
+        return sanitize_filename(filename)
 
     def validate_full_path_length(self, full_path: str) -> bool:
         """Validate that the full file path doesn't exceed filesystem limits"""

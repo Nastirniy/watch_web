@@ -1,4 +1,4 @@
-"""Administration of the accepted upload formats (media_formats).
+"""Administration of the accepted file formats: media and documents (media_formats).
 
 Same shape as the other dictionaries (categories, tags): reads need
 media_format.view, writes are administration routes and need view plus
@@ -24,7 +24,7 @@ from app.backend.models.media_format import MediaFormat
 from app.backend.auth.context import AuthContext
 from app.backend.auth.access_errors import access_denied
 from app.backend.auth.require import Require, require
-from app.backend.services.media.formats import find_conflict, hard_limit_bytes, invalidate_registry_cache
+from app.backend.services.files.formats import content_type_allowed, find_conflict, hard_limit_bytes, invalidate_registry_cache
 from app.backend.enums.general import Permissions
 from app.backend.enums.routes import MediaFormatRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
@@ -99,7 +99,7 @@ async def list_media_formats(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.MEDIA_FORMAT_VIEW]))
 ):
-    """Accepted formats with filters; include_deleted (archived rows too) requires media_format.archive."""
+    """Accepted file formats (media and documents) with filters; include_deleted (archived rows too) requires media_format.archive."""
     AccessControlService.check_include_deleted(auth, filters, Permissions.MEDIA_FORMAT_ARCHIVE)
     query = MediaFormatFilterService.apply_filters(select(MediaFormat), filters)
     rows = (await session.exec(query)).all()
@@ -121,7 +121,7 @@ async def create_media_format(
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.MEDIA_FORMAT_VIEW, Permissions.MEDIA_FORMAT_CREATE]))
 ):
-    """Add an accepted format. Creating an archived content_type again restores it with the new values, which needs
+    """Add an accepted file format (media and documents). Creating an archived content_type again restores it with the new values, which needs
     media_format.archive as well (as POST /{format_id}/restore does): 403 permission_denied without it."""
     current_user = auth.user
     _check_size(data.max_file_size_bytes)
@@ -205,7 +205,7 @@ async def update_media_format(
 
     media_type = changes.get("media_type", row.media_type)
     content_type = changes.get("content_type", row.content_type)
-    if not content_type.startswith(f"{media_type}/"):
+    if not content_type_allowed(media_type, content_type):
         raise ApiError(ErrorCode.MEDIA_FORMAT_CONTENT_TYPE_MISMATCH, content_type=content_type, media_type=media_type)
     if "max_file_size_bytes" in changes:
         _check_size(changes["max_file_size_bytes"])

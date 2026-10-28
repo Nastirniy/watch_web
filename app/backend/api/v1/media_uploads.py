@@ -37,8 +37,9 @@ from app.backend.api.v1.models.response.media import UploadResultResponse, uploa
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.access_errors import access_denied
 from app.backend.auth.context import AuthContext
-from app.backend.services.media import formats, uploads
-from app.backend.services.media.formats import FileTooLarge, UnsupportedMediaFormat
+from app.backend.services.files import formats
+from app.backend.services.media import uploads
+from app.backend.services.files.formats import FileTooLarge, UnsupportedMediaFormat
 from app.backend.services.media.manager import get_media_manager
 from app.backend.auth.require import Require, require
 from app.backend.utils.logging_config import get_api_logger

@@ -14,9 +14,10 @@ from app.backend.models.observation import Observation
 from app.backend.auth.context import AuthContext
 from app.backend.auth.access_control import AccessControlService
 from app.backend.services.media_manager import FileValidationConfig
-from app.backend.services.media import formats, jobs, renderer, urls as thumb_urls
+from app.backend.services.files import formats
+from app.backend.services.media import jobs, renderer, urls as thumb_urls
 from app.backend.services.media.probe import has_no_video_stream, metadata_for, resolve_tools
-from app.backend.enums.general import MediaType, Permissions, ThumbnailFormat, ThumbnailSize
+from app.backend.enums.general import MediaType, Permissions, UploadPurpose, ThumbnailFormat, ThumbnailSize
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.auth.scope import Node
 from app.backend.enums.audit import AuditEvent
@@ -67,9 +68,12 @@ def too_large(spec: formats.FormatSpec, actual: int = None) -> ApiError:
 def check_declared_format(registry: formats.FormatRegistry, media_type: str, filename: str, content_type: str = None) -> formats.FormatSpec:
     """Reject before touching the body: unknown media_type, extension or declared Content-Type outside the registry"""
     media_type = (media_type or "").lower()
+    registry = registry.restricted(UploadPurpose.OBSERVATION_MEDIA)
     if media_type not in registry.media_types():
         raise _unsupported(registry, ErrorCode.MEDIA_TYPE_UNKNOWN, media_type)
-    spec = registry.resolve(media_type, filename)
+    spec = registry.resolve(UploadPurpose.OBSERVATION_MEDIA, filename)
+    if spec is not None and spec.media_type != media_type:
+        spec = None
     if spec is None:
         raise _unsupported(registry, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, media_type, extension=Path(filename or "").suffix.lower())
     declared = formats.normalise_content_type(content_type)
@@ -159,6 +163,7 @@ async def record_upload(
 
 def _unsupported(registry: formats.FormatRegistry, code: ErrorCode, media_type: str = None, **params) -> ApiError:
     """415 with an Accept-Post header naming the Content-Types the endpoint accepts"""
+    registry = registry.restricted(UploadPurpose.OBSERVATION_MEDIA)
     scope = media_type if media_type and media_type in registry.media_types() else None
     return ApiError(
         code,

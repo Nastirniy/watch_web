@@ -69,7 +69,7 @@ async def seed_database():
         builtin_roles = await seed_roles_and_permissions(session)
 
         # 1b. Accepted upload formats (adds missing defaults, never edits existing rows)
-        from app.backend.services.media.formats import seed_media_formats
+        from app.backend.services.files.formats import seed_media_formats
         added_formats = await seed_media_formats(session)
         if added_formats:
             _logger.info(f"Seeded {added_formats} media format(s)")
