@@ -9,7 +9,8 @@ _logger = get_database_logger()
 
 
 SCHEMA_LOCK_NAME = "watch_web_schema_init"
-SCHEMA_LOCK_TIMEOUT_SECONDS = 300
+# How long one GET_LOCK call waits before the worker logs that it is still waiting and asks again
+SCHEMA_LOCK_POLL_SECONDS = 30
 
 
 class _SchemaLock:
@@ -18,7 +19,12 @@ class _SchemaLock:
     Every uvicorn worker runs the lifespan, so without this two workers run
     Alembic at the same time and MySQL rejects one with a concurrent DDL
     error. GET_LOCK is connection-scoped: the connection stays open until
-    release. Other dialects (sqlite in tests) have no such lock and skip it.
+    release, and the server frees the lock when the holder's connection
+    closes (its process stopped or crashed). So a worker waits as long as
+    another connection holds the lock, however long the migration takes
+    (a large backfill runs for minutes), logging every poll interval; no
+    deadline fails the waiting workers while the holder still works.
+    Other dialects (sqlite in tests) have no such lock and skip it.
     """
 
     def __init__(self):
@@ -29,16 +35,32 @@ class _SchemaLock:
         if engine.dialect.name != "mysql":
             return self
         self._conn = await engine.connect()
-        acquired = (await self._conn.execute(
-            text("SELECT GET_LOCK(:name, :timeout)"),
-            {"name": SCHEMA_LOCK_NAME, "timeout": SCHEMA_LOCK_TIMEOUT_SECONDS},
-        )).scalar()
-        if acquired != 1:
+        try:
+            await self._wait_for_lock()
+        except BaseException:
             await self._conn.close()
             self._conn = None
-            raise RuntimeError(f"could not acquire schema lock {SCHEMA_LOCK_NAME} within {SCHEMA_LOCK_TIMEOUT_SECONDS}s")
+            raise
         _logger.info("Schema lock acquired; running migrations and seeding")
         return self
+
+    async def _wait_for_lock(self):
+        waited = 0
+        while True:
+            acquired = (await self._conn.execute(
+                text("SELECT GET_LOCK(:name, :timeout)"),
+                {"name": SCHEMA_LOCK_NAME, "timeout": SCHEMA_LOCK_POLL_SECONDS},
+            )).scalar()
+            if acquired == 1:
+                return
+            if acquired is None:  # an error in the server (out of memory, the thread killed), not a timeout
+                raise RuntimeError(f"GET_LOCK of schema lock {SCHEMA_LOCK_NAME} failed")
+            waited += SCHEMA_LOCK_POLL_SECONDS
+            holder = (await self._conn.execute(
+                text("SELECT IS_USED_LOCK(:name)"), {"name": SCHEMA_LOCK_NAME},
+            )).scalar()
+            _logger.info(f"Schema lock {SCHEMA_LOCK_NAME} is held by connection {holder} (migrating); "
+                         f"waited {waited}s, still waiting")
 
     async def __aexit__(self, *exc):
         if self._conn is not None:

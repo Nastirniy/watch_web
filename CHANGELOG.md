@@ -78,6 +78,18 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   events `legacy.unknown` and `legacy.migrate` are refused. The test session checks every params dict written against
   its v1 params model (`tests/conftest.py` `audit_params_are_served`). No API change.
 
+### Deployment
+
+- The start's schema lock has no deadline any more: a worker waits as long as another connection holds
+  `watch_web_schema_init` (it migrates), asking again every 30 s (`SCHEMA_LOCK_POLL_SECONDS`) and logging the holder's
+  connection id; MySQL / MariaDB free the lock when the holder's connection closes, so a stopped holder never blocks
+  the start. Before, the waiting workers failed after 300 s ("could not acquire schema lock") and uvicorn restarted
+  them, which a migration 031 on more than about 1.4 million audit rows triggered. A `NULL` from `GET_LOCK` (a server
+  error) still fails the start. Checked live on MariaDB 11.8.
+- The api health check's `start_period` is 20 minutes (was 60 s): a long start migration no longer makes the api
+  unhealthy, which made `docker compose up` refuse the media-worker after 2.5 minutes. A normal start is healthy at
+  its first passing check. Larger migrations run on their own first (DEPLOYMENT.md, "Audit log (migration 031)").
+
 ### Changed (breaking for readers of audit rows)
 
 - Every new row has `event`, `category`, `params`, `request_id`, `scope_key` / `scope_post_id` / `scope_group_id`.

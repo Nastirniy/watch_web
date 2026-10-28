@@ -57,7 +57,11 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      # The start migrates before the API listens (migration 031: about 3.5 minutes per million audit rows), and a
+      # failed check inside start_period does not count: unhealthy earlier would make `docker compose up` refuse the
+      # media-worker (depends_on service_healthy). The first passing check ends the start period, so a normal start
+      # is healthy as soon as it listens (DEPLOYMENT.md, "Audit log (migration 031)").
+      start_period: 20m
 
   media-worker:
     <<: *app

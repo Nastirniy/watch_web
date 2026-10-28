@@ -32,6 +32,14 @@ def test_the_worker_starts_after_the_api_migrated_the_database():
     assert "healthcheck" in services["api"]
 
 
+def test_a_long_migration_at_the_start_does_not_make_the_api_unhealthy():
+    """The workers wait for the migrating one without a deadline (bootstrap/startup.py); the health check must give
+    the same start a long start_period, or compose refuses the media-worker after start_period + retries * interval
+    (2.5 minutes before: migration 031 on about 700,000 audit rows)"""
+    check = yaml.safe_load((PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8"))["services"]["api"]["healthcheck"]
+    assert check["start_period"] == "20m"
+
+
 def test_sizes_and_backoff_parse_from_json_strings():
     thumbs = ThumbnailSettings(small_size="[100, 120]", preview_size=[2000, 2000])
     assert thumbs.small_size == (100, 120) and thumbs.preview_size == (2000, 2000)

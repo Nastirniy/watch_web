@@ -342,7 +342,13 @@ log"). The start runs it.
    pool, 1,000,000 rows / 462 MB: 201 s in all). Adding the columns is instant (no table copy, the JSON column
    included), each index takes under a second per million rows, the rest is the backfill (UPDATEs in batches of
    10,000 ids plus one UPDATE per old `legacy.unknown`, role assignment, restore and reconcile row). Count the rows
-   first: `SELECT COUNT(*) FROM audit_logs`.
+   first: `SELECT COUNT(*) FROM audit_logs`. While one worker migrates, the other workers wait for its schema lock
+   as long as it holds it, logging `Schema lock watch_web_schema_init is held by connection N (migrating)` every 30
+   s (a holder that stops frees the lock). The api health check allows a start of up to 20 minutes
+   (`start_period` in `docker-compose.yml`), about 5 million audit rows; with more, run the migration on its own
+   first, with the api stopped: `docker compose run --rm --no-deps api python -m
+   app.backend.cli.migrations_manager migrate`, then `docker compose up -d` (the start finds nothing to migrate and
+   seeds).
 4. The web must ship a message for every event code (`GET /api/v1/audit-logs/events`) plus `legacy.unknown` before
    it shows the audit page: every row written before the deploy is served as `legacy.unknown` except the restores
    and reconciles, whose counts the backfill moved to `params`.
