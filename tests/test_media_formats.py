@@ -175,8 +175,11 @@ async def test_media_format_crud(client, db, headers):
     assert (await client.post(CREATE, json=payload, headers=headers(admin))).status_code == 400
     clash = dict(payload, content_type="image/avif2", extensions=[".png"])
     assert (await client.post(CREATE, json=clash, headers=headers(admin))).json()["code"] == "media_format_extension_clash"
-    alias_clash = dict(payload, content_type="image/avif3", extensions=[".av3"], aliases=["image/pjpeg"])
-    assert (await client.post(CREATE, json=alias_clash, headers=headers(admin))).status_code == 400
+    shared_alias = dict(payload, content_type="image/avif3", extensions=[".av3"], aliases=["image/pjpeg"])
+    shared = await client.post(CREATE, json=shared_alias, headers=headers(admin))
+    assert shared.status_code == 200, "formats may share an alias"
+    same_type = dict(payload, content_type="image/png", extensions=[".av7"])
+    assert (await client.post(CREATE, json=same_type, headers=headers(admin))).status_code == 400
     wrong_prefix = dict(payload, content_type="video/avif", extensions=[".av4"])
     assert (await client.post(CREATE, json=wrong_prefix, headers=headers(admin))).status_code == 422
     too_big = dict(payload, content_type="image/avif5", extensions=[".av5"], max_file_size_bytes=formats.hard_limit_bytes() + 1)
@@ -276,7 +279,7 @@ async def test_seeding_skips_a_default_whose_extension_or_alias_belongs_to_anoth
     assert "image/jpeg" not in {row.content_type for row in owners}
     assert await formats.seed_media_formats(db) == 0
 
-    # an alias clash is skipped as well
+    # an alias equal to another row's content_type no longer blocks a default (aliases may be shared)
     png = (await db.exec(select(MediaFormat).where(MediaFormat.content_type == "image/png"))).one()
     png.content_type = "image/x-png"
     png.aliases = ["image/webp"]
@@ -286,7 +289,7 @@ async def test_seeding_skips_a_default_whose_extension_or_alias_belongs_to_anoth
     webp.content_type = "image/x-webp"
     webp.extensions = [".wbp"]
     await db.commit()
-    assert await formats.seed_media_formats(db) == 0   # image/webp is an alias of image/x-png now
+    assert await formats.seed_media_formats(db) == 1   # image/webp is back; its alias on image/x-png is no clash
 
 
 class _InvalidatingSession:

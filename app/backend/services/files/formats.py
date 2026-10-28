@@ -280,11 +280,17 @@ async def load_registry(session: AsyncSession, use_cache: bool = True) -> Format
     return registry
 
 
+async def observation_registry(session: AsyncSession) -> FormatRegistry:
+    """The registry an observation upload works with: image, video and audio formats only"""
+    return (await load_registry(session)).restricted(UploadPurpose.OBSERVATION_MEDIA)
+
+
 def find_conflict(rows: Iterable[MediaFormat], extensions: Iterable[str], aliases: Iterable[str],
                   content_type: str, exclude_id: Optional[int] = None) -> Optional[Tuple[ErrorCode, Dict[str, object]]]:
-    """The first non-deleted row sharing an extension or a MIME spelling with the candidate, as (code, params), else None"""
+    """The first non-deleted row sharing an extension or the content_type with the candidate, as (code, params), else None.
+    Aliases only list what a detector may report for the format's files: formats may share them, and an alias may
+    equal another row's content_type. Unique are the content_type and each extension (`resolve` picks by extension)."""
     extensions = set(extensions)
-    mine = {content_type, *aliases}
     for row in rows:
         if row.is_deleted or row.id == exclude_id:
             continue
@@ -292,16 +298,15 @@ def find_conflict(rows: Iterable[MediaFormat], extensions: Iterable[str], aliase
         if clash_ext:
             return ErrorCode.MEDIA_FORMAT_EXTENSION_CLASH, dict(
                 extensions=clash_ext, format_content_type=row.content_type, format_id=row.id)
-        clash_mime = sorted(mine & {row.content_type, *(row.aliases or [])})
-        if clash_mime:
+        if content_type == row.content_type:
             return ErrorCode.MEDIA_FORMAT_CONTENT_TYPE_CLASH, dict(
-                content_types=clash_mime, format_content_type=row.content_type, format_id=row.id)
+                content_types=[content_type], format_content_type=row.content_type, format_id=row.id)
     return None
 
 
 async def seed_media_formats(session: AsyncSession) -> int:
-    """Insert every default format whose content_type is missing and whose extensions and aliases no live row owns
-    (an admin may have renamed a default; rows added by this same call do not count). Never touches existing rows. Returns the count added."""
+    """Insert every default format whose content_type is missing and whose extensions no live row owns
+    (an admin may have renamed a default). Never touches existing rows. Returns the count added."""
     rows = list((await session.exec(select(MediaFormat))).all())
     existing = {row.content_type for row in rows}
     added = 0
@@ -320,8 +325,7 @@ async def seed_media_formats(session: AsyncSession) -> int:
             is_active=True, sort_order=spec.sort_order,
         )
         session.add(row)
-        # not appended to rows: defaults may share aliases among themselves (application/zip, text/plain);
-        # only rows that existed before this call can make a default skip
+        rows.append(row)
         existing.add(spec.content_type)
         added += 1
     if added:

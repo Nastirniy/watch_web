@@ -15,7 +15,7 @@ class MediaFormat(SQLModel, table=True):
     __tablename__ = "media_formats"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    media_type: str = Field(max_length=10, index=True)            # image | video | audio
+    media_type: str = Field(max_length=10, index=True)            # image | video | audio | document
     content_type: str = Field(max_length=100, unique=True)        # canonical Content-Type, lower case
     label: str = Field(max_length=255)
     extensions: List[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))   # [".jpg", ".jpeg"]

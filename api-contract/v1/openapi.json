@@ -40682,7 +40682,7 @@
             "title": "Detail",
             "description": "Explanation of this occurrence",
             "examples": [
-              "content_type '{content_type}' must start with '{media_type}/' (put other spellings into aliases)"
+              "content_type '{content_type}' must belong to the families of media type {media_type} (put other spellings into aliases)"
             ]
           },
           "instance": {
@@ -40723,7 +40723,7 @@
           {
             "code": "media_format_content_type_mismatch",
             "content_type": "<content_type>",
-            "detail": "content_type '<content_type>' must start with '<media_type>/' (put other spellings into aliases)",
+            "detail": "content_type '<content_type>' must belong to the families of media type <media_type> (put other spellings into aliases)",
             "instance": "/api/v1/...",
             "media_type": "<media_type>",
             "status": 400,

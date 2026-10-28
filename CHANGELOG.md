@@ -20,6 +20,12 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `application/javascript`, `text/javascript`, `application/x-msdownload`, `application/x-sh`,
   `application/java-archive` are refused with 422 `validation_error` item `content_type_forbidden` (create and update).
 - The rule "content type belongs to the media type" is one function, `content_type_allowed`.
+- Format conflicts (create, update, restore): only the `content_type` and each extension are unique across formats.
+  Aliases may be shared (several document rows list `application/zip` or `text/plain`) and may equal another
+  format's `content_type`; `media_format_content_type_clash` now means the same `content_type` only (code and params
+  unchanged).
+- The details of `content_type_outside_media_type` and `media_format_content_type_mismatch` say the content type must
+  belong to the families of the media type (no longer "must start with '{media_type}/'"); params unchanged.
 
 ## Authorization fixes (moves, type change, user writes)
 

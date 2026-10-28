@@ -451,7 +451,7 @@ class ErrorCode(ProblemType):
         max_file_size_bytes=int, ceiling_bytes=int))
     MEDIA_FORMAT_CONTENT_TYPE_MISMATCH = ("media_format_content_type_mismatch", problem(
         400, "content_type does not belong to media_type",
-        "content_type '{content_type}' must start with '{media_type}/' (put other spellings into aliases)",
+        "content_type '{content_type}' must belong to the families of media type {media_type} (put other spellings into aliases)",
         content_type=str, media_type=str))
     MEDIA_FORMAT_EXTENSION_CLASH = ("media_format_extension_clash", problem(
         400, "Extension belongs to another format",
@@ -532,7 +532,7 @@ class FieldErrorCode(FieldCode):
     EXTENSIONS_REQUIRED = ("extensions_required", field("At least one extension is required"))
     MEDIA_TYPE_NOT_ACCEPTED = ("media_type_not_accepted", field("media_type must be one of {accepted}", accepted=List[str]))
     CONTENT_TYPE_OUTSIDE_MEDIA_TYPE = ("content_type_outside_media_type", field(
-        "content_type must start with '{media_type}/' (put other spellings into aliases)", media_type=str))
+        "content_type must belong to the families of media type {media_type} (put other spellings into aliases)", media_type=str))
     CONTENT_TYPE_FORBIDDEN = ("content_type_forbidden", field(
         "Content-Type '{content_type}' is never accepted: it runs code when opened", content_type=str))
     CONFIDENCE_LEVEL_INVALID = ("confidence_level_invalid", field("confidence_level must be one of: {accepted}", accepted=List[str]))

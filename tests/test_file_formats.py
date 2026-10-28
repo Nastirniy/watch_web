@@ -6,13 +6,18 @@ import pytest
 
 from app.backend.api.v1 import V1
 from app.backend.enums.general import UploadPurpose
+from sqlmodel import select
+
 from app.backend.enums.routes import MediaFormatRoutes
+from app.backend.models.media_format import MediaFormat
 from app.backend.services.files import formats
 from app.backend.services.files.names import extension_of, sanitize_filename
 from tests.helpers import make_admin
 
 CREATE = V1.path(MediaFormatRoutes.CREATE)
 BY_ID = V1.path(MediaFormatRoutes.FORMAT_BY_ID)
+ARCHIVE = V1.path(MediaFormatRoutes.FORMAT_ARCHIVE)
+RESTORE = V1.path(MediaFormatRoutes.FORMAT_RESTORE)
 BACKEND = Path(__file__).resolve().parent.parent / "app" / "backend"
 
 DOCUMENTS = {
@@ -62,7 +67,7 @@ async def test_media_format_api_accepts_document_with_application_type(client, d
     body = {"media_type": "document", "content_type": "application/epub+zip", "label": "EPUB",
             "extensions": [".epub"], "max_file_size_bytes": 10 * formats.MB}
     created = await client.post(CREATE, json=body, headers=headers(admin))
-    assert created.status_code in (200, 201), created.text
+    assert created.status_code == 200, created.text
     assert created.json()["media_type"] == "document"
     # the family rule still holds for media: an image cannot be application/*
     wrong = dict(body, media_type="image", content_type="application/x-wrong", extensions=[".wrg"])
@@ -81,7 +86,7 @@ async def test_forbidden_content_type_is_422(client, db, headers):
     assert (await client.post(CREATE, json=alias, headers=headers(admin))).status_code == 422
     ok = dict(body, content_type="text/x-ok", extensions=[".okx"])
     created = await client.post(CREATE, json=ok, headers=headers(admin))
-    assert created.status_code in (200, 201), created.text
+    assert created.status_code == 200, created.text
     format_id = created.json()["id"]
     for change in ({"content_type": "image/svg+xml", "media_type": "image"}, {"aliases": ["text/html"]}):
         assert (await client.put(BY_ID.format(format_id=format_id), json=change, headers=headers(admin))).status_code == 422
@@ -109,3 +114,34 @@ def test_names():
     assert extension_of("Plan.PDF") == ".pdf"
     assert extension_of("noext") == "" and extension_of(None) == "" and extension_of("a.") == ""
     assert sanitize_filename("photo.png") == "photo.png"
+
+
+def test_default_formats_have_unique_content_types_and_extensions():
+    defaults = formats.default_formats()
+    content_types = [spec.content_type for spec in defaults]
+    extensions = [ext for spec in defaults for ext in spec.extensions]
+    assert len(content_types) == len(set(content_types))
+    assert len(extensions) == len(set(extensions))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content_type", [
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "text/markdown", "text/csv"])
+async def test_seeded_document_row_can_be_updated_archived_and_restored(client, db, headers, content_type):
+    admin = await make_admin(db)
+    row = (await db.exec(select(MediaFormat).where(MediaFormat.content_type == content_type))).one()
+    url = BY_ID.format(format_id=row.id)
+    updated = await client.put(url, json={"label": "Renamed"}, headers=headers(admin))
+    assert updated.status_code == 200, updated.text
+    assert (await client.post(ARCHIVE.format(format_id=row.id), headers=headers(admin))).status_code == 200
+    restored = await client.post(RESTORE.format(format_id=row.id), headers=headers(admin))
+    assert restored.status_code == 200, restored.text
+
+
+@pytest.mark.asyncio
+async def test_second_format_claiming_an_extension_is_still_a_conflict(client, db, headers):
+    admin = await make_admin(db)
+    body = {"media_type": "document", "content_type": "application/x-second-docx", "label": "Second",
+            "extensions": [".docx"], "aliases": ["application/zip"], "max_file_size_bytes": formats.MB}
+    clash = await client.post(CREATE, json=body, headers=headers(admin))
+    assert clash.status_code == 400 and clash.json()["code"] == "media_format_extension_clash"

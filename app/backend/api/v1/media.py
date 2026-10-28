@@ -29,7 +29,7 @@ from app.backend.services.files import formats
 from app.backend.services.media import jobs, renderer, uploads, urls as thumb_urls
 from app.backend.services.media.storyboards import build_vtt, layout_usable, status_for
 from app.backend.services.files.formats import UnsupportedMediaFormat, FileTooLarge
-from app.backend.enums.general import Permissions, PosterStatus, UploadPurpose, StoryboardStatus, ThumbnailFormat, ThumbnailSize, ThumbnailStatus
+from app.backend.enums.general import Permissions, PosterStatus, StoryboardStatus, ThumbnailFormat, ThumbnailSize, ThumbnailStatus
 from app.backend.enums.routes import MediaRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.services.audit import create_audit_log
@@ -88,7 +88,7 @@ async def get_media_formats(
     auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW]))
 ):
     """Accepted upload formats (active rows of media_formats): Content-Type, extensions and size limit per media type. Also sent as Accept-Post."""
-    registry = (await formats.load_registry(session)).restricted(UploadPurpose.OBSERVATION_MEDIA)
+    registry = await formats.observation_registry(session)
     response.headers["Accept-Post"] = registry.accept_post_header()
     return MediaFormatsResponse(
         media_types=registry.media_types(),
@@ -367,7 +367,7 @@ async def upload_complete_file(
     post_id = (await load_observation_for_upload(session, auth, observation_id)).post_id
 
     original_filename = file.filename or "uploaded_file"
-    registry = await formats.load_registry(session)
+    registry = await formats.observation_registry(session)
     spec = check_declared_format(registry, media_type, original_filename, file.content_type)
     media_type = spec.media_type
     if file.size and file.size > spec.effective_limit_bytes:
@@ -446,7 +446,7 @@ async def nginx_upload_file(
 
     try:
         original_filename = x_original_filename or "uploaded_file"
-        registry = await formats.load_registry(session)
+        registry = await formats.observation_registry(session)
         spec = check_declared_format(registry, media_type, original_filename, request.headers.get("content-type"))
         media_type = spec.media_type
 

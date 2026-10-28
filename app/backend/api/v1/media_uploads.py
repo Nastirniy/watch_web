@@ -196,7 +196,7 @@ async def create_upload_session(
     """Open a resumable upload. Format, declared Content-Type and size are checked here, before any byte is sent.
     An observation of an archived post: 409 post_archived."""
     observation = await load_observation_for_upload(session, auth, body.observation_id)
-    registry = await formats.load_registry(session)
+    registry = await formats.observation_registry(session)
     spec = check_declared_format(registry, body.media_type, body.original_filename, body.content_type)
     if body.expected_size > spec.effective_limit_bytes:
         raise too_large(spec, body.expected_size)
@@ -458,7 +458,7 @@ async def _store_claimed(session: AsyncSession, row: UploadSession, token: str) 
             raise ApiError(ErrorCode.UPLOAD_CHECKSUM_MISMATCH, headers=_session_headers(row),
                            expected_sha256=row.expected_sha256, actual_sha256=actual)
 
-    registry = await formats.load_registry(session)
+    registry = await formats.observation_registry(session)
     spec = check_declared_format(registry, row.media_type, row.original_filename, row.declared_content_type)
     try:
         media_file_id = await get_media_manager().store_file_from_path(
