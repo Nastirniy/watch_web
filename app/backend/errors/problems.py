@@ -20,10 +20,11 @@ from fastapi.encoders import jsonable_encoder
 
 from app.backend.config import settings
 from app.backend.enums.errors import ErrorCode, FieldCode, ProblemType
+from app.backend.enums.media_types import ContentType
 from app.backend.enums.routes import SystemRoutes
 from app.backend.errors.coded import FIELD_MEMBERS, CodedError, check_params, is_optional
 
-PROBLEM_JSON = "application/problem+json"
+PROBLEM_JSON = ContentType.PROBLEM_JSON
 
 
 class ApiError(HTTPException):

@@ -2,7 +2,15 @@
 content type and aliases.
 
 The fixtures in tests/fixtures/files are small real files (make_fixtures.py writes the binary ones). The registry
-follows Debian's libmagic (the api image); these tests also run inside the image (task report)."""
+follows Debian's libmagic (the api image, production): re-check the aliases there whenever the image or the defaults
+change, from the repository root (on Windows the mount is the full path, e.g. E:/Develop/pypr/watch_web:/repo:ro):
+
+    docker build -t watch-web .
+    docker run --rm -v "$PWD:/repo:ro" -w /repo -e MYSETTINGS_APP__ENVIRONMENT=development watch-web python -m pytest tests/test_file_sniff.py -q -p no:cacheprovider
+
+Expected: every test passes, none skipped. A libmagic of another system (Windows, macOS) may name a file otherwise:
+the image decides.
+"""
 from pathlib import Path
 
 import pytest

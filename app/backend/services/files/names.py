@@ -1,7 +1,6 @@
 """File names: the one extension parser and the one sanitiser (no other module parses an extension by hand)."""
 from __future__ import annotations
 
-import os
 import re
 import unicodedata
 import uuid
@@ -23,9 +22,14 @@ def sanitize_filename(filename: str) -> str:
     if not filename:
         return f"upload_{uuid.uuid4().hex[:8]}"
 
-    # The extension comes from the original name (as check_declared_format reads it); only the
-    # stem is reduced to ASCII, so a stem without ASCII letters cannot swallow the extension
-    name, ext = os.path.splitext(filename)
+    # The extension comes from the original name by the one parser (extension_of, as check_declared_format reads
+    # it: ".jpg" has the extension .jpg), its case kept; only the stem is reduced to ASCII, so a stem without ASCII
+    # letters cannot swallow the extension
+    if extension_of(filename):
+        name = filename[:filename.rfind(".")]
+        ext = filename[len(name):]
+    else:
+        name, ext = filename, ""
     name, ext = (
         unicodedata.normalize('NFKD', part).encode('ascii', 'ignore').decode('ascii')
         for part in (name, ext)

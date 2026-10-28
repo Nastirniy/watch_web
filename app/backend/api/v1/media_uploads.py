@@ -18,6 +18,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.config import settings
 from app.backend.database import get_session
 from app.backend.enums.general import Permissions
+from app.backend.enums.media_types import ContentType
 from app.backend.enums.routes import MediaRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.auth.scope import Node
@@ -54,7 +55,8 @@ router = APIRouter(prefix=MediaRoutes.BASE.value, tags=[MediaRoutes.tag()])
 _logger = get_api_logger()
 
 UPLOAD_REQUIRE = require(all=[Permissions.MEDIA_VIEW, Permissions.MEDIA_CREATE])
-CHUNK_CONTENT_TYPES = {"application/offset+octet-stream", "application/octet-stream"}
+# The tus protocol's own name for a chunk body, and plain opaque bytes
+CHUNK_CONTENT_TYPES = frozenset({ContentType.OFFSET_OCTET_STREAM, ContentType.OCTET_STREAM})
 
 
 def _session_headers(row: UploadSession) -> dict:
@@ -201,10 +203,13 @@ async def create_upload_session(
     if body.expected_size > spec.effective_limit_bytes:
         raise too_large(spec, body.expected_size)
 
+    # A declared name of the format is kept as its canonical name (an alias as the format's name); an opaque one as is
+    declared = formats.normalise_content_type(body.content_type)
     row = uploads.new_session(
         user_id=auth.user.id, observation_id=observation.id, post_id=observation.post_id,
         media_type=spec.media_type, original_filename=body.original_filename, expected_size=body.expected_size,
-        declared_content_type=formats.normalise_content_type(body.content_type), expected_sha256=body.sha256,
+        declared_content_type=spec.content_type if declared in spec.all_mimes else declared,
+        expected_sha256=body.sha256,
     )
     session.add(row)
     await session.flush()
@@ -296,8 +301,9 @@ async def append_upload_chunk(
     if raw_offset is None or not raw_offset.isdigit():
         raise ApiError(ErrorCode.UPLOAD_OFFSET_REQUIRED, headers=_session_headers(row))
     offset = int(raw_offset)
-    content_type = formats.normalise_content_type(request.headers.get("content-type"))
-    if content_type and content_type not in CHUNK_CONTENT_TYPES:
+    raw_type = (request.headers.get("content-type") or "").strip()
+    content_type = formats.normalise_content_type(raw_type)
+    if raw_type and content_type not in CHUNK_CONTENT_TYPES:
         raise ApiError(ErrorCode.UPLOAD_CHUNK_CONTENT_TYPE, headers=_session_headers(row))
     max_chunk = settings.storage.upload.max_chunk_bytes
     declared_length = request.headers.get("content-length")

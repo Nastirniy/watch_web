@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Dict, FrozenSet, Iterable, List, Optional, Tuple, Union
 
 from sqlmodel import select
@@ -22,16 +23,19 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.config import settings
 from app.backend.enums.general import MediaType, UploadPurpose
+from app.backend.enums.media_types import ContentType as CT
 from app.backend.services.files.names import extension_of
 from app.backend.enums.errors import ErrorCode
 from app.backend.models.media_format import MediaFormat
 from app.backend.errors.coded import CodedError
+from app.backend.utils.content_type import parse_content_type
 from app.backend.utils.logging_config import get_api_logger
 
 _logger = get_api_logger()
 
-# Declared Content-Type values that mean "detect from the bytes"; never stored
-OPAQUE_CONTENT_TYPES = {"application/octet-stream", "binary/octet-stream"}
+# Declared Content-Type values that mean "detect from the bytes"; never stored, never a format's type or alias (the
+# sniffer answers application/octet-stream for bytes it cannot name: as an alias it would switch the check off)
+OPAQUE_CONTENT_TYPES: FrozenSet[CT] = frozenset({CT.OCTET_STREAM, CT.BINARY_OCTET_STREAM})
 
 MB = 1024 * 1024
 GB = 1024 * MB
@@ -51,17 +55,17 @@ ALLOWED_TOP_LEVEL: Dict[str, FrozenSet[str]] = {
 }
 
 # Types that run code in a browser or on a desktop when opened: never a format's content type or alias
-FORBIDDEN_CONTENT_TYPES: FrozenSet[str] = frozenset({
-    "text/html", "application/xhtml+xml", "image/svg+xml", "application/javascript", "text/javascript",
-    "application/x-msdownload", "application/x-sh", "application/java-archive",
+FORBIDDEN_CONTENT_TYPES: FrozenSet[CT] = frozenset({
+    CT.HTML, CT.XHTML, CT.IMAGE_SVG, CT.APPLICATION_JAVASCRIPT, CT.JAVASCRIPT, CT.X_MSDOWNLOAD, CT.X_SH,
+    CT.JAVA_ARCHIVE,
 })
 
 
 def content_type_allowed(media_type: str, content_type: str) -> bool:
     """True when the Content-Type belongs to the family of the media type (image/* for image, application/* or text/*
     for document, ...)"""
-    top = (content_type or "").split("/", 1)[0].strip().lower()
-    return top in ALLOWED_TOP_LEVEL.get((media_type or "").strip().lower(), frozenset())
+    parsed = parse_content_type(content_type)
+    return parsed is not None and parsed.type in ALLOWED_TOP_LEVEL.get((media_type or "").strip().lower(), frozenset())
 
 # Registry cache: uploads are rare compared with reads, but a query per upload
 # is still avoidable; writes call invalidate_registry_cache() so the process
@@ -118,39 +122,63 @@ def default_formats() -> Tuple[FormatSpec, ...]:
     """Seed data: keep it short, every entry must be renderable by imgproxy, decodable by ffmpeg or playable in a browser"""
     image, video, audio = MediaType.IMAGE.value, MediaType.VIDEO.value, MediaType.AUDIO.value
     document = MediaType.DOCUMENT.value
-    wordml = "application/vnd.openxmlformats-officedocument."
+    # The IANA name first (enums/media_types.py); aliases are the other names clients and libmagic use
     rows = (
-        (image, "image/jpeg", (".jpg", ".jpeg"), "JPEG", ("image/pjpeg",)),
-        (image, "image/png", (".png",), "PNG", ()),
-        (image, "image/webp", (".webp",), "WebP", ()),
-        (image, "image/gif", (".gif",), "GIF", ()),
-        (video, "video/mp4", (".mp4", ".m4v"), "MP4 (H.264/H.265)", ("video/x-m4v",)),
-        (video, "video/webm", (".webm",), "WebM", ()),
-        (video, "video/quicktime", (".mov",), "QuickTime MOV", ()),
-        (video, "video/x-matroska", (".mkv",), "Matroska MKV", ("video/matroska",)),
-        (audio, "audio/mpeg", (".mp3",), "MP3", ("audio/mp3",)),
-        (audio, "audio/wav", (".wav",), "WAV", ("audio/x-wav", "audio/wave", "audio/vnd.wave")),
-        (audio, "audio/flac", (".flac",), "FLAC", ("audio/x-flac",)),
-        (audio, "audio/ogg", (".ogg", ".oga", ".opus"), "Ogg Vorbis / Opus", ("audio/opus", "application/ogg")),
-        (audio, "audio/mp4", (".m4a",), "AAC in MP4 (M4A)", ("audio/x-m4a", "audio/aac")),
+        (image, CT.IMAGE_JPEG, (".jpg", ".jpeg"), "JPEG", (CT.IMAGE_PJPEG,)),
+        (image, CT.IMAGE_PNG, (".png",), "PNG", ()),
+        (image, CT.IMAGE_WEBP, (".webp",), "WebP", ()),
+        (image, CT.IMAGE_GIF, (".gif",), "GIF", ()),
+        (video, CT.VIDEO_MP4, (".mp4", ".m4v"), "MP4 (H.264/H.265)", (CT.VIDEO_X_M4V,)),
+        (video, CT.VIDEO_WEBM, (".webm",), "WebM", ()),
+        (video, CT.VIDEO_QUICKTIME, (".mov",), "QuickTime MOV", ()),
+        (video, CT.VIDEO_MATROSKA, (".mkv",), "Matroska MKV", (CT.VIDEO_X_MATROSKA,)),
+        (audio, CT.AUDIO_MPEG, (".mp3",), "MP3", (CT.AUDIO_MP3,)),
+        (audio, CT.AUDIO_WAV, (".wav",), "WAV", (CT.AUDIO_X_WAV, CT.AUDIO_WAVE, CT.AUDIO_VND_WAVE)),
+        (audio, CT.AUDIO_FLAC, (".flac",), "FLAC", (CT.AUDIO_X_FLAC,)),
+        (audio, CT.AUDIO_OGG, (".ogg", ".oga", ".opus"), "Ogg Vorbis / Opus", (CT.AUDIO_OPUS, CT.APPLICATION_OGG)),
+        (audio, CT.AUDIO_MP4, (".m4a",), "AAC in MP4 (M4A)", (CT.AUDIO_X_M4A, CT.AUDIO_AAC)),
         # Document aliases are what Debian's libmagic (the api image) reports for real files: OOXML, ODF and Word 97
         # by their own types, Markdown as text/plain, a CSV of fewer than three lines as text/plain, RTF as text/rtf
-        (document, "application/pdf", (".pdf",), "PDF", ()),
-        (document, wordml + "wordprocessingml.document", (".docx",), "Word DOCX", ()),
-        (document, wordml + "spreadsheetml.sheet", (".xlsx",), "Excel XLSX", ()),
-        (document, wordml + "presentationml.presentation", (".pptx",), "PowerPoint PPTX", ()),
-        (document, "application/vnd.oasis.opendocument.text", (".odt",), "OpenDocument text", ()),
-        (document, "application/msword", (".doc",), "Word 97-2003", ()),
-        (document, "text/markdown", (".md", ".markdown"), "Markdown", ("text/plain",)),
-        (document, "text/plain", (".txt",), "Plain text", ()),
-        (document, "text/csv", (".csv",), "CSV", ("text/plain",)),
-        (document, "application/rtf", (".rtf",), "RTF", ("text/rtf",)),
+        (document, CT.PDF, (".pdf",), "PDF", ()),
+        (document, CT.DOCX, (".docx",), "Word DOCX", ()),
+        (document, CT.XLSX, (".xlsx",), "Excel XLSX", ()),
+        (document, CT.PPTX, (".pptx",), "PowerPoint PPTX", ()),
+        (document, CT.ODT, (".odt",), "OpenDocument text", ()),
+        (document, CT.MSWORD, (".doc",), "Word 97-2003", ()),
+        (document, CT.TEXT_MARKDOWN, (".md", ".markdown"), "Markdown", (CT.TEXT_PLAIN,)),
+        (document, CT.TEXT_PLAIN, (".txt",), "Plain text", ()),
+        (document, CT.TEXT_CSV, (".csv",), "CSV", (CT.TEXT_PLAIN,)),
+        (document, CT.APPLICATION_RTF, (".rtf",), "RTF", (CT.TEXT_RTF,)),
     )
+    # Plain strings in the specs: they are stored in rows and compared with header values
     return tuple(
-        FormatSpec(media_type=mt, content_type=ct, extensions=exts, label=label,
-                   max_file_size_bytes=_default_size(mt), aliases=aliases, sort_order=index)
+        FormatSpec(media_type=mt, content_type=ct.value, extensions=exts, label=label,
+                   max_file_size_bytes=_default_size(mt), aliases=tuple(alias.value for alias in aliases),
+                   sort_order=index)
         for index, (mt, ct, exts, label, aliases) in enumerate(rows)
     )
+
+
+@lru_cache(maxsize=1)
+def _default_alias_names() -> Dict[str, str]:
+    """alias -> canonical name, for the aliases of exactly one default format that are no default format's name"""
+    defaults = default_formats()
+    names = {spec.content_type for spec in defaults}
+    owners: Dict[str, set] = {}
+    for spec in defaults:
+        for alias in spec.aliases:
+            owners.setdefault(alias, set()).add(spec.content_type)
+    return {alias: next(iter(of)) for alias, of in owners.items() if len(of) == 1 and alias not in names}
+
+
+def canonical_content_type(value: Optional[str]) -> Optional[str]:
+    """The canonical name of a media type: 'Video/X-Matroska; codecs=vp9' -> 'video/matroska' (an alias of one
+    default format becomes that format's name); any other type its parsed essence; None when absent or malformed.
+    Stored rows hold canonical names (migration 032), so a filter value goes through this."""
+    parsed = parse_content_type(value)
+    if parsed is None:
+        return None
+    return _default_alias_names().get(parsed.essence, parsed.essence)
 
 
 class UnsupportedMediaFormat(CodedError):
@@ -171,10 +199,9 @@ class FileTooLarge(ValueError):
 
 
 def normalise_content_type(value: Optional[str]) -> Optional[str]:
-    """'image/JPEG; charset=binary' -> 'image/jpeg'; None or empty stays None"""
-    if not value:
-        return None
-    return value.split(";", 1)[0].strip().lower() or None
+    """'image/JPEG; charset=binary' -> 'image/jpeg' (utils/content_type.py); None when absent, empty or malformed"""
+    parsed = parse_content_type(value)
+    return parsed.essence if parsed is not None else None
 
 
 class FormatRegistry:

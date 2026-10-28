@@ -16,10 +16,10 @@ def header(description: str, schema_type: str = "string", fmt: Optional[str] = N
 
 def file_response(description: str, media_types: Iterable[str], headers: Optional[Dict[str, dict]] = None,
                   status: int = 200) -> Dict[int, dict]:
-    """A binary body in one of media_types"""
+    """A binary body in one of media_types (members of enums/media_types.ContentType)"""
     return {status: {
         "description": description,
-        "content": {media_type: {"schema": BINARY} for media_type in media_types},
+        "content": {str(media_type): {"schema": BINARY} for media_type in media_types},
         **({"headers": headers} if headers else {}),
     }}
 

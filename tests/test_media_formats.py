@@ -36,7 +36,7 @@ async def test_seeded_registry_is_limited_and_consistent(db):
     assert len(canonical) == len(set(canonical)), "no duplicate Content-Types"
     all_ext = registry.extensions()
     assert len(all_ext) == len(set(all_ext)), "an extension maps to one format only"
-    assert registry.accept_post_header("video") == "video/mp4, video/webm, video/quicktime, video/x-matroska"
+    assert registry.accept_post_header("video") == "video/mp4, video/webm, video/quicktime, video/matroska"
     observation = UploadPurpose.OBSERVATION_MEDIA
     assert registry.resolve(observation, "clip.MOV").content_type == "video/quicktime"
     assert registry.resolve(observation, "clip") is None

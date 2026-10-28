@@ -15,6 +15,7 @@ from app.backend.models.media import MediaFile
 from app.backend.enums.general import MediaType, PosterStatus, UnitPlacement
 from app.backend.models.observation import Observation
 from app.backend.filters.simple_engine import ListCriteria, SimpleFilterEngine
+from app.backend.services.files.formats import canonical_content_type
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -47,6 +48,14 @@ class MediaFilterService(SimpleFilterEngine):
     MODEL = MediaFile
     CRITERIA = MediaCriteria
     SORTABLE_FIELDS = ["id", "original_filename", "file_size", "media_type", "uploaded_at", "observation_id"]
+
+    @staticmethod
+    def _mime_type(value: Optional[str]) -> Optional[str]:
+        """Rows hold canonical names (migration 032): the value parsed, an alias as its format's name ('Video/X-Matroska'
+        -> 'video/matroska'); a malformed value as given (it matches nothing)"""
+        if value is None:
+            return None
+        return canonical_content_type(value) or value
 
     @staticmethod
     def _apply_has_thumbnail(query: Select, has_thumbnail: Optional[bool]) -> Select:
@@ -108,7 +117,7 @@ class MediaFilterService(SimpleFilterEngine):
         query = cls._apply_exact(query, MediaFile.observation_id, params.observation_id)
         query = cls._apply_contains(query, MediaFile.original_filename, params.original_filename_contains)
         query = cls._apply_exact(query, MediaFile.media_type, params.media_type)
-        query = cls._apply_exact(query, MediaFile.mime_type, params.mime_type)
+        query = cls._apply_exact(query, MediaFile.mime_type, cls._mime_type(params.mime_type))
         query = cls._apply_exact(query, MediaFile.file_extension, params.file_extension)
         query = cls._apply_range(query, MediaFile.file_size, params.file_size_from, params.file_size_to)
         query = cls._apply_range(query, MediaFile.width, params.width_from, params.width_to)
@@ -140,7 +149,7 @@ class MediaFilterService(SimpleFilterEngine):
         query = cls._apply_exact(query, MediaFile.observation_id, params.observation_id)
         query = cls._apply_contains(query, MediaFile.original_filename, params.original_filename_contains)
         query = cls._apply_exact(query, MediaFile.media_type, params.media_type)
-        query = cls._apply_exact(query, MediaFile.mime_type, params.mime_type)
+        query = cls._apply_exact(query, MediaFile.mime_type, cls._mime_type(params.mime_type))
         query = cls._apply_exact(query, MediaFile.file_extension, params.file_extension)
         query = cls._apply_range(query, MediaFile.file_size, params.file_size_from, params.file_size_to)
         query = cls._apply_range(query, MediaFile.width, params.width_from, params.width_to)

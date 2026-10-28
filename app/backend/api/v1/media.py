@@ -30,7 +30,9 @@ from app.backend.services.media import jobs, renderer, uploads, urls as thumb_ur
 from app.backend.services.media.storyboards import build_vtt, layout_usable, status_for
 from app.backend.services.files.formats import UnsupportedMediaFormat, FileTooLarge
 from app.backend.enums.general import Permissions, PosterStatus, StoryboardStatus, ThumbnailFormat, ThumbnailSize, ThumbnailStatus
+from app.backend.enums.media_types import ContentType
 from app.backend.enums.routes import MediaRoutes
+from app.backend.utils.content_type import served_content_type
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.services.audit import create_audit_log
 from app.backend.utils.logging_config import get_api_logger
@@ -206,8 +208,8 @@ async def get_media_info(
     MediaRoutes.MEDIA_DOWNLOAD.value,
     response_class=Response,
     responses={
-        **file_response("The original file (attachment), in its own Content-Type", ["*/*"], ORIGINAL_FILE_HEADERS),
-        **file_response("The requested byte range (Range header)", ["*/*"], {"Content-Range": header("bytes start-end/size")}, status=206),
+        **file_response("The original file (attachment), in its own Content-Type", [ContentType.ANY], ORIGINAL_FILE_HEADERS),
+        **file_response("The requested byte range (Range header)", [ContentType.ANY], {"Content-Range": header("bytes start-end/size")}, status=206),
         **problems(
             AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.MEDIA_FILE_MISSING,
             ErrorCode.MEDIA_NOT_FOUND, ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_PATH_UNRESOLVED,
@@ -232,8 +234,8 @@ async def download_media_file(
     MediaRoutes.MEDIA_STREAM.value,
     response_class=Response,
     responses={
-        **file_response("The original file (inline), in its own Content-Type", ["*/*"], ORIGINAL_FILE_HEADERS),
-        **file_response("The requested byte range (Range header)", ["*/*"], {"Content-Range": header("bytes start-end/size")}, status=206),
+        **file_response("The original file (inline), in its own Content-Type", [ContentType.ANY], ORIGINAL_FILE_HEADERS),
+        **file_response("The requested byte range (Range header)", [ContentType.ANY], {"Content-Range": header("bytes start-end/size")}, status=206),
         **problems(
             AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.MEDIA_FILE_MISSING,
             ErrorCode.MEDIA_NOT_FOUND, ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_PATH_UNRESOLVED,
@@ -554,14 +556,14 @@ async def _proxy_render(url: str) -> Response:
     for name in ("etag", "content-length"):
         if name in rendered.headers:
             headers[name] = rendered.headers[name]
-    return Response(content=rendered.body, media_type=rendered.headers.get("content-type", "image/jpeg"), headers=headers)
+    return Response(content=rendered.body, media_type=rendered.headers.get("content-type", ContentType.IMAGE_JPEG.value), headers=headers)
 
 
 @router.get(
     MediaRoutes.MEDIA_THUMBNAIL.value,
     response_class=Response,
     responses={
-        **file_response("The image (WebP when format=auto and the client accepts it)", ["image/webp", "image/jpeg", "image/png"],
+        **file_response("The image (WebP when format=auto and the client accepts it)", [ContentType.IMAGE_WEBP, ContentType.IMAGE_JPEG, ContentType.IMAGE_PNG],
                         {"X-Thumbnail-Status": header("ready"), "Cache-Control": header("private, max-age=86400")}),
         **empty_response(202, "The video poster is not extracted yet; ask again after Retry-After", THUMBNAIL_PENDING_HEADERS),
         **problems(
@@ -614,7 +616,7 @@ async def get_media_thumbnail(
     MediaRoutes.MEDIA_STORYBOARD.value,
     response_class=Response,
     responses={
-        **file_response("WebVTT storyboard: one cue per frame, signed sheet URLs with #xywh", ["text/vtt"], STORYBOARD_HEADERS),
+        **file_response("WebVTT storyboard: one cue per frame, signed sheet URLs with #xywh", [ContentType.WEBVTT], STORYBOARD_HEADERS),
         **empty_response(202, "The storyboard is not generated yet; ask again after Retry-After", STORYBOARD_PENDING_HEADERS),
         **problems(
             AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.MEDIA_NOT_FOUND,
@@ -684,8 +686,8 @@ async def get_media_storyboard(
     )
     return Response(
         content=body,
-        media_type="text/vtt; charset=utf-8",
-        headers={"Cache-Control": f"private, max-age={ttl}"},
+        # in the headers: Starlette would add a charset to media_type=, and WebVTT defines none (always UTF-8)
+        headers={"Content-Type": served_content_type(ContentType.WEBVTT), "Cache-Control": f"private, max-age={ttl}"},
     )
 
 

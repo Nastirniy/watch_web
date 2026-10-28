@@ -20121,10 +20121,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Exact MIME type",
+              "description": "MIME type, any case, parameters ignored; an alias finds the stored canonical name (video/x-matroska finds video/matroska)",
               "title": "Mime Type"
             },
-            "description": "Exact MIME type"
+            "description": "MIME type, any case, parameters ignored; an alias finds the stored canonical name (video/x-matroska finds video/matroska)"
           },
           {
             "name": "file_extension",
@@ -28987,10 +28987,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Exact MIME type",
+              "description": "MIME type, any case, parameters ignored; an alias finds the stored canonical name (video/x-matroska finds video/matroska)",
               "title": "Mime Type"
             },
-            "description": "Exact MIME type"
+            "description": "MIME type, any case, parameters ignored; an alias finds the stored canonical name (video/x-matroska finds video/matroska)"
           },
           {
             "name": "file_extension",

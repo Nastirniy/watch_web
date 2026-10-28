@@ -69,7 +69,7 @@ Content-Length: 8388608
 | 410 | `upload_session_closed`: session is `completed`, `aborted` or `expired` (`session_status`). `upload_bytes_missing`: the bytes the server had stored are gone; the session is aborted (`session_status`). | Completed: you are done, `media_file_id` is the file. Otherwise open a new session. |
 | 400 | `upload_offset_required` (header missing), `upload_chunk_empty`, or `upload_chunk_not_stored` (the transfer broke mid-chunk or the disk refused the bytes, and the file was truncated back to the session's offset; or the request stalled so long that another request took the session over, see below). `offset` and the `Upload-Offset` header are the session's offset. | Ask `GET` for the offset and resend. |
 | 500 | `internal_error`: an unexpected failure (its `error_id` is in the server log); the file was truncated back to `offset`. | Ask `GET` for the offset and resend; stop after a few tries. |
-| 415 | `upload_chunk_content_type`: the `Content-Type` is neither `application/offset+octet-stream` nor `application/octet-stream` (a chunk without a `Content-Type` is accepted). | Fix the request. |
+| 415 | `upload_chunk_content_type`: the `Content-Type` is neither `application/offset+octet-stream` nor `application/octet-stream`, or cannot be parsed (a chunk without a `Content-Type` is accepted). | Fix the request. |
 | 401 | Token expired during a long upload. | Refresh the token and resend the same chunk. The session is not affected. |
 
 **On any network error** (timeout, reset, no response): do not assume anything about the chunk. Ask the server:

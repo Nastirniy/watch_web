@@ -147,3 +147,52 @@ async def test_second_format_claiming_an_extension_is_still_a_conflict(client, d
             "extensions": [".docx"], "aliases": ["application/zip"], "max_file_size_bytes": formats.MB}
     clash = await client.post(CREATE, json=body, headers=headers(admin))
     assert clash.status_code == 400 and clash.json()["code"] == "media_format_extension_clash"
+
+
+@pytest.mark.parametrize("name", [".jpg", "..jpg", ".JPG", "photo.tar.jpg", "\u0444\u043e\u0442\u043e.jpg", ".hidden.png"])
+def test_sanitize_filename_reads_the_extension_with_the_one_parser(name):
+    """The declared check (extension_of) and the store (sanitize_filename, then extension_of) agree: a leading-dot
+    name kept its extension in the first and lost it in the second (os.path.splitext)"""
+    assert extension_of(sanitize_filename(name)) == extension_of(name) != ""
+
+
+@pytest.mark.asyncio
+async def test_a_leading_dot_name_is_stored_like_it_is_declared(db, tmp_path):
+    from app.backend.api.shared.helpers.upload_helper import check_declared_format, validation_config_for
+    from app.backend.services.media_manager import MediaManager
+    from tests.helpers import make_dictionary, make_observation, make_post, make_user
+    from tests.test_media_formats import PNG_BYTES
+
+    registry = await formats.observation_registry(db)
+    spec = check_declared_format(registry, "image", ".png")
+    post = await make_post(db)
+    ids = await make_dictionary(db)
+    user = await make_user(db, post_id=post.id)
+    observation = await make_observation(db, user, post, ids["signal_type_id"])
+    manager = MediaManager(storage_path=str(tmp_path / "media"), temp_path=str(tmp_path / "temp"))
+    source = tmp_path / "temp" / "upload.part"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(PNG_BYTES)
+    media_id = await manager.store_file_from_path(db, observation.id, str(source), ".png", "image", user_id=user.id,
+                                                  validation_config=validation_config_for(spec))
+    assert media_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("opaque", ["application/octet-stream", "binary/octet-stream", "Application/Octet-Stream"])
+async def test_an_opaque_type_is_never_a_format_type_or_alias(client, db, headers, opaque):
+    """application/octet-stream is what the sniffer answers for bytes it cannot name: as an alias it would switch the
+    content check off for the format, as a content type it names no format"""
+    admin = await make_admin(db)
+    body = {"media_type": "document", "content_type": opaque, "label": "Opaque", "extensions": [".opq"],
+            "max_file_size_bytes": formats.MB}
+    for refused_body in (body, dict(body, content_type="application/x-opq", aliases=[opaque])):
+        refused = await client.post(CREATE, json=refused_body, headers=headers(admin))
+        assert refused.status_code == 422, refused.text
+        assert refused.json()["errors"][0]["code"] == "content_type_forbidden"
+    created = await client.post(CREATE, json=dict(body, content_type="application/x-opq"), headers=headers(admin))
+    assert created.status_code == 200, created.text
+    url = BY_ID.format(format_id=created.json()["id"])
+    for change in ({"content_type": opaque}, {"aliases": [opaque]}):
+        refused = await client.put(url, json=change, headers=headers(admin))
+        assert refused.status_code == 422 and refused.json()["errors"][0]["code"] == "content_type_forbidden"

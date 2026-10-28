@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.backend.models.media import MediaFile
 from app.backend.services.media.jobs import enqueue_poster
-from app.backend.services.files.formats import UnsupportedMediaFormat, FileTooLarge, hard_limit_bytes
+from app.backend.services.files.formats import UnsupportedMediaFormat, FileTooLarge, content_type_allowed, hard_limit_bytes
 from app.backend.services.files.names import extension_of, sanitize_filename
 from app.backend.services.files.sniff import detect_content_type
 from app.backend.services.media.probe import image_dimensions
@@ -38,6 +38,9 @@ class FileValidationConfig(BaseModel):
     max_size: int = Field(default_factory=hard_limit_bytes)
     allowed_extensions: Set[str] = set()
     allowed_mime_types: Set[str] = set()
+    # The format's canonical name, stored for an accepted file (the sniffed type, possibly an alias, only decides
+    # acceptance); None stores the sniffed type
+    content_type: Optional[str] = None
     sanitize_filename: bool = True
 
     @field_validator('allowed_extensions', mode='before')
@@ -224,7 +227,7 @@ class MediaManager:
         The file is never loaded entirely into memory -- hash is computed by streaming,
         MIME type is detected from the first 8KB (services/files/sniff.py), and the file is moved (not copied)
         to its final storage location. Checks, in order: size, extension, the sniffed type against the format's
-        content type and aliases.
+        content type and aliases. The row stores the format's canonical content type (validation_config.content_type).
 
         Commits the new row before the move (a file in storage always has its row) and deletes it again when the
         move fails. A new video row keeps its poster hold (enqueue_poster): the caller releases it once the file is
@@ -271,13 +274,16 @@ class MediaManager:
             mime_type = await asyncio.to_thread(detect_content_type, source)
             if config.allowed_mime_types and mime_type not in config.allowed_mime_types:
                 raise UnsupportedMediaFormat(ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED, media_type, content_type=mime_type)
+            # Stored and served under the format's canonical name (an MKV libmagic calls video/x-matroska is
+            # video/matroska), never the detector's alias
+            stored_type = config.content_type or mime_type
 
             # -- Hash computation (streaming, 1MB chunks) --
             file_hash = await self._compute_file_hash(source)
 
             # -- Image dimensions (header only) --
             dimensions = None
-            if mime_type.startswith('image/'):
+            if content_type_allowed(MediaType.IMAGE.value, stored_type):
                 dimensions = await self._extract_image_dimensions(source)
 
             # -- Deduplication --
@@ -302,7 +308,7 @@ class MediaManager:
                 stored_filename=temp_stored_filename,
                 file_path=str((organized_dir / temp_stored_filename).relative_to(self.storage_path)),
                 file_size=file_size,
-                mime_type=mime_type,
+                mime_type=stored_type,
                 file_extension=file_ext,
                 media_type=media_type_enum.value,
                 file_hash=file_hash

@@ -7,7 +7,7 @@ from app.backend.enums.general import MediaType
 from app.backend.utils.validators import SecureBaseModel, SecurityValidators, not_null
 from app.backend.errors.coded import invalid
 from app.backend.enums.errors import FieldErrorCode
-from app.backend.services.files.formats import FORBIDDEN_CONTENT_TYPES, content_type_allowed
+from app.backend.services.files.formats import FORBIDDEN_CONTENT_TYPES, OPAQUE_CONTENT_TYPES, content_type_allowed
 
 ACCEPTED_MEDIA_TYPES = (MediaType.IMAGE.value, MediaType.VIDEO.value, MediaType.AUDIO.value, MediaType.DOCUMENT.value)
 # RFC 6838 type/subtype, lower case only
@@ -19,7 +19,8 @@ def _clean_content_type(value: str) -> str:
     value = value.strip().lower()
     if not CONTENT_TYPE_RE.match(value):
         raise invalid(FieldErrorCode.CONTENT_TYPE_INVALID)
-    if value in FORBIDDEN_CONTENT_TYPES:
+    # Opaque types name no format, and as an alias the sniffer's answer for unknown bytes would pass any file
+    if value in FORBIDDEN_CONTENT_TYPES or value in OPAQUE_CONTENT_TYPES:
         raise invalid(FieldErrorCode.CONTENT_TYPE_FORBIDDEN, content_type=value)
     return value
 

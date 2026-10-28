@@ -37,11 +37,13 @@ from app.backend.services.certificates import MAX_CERTIFICATE_BYTES, register_ce
 from app.backend.auth import sessions as session_lifetimes
 from app.backend.api.v1.models.response.auth import SessionsEndedResponse, UserSessionResponse, build_session_response
 from app.backend.enums.routes import UserRoutes
+from app.backend.enums.media_types import ContentType
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.enums.audit import AuditEvent
 from app.backend.services.audit import create_audit_log, home_scope, node_name, role_name
 from app.backend.services.units import membership_nodes
 from app.backend.utils.logging_config import get_api_logger
+from app.backend.utils.content_type import parse_content_type
 from app.backend.api.v1.models.request.assignments import AssignmentCreate, SystemAssignmentCreate
 from app.backend.api.v1.models.request.users import UserCreateForm, UserUpdateForm
 from app.backend.api.v1.models.response.assignments import AssignmentResponse, SystemAssignmentResponse
@@ -75,7 +77,7 @@ def taken_error_code(exc: IntegrityError) -> ErrorCode | None:
     return None
 
 # PATCH /users/{id} reads form fields only; a JSON body would reach the route with every field unset
-FORM_CONTENT_TYPES = ("multipart/form-data", "application/x-www-form-urlencoded")
+FORM_CONTENT_TYPES = (ContentType.MULTIPART_FORM_DATA.value, ContentType.FORM_URLENCODED.value)
 
 
 async def _base_assignments(
@@ -400,12 +402,13 @@ async def update_user(
     cannot_remove_own_admin).
     """
     current_user = auth.user
-    content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
-    if content_type and content_type not in FORM_CONTENT_TYPES:
+    raw_type = (request.headers.get("content-type") or "").strip()
+    parsed_type = parse_content_type(raw_type)
+    if raw_type and (parsed_type is None or parsed_type.essence not in FORM_CONTENT_TYPES):
         raise ApiError(
             ErrorCode.FORM_CONTENT_TYPE_REQUIRED,
             headers={"Accept-Patch": ", ".join(FORM_CONTENT_TYPES)},
-            content_type=content_type,
+            content_type=parsed_type.essence if parsed_type is not None else raw_type,
         )
 
     if update_data.user_type is not None:

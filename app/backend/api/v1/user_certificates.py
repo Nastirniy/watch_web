@@ -31,6 +31,7 @@ from app.backend.config import settings
 from app.backend.database import get_session
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.enums.general import CertificateState, Permissions
+from app.backend.enums.media_types import ContentType
 from app.backend.enums.routes import UserRoutes
 from app.backend.errors.coded import CodedError
 from app.backend.errors.openapi import GUARDED, problems
@@ -155,7 +156,7 @@ async def upload_user_certificate(
         request: Request,
         user_id: Annotated[int, Path(ge=1)],
         # A form model holding a file: FastAPI would document it as urlencoded without the media type
-        form: Annotated[CertificateUploadForm, Form(media_type="multipart/form-data")],
+        form: Annotated[CertificateUploadForm, Form(media_type=ContentType.MULTIPART_FORM_DATA.value)],
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.CERTIFICATE_VIEW, Permissions.CERTIFICATE_CREATE])),
 ):

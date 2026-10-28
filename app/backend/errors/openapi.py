@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, create_model
 from app.backend.enums.errors import (
     PROBLEM_ENUMS, AccessErrorCode, AuthErrorCode, ErrorCode, FieldErrorCode, ProblemType,
 )
+from app.backend.enums.media_types import ContentType
 from app.backend.enums.routes import APIVersionRoutes
 from app.backend.errors.problems import PROBLEM_JSON
 from app.backend.errors.coded import is_optional
@@ -80,11 +81,11 @@ _EXAMPLE_VALUES: Dict[str, Any] = {
     "error_id": "3f1c2a9b7d8e4f60a1b2c3d4e5f60718",
     "missing": ["post.view"],
     "required": {"all": ["post.view"], "any": []},
-    "accepted_content_types": ["image/jpeg", "image/png"],
+    "accepted_content_types": [ContentType.IMAGE_JPEG.value, ContentType.IMAGE_PNG.value],
     "accepted_extensions": [".jpg", ".png"],
     "tag_ids": [7, 9],
     "extensions": [".png"],
-    "content_types": ["image/png"],
+    "content_types": [ContentType.IMAGE_PNG.value],
     "assigned_users": [{"id": 3, "username": "operator1"}],
     "assignments": [{"id": 12, "role": {"id": 9, "name": "media_editors", "display_name": "Media editors"},
                      "scope": {"kind": "post", "id": 7, "name": "Post 7"}, "excess_permissions": ["media.update"]}],

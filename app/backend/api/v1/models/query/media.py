@@ -25,7 +25,7 @@ class MediaFilterParams(BaseFilterParams):
     placement: UnitPlacement = Field(default=UnitPlacement.RECORDED, description="Which unit corps_id / brigade_id match: recorded (where the post was when the observation was created) or current (where the post is now, archived posts left out). Not a time filter")
     original_filename_contains: Optional[str] = Field(default=None, max_length=100, description="Filename contains text")
     media_type: Optional[MediaType] = Field(default=None, description="Media type")
-    mime_type: Optional[str] = Field(default=None, description="Exact MIME type")
+    mime_type: Optional[str] = Field(default=None, description="MIME type, any case, parameters ignored; an alias finds the stored canonical name (video/x-matroska finds video/matroska)")
     file_extension: Optional[str] = Field(default=None, max_length=11, description="File extension, with or without the dot, any case: png, .png, PNG")
     file_size_from: Optional[int] = Field(default=None, ge=0, description="File size min (bytes)")
     file_size_to: Optional[int] = Field(default=None, ge=0, description="File size max (bytes)")

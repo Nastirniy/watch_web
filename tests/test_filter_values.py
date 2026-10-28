@@ -155,3 +155,21 @@ async def test_report_statuses_and_level_still_filter(client, db, headers):
     ):
         response = await client.post(url, json={"report_type": "all_fields", **body}, headers=headers(admin))
         assert len(_report_rows(response, signal_name)) == rows, body
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("search", [False, True])
+@pytest.mark.parametrize("spelling", ["video/matroska", "video/x-matroska", "Video/X-Matroska", "video/matroska; codecs=vp9"])
+async def test_mime_type_filter_accepts_an_alias(client, db, headers, search, spelling):
+    """Stored types are canonical (032): the filter parses its value and maps an alias to the canonical name"""
+    admin = await make_admin(db)
+    post = await make_post(db)
+    ids = await make_dictionary(db)
+    observation = await make_observation(db, admin, post, ids["signal_type_id"])
+    mkv = await make_media(db, observation, admin, media_type="video", file_extension=".mkv", mime_type="video/matroska")
+    await make_media(db, observation, admin, media_type="video")
+    url = V1.path(SearchRoutes.MEDIA if search else MediaRoutes.ROOT)
+    response = await client.get(url, params={"mime_type": spelling}, headers=headers(admin))
+    assert response.status_code == 200, response.text
+    items = response.json()["items"] if search else response.json()
+    assert [item["id"] for item in items] == [mkv.id]

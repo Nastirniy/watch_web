@@ -16,10 +16,13 @@ VP9, no audio, a 90 degree display rotation, a really odd size, 4K, one keyframe
 grid, one cue per step, no cue on a black tile), statuses. A video file with only audio is unsupported at once
 (no_video_stream), a truncated one fails after its attempts (poster_failed). /stream through nginx's auth cache:
 bytes, the API's headers on a miss and a hit, refusals as the API's problems, logout and archive stop a stream within
-the 30 s of the cache. Audio (MP3, WAV, FLAC, Ogg Vorbis, Opus, M4A): stored with the type the sniffer names (libmagic
-in the api image, one of the format's content type and aliases). Bytes the sniffer cannot name, or names otherwise,
-are refused whatever the extension says (415 media_content_type_not_accepted). Document formats are checked by
-tests/test_file_sniff.py run inside the api image (task report): no observation route takes a document.
+the 30 s of the cache. Audio (MP3, WAV, FLAC, Ogg Vorbis, Opus, M4A) and video: accepted by the type the sniffer
+names (libmagic in the api image, one of the format's content type and aliases), stored and streamed under the
+format's canonical name (video/matroska for an MKV libmagic calls video/x-matroska, audio/wav for audio/x-wav). Bytes
+the sniffer cannot name, or names otherwise, are refused whatever the extension says (415
+media_content_type_not_accepted). Document formats are checked by
+tests/test_file_sniff.py run inside the api image (the command is in its docstring): no observation route takes a
+document.
 Exit code 0 when every check passes.
 Needs ffmpeg on the host (imageio-ffmpeg) and Pillow; the stack's worker runs with a short retry backoff.
 """
@@ -201,18 +204,20 @@ def run_image(headers: dict, observation_id: int, name: str, ctype: str, data: b
 
 # --------------------------------------------------------------------------- audio
 
-AUDIO = [   # (file name, ffmpeg codec arguments, the format's content type and aliases)
-    ("audio.mp3", ["-c:a", "libmp3lame", "-b:a", "96k"], {"audio/mpeg", "audio/mp3"}),
-    ("audio.wav", ["-c:a", "pcm_s16le"], {"audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave"}),
-    ("audio.flac", ["-c:a", "flac"], {"audio/flac", "audio/x-flac"}),
-    ("audio_vorbis.ogg", ["-c:a", "libvorbis"], {"audio/ogg", "audio/opus", "application/ogg"}),
-    ("audio.opus", ["-c:a", "libopus"], {"audio/ogg", "audio/opus", "application/ogg"}),
-    ("audio_aac.m4a", ["-c:a", "aac"], {"audio/mp4", "audio/x-m4a", "audio/aac"}),
+AUDIO = [   # (file name, ffmpeg codec arguments, the format's canonical content type)
+    ("audio.mp3", ["-c:a", "libmp3lame", "-b:a", "96k"], "audio/mpeg"),
+    ("audio.wav", ["-c:a", "pcm_s16le"], "audio/wav"),
+    ("audio.flac", ["-c:a", "flac"], "audio/flac"),
+    ("audio_vorbis.ogg", ["-c:a", "libvorbis"], "audio/ogg"),
+    ("audio.opus", ["-c:a", "libopus"], "audio/ogg"),
+    ("audio_aac.m4a", ["-c:a", "aac"], "audio/mp4"),
 ]
+VIDEO_TYPES = {".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
+               ".mkv": "video/matroska"}     # the canonical name each video is stored under
 
 
 def run_audio(ffmpeg: str, tmp: Path, headers: dict, observation_id: int) -> None:
-    for name, codec, accepted in AUDIO:
+    for name, codec, canonical in AUDIO:
         path = tmp / name
         subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
                         "sine=frequency=440:duration=3", *codec, str(path)], check=True, timeout=120)
@@ -222,7 +227,10 @@ def run_audio(ffmpeg: str, tmp: Path, headers: dict, observation_id: int) -> Non
         if not check(name, up.status_code == 200, "upload", f"{up.status_code} {'' if up.ok else up.text[:160]}"):
             continue
         info = requests.get(f"{API}/media/{up.json()['media_file_id']}/info", headers=headers, timeout=10).json()
-        check(name, info.get("mime_type") in accepted, "stored with the sniffed type", str(info.get("mime_type")))
+        check(name, info.get("mime_type") == canonical, f"stored as {canonical}", str(info.get("mime_type")))
+        if info.get("playback_type"):
+            check(name, info["playback_type"].split(";")[0] == canonical, "playback_type on the canonical name",
+                  info["playback_type"])
 
 
 def run_refusals(headers: dict, observation_id: int) -> None:
@@ -425,6 +433,11 @@ def run_videos(headers: dict, observation_id: int, videos: list[dict]) -> None:
         info = requests.get(f"{API}/media/{video['id']}/info", headers=headers, timeout=10).json()
         note(name, f"probe: {info.get('video_codec')}/{info.get('audio_codec')} {info.get('width')}x{info.get('height')} "
                    f"{info.get('duration_seconds')}s {info.get('playback_type')!r}")
+        canonical = VIDEO_TYPES[Path(name).suffix]
+        check(name, info.get("mime_type") == canonical, f"stored as {canonical}", str(info.get("mime_type")))
+        if info.get("playback_type"):
+            check(name, info["playback_type"].split(";")[0] == canonical, "playback_type on the canonical name",
+                  info["playback_type"])
         if video["expect"] == "no_video":
             check(name, poster.status_code == 422 and problem_code(poster) == "no_video_stream", "thumbnail: no_video_stream",
                   f"{poster.status_code} {problem_code(poster)}")
@@ -567,6 +580,11 @@ def main() -> int:
         if check("stream", streamed is not None, "a stored video to stream", ""):
             check_stream(headers, streamed)
             check_stream_refusals(headers, streamed)
+        matroska = next((video for video in videos if video["name"].endswith(".mkv") and video.get("id")), None)
+        if check("stream", matroska is not None, "a stored MKV to stream", ""):
+            check_stream(headers, matroska)
+            check("stream", requests.head(stream_url(matroska["id"]), headers=headers, timeout=30)
+                  .headers.get("Content-Type") == "video/matroska", "MKV served as video/matroska", "")
 
     print("\n==== summary")
     for name, lines in summary.items():

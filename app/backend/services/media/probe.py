@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Mapping, Optional, Tuple
 
 from app.backend.config import settings
+from app.backend.utils.content_type import parse_content_type
 from app.backend.services.media.posters import PosterError, _run, resolve_binary
 
 PROBE_TIMEOUT_SECONDS = 20
@@ -108,8 +109,11 @@ def playback_type(mime_type: str, result: ProbeResult) -> str:
         audio_codec_string(result.audio_codec, result.audio_profile),
     ]
     codecs = ", ".join(p for p in parts if p)
-    base = (mime_type or "").split(";", 1)[0].strip().lower()
-    return f'{base}; codecs="{codecs}"' if codecs else base
+    parsed = parse_content_type(mime_type)
+    if parsed is None:
+        return ""
+    # quoted always, as RFC 6381 writes it (codec strings hold no quote or backslash)
+    return f'{parsed.essence}; codecs="{codecs}"' if codecs else parsed.essence
 
 
 # ---- probing -----------------------------------------------------------------

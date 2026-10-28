@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from loguru import logger
 
+from app.backend.enums.media_types import ContentType
 from app.backend.enums.routes import SignerRoutes
 from app.backend.pki.authority import load_ca, sha256_fingerprint
 from app.backend.pki.crl import CrlEntry, build_crl
@@ -50,7 +51,7 @@ def create_app(settings: SignerSettings) -> FastAPI:
     @app.exception_handler(SigningRefused)
     async def refused(_: Request, exc: SigningRefused) -> JSONResponse:
         return JSONResponse(
-            status_code=422, media_type="application/problem+json",
+            status_code=422, media_type=ContentType.PROBLEM_JSON.value,
             content={"type": "about:blank", "title": "Signing refused", "status": 422, "reason": exc.reason},
         )
 

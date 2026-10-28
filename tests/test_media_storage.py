@@ -157,7 +157,7 @@ def test_dead_upload_code_is_gone():
     for name in ("FileValidationResult", "FileIntegrityCheck", "MAX_FILE_SIZE"):
         assert not hasattr(media_manager, name), name
     assert set(media_manager.FileValidationConfig.model_fields) == {
-        "max_size", "allowed_extensions", "allowed_mime_types", "sanitize_filename"}
+        "max_size", "allowed_extensions", "allowed_mime_types", "content_type", "sanitize_filename"}
 
 
 @pytest.mark.asyncio
@@ -224,3 +224,50 @@ async def test_storage_statistics_of_an_empty_database(db, tmp_path):
         "media_types": {},
         "filesystem_files": 0, "filesystem_size_bytes": 0,
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("filename, media_type, sniffed, canonical", [
+    ("clip.mkv", "video", "video/x-matroska", "video/matroska"),
+    ("tone.wav", "audio", "audio/x-wav", "audio/wav"),
+    ("photo.jpg", "image", "image/pjpeg", "image/jpeg"),
+])
+@pytest.mark.parametrize("enable_nginx", [True, False])
+async def test_an_alias_upload_stores_the_canonical_type(db, tmp_path, monkeypatch, filename, media_type, sniffed,
+                                                         canonical, enable_nginx):
+    """The sniffed type only decides acceptance (it may be an alias of the format); the row keeps the format's
+    canonical name, which download and stream serve (X-Accel-Redirect and the API's own streaming alike)"""
+    from app.backend.api.shared.helpers.media_helper import original_file_response
+    from app.backend.config import settings
+
+    monkeypatch.setattr(settings.storage, "upload_path", str(tmp_path / "media"))
+    monkeypatch.setattr(settings.storage, "enable_nginx", enable_nginx)
+    monkeypatch.setattr(media_manager, "detect_content_type", lambda path: sniffed)
+    post = await make_post(db)
+    ids = await make_dictionary(db)
+    user = await make_user(db, post_id=post.id)
+    observation = await make_observation(db, user, post, ids["signal_type_id"])
+    manager = MediaManager(storage_path=str(tmp_path / "media"), temp_path=str(tmp_path / "temp"))
+    source = tmp_path / "temp" / f"upload_{filename}"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(PNG_BYTES if media_type == "image" else b"\x1a\x45\xdf\xa3" + b"\x00" * 64)
+    media_id = await manager.store_file_from_path(db, observation.id, str(source), filename, media_type,
+                                                  user_id=user.id, validation_config=validation_config_for(_spec(filename)))
+    row = (await db.exec(select(MediaFile).where(MediaFile.id == media_id))).one()
+    assert row.mime_type == canonical and type(row.mime_type) is str
+    response = original_file_response(row, "inline")
+    assert response.headers["content-type"] == canonical
+
+
+@pytest.mark.asyncio
+async def test_a_refused_sniffed_type_is_named_as_sniffed(db, tmp_path, monkeypatch):
+    """The refusal names what the bytes are, not the format's name"""
+    monkeypatch.setattr(media_manager, "detect_content_type", lambda path: "video/webm")
+    manager = MediaManager(storage_path=str(tmp_path / "media"), temp_path=str(tmp_path / "temp"))
+    source = tmp_path / "temp" / "upload_clip.mkv"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"\x1a\x45\xdf\xa3" + b"\x00" * 64)
+    with pytest.raises(UnsupportedMediaFormat) as refused:
+        await manager.store_file_from_path(db, 1, str(source), "clip.mkv", "video",
+                                           validation_config=validation_config_for(_spec("clip.mkv")))
+    assert refused.value.params["content_type"] == "video/webm"

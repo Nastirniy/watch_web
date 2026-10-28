@@ -9,6 +9,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.models.media import MediaFile
+from app.backend.utils.content_type import served_content_type
 from app.backend.utils.row_locks import lock_first
 from app.backend.models.observation import Observation
 from app.backend.config import settings
@@ -104,6 +105,9 @@ def original_file_response(media_file: MediaFile, disposition: str, range_header
     and answers a single byte range itself (parse_byte_range)"""
     filename = media_file.original_filename.replace('"', "")
     headers = {
+        # the stored canonical name (text types with their charset); in the headers on both paths: Starlette would
+        # add its own charset to a media_type= text type
+        "Content-Type": served_content_type(media_file.mime_type),
         "Content-Disposition": f'{disposition}; filename="{filename}"',
         "Cache-Control": "private, max-age=3600",
         "ETag": f'"{media_file.file_hash}"',
@@ -123,7 +127,6 @@ def original_file_response(media_file: MediaFile, disposition: str, range_header
             raise ApiError(ErrorCode.MEDIA_PATH_UNRESOLVED)
         headers.update({
             "X-Accel-Redirect": accel_redirect_path(relative),
-            "Content-Type": media_file.mime_type,
             "Accept-Ranges": "bytes",
             "X-Accel-Buffering": "yes",
         })
@@ -140,7 +143,7 @@ def original_file_response(media_file: MediaFile, disposition: str, range_header
         headers["Content-Range"] = f"bytes {start}-{last}/{size}"
     headers["Content-Length"] = str(length)
     return StreamingResponse(
-        _read_range(path, start, length), status_code=status_code, media_type=media_file.mime_type, headers=headers,
+        _read_range(path, start, length), status_code=status_code, headers=headers,
     )
 
 

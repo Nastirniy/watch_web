@@ -533,7 +533,7 @@ class FieldErrorCode(FieldCode):
     CONTENT_TYPE_OUTSIDE_MEDIA_TYPE = ("content_type_outside_media_type", field(
         "content_type must belong to the families of media type {media_type} (put other spellings into aliases)", media_type=str))
     CONTENT_TYPE_FORBIDDEN = ("content_type_forbidden", field(
-        "Content-Type '{content_type}' is never accepted: it runs code when opened", content_type=str))
+        "Content-Type '{content_type}' is never accepted: it runs code when opened or names no format", content_type=str))
     CONFIDENCE_LEVEL_INVALID = ("confidence_level_invalid", field("confidence_level must be one of: {accepted}", accepted=List[str]))
     PAGINATION_NEGATIVE = ("pagination_negative", field("Pagination values must be non-negative"))
     DATE_FILTERS_CONFLICT = ("date_filters_conflict", field(

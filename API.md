@@ -398,7 +398,7 @@ const { data, error } = await api.POST("/api/v1/users/{user_id}/certificates", {
 });
 if (data) {
   const bytes = Uint8Array.from(atob(data.p12_base64), (c) => c.charCodeAt(0));
-  const url = URL.createObjectURL(new Blob([bytes], { type: "application/x-pkcs12" }));
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/pkcs12" }));
   Object.assign(document.createElement("a"), { href: url, download: data.filename }).click();
   URL.revokeObjectURL(url);
   showPasswordOnce(data.password);   // the person installs the file with it (PKI.md, section 5)
@@ -504,11 +504,45 @@ the built-in `administrator` role) reads the entries of the nodes where it is in
   (`page_size` at most 200). A scoped reader's `post_id` / `group_id` / `corps_id` / `brigade_id` outside its scope
   answers 403.
 
+## Media types
+
+Every media type the API names is the IANA-registered one where IANA has one (RFC 6838: lower case, case-insensitive
+when compared); where IANA has none, the de facto name (`audio/wav`, `video/webm`). `GET /media/formats` lists each
+format's canonical `content_type` and its `aliases`.
+
+- **Stored and served:** a file is stored under its format's canonical name, whatever name the client declared or the
+  server's detector reported; `mime_type` in media responses, the base of `playback_type`, and the `Content-Type` of
+  `/download` and `/stream` are that name. Files stored before migration 032 under an alias of a default format were rewritten to it.
+- **Accepted on upload** (declared `Content-Type`, `content_type` of a resumable upload): the canonical name or an
+  alias of the format (table below). `application/octet-stream` (or no `Content-Type`) means "detect from the
+  bytes". Administrators may add formats and aliases (`/media-formats`); `application/octet-stream` and
+  `binary/octet-stream` are never a format's type or alias (`422 content_type_forbidden`).
+- **Filters:** `mime_type` of `GET /media` and the media search takes any of these names, in any case, with or
+  without parameters (`Video/X-Matroska` finds `video/matroska`).
+- **Charset:** text types are served with `charset=utf-8` (`text/markdown` with `charset=UTF-8`, which RFC 7763
+  requires); `text/vtt` (storyboards) carries no parameter: WebVTT is always UTF-8.
+- **Names to use in the web client:** `application/pkcs12` for a `.p12` blob (not `application/x-pkcs12`),
+  `video/matroska; codecs="..."` from `playback_type` for `canPlayType()`; resumable chunks are
+  `application/offset+octet-stream` (the tus protocol's name, not an IANA registration; `UPLOADS.md`).
+
+| Canonical | Also accepted |
+|-----------|---------------|
+| `image/jpeg` | `image/pjpeg` |
+| `video/mp4` | `video/x-m4v` |
+| `video/matroska` (RFC 9559) | `video/x-matroska` (the name before the RFC) |
+| `audio/mpeg` | `audio/mp3` |
+| `audio/wav` | `audio/x-wav`, `audio/wave`, `audio/vnd.wave` |
+| `audio/flac` (RFC 9639) | `audio/x-flac` |
+| `audio/ogg` | `audio/opus`, `application/ogg` |
+| `audio/mp4` | `audio/x-m4a`, `audio/aac` |
+| `application/rtf` | `text/rtf` |
+| `text/markdown`, `text/csv` | `text/plain` (what a detector reports for them) |
+
 ## Responses that are not JSON
 
 | Operation | Response |
 |-----------|----------|
-| `GET /api/v1/media/{media_id}/download`, `/stream` | The file in its own Content-Type; `206` for a single `Range`; an unsatisfiable one is `416` `range_not_satisfiable` with `Content-Range: bytes */size` |
+| `GET /api/v1/media/{media_id}/download`, `/stream` | The file in its stored type (the canonical name, see Media types); `206` for a single `Range`; an unsatisfiable one is `416` `range_not_satisfiable` with `Content-Range: bytes */size` |
 | `GET /api/v1/media/{media_id}/thumbnail` | The image; `202` with `Retry-After` while a video poster is being extracted |
 | `GET /api/v1/media/{media_id}/storyboard` | WebVTT (`text/vtt`) for seek previews; `202` with `Retry-After` and `X-Storyboard-Status` while the worker has not produced it |
 | `POST /api/v1/observations/report` | An `.xlsx` file with one row per frequency band; at most `reports.max_rows` rows (20000 by default), a larger result is `422` `report_too_large` with `max_rows`: narrow the filters |

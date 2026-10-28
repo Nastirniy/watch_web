@@ -148,7 +148,7 @@ def _audit_rows(db_file: Path) -> dict:
 def test_031_is_in_the_chain():
     scripts = ScriptDirectory(str(PROJECT_ROOT / "app" / "backend" / "migrations"))
     assert scripts.get_revision(REVISION).down_revision == PREVIOUS
-    assert HEAD == REVISION
+    assert scripts.get_revision(HEAD) is not None
 
 
 def test_migration_backfills_events_and_post_scopes(tmp_path):
