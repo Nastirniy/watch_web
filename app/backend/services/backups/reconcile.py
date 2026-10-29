@@ -13,8 +13,13 @@ the media walk skips _guides and a walk of their own compares them with user_gui
 _orphaned/<time>/_guides/<same path>; a .tmp- folder of an interrupted upload (_guides/<guide_id>/.tmp-...) moves
 there as a whole once it and everything in it is older than MIN_AGE_SECONDS (younger: an upload on its way). A
 guide file counts as old only when its folder is old too: the upload renames the folder into place just before it
-commits the row, and the file keeps the older time of the spooled copy. A row whose file is nowhere is listed
-(MissingGuideFile); one whose file sits under _orphaned gets it back, as a media original does.
+commits the row, and the file keeps the older time of the spooled copy. A file's folder (_guides/<guide_id>/
+<file_id>) no row names moves as a whole, empty or not, and so does a guide's folder no row names: after a restore
+the id counters of tables the backup lacks start again at 1, and a new row must not meet an old folder of its id
+(store.py reuses an empty one and refuses any other). A folder moves whole only when it and everything in it is old
+and it holds no hidden or NAS name (those stay where they are, as in the media walk; its files then move one by
+one). A row whose file is nowhere is listed (MissingGuideFile); one whose file sits under _orphaned gets it back, as
+a media original does, with the folders it needs made 0750 as the store makes them.
 """
 import os
 import shutil
@@ -31,7 +36,7 @@ from app.backend.models.media import POSTER_DIR, MediaFile
 from app.backend.models.storyboard import STORYBOARD_DIR
 from app.backend.models.user_certificate import UserCertificate
 from app.backend.models.user_guide import UserGuideFile
-from app.backend.services.files.store import GUIDES_DIR, TEMP_PREFIX, guide_file_path
+from app.backend.services.files.store import GUIDE_DIR_MODE, GUIDES_DIR, TEMP_PREFIX, guide_file_path
 
 ORPHANED_DIR = "_orphaned"
 QUARANTINE_DIR = ".quarantine"
@@ -41,9 +46,11 @@ SKIPPED_PREFIXES = (".", "@", "#")
 SKIPPED_NAMES = frozenset({"lost+found"})
 
 
+MIN_AGE_SECONDS = 600
+
+
 def _ours(name: str) -> bool:
     return not name.startswith(SKIPPED_PREFIXES) and name not in SKIPPED_NAMES
-MIN_AGE_SECONDS = 600
 
 _logger = logger.bind(module="backups")
 
@@ -106,24 +113,67 @@ def _media_files(root: Path, now: datetime):
                 yield path.relative_to(root).as_posix()
 
 
-def _guide_files(root: Path, now: datetime) -> list[str]:
-    """Relative paths of the old enough files under _guides (file and folder old), and of the .tmp- folders of
-    interrupted uploads (_guides/<guide_id>/.tmp-...: old with everything in them); other hidden and NAS names are
-    skipped as in the media walk"""
+def _only_ours(folder: Path) -> bool:
+    """Nothing in the folder, at any depth, is a hidden or NAS name; the .tmp- folders of uploads directly in a
+    guide's folder (and what they hold) are the exception"""
+    guide_level = folder.parent.name == GUIDES_DIR
+    for current, dirs, files in os.walk(folder):
+        here = Path(current)
+        temporary = {d for d in dirs if guide_level and here == folder and d.startswith(TEMP_PREFIX)}
+        if not all(_ours(name) for name in (*dirs, *files) if name not in temporary):
+            return False
+        dirs[:] = [d for d in dirs if d not in temporary]
+    return True
+
+
+@dataclass(frozen=True)
+class _GuideWalk:
+    """What the walk of _guides found, relative to upload_path"""
+    files: tuple[str, ...]          # old files whose folder is old too
+    temporary: tuple[str, ...]      # .tmp- folders of interrupted uploads, old with everything in them
+    folders: tuple[str, ...]        # guide and file folders (_guides/<g>, _guides/<g>/<f>) that may move whole
+
+
+def _guide_files(root: Path, now: datetime) -> _GuideWalk:
+    """The old enough files under _guides (file and folder old), the .tmp- folders of interrupted uploads
+    (_guides/<guide_id>/.tmp-...: old with everything in them), and the guide and file folders that are old with
+    everything in them and hold only our names; other hidden and NAS names are skipped as in the media walk"""
     guides = root / GUIDES_DIR
     if not guides.is_dir():
-        return []
-    found = []
-    for current, dirs, files in os.walk(guides):
+        return _GuideWalk((), (), ())
+    files, temporary, folders = [], [], []
+    for current, dirs, names in os.walk(guides):
         here = Path(current)
-        if here.parent == guides:       # a guide's folder: where an upload writes its .tmp- folder
-            found.extend((here / d).relative_to(root).as_posix() for d in dirs
-                         if d.startswith(TEMP_PREFIX) and _old_tree(here / d, now))
+        depth = len(here.relative_to(guides).parts)     # 1: a guide's folder, 2: a file's folder
+        if depth == 1:      # where an upload writes its .tmp- folder
+            temporary.extend((here / d).relative_to(root).as_posix() for d in dirs
+                             if d.startswith(TEMP_PREFIX) and _old_tree(here / d, now))
+        if depth in (1, 2) and _old_tree(here, now) and _only_ours(here):
+            folders.append(here.relative_to(root).as_posix())
         dirs[:] = [d for d in dirs if _ours(d)]
-        for name in files:
+        for name in names:
             if _ours(name) and _old(here / name, now) and _old(here, now):
-                found.append((here / name).relative_to(root).as_posix())
-    return sorted(found)
+                files.append((here / name).relative_to(root).as_posix())
+    return _GuideWalk(tuple(files), tuple(temporary), tuple(folders))
+
+
+def _guide_orphans(walk: _GuideWalk, guide_rows: list, named: set[str]) -> tuple[str, ...]:
+    """What moves to _orphaned: a guide's folder no row names, as a whole; else a file's folder no row names, as a
+    whole; else each .tmp- folder and each file no row names"""
+    guides_named = {str(guide_id) for _, guide_id, _, _ in guide_rows}
+    folders_named = {f"{guide_id}/{file_id}" for file_id, guide_id, _, _ in guide_rows}
+    whole = [rel for rel in walk.folders
+             if len(parts := PurePosixPath(rel).parts[1:]) == 1 and parts[0] not in guides_named]
+    whole += [rel for rel in walk.folders
+              if len(parts := PurePosixPath(rel).parts[1:]) == 2 and "/".join(parts) not in folders_named
+              and f"{GUIDES_DIR}/{parts[0]}" not in whole]
+
+    def inside_whole(rel: str) -> bool:
+        return any(rel.startswith(f"{folder}/") for folder in whole)
+
+    rest = [rel for rel in walk.temporary if not inside_whole(rel)]
+    rest += [rel for rel in walk.files if rel not in named and not inside_whole(rel)]
+    return tuple(sorted((*whole, *rest)))
 
 
 def _derived(root: Path, now: datetime) -> list[tuple[str, int]]:
@@ -230,21 +280,49 @@ async def plan_reconcile(session: AsyncSession, upload_path: Path, store_dir: Op
                            stale_derived=tuple(rel for rel, media_id in derived if media_id not in ids),
                            returned_originals=tuple(returned), missing_originals=tuple(missing),
                            orphan_packages=packages,
-                           orphan_guide_files=tuple(rel for rel in guide_files if rel not in guide_named),
+                           orphan_guide_files=_guide_orphans(guide_files, guide_rows, guide_named),
                            missing_guide_files=tuple(missing_guides))
 
 
-def _move(src: Path, dst: Path, failed: list, label: str) -> bool:
+def _make_parents(path: Path, mode: Optional[int]) -> None:
+    """The missing folders above path; with a mode each folder made here gets it, whatever the umask"""
+    if mode is None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return
+    missing = []
+    for parent in path.parents:
+        if parent.exists():
+            break
+        missing.append(parent)
+    for folder in reversed(missing):
+        try:
+            folder.mkdir(mode=mode)
+        except FileExistsError:     # made meanwhile (an upload): its mode is the store's
+            continue
+        os.chmod(folder, mode)      # the umask may have narrowed the mode given to mkdir()
+
+
+def _move(src: Path, dst: Path, failed: list, label: str, dir_mode: Optional[int] = None) -> bool:
     try:
         if dst.exists():
             raise FileExistsError(str(dst))
-        dst.parent.mkdir(parents=True, exist_ok=True)
+        _make_parents(dst, dir_mode)
         os.replace(src, dst)
         return True
     except OSError as exc:
         _logger.error(f"Reconcile: {label} not moved ({type(exc).__name__}: {exc})")
         failed.append(label)
         return False
+
+
+def _guide_entry_old(path: Path, now: datetime) -> bool:
+    """An entry of orphan_guide_files checked again at apply: a file with its folder old; a .tmp- folder old with
+    everything in it; a guide's or file's folder old with everything in it and still holding only our names"""
+    if path.is_file():
+        return _old(path, now) and _old(path.parent, now)
+    if not path.is_dir() or not _old_tree(path, now):
+        return False
+    return path.name.startswith(TEMP_PREFIX) or _only_ours(path)
 
 
 def apply_reconcile(report: ReconcileReport, upload_path: Path, store_dir: Optional[Path],
@@ -255,10 +333,9 @@ def apply_reconcile(report: ReconcileReport, upload_path: Path, store_dir: Optio
              if (upload_path / rel).is_file() and _old(upload_path / rel, now)
              and _move(upload_path / rel, upload_path / ORPHANED_DIR / stamp / rel, failed, rel)]
     guides = []
-    for rel in report.orphan_guide_files:      # each checked again: a file with its folder, a .tmp- folder whole
+    for rel in report.orphan_guide_files:      # each checked again: an upload may have started since the plan
         path = upload_path / rel
-        old = (_old(path, now) and _old(path.parent, now)) if path.is_file() else path.is_dir() and _old_tree(path, now)
-        if old and _move(path, upload_path / ORPHANED_DIR / stamp / rel, failed, rel):
+        if _guide_entry_old(path, now) and _move(path, upload_path / ORPHANED_DIR / stamp / rel, failed, rel):
             guides.append(rel)
     deleted = []
     for rel in report.stale_derived:
@@ -276,7 +353,9 @@ def apply_reconcile(report: ReconcileReport, upload_path: Path, store_dir: Optio
     returned = []
     for rel in report.returned_originals:
         original = Path(*Path(rel).parts[2:])          # _orphaned/<stamp>/<the row's path>
-        if _move(upload_path / rel, upload_path / original, failed, rel):
+        # the folders a guide file needs are made as the store makes them (0750); a media original's as before
+        mode = GUIDE_DIR_MODE if original.parts[0] == GUIDES_DIR else None
+        if _move(upload_path / rel, upload_path / original, failed, rel, dir_mode=mode):
             returned.append(rel)
     packages = []
     if store_dir is not None:

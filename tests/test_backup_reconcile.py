@@ -244,19 +244,20 @@ async def test_guide_file_with_its_row_stays(db, media):
 
 
 async def test_guide_file_without_a_row_moves_with_its_path(db, media):
+    """A stray file in a row's folder moves alone; a file's folder no row names moves whole"""
     await guide_file_row(db, 1, 10, "aa.pdf")
     touch(media / "_guides/1/10/aa.pdf")
     touch(media / "_guides/1/10/other.pdf", content=b"stray")      # the row's folder, not the row's stored name
     touch(media / "_guides/2/20/cc.pdf", content=b"after the backup")
     age(media / "_guides/1/10", media / "_guides/2/20")
     report = await plan_reconcile(db, media, None, NOW)
-    assert report.orphan_guide_files == ("_guides/1/10/other.pdf", "_guides/2/20/cc.pdf")
+    assert report.orphan_guide_files == ("_guides/1/10/other.pdf", "_guides/2/20")
     assert report.orphan_files == ()
     done = apply_reconcile(report, media, None, NOW)
-    assert done.orphan_guide_files == ("_guides/1/10/other.pdf", "_guides/2/20/cc.pdf") and done.failed == ()
+    assert done.orphan_guide_files == ("_guides/1/10/other.pdf", "_guides/2/20") and done.failed == ()
     assert (media / "_orphaned" / STAMP / "_guides/2/20/cc.pdf").read_bytes() == b"after the backup"
     assert (media / "_orphaned" / STAMP / "_guides/1/10/other.pdf").read_bytes() == b"stray"
-    assert not (media / "_guides/2/20/cc.pdf").exists() and not (media / "_guides/1/10/other.pdf").exists()
+    assert not (media / "_guides/2/20").exists() and not (media / "_guides/1/10/other.pdf").exists()
     assert (media / "_guides/1/10/aa.pdf").exists()
 
 
@@ -266,7 +267,7 @@ async def test_media_walk_does_not_treat_guides_as_media(db, media):
     touch(media / "2026/10/20/obs_1/1_aa.jpg")
     report = await plan_reconcile(db, media, None, NOW)
     assert report.orphan_files == ("2026/10/20/obs_1/1_aa.jpg",)
-    assert report.orphan_guide_files == ("_guides/4/40/dd.pdf",)
+    assert report.orphan_guide_files == ("_guides/4/40",)
 
 
 async def test_guide_row_without_its_file_is_listed(db, media):
@@ -323,7 +324,7 @@ async def test_guide_dry_run_changes_nothing(db, media):
     touch(media / "_guides/6/.tmp-61-dddd4444/ff.pdf")
     age(media / "_guides/6/60", media / "_guides/6/.tmp-61-dddd4444")
     assert (await plan_reconcile(db, media, None, NOW)).orphan_guide_files == (
-        "_guides/6/.tmp-61-dddd4444", "_guides/6/60/ee.pdf")
+        "_guides/6/.tmp-61-dddd4444", "_guides/6/60")
     assert (media / "_guides/6/60/ee.pdf").exists() and (media / "_guides/6/.tmp-61-dddd4444/ff.pdf").exists()
     assert not (media / "_orphaned").exists()
 
@@ -334,7 +335,7 @@ async def test_cli_reports_guide_files(db, media, capsys):
     age(media / "_guides/7/71")
     assert await run(db, apply=False, upload_path=media, store_dir=None, now=NOW) == 0
     out = capsys.readouterr().out
-    assert "1 user guide file without a row" in out and "_guides/7/71/stray.pdf" in out
+    assert "1 user guide file or folder without a row" in out and "_guides/7/71" in out
     assert "1 user guide file row(s) whose file is missing" in out and "guide 7 file 70: Handbook.pdf" in out
     assert (media / "_guides/7/71/stray.pdf").exists()
     assert await run(db, apply=True, upload_path=media, store_dir=None, now=NOW) == 0
@@ -344,3 +345,107 @@ async def test_cli_reports_guide_files(db, media, capsys):
     assert row.params["orphan_files"] == 1 and row.params["missing_originals"] == 1
     again = await plan_reconcile(db, media, None, NOW)
     assert again.orphan_guide_files == () and again.orphan_files == ()
+
+
+async def test_a_file_folder_no_row_names_moves_whole_even_empty(db, media):
+    """After a restore the guide tables may restart their ids at 1: a file's folder no row names (empty, or holding
+    files) leaves _guides whole, so a new row of the same id never meets it; a row's folder stays"""
+    await guide_file_row(db, 1, 10, "aa.pdf")
+    touch(media / "_guides/1/10/aa.pdf")
+    (media / "_guides/1/11").mkdir()                       # emptied by an older reconcile
+    touch(media / "_guides/1/12/bb.pdf")
+    age(media / "_guides/1/10", media / "_guides/1/11", media / "_guides/1/12", media / "_guides/1")
+    report = await plan_reconcile(db, media, None, NOW)
+    assert report.orphan_guide_files == ("_guides/1/11", "_guides/1/12")
+    done = apply_reconcile(report, media, None, NOW)
+    assert done.orphan_guide_files == ("_guides/1/11", "_guides/1/12") and done.failed == ()
+    assert (media / "_orphaned" / STAMP / "_guides/1/11").is_dir()
+    assert (media / "_orphaned" / STAMP / "_guides/1/12/bb.pdf").exists()
+    assert sorted(p.name for p in (media / "_guides/1").iterdir()) == ["10"]
+
+
+async def test_a_guide_folder_no_row_names_moves_whole(db, media):
+    """No row of the guide: its folder goes as one entry, with its file folders and an interrupted .tmp- folder"""
+    touch(media / "_guides/3/30/a.pdf")
+    (media / "_guides/3/31").mkdir()
+    touch(media / "_guides/3/.tmp-32-eeee5555/y.pdf")
+    age(media / "_guides/3/30", media / "_guides/3/31", media / "_guides/3/.tmp-32-eeee5555", media / "_guides/3")
+    report = await plan_reconcile(db, media, None, NOW)
+    assert report.orphan_guide_files == ("_guides/3",)
+    done = apply_reconcile(report, media, None, NOW)
+    assert done.orphan_guide_files == ("_guides/3",) and done.failed == ()
+    assert not (media / "_guides/3").exists()
+    moved = media / "_orphaned" / STAMP / "_guides/3"
+    assert (moved / "30/a.pdf").exists() and (moved / "31").is_dir() and (moved / ".tmp-32-eeee5555/y.pdf").exists()
+
+
+async def test_a_young_guide_folder_moves_by_its_parts(db, media):
+    """A guide folder changed a moment ago (an upload placed a folder in it) does not move whole: only its old
+    parts no row names do"""
+    touch(media / "_guides/2/20/a.pdf")
+    touch(media / "_guides/2/21/b.pdf", mtime=NOW.timestamp() - 5)
+    age(media / "_guides/2/20")
+    os.utime(media / "_guides/2/21", (NOW.timestamp() - 5, NOW.timestamp() - 5))
+    os.utime(media / "_guides/2", (NOW.timestamp() - 5, NOW.timestamp() - 5))
+    report = await plan_reconcile(db, media, None, NOW)
+    assert report.orphan_guide_files == ("_guides/2/20",)
+
+
+async def test_apply_checks_every_guide_entry_again(db, media):
+    """Between the plan and the apply a guide file, a file folder and a .tmp- folder become young (an upload on its
+    way, a file written): apply leaves each where it is, and nothing fails"""
+    await guide_file_row(db, 1, 10, "aa.pdf")
+    touch(media / "_guides/1/10/aa.pdf")
+    touch(media / "_guides/1/10/stray.pdf")
+    touch(media / "_guides/1/11/b.pdf")
+    touch(media / "_guides/1/.tmp-12-ffff6666/c.pdf")
+    age(media / "_guides/1/10", media / "_guides/1/11", media / "_guides/1/.tmp-12-ffff6666")
+    report = await plan_reconcile(db, media, None, NOW)
+    assert report.orphan_guide_files == ("_guides/1/.tmp-12-ffff6666", "_guides/1/10/stray.pdf", "_guides/1/11")
+    young = NOW.timestamp() - 30
+    os.utime(media / "_guides/1/10/stray.pdf", (young, young))
+    touch(media / "_guides/1/11/new.pdf", mtime=young)
+    touch(media / "_guides/1/.tmp-12-ffff6666/.tmp-0a0a-d.pdf", mtime=young)
+    done = apply_reconcile(report, media, None, NOW)
+    assert done.orphan_guide_files == () and done.failed == ()
+    assert (media / "_guides/1/10/stray.pdf").exists() and (media / "_guides/1/11/b.pdf").exists()
+    assert (media / "_guides/1/.tmp-12-ffff6666/c.pdf").exists()
+    assert not (media / "_orphaned").exists()
+
+
+async def test_hidden_and_nas_names_under_guides_are_left_alone(db, media):
+    """As in the media walk: hidden files, NAS index / recycle folders and lost+found under _guides are never
+    listed nor moved, and a folder holding one never moves whole (its own old files move one by one)"""
+    for rel in ("_guides/@eaDir/x.jpg", "_guides/.DS_Store", "_guides/#recycle/old.pdf", "_guides/lost+found/f",
+                "_guides/8/@eaDir/thumb.jpg", "_guides/8/.x", "_guides/8/80/.hidden", "_guides/8/80/stray.pdf",
+                "_guides/9/90/@eaDir/a/b.jpg", "_guides/9/90/c.pdf"):
+        touch(media / rel)
+    age(media / "_guides/@eaDir", media / "_guides/#recycle", media / "_guides/lost+found",
+        media / "_guides/8/@eaDir", media / "_guides/8/80", media / "_guides/8",
+        media / "_guides/9/90/@eaDir/a", media / "_guides/9/90/@eaDir", media / "_guides/9/90", media / "_guides/9",
+        media / "_guides")
+    report = await plan_reconcile(db, media, None, NOW)
+    assert report.orphan_guide_files == ("_guides/8/80/stray.pdf", "_guides/9/90/c.pdf")
+    assert report.orphan_files == ()
+    done = apply_reconcile(report, media, None, NOW)
+    assert done.orphan_guide_files == ("_guides/8/80/stray.pdf", "_guides/9/90/c.pdf") and done.failed == ()
+    for rel in ("_guides/@eaDir/x.jpg", "_guides/.DS_Store", "_guides/#recycle/old.pdf", "_guides/lost+found/f",
+                "_guides/8/@eaDir/thumb.jpg", "_guides/8/.x", "_guides/8/80/.hidden", "_guides/9/90/@eaDir/a/b.jpg"):
+        assert (media / rel).exists(), rel
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permissions")
+async def test_folders_made_for_a_returned_guide_file_are_0750(db, media):
+    """A guide file moved back from _orphaned gets the folders it needs as the store makes them, whatever the
+    umask"""
+    await guide_file_row(db, 1, 14, "back.pdf")
+    touch(media / "_orphaned/20261022T100000Z/_guides/1/14/back.pdf", content=b"guide")
+    report = await plan_reconcile(db, media, None, NOW)
+    previous = os.umask(0o077)
+    try:
+        done = apply_reconcile(report, media, None, NOW)
+    finally:
+        os.umask(previous)
+    assert done.returned_originals == ("_orphaned/20261022T100000Z/_guides/1/14/back.pdf",) and done.failed == ()
+    for folder in ("_guides", "_guides/1", "_guides/1/14"):
+        assert (media / folder).stat().st_mode & 0o777 == 0o750, folder

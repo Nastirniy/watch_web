@@ -194,8 +194,11 @@ What `restore` does:
    - **Users created after the backup** who have a certificate come back archived (`is_deleted`, inactive, no
      roles, no post the backup lacks; a username taken meanwhile gets `~<id>`), so their certificates can come back
      revoked and go on the CRL. An administrator can restore such a user and give it roles again.
-   - **Ids:** the id counter of every table is raised past the replaced data, so no id is handed out twice (posters,
-     storyboards, the thumbnail cache and certificate folders are keyed by id).
+   - **Ids:** the id counter of every table the backup has is raised past the replaced data, so no id is handed
+     out twice (posters, storyboards, the thumbnail cache and certificate folders are keyed by id). A table the
+     backup does not have (one a later migration adds, such as `user_guides` and `user_guide_files` in a backup
+     from before migration 033) is created empty when the api starts, and its ids start again at 1: run
+     `restore_reconcile --apply` (below), which moves the folders of its files aside.
 5. Swap: one atomic `RENAME TABLE` moves every live table to `<db>_before_<YYYYMMDD_HHMMSS>` and every restored
    table into `<db>`.
 6. It writes an audit row (`restore`, resource `database`) and prints the next steps, the carry-over counts, and the
@@ -236,7 +239,11 @@ Refusals (exit 3):
 - **User guide files:** they live under `MEDIA_ROOT/_guides/<guide_id>/<file_id>/<stored name>` and are not media:
   the media walk skips `_guides`, and `restore_reconcile` compares them with the `user_guide_files` rows, live or
   archived (archiving a file never removes it). A file no row names by its guide, file id and stored name (uploaded
-  after the backup) moves, with `--apply`, to `MEDIA_ROOT/_orphaned/<time>/_guides/<same path>`; a `.tmp-` folder
+  after the backup) moves, with `--apply`, to `MEDIA_ROOT/_orphaned/<time>/_guides/<same path>`. A file's folder
+  (`_guides/<guide_id>/<file_id>`) no row names moves there as a whole, even empty, and so does a guide's folder
+  no row names, so a new row with the same id never meets an old folder (an upload also takes over an empty folder
+  of its id, and refuses one with anything in it: 500 `media_store_failed`). A folder holding a hidden or NAS name
+  (`.x`, `@eaDir`, `#recycle`) is not moved whole: those names stay, as in the media walk. A `.tmp-` folder
   of an interrupted upload (`_guides/<guide_id>/.tmp-...`) moves there as a whole once it and everything in it is
   older than 10 minutes (younger: an upload on its way, left alone). A guide file counts as old only when its folder
   is old too. A row whose file is missing is listed (`guide <id> file <id>: <file name>`); one whose file sits under
@@ -245,8 +252,10 @@ Refusals (exit 3):
 - **PKI:** the CA key and the CRL file live in `PKI_DIR` (PKI.md, offline encrypted backup of `private/`). Package
   folders of certificates no row names (made after the backup for users the backup lacks) hold private keys:
   `restore_reconcile --apply` moves them to `PKI_DIR/issued/.quarantine/<time>/`; delete them once checked.
-- **Ids:** the restore raises every id counter past the replaced data, so the moved files and folders never meet a
-  new row with the same id.
+- **Ids:** the restore raises the id counter of every table the backup has past the replaced data, so the moved
+  files and folders never meet a new row with the same id. The counters of a table the backup does not have (the
+  guide tables in a backup from before migration 033, or after a downgrade of 033 and an upgrade again) start at 1:
+  there `restore_reconcile --apply` is what keeps the old folders of those ids out of the way.
 - **Sessions:** everyone logs in again.
 - **Users:** a user deactivated or archived after the backup is active again in the restored data. The restore lists
   such users; deactivate them again if needed.

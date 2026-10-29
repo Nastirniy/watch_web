@@ -7,8 +7,8 @@ Usage:
     python -m app.backend.cli.restore_reconcile            # dry run: what it would do
     python -m app.backend.cli.restore_reconcile --apply    # do it (one audit row)
 
-Media files no row names go to <upload_path>/_orphaned/<time>/, user guide files no user_guide_files row names (and
-.tmp- folders of interrupted guide uploads) to <upload_path>/_orphaned/<time>/_guides/, certificate packages no row
+Media files no row names go to <upload_path>/_orphaned/<time>/, user guide files and folders no user_guide_files row
+names (and .tmp- folders of interrupted guide uploads) to <upload_path>/_orphaned/<time>/_guides/, certificate packages no row
 names (private keys) to <store_dir>/.quarantine/<time>/; nothing is deleted but derived posters and storyboards of
 ids without a row.
 Exit code 1: something could not be moved (logged).
@@ -32,7 +32,7 @@ SECTIONS = (
     ("stale_derived", "derived file of an id without a row", "deleted"),
     ("returned_originals", "original of a row found under _orphaned", "moved back"),
     ("orphan_packages", "certificate package without a row", "moved to .quarantine"),
-    ("orphan_guide_files", "user guide file without a row", "moved to _orphaned"),
+    ("orphan_guide_files", "user guide file or folder without a row", "moved to _orphaned"),
 )
 
 

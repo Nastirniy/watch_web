@@ -173,16 +173,23 @@ def _place(temporary: Path, target: Path) -> None:
 def _write_guide_folder(root: Path, guide_id: int, file_id: int, stored_name: str, source: Path) -> None:
     """<root>/_guides/<guide_id>/<file_id>/<stored_name> through a .tmp- folder renamed into place (blocking).
 
-    FileExistsError when the file's folder exists (it is never touched); on any failure the .tmp- folder is removed
-    and the error raised. The source is moved, not copied, when it is on the same filesystem."""
+    An empty folder already at the file's place is reused (removed, then the new one renamed there): after a restore
+    the id counter of a table the backup lacks starts again at 1 and an old folder of the id may be left. Any other
+    entry there (a folder with something in it, a file) is never touched: FileExistsError. On any failure the .tmp-
+    folder is removed and the error raised. The source is moved, not copied, when it is on the same filesystem."""
     root.mkdir(parents=True, exist_ok=True)
     guides = root / GUIDES_DIR
     _make_dir(guides)
     guide_dir = guides / str(guide_id)
     _make_dir(guide_dir)
     target = guide_dir / str(file_id)
-    if target.exists():
-        raise FileExistsError(f"guide file folder {guide_id}/{file_id} exists")
+    if target.exists() or target.is_symlink():
+        try:
+            if target.is_symlink():
+                raise NotADirectoryError(str(target))
+            target.rmdir()          # only an empty folder goes
+        except OSError as exc:
+            raise FileExistsError(f"guide file folder {guide_id}/{file_id} exists") from exc
     temporary = guide_dir / f"{TEMP_PREFIX}{file_id}-{secrets.token_hex(4)}"
     temporary.mkdir(mode=GUIDE_DIR_MODE)
     try:

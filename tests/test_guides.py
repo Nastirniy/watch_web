@@ -5,6 +5,7 @@ tests/test_guides_audience.py."""
 import asyncio
 import hashlib
 import os
+import time
 from pathlib import Path
 from typing import get_type_hints
 
@@ -1027,3 +1028,67 @@ async def test_two_uploads_to_one_guide_at_once_both_land(client, db, headers, s
         assert row.sha256 == hashlib.sha256(expected).hexdigest()
     listed = (await client.get(by_id(guide["id"]), headers=headers(admin))).json()["files"]
     assert len(listed) == 2
+
+
+# --- ids reused after a restore (final review) -----------------------------------------------------------------------
+
+def _age_tree(top: Path, seconds: float = 3600) -> None:
+    """Every file and folder under top (top included) older than the reconcile age guard"""
+    then = time.time() - seconds
+    for path in sorted(top.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+        os.utime(path, (then, then))
+    os.utime(top, (then, then))
+
+
+async def test_an_id_reused_after_reconcile_apply_stores_its_file(client, db, headers, storage):
+    """A restore from a backup without the guide tables restarts their ids at 1; the folders of the files uploaded
+    after the backup (one with its file, one emptied by an older reconcile) are moved aside by restore_reconcile
+    --apply, and the next guide with the same ids stores its files"""
+    from datetime import datetime, timezone
+    from app.backend.cli.restore_reconcile import run
+
+    media = storage / "media"
+    (media / "_guides/1/1").mkdir(parents=True)
+    (media / "_guides/1/1/old.pdf").write_bytes(b"uploaded after the backup")
+    (media / "_guides/1/2").mkdir()
+    _age_tree(media / "_guides")
+    assert await run(db, apply=True, upload_path=media, store_dir=None, now=datetime.now(timezone.utc)) == 0
+    assert not (media / "_guides/1").exists()
+
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    first = await _uploaded(client, headers, admin, guide["id"])
+    second = await _uploaded(client, headers, admin, guide["id"], name="second.pdf")
+    assert (guide["id"], first["id"], second["id"]) == (1, 1, 2), "the ids the old folders had"
+    for body in (first, second):
+        row = await db.get(UserGuideFile, body["id"])
+        assert (media / row.file_path).read_bytes() == PDF
+
+
+async def test_an_empty_folder_left_at_the_file_id_is_reused(client, db, headers, storage):
+    """No reconcile run: an empty folder of the new file's id is taken over"""
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    leftover = storage / "media" / "_guides" / str(guide["id"]) / "1"
+    leftover.mkdir(parents=True)
+    body = await _uploaded(client, headers, admin, guide["id"])
+    assert body["id"] == 1
+    row = await db.get(UserGuideFile, body["id"])
+    assert (storage / "media" / row.file_path).read_bytes() == PDF
+    assert [p.name for p in leftover.iterdir()] == [row.stored_name]
+
+
+async def test_a_folder_with_something_in_it_at_the_file_id_is_refused(client, db, headers, storage):
+    """A folder of the new file's id that holds anything is never touched: 500 media_store_failed, no row, the
+    folder as it was"""
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    leftover = storage / "media" / "_guides" / str(guide["id"]) / "1"
+    leftover.mkdir(parents=True)
+    (leftover / "someone-else.pdf").write_bytes(b"not ours")
+    response = await _upload(client, headers, admin, guide["id"])
+    assert response.status_code == 500 and response.json()["code"] == "media_store_failed", response.text
+    assert (await db.exec(select(UserGuideFile))).all() == []
+    assert [p.name for p in leftover.iterdir()] == ["someone-else.pdf"]
+    assert (leftover / "someone-else.pdf").read_bytes() == b"not ours"
+    assert [p.name for p in leftover.parent.iterdir()] == ["1"], "no .tmp- folder left"
