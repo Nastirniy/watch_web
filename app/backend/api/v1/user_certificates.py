@@ -7,6 +7,10 @@ user_self_only); an archived user only for callers with user.archive covering th
 certificate.view covering the user (403 permission_denied), the user themselves included; for a change also
 check_target_user with the permission of the change (403 target_user_more_privileged); then the certificate (404
 certificate_not_found, also for another user's certificate) and its state.
+
+A write (issue, upload, export, revoke) first locks the user row (lock_certificate_owner) and runs every check after
+the lock: every writer of a user's assignments locks the user first, so check_target_user cannot pass on assignments
+another request is changing.
 """
 from typing import Annotated, List, Optional
 
@@ -41,8 +45,8 @@ from app.backend.models.user_certificate import UserCertificate
 from app.backend.enums.audit import AuditEvent
 from app.backend.services.audit import create_audit_log, home_scope
 from app.backend.services.certificates import (
-    MAX_CERTIFICATE_BYTES, WriteAudit, export_package, get_user_certificate, issue_certificate, revoke_certificate,
-    upload_certificate, user_certificates,
+    MAX_CERTIFICATE_BYTES, WriteAudit, export_package, get_user_certificate, issue_certificate,
+    lock_certificate_owner, revoke_certificate, upload_certificate, user_certificates,
 )
 from app.backend.services.crl_publisher import publish_crl
 from app.backend.services.signer_client import SignerRefused
@@ -55,10 +59,15 @@ _logger = get_api_logger()
 _OWNER_PROBLEMS = (ErrorCode.USER_NOT_FOUND, AccessErrorCode.USER_SELF_ONLY, *GUARDED)
 
 
-async def _certificate_owner(session: AsyncSession, auth: AuthContext, user_id: int) -> User:
+async def _certificate_owner(session: AsyncSession, auth: AuthContext, user_id: int, lock: bool = False) -> User:
     """The user of the path, visible to the caller as GET /users/{user_id} shows it, with certificate.view covering
-    them"""
-    user = (await session.exec(select(User).where(User.id == user_id))).first()
+    them. lock for a write: the user row locked as the first statement of the write (lock_certificate_owner), so
+    that check_target_user, which the write runs next, reads the user's assignments as they stand until the commit
+    (every writer of a user's assignments locks the user first)."""
+    if lock:
+        user = await lock_certificate_owner(session, user_id)
+    else:
+        user = (await session.exec(select(User).where(User.id == user_id))).first()
     if not user:
         raise ApiError(ErrorCode.USER_NOT_FOUND)
     # Visibility before the state: an outsider gets the same 403 for an archived and a live user
@@ -130,7 +139,7 @@ async def issue_user_certificate(
     target_user_more_privileged). An archived user answers 404 user_not_found; an inactive user may receive one.
     503 certificate_authority_not_configured without PKI on the server, certificate_authority_unavailable when the
     signing service does not answer (nothing is issued)."""
-    user = await _certificate_owner(session, auth, user_id)
+    user = await _certificate_owner(session, auth, user_id, lock=True)
     await check_target_user(session, auth, user, Permissions.CERTIFICATE_CREATE)
     validity_days = data.validity_days if data.validity_days is not None else settings.pki.validity_days
     try:
@@ -164,7 +173,7 @@ async def upload_user_certificate(
     the hashes the login matches. ca_issued when it is signed by the client CA of this server. An expired file is
     accepted (listed as expired); the same certificate registered already, for any user, answers 400
     certificate_taken. The same checks as issuing; an archived user answers 404 user_not_found."""
-    user = await _certificate_owner(session, auth, user_id)
+    user = await _certificate_owner(session, auth, user_id, lock=True)
     await check_target_user(session, auth, user, Permissions.CERTIFICATE_CREATE)
     cert_data = await form.file.read(MAX_CERTIFICATE_BYTES + 1)
     if len(cert_data) == 0:
@@ -230,7 +239,7 @@ async def export_user_certificate(
     409 certificate_not_exportable for a certificate this server did not issue, certificate_not_active for a revoked
     or expired one; 410 certificate_files_missing when its folder was removed; 503
     certificate_authority_not_configured without PKI on the server. The signing service is not needed."""
-    user = await _certificate_owner(session, auth, user_id)
+    user = await _certificate_owner(session, auth, user_id, lock=True)
     await check_target_user(session, auth, user, Permissions.CERTIFICATE_EXPORT)
     try:
         row = await get_user_certificate(session, user.id, certificate_id, lock=True)
@@ -268,7 +277,7 @@ async def revoke_user_certificate(
     Needs certificate.revoke covering the user and every assignment of the user grantable by the caller (403
     target_user_more_privileged). 409 certificate_already_revoked for a revoked one. The body may be left out
     (reason unspecified)."""
-    user = await _certificate_owner(session, auth, user_id)
+    user = await _certificate_owner(session, auth, user_id, lock=True)
     await check_target_user(session, auth, user, Permissions.CERTIFICATE_REVOKE)
     reason = (data or CertificateRevokeRequest()).reason
     try:

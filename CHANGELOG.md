@@ -5,6 +5,17 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Owner decisions 2026-10-29
+
+### Fixed
+
+- Certificate writes (`POST /users/{user_id}/certificates`, `.../certificates/upload`,
+  `.../certificates/{certificate_id}/export`, `.../certificates/{certificate_id}/revoke`) lock the target user row
+  as the first statement of the write and check the target (`target_user_more_privileged`) after the lock; the check
+  used to read the user's assignments before the lock, so an assignment added meanwhile could pass a stale check.
+  Answers and codes are unchanged. `pki issue` takes the same lock (`lock_certificate_owner` in
+  `services/certificates.py`).
+
 ## User guides and file formats
 
 ### Changed

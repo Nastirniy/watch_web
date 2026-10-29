@@ -180,7 +180,9 @@ async def test_certificate_revoke_locks_the_user_first(client, db, headers, engi
     assert response.status_code == 200, response.text
     write = _write_of(seen, "UPDATE user_certificates")
     assert write[0].startswith("SELECT users.id FROM users WHERE users.id = ?"), write
-    assert write[1].startswith("SELECT user_certificates."), write
+    # Then the user entity (lock_certificate_owner), the checks of the target, the certificate row
+    assert write[1].startswith("SELECT users.id, users.username"), write
+    assert any(statement.startswith("SELECT user_certificates.") for statement in write[2:]), write
 
 
 def test_the_touch_lock_is_shared(monkeypatch):

@@ -194,10 +194,10 @@ def _stored_certificate(row: UserCertificate) -> Optional[x509.Certificate]:
 async def get_user_certificate(session: AsyncSession, user_id: int, certificate_id: int,
                                lock: bool = False) -> UserCertificate:
     """The certificate of the user; CodedError certificate_not_found when there is none, also for the id of another
-    user's certificate. lock: the row locked as the first statement of the write and read as committed
-    (utils/row_locks.py)"""
+    user's certificate. lock: the row locked and read as committed (utils/row_locks.py), inside a write that began
+    with lock_certificate_owner"""
     query = _certificate_query(user_id, certificate_id)
-    row = await lock_first(session, query) if lock else (await session.exec(query)).first()
+    row = await lock_row(session, query) if lock else (await session.exec(query)).first()
     if row is None:
         raise CodedError(ErrorCode.CERTIFICATE_NOT_FOUND)
     return row
@@ -230,10 +230,23 @@ async def session_certificate(session: AsyncSession, user_id: int,
     return result.first()
 
 
+async def lock_certificate_owner(session: AsyncSession, user_id: int) -> Optional[User]:
+    """The first locks of every certificate write (issue, upload, export, revoke): the user row as the first
+    statement of the write (its id only), then the User entity, read as committed (utils/row_locks.py); None when
+    there is no such user. The caller checks the target (check_target_user) after these locks: every writer of a
+    user's assignments locks the user row first, so the check reads the assignments as they stand until the commit.
+    The id comes first because locking the entity reads its presence subqueries (user_sessions), a plain read that
+    takes the snapshot on MariaDB: the snapshot then starts after the user row is held, as in _lock_user_and_roles
+    (api/v1/users.py), and a session touch (which holds the user row shared, auth/sessions.py) commits before it."""
+    if await lock_first(session, select(User.id).where(User.id == user_id)) is None:
+        return None
+    return await lock_row(session, select(User).where(User.id == user_id))
+
+
 async def _lock_live_user(session: AsyncSession, user: User) -> User:
-    """The user row locked as the first statement of the write and read as committed (utils/row_locks.py);
+    """The user row, locked again (the caller began the write with lock_certificate_owner) and read as committed;
     CodedError user_not_found when it is archived. An inactive user may receive a certificate."""
-    locked = await lock_first(session, select(User).where(User.id == user.id))
+    locked = await lock_row(session, select(User).where(User.id == user.id))
     if locked is None or locked.is_deleted:
         raise CodedError(ErrorCode.USER_NOT_FOUND)
     return locked
@@ -272,9 +285,10 @@ async def issue_certificate(
         created_by: Optional[int],
         write_audit: WriteAudit,
 ) -> CertificatePackage:
-    """Issue a certificate for the user in one transaction (spec section 5): lock the user row (archived: CodedError
-    user_not_found), generate the key, have the signer sign it, insert the row (source issued, ca_issued), write
-    the folder <store_dir>/<user_id>/<id>/, write the audit row (write_audit), commit.
+    """Issue a certificate for the user in one transaction (spec section 5): the user row, which the caller
+    locked first (lock_certificate_owner), read again (archived: CodedError user_not_found), generate the key,
+    have the signer sign it, insert the row (source issued, ca_issued), write the folder
+    <store_dir>/<user_id>/<id>/, write the audit row (write_audit), commit.
 
     label is already checked (pki.profile.normalize_label), validity_days too (1..settings.pki.max_validity_days).
     CodedError certificate_authority_not_configured without PKI settings, certificate_authority_unavailable when
@@ -330,9 +344,10 @@ async def upload_certificate(
         created_by: Optional[int],
         write_audit: WriteAudit,
 ) -> UserCertificate:
-    """Register a certificate file for the user (source uploaded) in one transaction: lock the user row (archived:
-    CodedError user_not_found), register_certificate (certificate_invalid, certificate_taken), the audit row,
-    commit. The caller checked the size of the file and the label."""
+    """Register a certificate file for the user (source uploaded) in one transaction: the user row, which the
+    caller locked first (lock_certificate_owner), read again (archived: CodedError user_not_found),
+    register_certificate (certificate_invalid, certificate_taken), the audit row, commit. The caller checked the
+    size of the file and the label."""
     user = await _lock_live_user(session, user)
     row = await register_certificate(session, user, cert_data, label, CertificateSource.UPLOADED, created_by)
     await write_audit(row, certificate_audit_details(row, certificate_values(cert_data).certificate))
@@ -343,8 +358,8 @@ async def upload_certificate(
 async def export_package(session: AsyncSession, certificate: UserCertificate,
                          write_audit: WriteAudit) -> CertificatePackage:
     """The stored package of an issued certificate again, from its folder (the signer is not needed):
-    export_count + 1, last_exported_at, the audit row, commit. The caller locked the row
-    (get_user_certificate(lock=True)).
+    export_count + 1, last_exported_at, the audit row, commit. The caller locked the user
+    (lock_certificate_owner), then the row (get_user_certificate(lock=True)).
 
     CodedError certificate_authority_not_configured without PKI settings, certificate_not_exportable for a
     certificate the API did not issue, certificate_not_active for a revoked or expired one,
@@ -383,19 +398,20 @@ async def revoke_certificate(
         revoked_by: int,
         write_audit: WriteAudit,
 ) -> UserCertificate:
-    """Revoke a certificate (final): lock the user row, then the certificate row and read it again, CodedError
+    """Revoke a certificate (final): the user row (locked again: the caller began the write with
+    lock_certificate_owner), then the certificate row and read it again, CodedError
     certificate_already_revoked when it is revoked; set revoked_at, revoked_by and revocation_reason, end the live
     sessions bound to it, write the audit row (write_audit), commit. Everything lands in one transaction: a session of
     the revoked device never outlives the revocation. The CRL is published by the caller after the commit
     (crl_publisher.publish_crl).
 
-    The user row is the first lock, as for every write that ends sessions of the user: a session touch takes it
-    shared (auth/sessions.py touch_session), so it waits for the revocation instead of changing a session row this
-    write reads and then ends (MariaDB error 1020)."""
+    The user row is the first lock (lock_certificate_owner), as for every write that ends sessions of the user: a
+    session touch takes it shared (auth/sessions.py touch_session), so it waits for the revocation instead of
+    changing a session row this write reads and then ends (MariaDB error 1020)."""
     # auth.service imports this module (login looks certificates up): imported here to avoid the cycle
     from app.backend.auth.service import AuthService
 
-    await lock_first(session, select(User.id).where(User.id == certificate.user_id))
+    await lock_row(session, select(User.id).where(User.id == certificate.user_id))
     row = await lock_row(session, _certificate_query(certificate.user_id, certificate.id))
     if row is None:
         raise CodedError(ErrorCode.CERTIFICATE_NOT_FOUND)

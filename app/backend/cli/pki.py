@@ -32,7 +32,7 @@ from app.backend.pki.authority import CaCheckError, load_ca_certificate, sha256_
 from app.backend.pki.profile import LABEL_MAX_LENGTH, normalize_label
 from app.backend.enums.audit import AuditEvent
 from app.backend.services.audit import create_audit_log, home_scope
-from app.backend.services.certificates import issue_certificate, state_clause
+from app.backend.services.certificates import issue_certificate, lock_certificate_owner, state_clause
 from app.backend.services.crl_publisher import crl_status, publish_crl
 from app.backend.services.signer_client import SignerRefused, SignerUnavailable, signer_client
 
@@ -97,6 +97,11 @@ async def _issue(session, args) -> int:
         print(f"{out} must be a new or empty directory (a package is never written over another)", file=sys.stderr)
         return 1
     user = (await session.exec(select(User).where(func.lower(User.username) == args.username.lower()))).first()
+    if user is None:
+        print(f"no user {args.username}", file=sys.stderr)
+        return 1
+    # The first lock of the write, as for POST /users/{user_id}/certificates
+    user = await lock_certificate_owner(session, user.id)
     if user is None:
         print(f"no user {args.username}", file=sys.stderr)
         return 1
