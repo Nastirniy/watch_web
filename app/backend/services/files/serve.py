@@ -19,10 +19,11 @@ any other, so a copy of the API's would never arrive, and a header it does pass 
 from __future__ import annotations
 
 import unicodedata
-from typing import Dict, Mapping, Optional
+from typing import Callable, Dict, Mapping, Optional
 from urllib.parse import quote
 
 from app.backend.config import settings
+from app.backend.services.files.names import extension_of
 from app.backend.utils.content_type import served_content_type
 
 DISPOSITIONS = frozenset({"attachment", "inline"})
@@ -41,11 +42,45 @@ _ATTR_CHAR_SAFE = "!#$&+-.^_`|~"
 # (RFC 6266 appendix D)
 _FALLBACK_REPLACED = frozenset('"\\%')
 _EMPTY_NAME = "file"
+# A name is cut to this many UTF-8 bytes (its extension kept), its fallback to as many characters: filename* is at
+# most 3 x 512 characters, the whole header at most MAX_CONTENT_DISPOSITION_LENGTH, about half of nginx's smallest
+# default proxy_buffer_size (4 KB, one memory page), which must hold every header of the API's answer. File names are
+# at most 255 characters (names.MAX_FILENAME_LENGTH): 255 Cyrillic letters and an extension are just over it.
+FILENAME_BYTE_BUDGET = 512
+MAX_CONTENT_DISPOSITION_LENGTH = len("attachment; filename=\"\"; filename*=UTF-8''") + 4 * FILENAME_BYTE_BUDGET
+
+
+# Format characters that can disguise a name (bidi embeddings, overrides, isolates and marks: "invoice<RLO>txt.exe"
+# shows as "invoiceexe.txt") and the byte order mark; other format characters stay (ZWJ / ZWNJ spell words)
+_HIDDEN = frozenset(chr(code) for code in (*range(0x202A, 0x202F), *range(0x2066, 0x206A), 0x200E, 0x200F, 0x061C,
+                                           0xFEFF))
 
 
 def _printable(filename: str) -> str:
-    """The name without control and format characters (CR, LF, NUL, bidirectional overrides)"""
-    return "".join(ch for ch in filename if unicodedata.category(ch) not in ("Cc", "Cf"))
+    """The name without control characters (CR, LF, NUL), lone surrogates (no UTF-8 for them) and _HIDDEN"""
+    return "".join(ch for ch in filename if unicodedata.category(ch) not in ("Cc", "Cs") and ch not in _HIDDEN)
+
+
+def _cut(name: str, size: Callable[[str], int]) -> str:
+    """The name within FILENAME_BYTE_BUDGET by `size`, cut between characters, its extension kept (one that alone
+    takes half the budget is not an extension worth keeping)"""
+    if size(name) <= FILENAME_BYTE_BUDGET:
+        return name
+    extension = extension_of(name)
+    suffix = name[len(name) - len(extension):] if extension else ""
+    if size(suffix) > FILENAME_BYTE_BUDGET // 2:
+        suffix = ""
+    room, kept = FILENAME_BYTE_BUDGET - size(suffix), []
+    for ch in name[:len(name) - len(suffix)]:
+        room -= size(ch)
+        if room < 0:
+            break
+        kept.append(ch)
+    return "".join(kept) + suffix
+
+
+def _utf8_size(text: str) -> int:
+    return len(text.encode("utf-8"))
 
 
 def _ascii_fallback(filename: str) -> str:
@@ -65,12 +100,14 @@ def _ascii_fallback(filename: str) -> str:
 
 def content_disposition(disposition: str, filename: str) -> str:
     """'attachment; filename="<ASCII fallback>"; filename*=UTF-8''<name, percent-encoded>' (RFC 6266, RFC 8187).
-    Both parts always: for an ASCII name they are the same. ValueError for another disposition"""
+    Both parts always: for an ASCII name they are the same. A name longer than FILENAME_BYTE_BUDGET is cut, its
+    extension kept; the header is at most MAX_CONTENT_DISPOSITION_LENGTH. ValueError for another disposition"""
     if disposition not in DISPOSITIONS:
         raise ValueError("disposition must be attachment or inline")
-    name = _printable(filename).strip() or _EMPTY_NAME
+    name = _cut(_printable(filename).strip() or _EMPTY_NAME, _utf8_size)
     encoded = quote(name.encode("utf-8"), safe=_ATTR_CHAR_SAFE)
-    return f"{disposition}; filename=\"{_ascii_fallback(name)}\"; filename*=UTF-8''{encoded}"
+    fallback = _cut(_ascii_fallback(name), len)
+    return f"{disposition}; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
 
 
 def file_headers(*, content_type: str, filename: str, disposition: str, etag: Optional[str]) -> Dict[str, str]:

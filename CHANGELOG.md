@@ -101,8 +101,10 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   it). `GET /media/{id}/download`, `GET /media/{id}/stream` and `POST /observations/report` use it.
 - `Content-Disposition` names the file twice (RFC 6266, RFC 8187): an ASCII fallback in `filename="..."` (accents
   dropped, every run of other characters one `_`, no `"`, `\` or `%`) and the real name in
-  `filename*=UTF-8''<percent-encoded>`; control and format characters (CR, LF, NUL, bidirectional overrides) are left
-  out of both. Before, the name went into `filename="..."` with only `"` removed: a name outside Latin-1 (stored
+  `filename*=UTF-8''<percent-encoded>`; control characters (CR, LF, NUL), lone surrogates, the bidi controls
+  (U+202A-202E, U+2066-2069, U+200E, U+200F, U+061C) and U+FEFF are left out of both (ZWJ / ZWNJ stay). A name
+  longer than 512 UTF-8 bytes is cut between characters, its extension kept (fallback: 512 characters), so the
+  header stays under about 2.1 KB, well inside nginx's 4 KB default `proxy_buffer_size`. Before, the name went into `filename="..."` with only `"` removed: a name outside Latin-1 (stored
   when upload name sanitising is off) answered 500.
 - Every file answer carries `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox; default-src
   'none'` (a stored file opened as a page runs sandboxed, nothing loads; `<video>`, `<audio>` and `<img>` loads are

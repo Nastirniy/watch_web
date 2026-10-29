@@ -19,8 +19,9 @@ from app.backend.api.v1 import V1
 from app.backend.config import settings
 from app.backend.enums.media_types import ContentType
 from app.backend.enums.routes import MediaRoutes, ObservationRoutes
-from app.backend.services.files.serve import (CONTENT_SECURITY_POLICY, content_disposition, file_headers,
-                                              NGINX_ADDED_HEADERS)
+from app.backend.services.files.serve import (CONTENT_SECURITY_POLICY, FILENAME_BYTE_BUDGET,
+                                              MAX_CONTENT_DISPOSITION_LENGTH, NGINX_ADDED_HEADERS,
+                                              content_disposition, file_headers)
 from tests.helpers import make_admin, make_dictionary, make_media, make_observation, make_post, make_user
 from tests.test_nginx_conf import APP, _location
 
@@ -73,6 +74,49 @@ def test_quotes_and_backslashes_in_names_are_safe():
     assert not set(fallback) & set('"\\%') and fallback.endswith(".txt")
     # filename* keeps every printable character; control characters are dropped from both
     assert decoded == 'a"b\\c;d%eX-Evil: 1.txt'
+
+
+def test_joiners_stay_and_bidi_controls_and_the_bom_go():
+    """ZWJ / ZWNJ are part of the spelling in some scripts; bidi controls can disguise an extension"""
+    joined = "\u0915\u094d\u200d\u0937 \u200c.txt"
+    assert _names(content_disposition("attachment", joined))[1] == joined
+    hidden = "\ufeffinvoice\u202e\u2066\u2069\u200e\u200f\u061c\u202atxt.exe"
+    fallback, decoded = _names(content_disposition("attachment", hidden))
+    assert decoded == "invoicetxt.exe" and fallback == "invoicetxt.exe"
+
+
+def test_a_lone_surrogate_is_left_out():
+    """It cannot be encoded as UTF-8: the answer was a 500"""
+    fallback, decoded = _names(content_disposition("attachment", "a\ud800b.pdf"))
+    assert decoded == "ab.pdf" and fallback == "ab.pdf"
+
+
+def test_a_name_outside_the_bmp():
+    name = "radio \U0001f4fb.mp4"
+    header = content_disposition("inline", name)
+    assert "%F0%9F%93%BB" in header
+    fallback, decoded = _names(header)
+    assert decoded == name and fallback == "radio _.mp4"
+
+
+@pytest.mark.parametrize("name", ["\u0436" * 255 + ".md", "\U0001f4fb" * 300 + ".md",
+                                  "a" * 2000 + ".pdf", "\u00e9" * 900 + ".txt"],
+                         ids=["255-cyrillic", "300-emoji", "2000-ascii", "900-accented"])
+def test_a_long_name_is_cut_to_the_budget_keeping_its_extension(name):
+    header = content_disposition("attachment", name)
+    assert len(header) <= MAX_CONTENT_DISPOSITION_LENGTH < 2200
+    fallback, decoded = _names(header)
+    extension = name[name.rindex("."):]
+    assert decoded.endswith(extension) and fallback.endswith(extension)
+    assert len(decoded.encode("utf-8")) <= FILENAME_BYTE_BUDGET
+    assert name.startswith(decoded[:-len(extension)])          # cut at a character, never inside one
+    if len(name.encode("utf-8")) <= FILENAME_BYTE_BUDGET:
+        assert decoded == name
+
+
+def test_a_name_inside_the_budget_is_not_cut():
+    name = "\u0436" * 250 + ".md"                               # 503 bytes
+    assert _names(content_disposition("attachment", name))[1] == name
 
 
 def test_an_empty_name_still_has_a_name():
