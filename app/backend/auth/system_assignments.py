@@ -5,11 +5,13 @@ session; the route flushes and commits (the unique index uq_system_role_assignme
 assignment_exists when two requests pass the duplicate check together) and writes the audit row. A system role acts
 at the root, so it is granted as an assignment at the root: user.update and every permission of the role held there.
 
-    create: check_target_user(user.update) 403 -> archived user 404 -> role unknown or archived 404
+    create: check_target_user(user.view 403 user_self_only, user.update) 403 -> archived user 404
+            -> role unknown or archived 404
             -> a tree role 409 role_is_tree -> check_assign_at(user.update and the role's permissions, the root) 403
             -> the boundary of the user's type for system grants 409 role_exceeds_user_type
             -> the same role 409 assignment_exists
-    delete: check_target_user(user.update) 403 -> archived user 404 -> the assignment of that user 404
+    delete: check_target_user(user.view 403 user_self_only, user.update) 403 -> archived user 404
+            -> the assignment of that user 404
             -> check_assign_at(user.update and its role's permissions, the root) 403
             -> the user's last assignment of either table 409 last_assignment_required
             -> the built-in system_administrator: not taken from oneself, and someone keeps it 409

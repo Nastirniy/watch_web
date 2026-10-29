@@ -220,7 +220,8 @@ def grants_of(rows: Iterable, kind: str = "tree", user: Optional[User] = None) -
         names = frozenset(permissions[assignment_id])
         return names if user is None else _in_effect(user, kind, assignment_id, names, role_kinds[assignment_id])
 
-    return tuple(Grant(*heads[assignment_id], held_by(assignment_id), assignment_id=assignment_id, kind=kind)
+    return tuple(Grant(*heads[assignment_id], held_by(assignment_id), assignment_id=assignment_id, kind=kind,
+                       role_kind=role_kinds[assignment_id])
                  for assignment_id in sorted(heads))
 
 

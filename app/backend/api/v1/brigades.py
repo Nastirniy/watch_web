@@ -25,6 +25,7 @@ from app.backend.api.v1.models.response.corps import UnitObservationStatsRespons
 from app.backend.api.v1.models.response.posts import PostResponse, posts_to_response
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.context import AuthContext, load_scope_tree
+from app.backend.auth.privileges import check_move
 from app.backend.auth.require import require
 from app.backend.auth.scope import Node
 from app.backend.config import settings
@@ -143,7 +144,8 @@ async def get_brigade(
     BrigadeRoutes.BRIGADE_BY_ID.value,
     response_model=BrigadeResponse,
     responses=problems(
-        *PLACEMENT_PROBLEMS, ErrorCode.SCOPE_GROUP_NAME_TAKEN, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED,
+        *PLACEMENT_PROBLEMS, ErrorCode.SCOPE_GROUP_NAME_TAKEN, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION,
+        AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
     ),
 )
 async def update_brigade(
@@ -161,7 +163,10 @@ async def update_brigade(
     scope_group.view and scope_group.update covering the old and the new corps and, as it takes every post of the brigade along, post.view
     and post.update covering both (403 permission_required_for_action, action move_brigade), answered before the
     existence of the new corps; the new corps unknown, archived or outside scope_group.view: 404, not a corps: 409
-    scope_group_parent_not_allowed. Nothing changes on a refusal."""
+    scope_group_parent_not_allowed. Every role assignment at the new corps that does not already apply at the brigade
+    comes into effect for it and its posts: the caller must be able to grant each of them at the brigade, holding
+    every permission of its role there before the move, the grants of other users included (403
+    grant_exceeds_own_permissions, after the corps checks). Nothing changes on a refusal."""
     update_data = data.model_dump(exclude_unset=True)
     # The current corps sent back is no move: only another corps must be visible (404 before any lock)
     if "corps_id" in update_data and update_data["corps_id"] != auth.tree.group_parent.get(brigade_id):
@@ -189,6 +194,8 @@ async def update_brigade(
             for permission in (Permissions.POST_UPDATE, Permissions.POST_VIEW):
                 AccessControlService.check_covers(auth, permission, parent_location(corps_id), "move_brigade")
         await _check_corps(session, brigade.id, new_corps)
+        # What the new corps puts in effect at the brigade, read after lock_unit's locks (auth/privileges.py)
+        await check_move(session, auth, Node.group(brigade.id), Node.group(new_corps))
     if ("corps_id" in update_data or "name" in update_data) and await name_taken(
             session, update_data.get("name", brigade.name), new_corps, exclude_id=brigade.id):
         raise ApiError(ErrorCode.SCOPE_GROUP_NAME_TAKEN)
@@ -238,7 +245,7 @@ async def archive_brigade(
     response_model=BrigadeResponse,
     responses=problems(
         ErrorCode.SCOPE_GROUP_NOT_FOUND, ErrorCode.SCOPE_GROUP_NOT_ARCHIVED,
-        AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED,
+        AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
     ),
 )
 async def restore_brigade(
@@ -250,7 +257,8 @@ async def restore_brigade(
     """Restore an archived brigade (is_deleted=false) in its corps: the brigade only; its archived posts are
     listed with include_deleted (GET /{brigade_id}/posts) and restored one by one. scope_group.archive must cover its
     corps (403). Not archived: 409; its corps archived (restore the corps first), unknown, another kind or outside
-    scope_group.view: 404."""
+    scope_group.view: 404. The role assignments made at the brigade apply again: the caller must hold every
+    permission of each of their roles at the brigade (403 grant_exceeds_own_permissions)."""
     brigade = await restore_unit(request, session, auth, BRIGADE, brigade_id)
     return brigade_to_response(brigade, await _fresh(session, auth))
 

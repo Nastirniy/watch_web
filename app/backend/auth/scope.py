@@ -89,6 +89,8 @@ class Grant:
     assignment_id: Optional[int] = None
     # tree: a role assignment at node; system: a system role assignment (node is the root)
     kind: str = "tree"
+    # the kind of the role (RoleKind value) as read from the database; None for a grant built without one
+    role_kind: Optional[str] = None
 
 
 @dataclass(frozen=True)

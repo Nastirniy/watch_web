@@ -24,20 +24,21 @@ def problem(response, status: int, code: str) -> dict:
 
 
 def _record_order(monkeypatch, module):
-    """The order of the role row lock (lock) and the first plain read of grants (load_grants) in an assignment write"""
+    """The order of the role row lock (lock) and the first plain read of grants (every_assignment, the target's) in an
+    assignment write"""
     calls = []
-    original_lock, original_grants = module.lock, privileges.load_grants
+    original_lock, original_grants = module.lock, privileges.every_assignment
 
     async def recording_lock(session, query, shared=False):
         calls.append("lock")
         return await original_lock(session, query, shared=shared)
 
-    async def recording_grants(session, user, include_archived_roles=False):
+    async def recording_grants(session, user):
         calls.append("grants")
-        return await original_grants(session, user, include_archived_roles=include_archived_roles)
+        return await original_grants(session, user)
 
     monkeypatch.setattr(module, "lock", recording_lock)
-    monkeypatch.setattr(privileges, "load_grants", recording_grants)
+    monkeypatch.setattr(privileges, "every_assignment", recording_grants)
     return calls
 
 

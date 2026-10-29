@@ -203,7 +203,8 @@ async def test_user_update_outsider_gets_the_same_403_for_an_archived_and_a_live
         response = await client.patch(V1.path(UserRoutes.USER_BY_ID, user_id=target.id),
                                       data={"username_alias": "X"}, headers=headers(outsider))
         assert response.status_code == 403, (target.is_deleted, response.text)
-        assert response.json()["code"] == "target_user_more_privileged"
+        # The user lies outside the caller's user.view: the 403 of GET /users/{user_id} (audit L1)
+        assert response.json()["code"] == "user_self_only"
     admin = await make_admin(db)
     hidden = await client.patch(V1.path(UserRoutes.USER_BY_ID, user_id=archived.id), data={"username_alias": "X"},
                                 headers=headers(admin))
@@ -238,7 +239,8 @@ async def test_user_state_routes_answer_the_outsider_alike(client, db, headers, 
     for target in (live, archived):
         response = await client.post(url(target), headers=headers(outsider))
         assert response.status_code == 403, (target.is_deleted, response.text)
-        assert response.json()["code"] == "target_user_more_privileged", response.text
+        # The user lies outside the caller's user.view: the 403 of GET /users/{user_id} (audit L1)
+        assert response.json()["code"] == "user_self_only", response.text
 
     # Inside the caller's reach the state answers
     admin = await make_admin(db)

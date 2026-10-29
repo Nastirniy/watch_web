@@ -21,6 +21,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.context import AuthContext
+from app.backend.auth.privileges import check_node_restore
 from app.backend.auth.scope import Node, ROOT, ScopeTree
 from app.backend.enums.audit import AuditEvent
 from app.backend.enums.errors import ErrorCode
@@ -209,7 +210,9 @@ async def restore_unit(request: Request, session: AsyncSession, auth: AuthContex
                        unit_id: int) -> ScopeGroup:
     """POST /corps/{id}/restore, /brigades/{id}/restore: the node only. 404 as get_unit (archived ones included);
     scope_group.archive covering its parent (parent_node, 403); not archived: 409 scope_group_not_archived; its parent
-    archived: 404 scope_group_not_found (restore the parent first). Audited and committed."""
+    archived: 404 scope_group_not_found (restore the parent first); the role assignments made at the unit apply
+    again, so the caller holds every permission of each of their roles at the unit (auth/privileges.py
+    check_node_restore, 403 grant_exceeds_own_permissions). Audited and committed."""
     unit = await lock_unit(session, auth, kind, unit_id, include_deleted=True)
     AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_ARCHIVE, parent_node(unit),
                                       f"restore_{ScopeGroupKind(kind).value}")
@@ -220,6 +223,7 @@ async def restore_unit(request: Request, session: AsyncSession, auth: AuthContex
         await groups_service.check_placement(session, kind, unit.parent_id)
     except CodedError as exc:
         raise ApiError.from_coded(exc)
+    await check_node_restore(session, auth, Node.group(unit.id))
     old_values = unit.model_dump()
     unit.is_deleted = False
     unit.updated_at = datetime.now(timezone.utc)

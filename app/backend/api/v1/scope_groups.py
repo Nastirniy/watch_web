@@ -16,6 +16,7 @@ from app.backend.api.v1.models.response.scope_groups import (
 )
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.context import AuthContext
+from app.backend.auth.privileges import check_move, check_node_restore
 from app.backend.auth.require import require
 from app.backend.auth.scope import Node, ROOT
 from app.backend.database import get_session
@@ -204,7 +205,10 @@ async def get_scope_group(
 @router.patch(
     ScopeGroupRoutes.GROUP_BY_ID.value,
     response_model=ScopeGroupResponse,
-    responses=problems(*TREE_PROBLEMS, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED),
+    responses=problems(
+        *TREE_PROBLEMS, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS,
+        *GUARDED,
+    ),
 )
 async def update_scope_group(
         request: Request,
@@ -223,7 +227,10 @@ async def update_scope_group(
     scope_group.view and scope_group.update covering the old and the new parent location (the root for a group
     directly under it) and, as it takes every post below the group along, post.update and post.view covering both (the group or above it; the root for a group directly under it),
     otherwise 403 permission_required_for_action (action move_scope_group), answered before the existence of the new
-    parent and the tree rules; nothing changes on a refusal. The group keeps its kind and
+    parent and the tree rules; nothing changes on a refusal. Every role assignment at the new parent and above it that
+    does not already apply at the group comes into effect for the whole subtree: the caller must be able to grant each
+    of them at the group, holding every permission of its role there before the move, the grants of other users
+    included (403 grant_exceeds_own_permissions, after the tree rules). The group keeps its kind and
     the parent must suit it (a plain group never moves into a corps or brigade, a corps stays under the root, a
     brigade in a corps): 409 scope_group_parent_not_allowed."""
     update_data = data.model_dump(exclude_unset=True)
@@ -236,6 +243,8 @@ async def update_scope_group(
     if "parent_id" in update_data and new_parent != group.parent_id:
         await _check_chosen_parent(session, auth, group.id, new_parent, ScopeGroupKind(group.kind),
                                    old_parent_id=group.parent_id)
+        # What the new parent puts in effect at the subtree, read after lock_unit's locks (auth/privileges.py)
+        await check_move(session, auth, Node.group(group.id), parent_location(new_parent))
     else:
         AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_UPDATE, parent_node(group), "update_scope_group")
         if "name" in update_data:
@@ -300,7 +309,8 @@ async def archive_scope_group(
     ScopeGroupRoutes.GROUP_RESTORE.value,
     response_model=ScopeGroupResponse,
     responses=problems(
-        ErrorCode.SCOPE_GROUP_NOT_ARCHIVED, *TREE_PROBLEMS, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED,
+        ErrorCode.SCOPE_GROUP_NOT_ARCHIVED, *TREE_PROBLEMS, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION,
+        AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
     ),
 )
 async def restore_scope_group(
@@ -313,12 +323,15 @@ async def restore_scope_group(
     """Restore an archived group (is_deleted=false) under its former parent. Unknown: 404, and 404 when the
     parent is archived (restore the parent first); outside the caller's scope_group.view: 404. scope_group.archive
     must cover its parent (the root for a group directly under it), otherwise 403 permission_required_for_action
-    (action restore_scope_group). Not archived: 409."""
+    (action restore_scope_group). Not archived: 409. The role assignments made at the group apply again: the caller
+    must hold every permission of each of their roles at the group (403 grant_exceeds_own_permissions), as for a
+    role's restore."""
     group = await lock_unit(session, auth, None, group_id, include_deleted=True)   # its parent first
     AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_ARCHIVE, parent_node(group), "restore_scope_group")
     if not group.is_deleted:
         raise ApiError(ErrorCode.SCOPE_GROUP_NOT_ARCHIVED)
     await _check_parent(session, group.id, group.parent_id, ScopeGroupKind(group.kind))
+    await check_node_restore(session, auth, Node.group(group.id))
     old_values = group.model_dump()
     group.is_deleted = False
     group.updated_at = datetime.now(timezone.utc)

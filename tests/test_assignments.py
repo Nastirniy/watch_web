@@ -149,11 +149,12 @@ async def test_group_admin_cannot_assign_outside_own_subtree(client, db, headers
         body = problem(refused, 403, "grant_exceeds_own_permissions")
         assert body["missing"] == sorted(USER_TYPES[UserType.OPERATOR].base_permissions | {"user.update"}), kind
 
+    # The outsider lies outside the group admin's user.view: the same 403 as GET /users/{id} (audit L1)
     refused = await client.post(assignments_url(outsider.id), json=body_of(operator, "group", tree.kharkiv.id),
                                 headers=headers(group_admin))
-    assert problem(refused, 403, "target_user_more_privileged")["missing"] == ["user.update"]
+    problem(refused, 403, "user_self_only")
     refused = await client.delete(assignment_url(outsider.id, before[outsider.id][0]), headers=headers(group_admin))
-    problem(refused, 403, "target_user_more_privileged")
+    problem(refused, 403, "user_self_only")
 
     # A user of A who also holds a role at West: the group admin could not grant it, so cannot change the user
     await assign(db, target, await builtin(db, UserType.VIEWER), Node.group(tree.west.id))
@@ -192,11 +193,12 @@ async def test_group_admin_cannot_touch_users_without_home_post(client, db, head
     problem(await client.get(V1.path(UserRoutes.USER_BY_ID, user_id=analyst.id), headers=headers(group_admin)),
             403, "user_self_only")
     problem(await client.get(assignments_url(analyst.id), headers=headers(group_admin)), 403, "user_self_only")
+    # Writes answer like the reads: the analyst lies outside the group admin's user.view (audit L1)
     refused = await client.post(assignments_url(analyst.id), json=body_of(viewer, "group", tree.kharkiv.id),
                                 headers=headers(group_admin))
-    assert problem(refused, 403, "target_user_more_privileged")["missing"] == ["user.update"]
+    problem(refused, 403, "user_self_only")
     refused = await client.delete(assignment_url(analyst.id, analyst_assignment), headers=headers(group_admin))
-    problem(refused, 403, "target_user_more_privileged")
+    problem(refused, 403, "user_self_only")
     assert await assignment_ids(db, analyst) == [analyst_assignment]
 
 

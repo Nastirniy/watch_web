@@ -5,6 +5,39 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Authorization fixes (moves, type change, user writes)
+
+### Changed
+
+- Moving a post (`PUT /posts/{post_id}` with `group_id`), a scope group (`PATCH /scope-groups/{group_id}` with
+  `parent_id`) or a brigade (`PATCH /brigades/{brigade_id}` with `corps_id`) puts every role assignment at the new
+  location and above it in effect at the moved node and everything below it. The move is now refused unless the
+  caller could grant each of those assignments at the moved node: the caller must already hold there every
+  permission of the role, the assignments of other users included (moving a post under another brigade's
+  administrator gives that administrator the post). 403 `grant_exceeds_own_permissions` with the permissions
+  missing, after the checks of the destination (404, 409). Assignments already above the moved node (a move to an
+  ancestor) and assignments of archived roles do not count. Before, the location checks were enough, and an
+  administrator of one group with `post.update` at the root could move a foreign post into the group and gain
+  every permission there.
+- Restoring an archived post (`POST /posts/{post_id}/restore`), scope group (`POST /scope-groups/{group_id}/restore`),
+  corps (`POST /corps/{corps_id}/restore`) or brigade (`POST /brigades/{brigade_id}/restore`) makes the role
+  assignments at that node apply again. The restore now needs the caller to hold every permission of each of their
+  roles at the node (as the restore of a role does), otherwise 403 `grant_exceeds_own_permissions`.
+- Changing a user (fields, home post, type, archive state, sessions, assignments, certificates) judged the user's
+  assignments through the user's current type, so a permission the type leaves out did not count. It now counts
+  every permission of each role: the caller must be able to grant the assignment as the role holds it (403
+  `target_user_more_privileged`). A type change also needs the caller to hold, at each assignment's node, every
+  permission the new type puts in effect that the old one left out (403 `grant_exceeds_own_permissions`). Before, a
+  type change could switch on permissions the caller never held.
+- Every user write route now requires `user.view` in effect at the target user before anything else:
+  `PATCH /users/{user_id}`, `POST /users/{user_id}/archive`, `POST /users/{user_id}/restore`,
+  `POST /users/{user_id}/sessions/end`, `POST /users/{user_id}/sessions/{session_id}/end`, and `POST` and `DELETE`
+  of `/users/{user_id}/assignments` and `/users/{user_id}/system-assignments`. A target the caller cannot see
+  answers 403 `user_self_only`, the same as `GET /users/{user_id}`; before, a write answered with the full record of
+  a user the caller could not read.
+- OpenAPI: these operations now declare the new 403 codes (`grant_exceeds_own_permissions` on the moves and node
+  restores, `user_self_only` on the user writes); `api-contract/v1/openapi.json` rewritten.
+
 ## Audit log
 
 ### Added

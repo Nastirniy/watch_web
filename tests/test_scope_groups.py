@@ -306,6 +306,13 @@ async def test_a_group_move_needs_post_update_at_the_old_and_the_new_parent(clie
     both = await _caller(db, Node.group(east.id), Permissions.POST_UPDATE, Permissions.POST_VIEW, user_type=UserType.SYSTEM_ADMINISTRATOR)
     await assign(db, both, await make_role(db, [Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_UPDATE]), ROOT_NODE)
     await assign(db, both, await make_role(db, [Permissions.POST_UPDATE, Permissions.POST_VIEW]), Node.group(west.id))
+    # The move puts the first mover's observation role at West in effect at A: the caller must be able to grant it
+    # there (audit H1, 403 grant_exceeds_own_permissions otherwise)
+    refused = await client.patch(_group(kharkiv.id), json={"parent_id": west.id}, headers=headers(both))
+    assert refused.status_code == 403 and refused.json()["code"] == "grant_exceeds_own_permissions", refused.text
+    assert refused.json()["missing"] == ["observation.update", "observation.view"], refused.text
+    await assign(db, both, await make_role(db, [Permissions.OBSERVATION_VIEW, Permissions.OBSERVATION_UPDATE]),
+                 Node.group(east.id))
     moved = await client.patch(_group(kharkiv.id), json={"parent_id": west.id}, headers=headers(both))
     assert moved.status_code == 200 and moved.json()["parent_id"] == west.id, moved.text
     r = await client.patch(_group(kharkiv.id), json={"parent_id": None}, headers=headers(both))

@@ -14,6 +14,7 @@ from app.backend.models.post import Post
 from app.backend.auth.context import AuthContext
 from app.backend.api.v1.models.request.posts import PostCreate, PostUpdate
 from app.backend.auth.access_control import AccessControlService
+from app.backend.auth.privileges import check_move, check_node_restore
 from app.backend.auth.require import require
 from app.backend.auth.scope import Node, ROOT
 from app.backend.enums.audit import AuditEvent
@@ -220,8 +221,8 @@ async def get_post_observation_stats(
     response_model=PostResponse,
     responses=problems(
         AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED,
-        AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, ErrorCode.POST_CODE_TAKEN, ErrorCode.POST_NOT_FOUND,
-        ErrorCode.SCOPE_GROUP_NOT_FOUND, *GUARDED,
+        AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS,
+        ErrorCode.POST_CODE_TAKEN, ErrorCode.POST_NOT_FOUND, ErrorCode.SCOPE_GROUP_NOT_FOUND, *GUARDED,
     ),
 )
 async def update_post(
@@ -234,6 +235,10 @@ async def update_post(
     """Update post by ID. post.view (403 post_access_denied) and post.update (403 post_write_denied) must be in effect
     at the post; a move (group_id) also needs post.update and post.view covering both the old and the new location
     (the group or above it; the root for a post directly under it; 403 permission_required_for_action, move_post).
+    Every role assignment at the new location and above it that does not already apply at the post comes into
+    effect there with the move: the caller must be able to grant each of them at the post, holding every permission
+    of its role there before the move, the grants of other users included (403 grant_exceeds_own_permissions with
+    the permissions missing; answered after the new group's existence).
 
     Only the fields sent are changed; null is refused for name, code and is_active (omit them instead).
     Archived posts answer 404 until restored (POST /{post_id}/restore); is_deleted is never read from the body.
@@ -257,6 +262,8 @@ async def update_post(
             for permission in (Permissions.POST_UPDATE, Permissions.POST_VIEW):
                 AccessControlService.check_covers(auth, permission, location, "move_post")
         await _check_group(session, update_data["group_id"])
+        # What the new location puts in effect at the post, read after the locks above (auth/privileges.py)
+        await check_move(session, auth, Node.post(post.id), _location(update_data["group_id"]))
     # Check code uniqueness if being updated
     if "code" in update_data:
         existing = await session.exec(_code_taken(update_data["code"], exclude_post_id=post_id))
@@ -306,6 +313,8 @@ async def _set_post_archived(
     if not archived:
         # Like a group restored under an archived parent: restore the group first
         await _check_group(session, post.group_id)
+        # The assignments made on the post apply again: the caller could grant each of them there
+        await check_node_restore(session, auth, Node.post(post.id))
 
     event = AuditEvent.POST_ARCHIVE if archived else AuditEvent.POST_RESTORE
     old_values = post.model_dump()
@@ -356,7 +365,8 @@ async def archive_post(
     response_model=PostResponse,
     responses=problems(
         AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED,
-        ErrorCode.POST_NOT_FOUND, ErrorCode.POST_NOT_ARCHIVED, ErrorCode.SCOPE_GROUP_NOT_FOUND, *GUARDED,
+        AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, ErrorCode.POST_NOT_FOUND, ErrorCode.POST_NOT_ARCHIVED,
+        ErrorCode.SCOPE_GROUP_NOT_FOUND, *GUARDED,
     ),
 )
 async def restore_post(
@@ -368,5 +378,7 @@ async def restore_post(
     """Restore an archived post (is_deleted=false): role assignments made on it apply again.
     post.view and post.archive must be in effect at the post through a group or the root (a grant on the archived
     post itself does not apply). Unknown: 404. Not archived: 409. Its group archived: 404 scope_group_not_found (restore the
-    group first, as for a group under an archived parent)."""
+    group first, as for a group under an archived parent). The role assignments made on the post apply again: the
+    caller must hold every permission of each of their roles at the post (403 grant_exceeds_own_permissions), as for
+    a role's restore."""
     return await _set_post_archived(request, session, auth, post_id, archived=False)

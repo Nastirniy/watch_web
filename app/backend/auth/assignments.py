@@ -5,13 +5,15 @@ the route flushes and commits (the unique index uq_role_assignments_user_role_sc
 two requests pass the duplicate check together) and writes the audit row. The order tells an outsider nothing about
 ids: the target user and the caller's scope answer before the existence or the state of a role, a group or a post.
 
-    create: check_target_user(user.update) 403 -> archived user 404 -> role unknown or archived 404
+    create: check_target_user(user.view 403 user_self_only, user.update) 403 -> archived user 404
+            -> role unknown or archived 404
             -> check_assign_at(user.update and the role's permissions, the node) 403 (an unknown or archived node
                outside the caller's scope is not covered: the same 403 as a live one, a role without permissions
                included) -> the node exists and is live 404
             -> (a system role 409 role_is_system, right after the role) -> the boundary of the user's type 409
             -> the same role at the same node 409
-    delete: check_target_user(user.update) 403 -> archived user 404 -> the assignment of that user 404
+    delete: check_target_user(user.view 403 user_self_only, user.update) 403 -> archived user 404
+            -> the assignment of that user 404
             -> check_assign_at(user.update and its role's permissions, its node) 403
             -> the user's last assignment 409 (of a live role: another one of a live role remains; an assignment of
                an archived role grants nothing)
@@ -25,7 +27,10 @@ an assignment the user already has is kept and the replaced row merged into it),
 type the new one lacks are removed and those it adds are given; then every assignment of both tables is checked
 against the boundary of the new type:
 
-            check_assign_at(user.update and the new tree base role's permissions, at the node of the default
+            check_boundary_change(what the new boundary puts in effect of every existing assignment, both tables,
+               archived roles included, that the old one left out: covered by the caller at its node) 403
+               grant_exceeds_own_permissions
+            -> check_assign_at(user.update and the new tree base role's permissions, at the node of the default
                assignment of a new user (the home post; the root without one or for an at_root base role), also when
                nothing is replaced, and at each target node; each added system base role at the root) 403
             -> the replacements written (the unique index answers a concurrent assignment of the new base role at
@@ -58,7 +63,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.auth.context import AuthContext
 from app.backend.auth.privileges import (
-    check_admin_kept, check_assign_at, check_target_user, holds_admin_at_root, role_permission_names,
+    check_admin_kept, check_assign_at, check_boundary_change, check_target_user, every_assignment, holds_admin_at_root,
+    role_permission_names,
 )
 from app.backend.auth.scope import Node, NodeKind, ROOT
 from app.backend.auth.user_types import USER_TYPES, excess_permissions
@@ -327,6 +333,9 @@ async def change_user_type(session: AsyncSession, auth: AuthContext, target: Use
     old_type = UserType(target.user_type)
     if new_type is old_type:
         return None
+    # A grant the old boundary left out and the new one lets through comes into effect: the caller holds it there
+    # (for another user check_target_user asked for every permission already; this covers a change of oneself)
+    check_boundary_change(auth, await every_assignment(session, target), old_type, new_type)
     old_spec, new_spec = USER_TYPES[old_type], USER_TYPES[new_type]
     old_base = await _builtin_role(session, old_spec.tree_base.role)
     new_base = await _builtin_role(session, new_spec.tree_base.role)

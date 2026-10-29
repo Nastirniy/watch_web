@@ -192,7 +192,7 @@ async def archive_corps(
     response_model=CorpsResponse,
     responses=problems(
         ErrorCode.SCOPE_GROUP_NOT_FOUND, ErrorCode.SCOPE_GROUP_NOT_ARCHIVED,
-        AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, *GUARDED,
+        AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
     ),
 )
 async def restore_corps(
@@ -204,7 +204,8 @@ async def restore_corps(
     """Restore an archived corps (is_deleted=false): the corps only; its archived brigades and posts are
     listed with include_deleted (GET /{corps_id}/brigades, /{corps_id}/posts) and restored one by one.
     scope_group.archive must cover its parent, the root (403). Not archived: 409; unknown, another kind or outside
-    scope_group.view: 404."""
+    scope_group.view: 404. The role assignments made at the corps apply again: the caller must hold every permission
+    of each of their roles at the corps (403 grant_exceeds_own_permissions)."""
     corps = await restore_unit(request, session, auth, CORPS, corps_id)
     return corps_to_response(corps, await _fresh(session, auth))
 

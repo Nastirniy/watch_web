@@ -346,8 +346,8 @@ async def test_type_change_needs_the_new_base_role_at_the_node(client, db, heade
     operator = await typed_user(db, UserType.OPERATOR, post_id=tree.a.id)
     before = await assignment_rows(db, operator)
 
-    problem(await change_type(client, headers(west_admin), operator, "senior_operator"), 403,
-            "target_user_more_privileged")
+    # The operator lies outside the West administrator's user.view (audit L1)
+    problem(await change_type(client, headers(west_admin), operator, "senior_operator"), 403, "user_self_only")
     body = problem(await change_type(client, headers(east_admin), operator, "system_administrator"), 403,
                    "grant_exceeds_own_permissions")
     assert "user.create" in body["missing"]          # administrator at the root, beyond East

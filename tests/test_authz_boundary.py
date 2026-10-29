@@ -107,8 +107,9 @@ async def test_warning_logged_once_per_grant(client, db, headers):
     assert "user.archive" in matching[0] and user.username not in matching[0]
 
 
-async def test_delegation_reads_effective_permissions(client, db, headers):
-    """A grant the boundary leaves out does not make its holder more privileged than the caller"""
+async def test_delegation_reads_the_role_permissions(client, db, headers):
+    """A grant the boundary leaves out still counts in delegation (audit M1): a type change or a wider boundary in
+    code would put it in effect, so the caller must be able to grant it as the role holds it"""
     post = await make_post(db)
     target = await make_user(db, post_id=post.id, user_type=UserType.OPERATOR)
     await assign(db, target, await builtin_role(db, BuiltinRole.OPERATOR), Node.post(post.id))
@@ -119,4 +120,6 @@ async def test_delegation_reads_effective_permissions(client, db, headers):
 
     response = await client.patch(V1.path(UserRoutes.USER_BY_ID, user_id=target.id), data={"username_alias": "Renamed"},
                                   headers=headers(caller))
-    assert response.status_code == 200, response.text
+    assert response.status_code == 403, response.text
+    assert response.json()["code"] == "target_user_more_privileged"
+    assert response.json()["missing"] == ["user.create"]

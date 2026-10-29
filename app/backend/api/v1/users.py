@@ -353,8 +353,8 @@ async def get_user(
         ErrorCode.CANNOT_DEACTIVATE_SELF, ErrorCode.USERNAME_TAKEN, ErrorCode.POST_NOT_FOUND, ErrorCode.POST_ARCHIVED,
         ErrorCode.USER_NOT_FOUND, ErrorCode.FORM_CONTENT_TYPE_REQUIRED, ErrorCode.LAST_ADMIN_REQUIRED,
         ErrorCode.CANNOT_REMOVE_OWN_ADMIN, ErrorCode.USER_TYPE_CEILING_EXCEEDED, ErrorCode.ASSIGNMENT_EXISTS,
-        AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION,
-        AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
+        AccessErrorCode.USER_SELF_ONLY, AccessErrorCode.TARGET_USER_MORE_PRIVILEGED,
+        AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
     ),
 )
 async def update_user(
@@ -391,8 +391,10 @@ async def update_user(
     field is ignored).
     The fields are form fields: any other body (JSON included) answers 415 instead of being ignored.
 
-    Changing a user needs user.update covering them (their home post, the root for a user without one) and, for
-    another user, that the caller could grant every assignment they have (403 target_user_more_privileged); this
+    Changing a user needs the user visible to the caller (user.view covering them, as GET /users/{user_id}: 403
+    user_self_only), user.update covering them (their home post, the root for a user without one) and, for
+    another user, that the caller could grant every assignment they have, each with all of its role's permissions
+    whatever the user's type puts in effect (403 target_user_more_privileged); this
     answers before the archived state of the user. A deactivation or a type change must leave an active holder of the
     built-in admin role at the root (409 last_admin_required), and a caller cannot take it from themselves (409
     cannot_remove_own_admin).
@@ -526,7 +528,7 @@ async def update_user(
     response_model=UserResponse,
     responses=problems(
         ErrorCode.CANNOT_ARCHIVE_SELF, ErrorCode.USER_NOT_FOUND, ErrorCode.LAST_ADMIN_REQUIRED,
-        AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *GUARDED,
+        AccessErrorCode.USER_SELF_ONLY, AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *GUARDED,
     ),
 )
 async def archive_user(
@@ -539,8 +541,8 @@ async def archive_user(
 
     Nothing is removed: observations, media and role assignments of the user stay. The user is hidden from
     lists unless include_deleted=true. Undo with POST /{user_id}/restore. Already archived or unknown: 404.
-    Needs user.archive covering the user and every assignment of the user grantable by the caller (403
-    target_user_more_privileged), answered before the archived state of the user, so an outsider gets the same 403
+    Needs user.view covering the user (403 user_self_only, as GET /users/{user_id}), user.archive covering the user
+    and every assignment of the user grantable by the caller (403 target_user_more_privileged), answered before the archived state of the user, so an outsider gets the same 403
     for an archived and a live user; the last administrator: 409.
     """
     current_user = auth.user
@@ -588,7 +590,8 @@ async def archive_user(
     UserRoutes.USER_RESTORE.value,
     response_model=UserResponse,
     responses=problems(
-        ErrorCode.USER_NOT_FOUND, ErrorCode.USER_NOT_ARCHIVED, AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *GUARDED,
+        ErrorCode.USER_NOT_FOUND, ErrorCode.USER_NOT_ARCHIVED, AccessErrorCode.USER_SELF_ONLY,
+        AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *GUARDED,
     ),
 )
 async def restore_user(
@@ -598,8 +601,8 @@ async def restore_user(
         auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_ARCHIVE]))
 ):
     """Restore an archived user (is_deleted=false, is_active=true): the account can log in again. Not archived: 409.
-    Needs user.archive covering the user and every assignment of the user grantable by the caller (403
-    target_user_more_privileged), answered before the archived state of the user."""
+    Needs user.view covering the user (403 user_self_only, as GET /users/{user_id}), user.archive covering the user
+    and every assignment of the user grantable by the caller (403 target_user_more_privileged), answered before the archived state of the user."""
     current_user = auth.user
     user = await _get_user_or_404(session, user_id, lock="user")
     # Scope before the state: an outsider gets the same 403 for an archived and a live user
@@ -661,7 +664,9 @@ async def list_user_sessions(
 @router.post(
     UserRoutes.USER_SESSIONS_END.value,
     response_model=SessionsEndedResponse,
-    responses=problems(ErrorCode.USER_NOT_FOUND, AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *GUARDED),
+    responses=problems(
+        ErrorCode.USER_NOT_FOUND, AccessErrorCode.USER_SELF_ONLY, AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *GUARDED,
+    ),
 )
 async def end_user_sessions(
         request: Request,
@@ -671,8 +676,9 @@ async def end_user_sessions(
 ):
     """Revoke every live session of a user (revoke_cause ended_by_admin); the account stays as it is and can log
     in again. The caller's own session ends too when user_id is the caller. Archived users: 404.
-    Needs user.update covering the user and every assignment of the user grantable by the caller (403
-    target_user_more_privileged), answered before the archived state of the user."""
+    Needs user.view covering the user (403 user_self_only, as GET /users/{user_id}), user.update covering the user
+    and every assignment of the user grantable by the caller (403 target_user_more_privileged), answered before the
+    archived state of the user."""
     target = await _get_user_or_404(session, user_id, lock="user")
     # Scope before the state: an outsider gets the same 403 for an archived and a live user
     await check_target_user(session, auth, target, Permissions.USER_UPDATE)
@@ -695,7 +701,7 @@ async def end_user_sessions(
     response_model=UserSessionResponse,
     responses=problems(
         ErrorCode.USER_NOT_FOUND, ErrorCode.SESSION_NOT_FOUND, ErrorCode.SESSION_ALREADY_ENDED,
-        AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *GUARDED,
+        AccessErrorCode.USER_SELF_ONLY, AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *GUARDED,
     ),
 )
 async def end_user_session(
@@ -706,8 +712,9 @@ async def end_user_session(
         auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE]))
 ):
     """Revoke one live session of a user (revoke_cause ended_by_admin). Ended already: 409 with its end_reason.
-    Archived users: 404. Needs user.update covering the user and every assignment of the user grantable by the
-    caller (403 target_user_more_privileged), answered before the archived state of the user and the session."""
+    Archived users: 404. Needs user.view covering the user (403 user_self_only, as GET /users/{user_id}), user.update
+    covering the user and every assignment of the user grantable by the caller (403 target_user_more_privileged),
+    answered before the archived state of the user and the session."""
     target = await _get_user_or_404(session, user_id, lock="user")
     # Scope before the state: an outsider gets the same 403 for an archived and a live user
     await check_target_user(session, auth, target, Permissions.USER_UPDATE)
@@ -774,7 +781,8 @@ async def list_user_assignments(
     responses=problems(
         ErrorCode.USER_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.SCOPE_GROUP_NOT_FOUND, ErrorCode.POST_NOT_FOUND,
         ErrorCode.ROLE_IS_SYSTEM, ErrorCode.ROLE_EXCEEDS_USER_TYPE, ErrorCode.ASSIGNMENT_EXISTS,
-        AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
+        AccessErrorCode.USER_SELF_ONLY, AccessErrorCode.TARGET_USER_MORE_PRIVILEGED,
+        AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
     ),
 )
 async def create_user_assignment(
@@ -789,8 +797,8 @@ async def create_user_assignment(
     POST /{user_id}/system-assignments (409 role_is_system here).
 
     Checked in this order, so that a node outside the caller's scope answers the same 403 whether it exists, is
-    archived or not: user.update covering the user and every assignment of the user grantable by the caller (403
-    target_user_more_privileged); an archived user 404 user_not_found; an unknown or archived role 404
+    archived or not: user.view covering the user (403 user_self_only, as GET /users/{user_id}); user.update covering
+    the user and every assignment of the user grantable by the caller (403 target_user_more_privileged); an archived user 404 user_not_found; an unknown or archived role 404
     role_not_found; a system role 409 role_is_system; user.update and every permission of the role held by the
     caller at the node (403 grant_exceeds_own_permissions, missing lists both; a role without permissions still needs
     user.update there); an unknown or archived group or post 404 scope_group_not_found / post_not_found; a role above
@@ -822,7 +830,7 @@ async def create_user_assignment(
     status_code=status.HTTP_204_NO_CONTENT,
     responses=problems(
         ErrorCode.USER_NOT_FOUND, ErrorCode.ASSIGNMENT_NOT_FOUND, ErrorCode.LAST_ASSIGNMENT_REQUIRED,
-        ErrorCode.LAST_ADMIN_REQUIRED, ErrorCode.CANNOT_REMOVE_OWN_ADMIN,
+        ErrorCode.LAST_ADMIN_REQUIRED, ErrorCode.CANNOT_REMOVE_OWN_ADMIN, AccessErrorCode.USER_SELF_ONLY,
         AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
     ),
 )
@@ -836,8 +844,8 @@ async def delete_user_assignment(
     """Remove one role assignment of the user (the link row; the role stays). The audit log keeps a full copy of the
     removed row.
 
-    Checked in this order: user.update covering the user and every assignment of the user grantable by the caller
-    (403 target_user_more_privileged); an archived user 404 user_not_found; an assignment that is not this user's
+    Checked in this order: user.view covering the user (403 user_self_only, as GET /users/{user_id}); user.update
+    covering the user and every assignment of the user grantable by the caller (403 target_user_more_privileged); an archived user 404 user_not_found; an assignment that is not this user's
     404 assignment_not_found; user.update and every permission of its role held by the caller at its node (403
     grant_exceeds_own_permissions); the user's last assignment of either kind 409 last_assignment_required (an
     assignment of a live role needs another one of a live role to remain: an assignment of an archived role grants
@@ -891,7 +899,7 @@ async def list_user_system_assignments(
     status_code=status.HTTP_201_CREATED,
     responses=problems(
         ErrorCode.USER_NOT_FOUND, ErrorCode.ROLE_NOT_FOUND, ErrorCode.ROLE_IS_TREE, ErrorCode.ROLE_EXCEEDS_USER_TYPE,
-        ErrorCode.ASSIGNMENT_EXISTS, AccessErrorCode.TARGET_USER_MORE_PRIVILEGED,
+        ErrorCode.ASSIGNMENT_EXISTS, AccessErrorCode.USER_SELF_ONLY, AccessErrorCode.TARGET_USER_MORE_PRIVILEGED,
         AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
     ),
 )
@@ -904,8 +912,8 @@ async def create_user_system_assignment(
 ):
     """Give the user a system role: it acts on the whole system, without a node.
 
-    Checked in this order: user.update covering the user and every assignment of the user grantable by the caller
-    (403 target_user_more_privileged); an archived user 404 user_not_found; an unknown or archived role 404
+    Checked in this order: user.view covering the user (403 user_self_only, as GET /users/{user_id}); user.update
+    covering the user and every assignment of the user grantable by the caller (403 target_user_more_privileged); an archived user 404 user_not_found; an unknown or archived role 404
     role_not_found; a tree role 409 role_is_tree (POST /{user_id}/assignments gives those); user.update and every
     permission of the role held by the caller at the root (403 grant_exceeds_own_permissions); a role above the
     system boundary of the user's type 409 role_exceeds_user_type; the same role 409 assignment_exists.
@@ -934,7 +942,7 @@ async def create_user_system_assignment(
     status_code=status.HTTP_204_NO_CONTENT,
     responses=problems(
         ErrorCode.USER_NOT_FOUND, ErrorCode.ASSIGNMENT_NOT_FOUND, ErrorCode.LAST_ASSIGNMENT_REQUIRED,
-        ErrorCode.LAST_ADMIN_REQUIRED, ErrorCode.CANNOT_REMOVE_OWN_ADMIN,
+        ErrorCode.LAST_ADMIN_REQUIRED, ErrorCode.CANNOT_REMOVE_OWN_ADMIN, AccessErrorCode.USER_SELF_ONLY,
         AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
     ),
 )
@@ -948,8 +956,8 @@ async def delete_user_system_assignment(
     """Remove one system role assignment of the user (the role stays). The audit log keeps a full copy of the
     removed row.
 
-    Checked in this order: user.update covering the user and every assignment of the user grantable by the caller
-    (403 target_user_more_privileged); an archived user 404 user_not_found; a system assignment that is not this
+    Checked in this order: user.view covering the user (403 user_self_only, as GET /users/{user_id}); user.update
+    covering the user and every assignment of the user grantable by the caller (403 target_user_more_privileged); an archived user 404 user_not_found; a system assignment that is not this
     user's 404 assignment_not_found; user.update and every permission of its role held by the caller at the root
     (403 grant_exceeds_own_permissions); the user's last assignment of either kind 409 last_assignment_required; the
     built-in system_administrator role must stay with an active user (409 last_admin_required) and cannot be taken
