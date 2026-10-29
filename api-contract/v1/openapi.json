@@ -31682,10 +31682,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Field to sort by first (sort_order when left out); the other one follows",
+              "description": "Field to sort by first (sort_order when left out); the other one follows. sort_by=sort_order sorts by the guide's position, while the sort_order parameter sets the direction",
               "title": "Sort By"
             },
-            "description": "Field to sort by first (sort_order when left out); the other one follows"
+            "description": "Field to sort by first (sort_order when left out); the other one follows. sort_by=sort_order sorts by the guide's position, while the sort_order parameter sets the direction"
           },
           {
             "name": "sort_order",
@@ -38817,8 +38817,8 @@
           "title": {
             "type": "string",
             "maxLength": 200,
-            "minLength": 1,
-            "title": "Title"
+            "title": "Title",
+            "description": "Plain text, one line, 1 to 200 characters after trimming (empty: 422 value_empty). Untrusted text: render it as text"
           },
           "description": {
             "anyOf": [
@@ -38831,7 +38831,7 @@
               }
             ],
             "title": "Description",
-            "description": "Plain text"
+            "description": "Plain text, line breaks kept, at most 2000 characters; empty after trimming is stored as null. Untrusted text: render it as text"
           },
           "sort_order": {
             "type": "integer",
@@ -39130,14 +39130,14 @@
             "anyOf": [
               {
                 "type": "string",
-                "maxLength": 200,
-                "minLength": 1
+                "maxLength": 200
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Title"
+            "title": "Title",
+            "description": "Plain text, one line, 1 to 200 characters after trimming (empty: 422 value_empty). Untrusted text: render it as text"
           },
           "description": {
             "anyOf": [
@@ -39150,7 +39150,7 @@
               }
             ],
             "title": "Description",
-            "description": "Plain text"
+            "description": "Plain text, line breaks kept, at most 2000 characters; empty after trimming is stored as null. Untrusted text: render it as text"
           },
           "sort_order": {
             "anyOf": [

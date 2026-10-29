@@ -257,6 +257,56 @@ async def test_control_characters_are_refused(client, db, headers, method, body,
     assert [item["code"] for item in items] == [code], response.json()
 
 
+@pytest.mark.parametrize("title", ["<script>alert(1)</script>", "Open javascript:alert(1)", "x onerror=alert(1)"])
+async def test_script_patterns_are_refused_in_guide_text(client, db, headers, title):
+    """Guide text is untrusted: the web renders it as text, and the script patterns of sanitize_string stay refused"""
+    admin = await make_admin(db)
+    h = headers(admin)
+    for body, pointer in [({"title": title}, "#/title"), ({"title": "ok", "description": title}, "#/description")]:
+        response = await client.post(GUIDES, headers=h, json=body)
+        assert response.status_code == 422, response.text
+        assert [item["code"] for item in response.json()["errors"] if item.get("pointer") == pointer] == [
+            "text_script_pattern"]
+    assert (await client.post(GUIDES, headers=h, json={"title": "How to create an observation"})).status_code == 201
+
+
+@pytest.mark.parametrize("title", ["   ", "&nbsp;", " &nbsp; &#32; "])
+async def test_a_title_that_is_empty_after_trimming_is_value_empty(client, db, headers, title):
+    admin = await make_admin(db)
+    created = await _create(client, headers, admin)
+    for method, path in [("POST", GUIDES), ("PATCH", by_id(created["id"]))]:
+        response = await client.request(method, path, headers=headers(admin), json={"title": title})
+        assert response.status_code == 422, response.text
+        assert [item["code"] for item in response.json()["errors"] if item.get("pointer") == "#/title"] == [
+            "value_empty"]
+
+
+async def test_an_empty_description_is_stored_as_null(client, db, headers):
+    admin = await make_admin(db)
+    body = await _create(client, headers, admin, description="   ")
+    assert body["description"] is None and (await db.get(UserGuide, body["id"])).description is None
+    filled = await client.patch(by_id(body["id"]), headers=headers(admin), json={"description": "Some text"})
+    assert filled.json()["description"] == "Some text"
+    emptied = await client.patch(by_id(body["id"]), headers=headers(admin), json={"description": " &nbsp; "})
+    assert emptied.status_code == 200 and emptied.json()["description"] is None
+
+
+@pytest.mark.parametrize("char", [" ", " ", "‪", "‫", "‬", "‭", "‮", "⁦",
+                                  "⁧", "⁨", "⁩", "‎", "‏", "؜"])
+async def test_a_title_refuses_separators_and_bidi_controls(client, db, headers, char):
+    admin = await make_admin(db)
+    response = await client.post(GUIDES, headers=headers(admin), json={"title": f"invoice{char}txt.exe"})
+    assert response.status_code == 422, response.text
+    assert [item["code"] for item in response.json()["errors"] if item.get("pointer") == "#/title"] == [
+        "text_control_character"]
+
+
+async def test_a_title_keeps_zwj_and_zwnj(client, db, headers):
+    admin = await make_admin(db)
+    title = "Joined‍word and non‌joined"
+    assert (await _create(client, headers, admin, title=title))["title"] == title
+
+
 def test_plain_text_strips_and_limits():
     from app.backend.utils.validators import SecurityValidators
     assert SecurityValidators.plain_text("  Create the post  ", max_length=50) == "Create the post"

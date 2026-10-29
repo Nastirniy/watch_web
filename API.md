@@ -504,6 +504,17 @@ the built-in `administrator` role) reads the entries of the nodes where it is in
   (`page_size` at most 200). A scoped reader's `post_id` / `group_id` / `corps_id` / `brigade_id` outside its scope
   answers 403.
 
+## User guides
+
+The help section: every authenticated user reads `GET /api/v1/guides/` and `GET /api/v1/guides/{guide_id}`
+(there is no `guide.view`); create, edit, archive and restore need the system permissions `guide.create`,
+`guide.update`, `guide.archive` (`include_deleted` too).
+
+- A guide's `title` and `description` are untrusted text: render them as text, never as HTML (no `v-html`, no
+  `innerHTML`, no markdown-to-HTML without a sanitiser). The API refuses script patterns (`text_script_pattern`)
+  and control characters (`text_control_character`) but accepts any other natural text, SQL words included.
+- `description` keeps its line breaks (show them with `white-space: pre-line`); an empty one is null.
+
 ## Media types
 
 Every media type the API names is the IANA-registered one where IANA has one (RFC 6838: lower case, case-insensitive

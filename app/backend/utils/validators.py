@@ -139,16 +139,23 @@ class SecurityValidators:
 
     # Whitespace controls a multi-line text keeps (line breaks and tabs); every other control character is refused
     MULTILINE_CONTROLS = frozenset("\n\r\t")
+    # Refused in single-line text as well: the line and paragraph separators, and the bidi embeddings, overrides,
+    # isolates and marks that can disguise a text (the same set as the file-name rule of services/files/serve.py,
+    # without the BOM). Other format characters stay: ZWJ / ZWNJ spell words.
+    SINGLE_LINE_HIDDEN = frozenset(chr(code) for code in (
+        0x2028, 0x2029, *range(0x202A, 0x202F), *range(0x2066, 0x206A), 0x200E, 0x200F, 0x061C))
 
     @classmethod
     def plain_text(cls, value: str, max_length: int, multiline: bool = False) -> str:
         """Natural plain text (user guide titles and descriptions): trimmed, at most max_length characters, without
-        control characters (multiline keeps line breaks and tabs) or lone surrogates.
+        script patterns (the xss_patterns of sanitize_string: text_script_pattern), control characters or lone
+        surrogates (text_control_character). multiline keeps line breaks and tabs; single-line text also refuses
+        SINGLE_LINE_HIDDEN. May return "": the caller decides what an empty text means.
 
-        Unlike sanitize_string it does not refuse SQL keywords or script patterns: the ORM binds every value as a
-        parameter, so "How to create an observation" is harmless at the database layer, and the API returns JSON
-        (escaping belongs to the renderer). Entities a client sends anyway are decoded first, as in sanitize_string,
-        so the checks see the real text ("&#7;" is a control character).
+        Unlike sanitize_string it does not refuse SQL keywords: the ORM binds every value as a parameter, so "How to
+        create an observation" is harmless at the database layer. Entities a client sends anyway are decoded first,
+        as in sanitize_string, so the checks see the real text: "&#10;" is a line break, "&nbsp;" strips away (a
+        reference to a C0 control such as "&#7;" is dropped by html.unescape, not refused).
         """
         if not isinstance(value, str):
             raise invalid(FieldErrorCode.VALUE_NOT_STRING)
@@ -156,8 +163,12 @@ class SecurityValidators:
         if len(value) > max_length:
             raise invalid(FieldErrorCode.STRING_TOO_LONG, max_length=max_length)
         allowed = cls.MULTILINE_CONTROLS if multiline else frozenset()
-        if any(unicodedata.category(char) in ("Cc", "Cs") and char not in allowed for char in value):
+        hidden = frozenset() if multiline else cls.SINGLE_LINE_HIDDEN
+        if any((unicodedata.category(char) in ("Cc", "Cs") and char not in allowed) or char in hidden
+               for char in value):
             raise invalid(FieldErrorCode.TEXT_CONTROL_CHARACTER)
+        if cls.PATTERNS['xss_patterns'].search(value):
+            raise invalid(FieldErrorCode.TEXT_SCRIPT_PATTERN)
         return value
 
     @classmethod

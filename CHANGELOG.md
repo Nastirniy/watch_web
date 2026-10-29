@@ -172,10 +172,16 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - Audit: every write and its row (`user_guide.create` / `update` / `archive` / `restore`, param `guide_title`,
   system-wide: no scope) are one transaction.
 - Guide `title` and `description` are natural plain text (`SecurityValidators.plain_text`, `utils/validators.py`):
-  trimmed, length limits, no control characters (the description keeps line breaks and tabs), entities decoded
-  first as elsewhere. SQL keywords and script patterns are NOT refused there ("How to create an observation" is a
-  valid title): the ORM binds every value as a parameter and the API returns JSON. Every other field keeps
-  `sanitize_string`. New field error code `text_control_character` (422 item).
+  entities decoded first as elsewhere, trimmed, length limits, script patterns refused (`text_script_pattern`, the
+  same `xss_patterns` as `sanitize_string`), no control characters or lone surrogates (`text_control_character`; the
+  description keeps line breaks and tabs, the title also refuses U+2028 / U+2029 and the bidi controls U+202A-202E,
+  U+2066-2069, U+200E, U+200F, U+061C; ZWJ and ZWNJ stay). SQL keywords are NOT refused there ("How to create an
+  observation" is a valid title): the ORM binds every value as a parameter. A title that is empty after decoding
+  and trimming ("   ", "&nbsp;") answers 422 `value_empty` (the field has no `minLength` any more); an empty
+  description is stored as null. Every other field keeps `sanitize_string`. New field error code
+  `text_control_character` (422 item).
+- Guide title and description are untrusted text: the web renders them as text (no `v-html`, no markdown-to-HTML
+  without a sanitiser); API.md "User guides".
 - New problem types `guide_not_found` (404) and `guide_not_archived` (409).
 - Contract: the six operations above and the schemas `GuideCreate`, `GuideUpdate`, `GuideAudienceRef`,
   `GuideResponse`, `GuideAudienceResponse`, `GuideFileResponse`, `GuideNotFoundProblem`, `GuideNotArchivedProblem`,

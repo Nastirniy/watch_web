@@ -131,7 +131,8 @@ async def guide_view(session: AsyncSession, guide: UserGuide, include_deleted_fi
 
 async def guide_views(session: AsyncSession, guides: Sequence[UserGuide],
                       include_deleted_files: bool = False) -> List[GuideView]:
-    """The views of guides, in their order: two queries for the files and the audience names, whatever the count"""
+    """The views of guides, in their order: up to three queries whatever the count (the files; the names of the
+    audience posts and of the audience groups, each only when some guide has one)"""
     if not guides:
         return []
     files = await _files_of(session, [guide.id for guide in guides], include_deleted_files)

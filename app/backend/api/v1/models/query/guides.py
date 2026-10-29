@@ -16,7 +16,9 @@ class GuideFilterParams(BaseFilterParams):
     """Filter parameters of the guide list"""
 
     sort_by: Optional[GuideSortField] = Field(
-        default=None, description="Field to sort by first (sort_order when left out); the other one follows")
+        default=None, description="Field to sort by first (sort_order when left out); the other one follows. "
+                                  "sort_by=sort_order sorts by the guide's position, while the sort_order "
+                                  "parameter sets the direction")
     q: Optional[str] = Field(default=None, max_length=200, description="Title contains text (case-insensitive)")
     include_deleted: bool = Field(default=False, description=INCLUDE_DELETED)
 
