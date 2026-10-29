@@ -16,6 +16,7 @@ from .media_format import MediaFormat
 from .upload_session import UploadSession
 from .storyboard import VideoStoryboard
 from .observation_unit import ObservationUnit
+from .user_guide import UserGuide, UserGuideFile
 
 __all__ = [
     'User', 'UserSession', 'UserCertificate', 'CertificateAuthorityState',
@@ -24,7 +25,7 @@ __all__ = [
     'SignalType', 'Category',
     'Observation', 'ObservationFrequency', 'Tag', 'ObservationTag', 'MediaFile',
     'AuditLog', 'ExportJob', 'WorkerHeartbeat', 'MediaFormat', 'UploadSession', 'VideoStoryboard',
-    'ObservationUnit'
+    'ObservationUnit', 'UserGuide', 'UserGuideFile'
 ]
 
 from .presence_properties import configure_presence_properties

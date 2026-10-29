@@ -1,5 +1,6 @@
 """The audit events of the rows written before the event catalog (enums/audit.py): (resource_type, action) -> (event
-code, category). FROZEN once migration 031_audit_events has shipped: 031 backfills old rows with it. Never import the
+code, category). FROZEN once migration 031_audit_events has shipped: 031 backfills old rows with it (a catalog event
+added later only adds its own new pair at the end, which no old row has). Never import the
 catalog here; tests/test_audit_catalog.py checks that every code below is a catalog event of that category and that
 DETAILS_PARAMS names only params of its event.
 
@@ -76,6 +77,10 @@ LEGACY_EVENTS: Dict[Tuple[str, str], Tuple[str, str]] = {
         ("observations", "observation"), ("users", "user"), ("posts", "post"), ("roles", "role"),
         ("categories", "category"), ("signal_types", "signal_type"), ("tags", "tag"),
         ("media_formats", "media_format"))},     # media: singular and plural are the same word
+    # the pairs of catalog events added after 031 (no row written before 031 has them, so the backfill of the old
+    # rows is unchanged; rows written by them map back after a downgrade of 031 and an upgrade again)
+    **_events("user_guide", "dictionaries", *_CRUD),
+    **_events("user_guide_file", "dictionaries", "upload", "archive", "restore"),
 }
 
 _RESTORE_COUNTS = {

@@ -117,6 +117,34 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - Contract: the 200 answers of `/media/{id}/download`, `/media/{id}/stream` and `/observations/report` declare
   `X-Content-Type-Options` and `Content-Security-Policy`, and the new `Content-Disposition` form.
 
+### User guides (tables, permissions, audit events)
+
+- Migration `033_user_guides` creates `user_guides` (`title` 200, `description` 2000 plain text, `sort_order`
+  default 0, `audience_key` 24 (null = everyone, else a scope key `g:<id>` / `p:<id>`), `is_deleted`, `created_at`,
+  `updated_at`, `created_by`, `updated_by`; index `ix_user_guides_list (is_deleted, sort_order, title)`) and
+  `user_guide_files` (`guide_id` with a foreign key to `user_guides.id`, `file_name` 255, `stored_name` 64,
+  `file_path` 500, `content_type` 100, `format_id` (the `media_formats` row the upload matched), `size_bytes`
+  BIGINT, `sha256` 64, `language` 8, `is_deleted`, `created_at`, `created_by`; index
+  `ix_user_guide_files_guide_id`). Models `UserGuide`, `UserGuideFile` (`models/user_guide.py`). No foreign key on
+  the actor columns (as 028) nor on `format_id`; no CHECK constraints. Both tables are listed in
+  `TABLES_OWNED_BY_LATER_REVISIONS` of `002_sync_schema` and every create is guarded with an inspector check (a
+  second run or a database built with create_all is left as it is). The downgrade drops both tables; files under
+  `<upload_path>/_guides/` stay on disk. No route uses them yet.
+- New system permissions `guide.create`, `guide.update`, `guide.archive` (Ukrainian display names: create / edit /
+  archive user guides; `PERMISSION_META`, `_SYSTEM_PERMISSIONS`). Seeding inserts them with level `system` and
+  grants them to the built-in `system_administrator` role (every system permission); only the
+  `system_administrator` user type may hold them (the `administrator` type's system boundary is unchanged). Reading
+  guides will need only an authenticated user: there is no `guide.view`.
+- Audit catalog events (category `dictionaries`, system-wide: no scope): `user_guide.create`, `user_guide.update`,
+  `user_guide.archive`, `user_guide.restore` (param `guide_title`) and `user_guide_file.upload`,
+  `user_guide_file.archive`, `user_guide_file.restore` (params `guide_title`, `file_name`, `size_bytes`, `sha256`).
+  No writer yet. Their (resource_type, action) pairs are added at the end of the mapping of
+  `migrations/support/audit_events_v1.py` (no row written before 031 has them; rows written by them map back after a
+  downgrade of 031 and an upgrade again, as for every catalog event).
+- Contract: the event enum of `AuditEventResponse` and the `event` filter of `GET /audit-logs/`, and the entry
+  unions of `GET /audit-logs/` and `GET /audit-logs/{audit_id}` gain the seven events (schemas
+  `UserGuide*AuditEntry`, `UserGuide*AuditParams`). Permission names are not part of the document.
+
 ## Authorization fixes (moves, type change, user writes)
 
 ### Changed

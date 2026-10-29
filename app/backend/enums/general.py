@@ -95,6 +95,11 @@ class Permissions(Enum):
     DATABASE_VIEW = "database.view"
     BACKUP_VIEW = "backup.view"
 
+    # User guides (help section; system permissions). Reading needs only an authenticated user: no guide.view
+    GUIDE_CREATE = "guide.create"
+    GUIDE_UPDATE = "guide.update"
+    GUIDE_ARCHIVE = "guide.archive"
+
 
 class PermissionLevel(str, Enum):
     """What a permission acts on: tree at a node of the scope tree and below it, system on the whole system (held only

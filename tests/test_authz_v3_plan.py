@@ -6,7 +6,7 @@ from app.backend.migrations.support.authz_v3 import (
 )
 
 # Permissions added after migration 030 (not in its frozen copy)
-ADDED_AFTER_030 = frozenset({"audit.view_scope"})
+ADDED_AFTER_030 = frozenset({"audit.view_scope", "guide.create", "guide.update", "guide.archive"})
 ALL = frozenset(LEVELS)
 TREE = frozenset(name for name, level in LEVELS.items() if level == "tree")
 SYSTEM = ALL - TREE

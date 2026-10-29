@@ -33,7 +33,7 @@ class AuditCategory(str, Enum):
     ACCESS = "access"                  # users, roles, assignments, sessions ended by others, certificates
     STRUCTURE = "structure"            # posts, scope groups, unit history
     DATA = "data"                      # observations, frequencies, media, upload sessions, shares
-    DICTIONARIES = "dictionaries"      # categories, signal types, tags, media formats
+    DICTIONARIES = "dictionaries"      # categories, signal types, tags, media formats, user guides
     READS = "reads"                    # searches (later exports, downloads)
     SYSTEM = "system"                  # poster reconcile, restore reconcile, migrations
     AUDIT = "audit"                    # the audit log's own management; database restore / undo-restore
@@ -73,6 +73,8 @@ _FREQ = dict(observation_id=int, frequency_kind=str)
 _MEDIA = dict(observation_id=Optional[int], ttl_seconds=Optional[int])   # media of old data may have no observation
 _CATEGORY = dict(category_name=str)
 _TAG = dict(tag_name=str)
+_GUIDE = dict(guide_title=str)
+_GUIDE_FILE = dict(guide_title=str, file_name=str, size_bytes=int, sha256=str)
 _SEARCH = dict(result_count=int)
 # what a restore or undo-restore carried over (services/backups/carry_over.py) and how many AUTO_INCREMENTs it raised
 _COUNTS = dict(kept_schema=str, revocation_count=int, added_certificate_count=int, added_user_count=int,
@@ -194,6 +196,13 @@ class AuditEvent(Enum):
     MEDIA_FORMAT_UPDATE = ("media_format.update", event(_DI, "Media format updated", content_type=str))
     MEDIA_FORMAT_ARCHIVE = ("media_format.archive", event(_DI, "Media format archived", content_type=str))
     MEDIA_FORMAT_RESTORE = ("media_format.restore", event(_DI, "Media format restored", content_type=str))
+    USER_GUIDE_CREATE = ("user_guide.create", event(_DI, "User guide created", **_GUIDE))
+    USER_GUIDE_UPDATE = ("user_guide.update", event(_DI, "User guide updated", **_GUIDE))
+    USER_GUIDE_ARCHIVE = ("user_guide.archive", event(_DI, "User guide archived", **_GUIDE))
+    USER_GUIDE_RESTORE = ("user_guide.restore", event(_DI, "User guide restored", **_GUIDE))
+    USER_GUIDE_FILE_UPLOAD = ("user_guide_file.upload", event(_DI, "User guide file uploaded", **_GUIDE_FILE))
+    USER_GUIDE_FILE_ARCHIVE = ("user_guide_file.archive", event(_DI, "User guide file archived", **_GUIDE_FILE))
+    USER_GUIDE_FILE_RESTORE = ("user_guide_file.restore", event(_DI, "User guide file restored", **_GUIDE_FILE))
 
     # reads
     SEARCH_OBSERVATIONS = ("search.observations", event(_R, "Observations searched", **_SEARCH))

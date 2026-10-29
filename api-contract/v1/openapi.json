@@ -30269,6 +30269,13 @@
                       "media_format.update",
                       "media_format.archive",
                       "media_format.restore",
+                      "user_guide.create",
+                      "user_guide.update",
+                      "user_guide.archive",
+                      "user_guide.restore",
+                      "user_guide_file.upload",
+                      "user_guide_file.archive",
+                      "user_guide_file.restore",
                       "search.observations",
                       "search.users",
                       "search.posts",
@@ -30761,6 +30768,27 @@
                         "$ref": "#/components/schemas/MediaFormatRestoreAuditEntry"
                       },
                       {
+                        "$ref": "#/components/schemas/UserGuideCreateAuditEntry"
+                      },
+                      {
+                        "$ref": "#/components/schemas/UserGuideUpdateAuditEntry"
+                      },
+                      {
+                        "$ref": "#/components/schemas/UserGuideArchiveAuditEntry"
+                      },
+                      {
+                        "$ref": "#/components/schemas/UserGuideRestoreAuditEntry"
+                      },
+                      {
+                        "$ref": "#/components/schemas/UserGuideFileUploadAuditEntry"
+                      },
+                      {
+                        "$ref": "#/components/schemas/UserGuideFileArchiveAuditEntry"
+                      },
+                      {
+                        "$ref": "#/components/schemas/UserGuideFileRestoreAuditEntry"
+                      },
+                      {
                         "$ref": "#/components/schemas/SearchObservationsAuditEntry"
                       },
                       {
@@ -30873,6 +30901,13 @@
                         "media_format.update": "#/components/schemas/MediaFormatUpdateAuditEntry",
                         "media_format.archive": "#/components/schemas/MediaFormatArchiveAuditEntry",
                         "media_format.restore": "#/components/schemas/MediaFormatRestoreAuditEntry",
+                        "user_guide.create": "#/components/schemas/UserGuideCreateAuditEntry",
+                        "user_guide.update": "#/components/schemas/UserGuideUpdateAuditEntry",
+                        "user_guide.archive": "#/components/schemas/UserGuideArchiveAuditEntry",
+                        "user_guide.restore": "#/components/schemas/UserGuideRestoreAuditEntry",
+                        "user_guide_file.upload": "#/components/schemas/UserGuideFileUploadAuditEntry",
+                        "user_guide_file.archive": "#/components/schemas/UserGuideFileArchiveAuditEntry",
+                        "user_guide_file.restore": "#/components/schemas/UserGuideFileRestoreAuditEntry",
                         "search.observations": "#/components/schemas/SearchObservationsAuditEntry",
                         "search.users": "#/components/schemas/SearchUsersAuditEntry",
                         "search.posts": "#/components/schemas/SearchPostsAuditEntry",
@@ -31325,6 +31360,27 @@
                       "$ref": "#/components/schemas/MediaFormatRestoreAuditEntry"
                     },
                     {
+                      "$ref": "#/components/schemas/UserGuideCreateAuditEntry"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UserGuideUpdateAuditEntry"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UserGuideArchiveAuditEntry"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UserGuideRestoreAuditEntry"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UserGuideFileUploadAuditEntry"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UserGuideFileArchiveAuditEntry"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UserGuideFileRestoreAuditEntry"
+                    },
+                    {
                       "$ref": "#/components/schemas/SearchObservationsAuditEntry"
                     },
                     {
@@ -31437,6 +31493,13 @@
                       "media_format.update": "#/components/schemas/MediaFormatUpdateAuditEntry",
                       "media_format.archive": "#/components/schemas/MediaFormatArchiveAuditEntry",
                       "media_format.restore": "#/components/schemas/MediaFormatRestoreAuditEntry",
+                      "user_guide.create": "#/components/schemas/UserGuideCreateAuditEntry",
+                      "user_guide.update": "#/components/schemas/UserGuideUpdateAuditEntry",
+                      "user_guide.archive": "#/components/schemas/UserGuideArchiveAuditEntry",
+                      "user_guide.restore": "#/components/schemas/UserGuideRestoreAuditEntry",
+                      "user_guide_file.upload": "#/components/schemas/UserGuideFileUploadAuditEntry",
+                      "user_guide_file.archive": "#/components/schemas/UserGuideFileArchiveAuditEntry",
+                      "user_guide_file.restore": "#/components/schemas/UserGuideFileRestoreAuditEntry",
                       "search.observations": "#/components/schemas/SearchObservationsAuditEntry",
                       "search.users": "#/components/schemas/SearchUsersAuditEntry",
                       "search.posts": "#/components/schemas/SearchPostsAuditEntry",
@@ -32222,6 +32285,13 @@
               "media_format.update",
               "media_format.archive",
               "media_format.restore",
+              "user_guide.create",
+              "user_guide.update",
+              "user_guide.archive",
+              "user_guide.restore",
+              "user_guide_file.upload",
+              "user_guide_file.archive",
+              "user_guide_file.restore",
               "search.observations",
               "search.users",
               "search.posts",
@@ -64317,6 +64387,1360 @@
         ],
         "title": "UserCreateForm",
         "description": "Form of POST /users/ (multipart/form-data). Unknown form fields are ignored, as with plain Form() params."
+      },
+      "UserGuideArchiveAuditEntry": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "category": {
+            "$ref": "#/components/schemas/AuditCategory"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditActorResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who acted; null for the system or an anonymous caller"
+          },
+          "resource_type": {
+            "type": "string",
+            "title": "Resource Type"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Id"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditScopeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the event happened; null for a system-wide event"
+          },
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "old_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Values"
+          },
+          "new_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Values"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id",
+            "description": "X-Request-ID of the request that wrote the row"
+          },
+          "ip_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip Address",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "user_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Agent",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "request_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Url",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "event": {
+            "type": "string",
+            "const": "user_guide.archive",
+            "title": "Event",
+            "description": "Key of exactly this message in the localization package"
+          },
+          "params": {
+            "$ref": "#/components/schemas/UserGuideArchiveAuditParams"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "category",
+          "actor",
+          "resource_type",
+          "resource_id",
+          "scope",
+          "success",
+          "old_values",
+          "new_values",
+          "request_id",
+          "ip_address",
+          "user_agent",
+          "session_id",
+          "request_url",
+          "event",
+          "params"
+        ],
+        "title": "UserGuideArchiveAuditEntry",
+        "description": "User guide archived (event user_guide.archive, category dictionaries)"
+      },
+      "UserGuideArchiveAuditParams": {
+        "properties": {
+          "guide_title": {
+            "type": "string",
+            "title": "Guide Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "guide_title"
+        ],
+        "title": "UserGuideArchiveAuditParams",
+        "description": "Params of user_guide.archive (User guide archived)"
+      },
+      "UserGuideCreateAuditEntry": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "category": {
+            "$ref": "#/components/schemas/AuditCategory"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditActorResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who acted; null for the system or an anonymous caller"
+          },
+          "resource_type": {
+            "type": "string",
+            "title": "Resource Type"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Id"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditScopeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the event happened; null for a system-wide event"
+          },
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "old_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Values"
+          },
+          "new_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Values"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id",
+            "description": "X-Request-ID of the request that wrote the row"
+          },
+          "ip_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip Address",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "user_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Agent",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "request_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Url",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "event": {
+            "type": "string",
+            "const": "user_guide.create",
+            "title": "Event",
+            "description": "Key of exactly this message in the localization package"
+          },
+          "params": {
+            "$ref": "#/components/schemas/UserGuideCreateAuditParams"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "category",
+          "actor",
+          "resource_type",
+          "resource_id",
+          "scope",
+          "success",
+          "old_values",
+          "new_values",
+          "request_id",
+          "ip_address",
+          "user_agent",
+          "session_id",
+          "request_url",
+          "event",
+          "params"
+        ],
+        "title": "UserGuideCreateAuditEntry",
+        "description": "User guide created (event user_guide.create, category dictionaries)"
+      },
+      "UserGuideCreateAuditParams": {
+        "properties": {
+          "guide_title": {
+            "type": "string",
+            "title": "Guide Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "guide_title"
+        ],
+        "title": "UserGuideCreateAuditParams",
+        "description": "Params of user_guide.create (User guide created)"
+      },
+      "UserGuideFileArchiveAuditEntry": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "category": {
+            "$ref": "#/components/schemas/AuditCategory"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditActorResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who acted; null for the system or an anonymous caller"
+          },
+          "resource_type": {
+            "type": "string",
+            "title": "Resource Type"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Id"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditScopeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the event happened; null for a system-wide event"
+          },
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "old_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Values"
+          },
+          "new_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Values"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id",
+            "description": "X-Request-ID of the request that wrote the row"
+          },
+          "ip_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip Address",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "user_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Agent",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "request_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Url",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "event": {
+            "type": "string",
+            "const": "user_guide_file.archive",
+            "title": "Event",
+            "description": "Key of exactly this message in the localization package"
+          },
+          "params": {
+            "$ref": "#/components/schemas/UserGuideFileArchiveAuditParams"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "category",
+          "actor",
+          "resource_type",
+          "resource_id",
+          "scope",
+          "success",
+          "old_values",
+          "new_values",
+          "request_id",
+          "ip_address",
+          "user_agent",
+          "session_id",
+          "request_url",
+          "event",
+          "params"
+        ],
+        "title": "UserGuideFileArchiveAuditEntry",
+        "description": "User guide file archived (event user_guide_file.archive, category dictionaries)"
+      },
+      "UserGuideFileArchiveAuditParams": {
+        "properties": {
+          "guide_title": {
+            "type": "string",
+            "title": "Guide Title"
+          },
+          "file_name": {
+            "type": "string",
+            "title": "File Name"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          },
+          "sha256": {
+            "type": "string",
+            "title": "Sha256"
+          }
+        },
+        "type": "object",
+        "required": [
+          "guide_title",
+          "file_name",
+          "size_bytes",
+          "sha256"
+        ],
+        "title": "UserGuideFileArchiveAuditParams",
+        "description": "Params of user_guide_file.archive (User guide file archived)"
+      },
+      "UserGuideFileRestoreAuditEntry": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "category": {
+            "$ref": "#/components/schemas/AuditCategory"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditActorResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who acted; null for the system or an anonymous caller"
+          },
+          "resource_type": {
+            "type": "string",
+            "title": "Resource Type"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Id"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditScopeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the event happened; null for a system-wide event"
+          },
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "old_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Values"
+          },
+          "new_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Values"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id",
+            "description": "X-Request-ID of the request that wrote the row"
+          },
+          "ip_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip Address",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "user_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Agent",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "request_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Url",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "event": {
+            "type": "string",
+            "const": "user_guide_file.restore",
+            "title": "Event",
+            "description": "Key of exactly this message in the localization package"
+          },
+          "params": {
+            "$ref": "#/components/schemas/UserGuideFileRestoreAuditParams"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "category",
+          "actor",
+          "resource_type",
+          "resource_id",
+          "scope",
+          "success",
+          "old_values",
+          "new_values",
+          "request_id",
+          "ip_address",
+          "user_agent",
+          "session_id",
+          "request_url",
+          "event",
+          "params"
+        ],
+        "title": "UserGuideFileRestoreAuditEntry",
+        "description": "User guide file restored (event user_guide_file.restore, category dictionaries)"
+      },
+      "UserGuideFileRestoreAuditParams": {
+        "properties": {
+          "guide_title": {
+            "type": "string",
+            "title": "Guide Title"
+          },
+          "file_name": {
+            "type": "string",
+            "title": "File Name"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          },
+          "sha256": {
+            "type": "string",
+            "title": "Sha256"
+          }
+        },
+        "type": "object",
+        "required": [
+          "guide_title",
+          "file_name",
+          "size_bytes",
+          "sha256"
+        ],
+        "title": "UserGuideFileRestoreAuditParams",
+        "description": "Params of user_guide_file.restore (User guide file restored)"
+      },
+      "UserGuideFileUploadAuditEntry": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "category": {
+            "$ref": "#/components/schemas/AuditCategory"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditActorResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who acted; null for the system or an anonymous caller"
+          },
+          "resource_type": {
+            "type": "string",
+            "title": "Resource Type"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Id"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditScopeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the event happened; null for a system-wide event"
+          },
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "old_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Values"
+          },
+          "new_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Values"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id",
+            "description": "X-Request-ID of the request that wrote the row"
+          },
+          "ip_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip Address",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "user_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Agent",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "request_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Url",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "event": {
+            "type": "string",
+            "const": "user_guide_file.upload",
+            "title": "Event",
+            "description": "Key of exactly this message in the localization package"
+          },
+          "params": {
+            "$ref": "#/components/schemas/UserGuideFileUploadAuditParams"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "category",
+          "actor",
+          "resource_type",
+          "resource_id",
+          "scope",
+          "success",
+          "old_values",
+          "new_values",
+          "request_id",
+          "ip_address",
+          "user_agent",
+          "session_id",
+          "request_url",
+          "event",
+          "params"
+        ],
+        "title": "UserGuideFileUploadAuditEntry",
+        "description": "User guide file uploaded (event user_guide_file.upload, category dictionaries)"
+      },
+      "UserGuideFileUploadAuditParams": {
+        "properties": {
+          "guide_title": {
+            "type": "string",
+            "title": "Guide Title"
+          },
+          "file_name": {
+            "type": "string",
+            "title": "File Name"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          },
+          "sha256": {
+            "type": "string",
+            "title": "Sha256"
+          }
+        },
+        "type": "object",
+        "required": [
+          "guide_title",
+          "file_name",
+          "size_bytes",
+          "sha256"
+        ],
+        "title": "UserGuideFileUploadAuditParams",
+        "description": "Params of user_guide_file.upload (User guide file uploaded)"
+      },
+      "UserGuideRestoreAuditEntry": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "category": {
+            "$ref": "#/components/schemas/AuditCategory"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditActorResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who acted; null for the system or an anonymous caller"
+          },
+          "resource_type": {
+            "type": "string",
+            "title": "Resource Type"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Id"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditScopeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the event happened; null for a system-wide event"
+          },
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "old_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Values"
+          },
+          "new_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Values"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id",
+            "description": "X-Request-ID of the request that wrote the row"
+          },
+          "ip_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip Address",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "user_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Agent",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "request_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Url",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "event": {
+            "type": "string",
+            "const": "user_guide.restore",
+            "title": "Event",
+            "description": "Key of exactly this message in the localization package"
+          },
+          "params": {
+            "$ref": "#/components/schemas/UserGuideRestoreAuditParams"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "category",
+          "actor",
+          "resource_type",
+          "resource_id",
+          "scope",
+          "success",
+          "old_values",
+          "new_values",
+          "request_id",
+          "ip_address",
+          "user_agent",
+          "session_id",
+          "request_url",
+          "event",
+          "params"
+        ],
+        "title": "UserGuideRestoreAuditEntry",
+        "description": "User guide restored (event user_guide.restore, category dictionaries)"
+      },
+      "UserGuideRestoreAuditParams": {
+        "properties": {
+          "guide_title": {
+            "type": "string",
+            "title": "Guide Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "guide_title"
+        ],
+        "title": "UserGuideRestoreAuditParams",
+        "description": "Params of user_guide.restore (User guide restored)"
+      },
+      "UserGuideUpdateAuditEntry": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "category": {
+            "$ref": "#/components/schemas/AuditCategory"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditActorResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who acted; null for the system or an anonymous caller"
+          },
+          "resource_type": {
+            "type": "string",
+            "title": "Resource Type"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Id"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditScopeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the event happened; null for a system-wide event"
+          },
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "old_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Values"
+          },
+          "new_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Values"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id",
+            "description": "X-Request-ID of the request that wrote the row"
+          },
+          "ip_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip Address",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "user_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Agent",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "request_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Url",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "event": {
+            "type": "string",
+            "const": "user_guide.update",
+            "title": "Event",
+            "description": "Key of exactly this message in the localization package"
+          },
+          "params": {
+            "$ref": "#/components/schemas/UserGuideUpdateAuditParams"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "category",
+          "actor",
+          "resource_type",
+          "resource_id",
+          "scope",
+          "success",
+          "old_values",
+          "new_values",
+          "request_id",
+          "ip_address",
+          "user_agent",
+          "session_id",
+          "request_url",
+          "event",
+          "params"
+        ],
+        "title": "UserGuideUpdateAuditEntry",
+        "description": "User guide updated (event user_guide.update, category dictionaries)"
+      },
+      "UserGuideUpdateAuditParams": {
+        "properties": {
+          "guide_title": {
+            "type": "string",
+            "title": "Guide Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "guide_title"
+        ],
+        "title": "UserGuideUpdateAuditParams",
+        "description": "Params of user_guide.update (User guide updated)"
       },
       "UserInfoResponse": {
         "properties": {

@@ -40,6 +40,8 @@ TABLES_OWNED_BY_LATER_REVISIONS = {
     "certificate_authority_state",  # 024_user_certificates
     "observation_units",  # 027_scope_group_kinds
     "system_role_assignments",  # 029_authz_v3_schema
+    "user_guides",  # 033_user_guides
+    "user_guide_files",  # 033_user_guides
 }
 down_revision = "001_relativize_media_paths"
 branch_labels = None
