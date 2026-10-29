@@ -3,22 +3,39 @@
 Reading is open to every authenticated user, writes need the system permissions guide.create / guide.update /
 guide.archive (the routes check them). The audience of a guide is stored as the scope key of a node ("p:<id>" /
 "g:<id>", auth/scope.py Node.key; null: everyone): audience_key checks the node exists and is live, guide_views
-names it as it is now. Visibility by audience is not applied yet (part 2, task 7): every live guide is listed.
+names it as it is now.
+
+Who sees a guide (plan decision 8): guide_visible is the rule, related_keys the same rule as the set of audience keys
+the list filters by in SQL. Both read only the AuthContext of the request (its grants and scope tree): no query.
+A guide without an audience is seen by everyone. A guide for node N is seen by
+  - a manager: guide.update in effect (a system permission, so a system grant at the root): every guide, also one
+    whose node is archived;
+  - a caller related to N: N lies on a path through the caller's home post or through the node of one of the
+    caller's tree grants in effect (a grant at an archived node applies nowhere and is left out; AuthContext already
+    leaves out archived roles), in either direction: N contains it (its brigade, its corps) or lies inside it.
+    System grants never widen the audience; a user without a home post and without tree grants sees only guides
+    without an audience. Sibling subtrees are not on one path: a guide for one post is not for the other posts of
+    its brigade.
+An archived N hides the guide from everyone but managers, also when N is on the caller's own path (only N itself
+counts: a live post below an archived brigade is live); so does a node the tree does not know (no such row). Every
+lookup (get_guide) answers guide_not_found for a guide the caller does not see, exactly as for an unknown one.
 
 The service returns dataclasses (GuideView); each API version builds its response from them. Errors are CodedError;
 the route converts them (ApiError.from_coded). No FastAPI.
 """
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, Iterable, List, Literal, Optional, Sequence
+from typing import Dict, FrozenSet, Iterable, List, Literal, Optional, Sequence, Tuple
 
+from sqlalchemy import or_
 from sqlmodel import select
 from sqlalchemy.sql.selectable import Select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.backend.auth.scope import Node
+from app.backend.auth.context import AuthContext
+from app.backend.auth.scope import Node, ScopeTree
 from app.backend.enums.errors import ErrorCode
-from app.backend.enums.general import SortOrder
+from app.backend.enums.general import Permissions, SortOrder
 from app.backend.errors.coded import CodedError
 from app.backend.filters.simple_engine import ListCriteria, SimpleFilterEngine
 from app.backend.models.post import Post
@@ -66,6 +83,60 @@ class GuideView:
     updated_at: datetime
 
 
+# ------------------------------------------------------------------ audience
+
+def _is_manager(auth: AuthContext) -> bool:
+    """guide.update in effect: a system permission, held through a system grant (at the root)"""
+    return auth.has_at_root(Permissions.GUIDE_UPDATE)
+
+
+def _known(tree: ScopeTree, node: Node) -> bool:
+    """A group or a post of the tree (the root is never an audience)"""
+    if node.kind == "group":
+        return node.id in tree.group_parent
+    if node.kind == "post":
+        return node.id in tree.post_group
+    return False
+
+
+def _anchors(auth: AuthContext) -> Tuple[Node, ...]:
+    """The nodes the caller is related through: the home post, then the node of every tree grant in effect (not at
+    an archived node). System grants are left out."""
+    tree = auth.tree
+    anchors: List[Node] = [Node.post(auth.user.post_id)] if auth.user.post_id is not None else []
+    anchors += [grant.node for grant in auth.grants if grant.kind == "tree" and not tree.is_archived(grant.node)]
+    return tuple(dict.fromkeys(anchors))
+
+
+def guide_visible(auth: AuthContext, audience: Optional[Node]) -> bool:
+    """Whether the caller sees a guide for the audience node (None: a guide for everyone); the rule is in the module
+    docstring (decision 8). Pure: reads only the AuthContext."""
+    if audience is None or _is_manager(auth):
+        return True
+    tree = auth.tree
+    if tree.is_archived(audience) or not _known(tree, audience):
+        return False
+    return any(tree.contains(anchor, audience) or tree.contains(audience, anchor) for anchor in _anchors(auth))
+
+
+def related_keys(auth: AuthContext) -> Optional[FrozenSet[str]]:
+    """The audience keys of the guides the caller sees (guide_visible as a set, for the list's SQL): the ancestors
+    and the descendants of every anchor, live known nodes only. None for a manager: every guide."""
+    if _is_manager(auth):
+        return None
+    tree = auth.tree
+    related = set()
+    for anchor in _anchors(auth):
+        related.update(tree.ancestors(anchor))
+        related.update(Node.group(group_id) for group_id in tree.groups_under(anchor))
+        related.update(Node.post(post_id) for post_id in tree.posts_under(anchor))
+    return frozenset(node.key for node in related if _known(tree, node) and not tree.is_archived(node))
+
+
+def audience_node(guide: UserGuide) -> Optional[Node]:
+    return Node.parse(guide.audience_key) if guide.audience_key else None
+
+
 # ------------------------------------------------------------------ criteria
 
 @dataclass(frozen=True, kw_only=True)
@@ -105,21 +176,28 @@ class GuideFilterService(SimpleFilterEngine):
 
 # ------------------------------------------------------------------ reads
 
-async def list_guides(session: AsyncSession, criteria: GuideCriteria) -> List[GuideView]:
-    """One page of guides with their files (archived files only with include_deleted)"""
-    rows = (await session.exec(GuideFilterService.apply_filters(select(UserGuide), criteria))).all()
+async def list_guides(session: AsyncSession, criteria: GuideCriteria, auth: AuthContext) -> List[GuideView]:
+    """One page of the guides the caller sees (related_keys, applied before the page is cut) with their files
+    (archived files only with include_deleted)"""
+    query = select(UserGuide)
+    keys = related_keys(auth)
+    if keys is not None:
+        no_audience = UserGuide.audience_key.is_(None)
+        query = query.where(or_(no_audience, UserGuide.audience_key.in_(sorted(keys))) if keys else no_audience)
+    rows = (await session.exec(GuideFilterService.apply_filters(query, criteria))).all()
     return await guide_views(session, rows, include_deleted_files=GuideFilterService.criteria(criteria).include_deleted)
 
 
-async def get_guide(session: AsyncSession, guide_id: int, include_deleted: bool = False,
+async def get_guide(session: AsyncSession, guide_id: int, auth: AuthContext, include_deleted: bool = False,
                     lock: bool = False) -> UserGuide:
-    """The guide (archived only with include_deleted); lock=True locks it as the first statement of the write
-    (utils/row_locks.py). Unknown, or archived without include_deleted: guide_not_found."""
+    """The guide (archived only with include_deleted) when the caller sees it (guide_visible); lock=True locks it
+    as the first statement of the write (utils/row_locks.py). Unknown, archived without include_deleted, or not
+    for the caller: guide_not_found, one answer for all three."""
     query = select(UserGuide).where(UserGuide.id == guide_id)
     if not include_deleted:
         query = query.where(UserGuide.is_deleted == False)  # noqa: E712
     guide = await lock_first(session, query) if lock else (await session.exec(query)).first()
-    if guide is None:
+    if guide is None or not guide_visible(auth, audience_node(guide)):
         raise CodedError(ErrorCode.GUIDE_NOT_FOUND, guide_id=guide_id)
     return guide
 
@@ -173,7 +251,7 @@ async def get_guide_file(session: AsyncSession, guide_id: int, file_id: int, inc
         query = query.where(UserGuideFile.is_deleted == False)  # noqa: E712
     row = await lock_rows(session, query) if lock else (await session.exec(query)).first()
     if row is None:
-        raise CodedError(ErrorCode.GUIDE_FILE_NOT_FOUND)
+        raise CodedError(ErrorCode.GUIDE_FILE_NOT_FOUND, file_id=file_id)
     return row
 
 

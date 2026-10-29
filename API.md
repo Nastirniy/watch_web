@@ -510,6 +510,17 @@ The help section: every authenticated user reads `GET /api/v1/guides/` and `GET 
 (there is no `guide.view`); create, edit, archive and restore need the system permissions `guide.create`,
 `guide.update`, `guide.archive` (`include_deleted` too).
 
+- Who sees a guide: a guide without an `audience` is for everyone. A guide for a node (a corps, a brigade, a post)
+  is for the users related to it: their home post, or a node where they hold a tree role, lies on one path with the
+  node (inside it or above it). A guide for a brigade is seen at its posts and by the administrators of the
+  brigade, of its corps and of the root, not at a sibling brigade; a guide for a post is not seen at the other posts
+  of its brigade. System roles do not count, and a user without a home post and tree roles sees only guides
+  without an audience. Managers (`guide.update`) see every guide. An archived audience node hides the guide from
+  everyone but managers.
+- A guide the caller does not see is simply absent: left out of the list, and 404 `guide_not_found` on
+  `GET /guides/{guide_id}` and on every file route, the same answer as for a guide that does not exist. Show it as
+  "not found", never as "access denied".
+
 - A guide's `title` and `description` are untrusted text: render them as text, never as HTML (no `v-html`, no
   `innerHTML`, no markdown-to-HTML without a sanitiser). The API refuses script patterns (`text_script_pattern`)
   and control characters (`text_control_character`) but accepts any other natural text, SQL words included.

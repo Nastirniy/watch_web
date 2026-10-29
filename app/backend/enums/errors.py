@@ -471,7 +471,8 @@ class ErrorCode(ProblemType):
     GUIDE_NOT_FOUND = ("guide_not_found", problem(404, "User guide not found", guide_id=int))
     GUIDE_NOT_ARCHIVED = ("guide_not_archived", problem(409, "User guide is not archived"))
     # A file of the guide in the path: unknown, of another guide, archived (without include_deleted), or gone from disk
-    GUIDE_FILE_NOT_FOUND = ("guide_file_not_found", problem(404, "User guide file not found"))
+    # (file_id absent then: stored_file_response's missing= carries no params)
+    GUIDE_FILE_NOT_FOUND = ("guide_file_not_found", problem(404, "User guide file not found", file_id=Optional[int]))
     GUIDE_FILE_NOT_ARCHIVED = ("guide_file_not_archived", problem(409, "User guide file is not archived"))
 
     # ---------------------------------------------------------------- resumable uploads

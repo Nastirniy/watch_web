@@ -166,7 +166,7 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - List query `GuideFilterParams`: `q` (title contains, case-insensitive), `page`, `page_size`, `sort_by`
   (`sort_order` (default) or `title`, the other one follows, then the id), `sort_order`, `include_deleted`. Criteria
   `GuideCriteria` / `GuideFilterService` in `services/guides.py`.
-- Every guide is listed for every user for now: filtering by audience comes with a later step. An archived guide
+- Who sees a guide: see the audience entry below. An archived guide
   answers 404 `guide_not_found` (param `guide_id`) on GET without `include_deleted`, on PATCH and on archive; a live
   one 409 `guide_not_archived` on restore. PATCH, archive and restore lock the row first (`lock_first`).
 - Audit: every write and its row (`user_guide.create` / `update` / `archive` / `restore`, param `guide_title`,
@@ -217,8 +217,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `ETag` and `X-File-Hash` the sha256, Range; behind nginx `X-Accel-Redirect` to
   `/protected_uploads/_guides/...`), `Content-Type` the stored type with its charset for text types
   (`text/markdown; charset=UTF-8`, `text/plain; charset=utf-8`). A file gone from disk, of another guide, unknown
-  or archived is 404 `guide_file_not_found` (new problem type, no params; never a path); a file of an archived
-  guide 404 `guide_not_found`. `include_deleted=true` (requires `guide.archive`) serves archived ones.
+  or archived is 404 `guide_file_not_found` (new problem type, param `file_id`, absent when the file is gone from
+  disk; never a path); a file of an archived guide 404 `guide_not_found`. `include_deleted=true` (requires
+  `guide.archive`) serves archived ones.
 - Archive and restore of a file lock the guide row, then the file row; a file of an archived guide is 404
   `guide_not_found`, an archived file 404 on archive, a live one 409 `guide_file_not_archived` (new problem type) on
   restore. Archived files stay on disk and are left out of `GuideResponse.files` unless `include_deleted`.
@@ -228,6 +229,28 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - Contract: the four operations above, the schemas `Body_upload_guide_file`, `DocumentTextInvalidProblem`,
   `GuideFileNotFoundProblem`, `GuideFileNotArchivedProblem`, the field `download_url` (and descriptions) of
   `GuideFileResponse` and the value `language_tag_invalid` of `FieldErrorCode` (additions only).
+- Audience (who sees a guide): a guide without an audience is for everyone. A guide for a corps, a brigade or a
+  post is for the people of that unit and of everything inside it, and for the people of the units around it:
+  a user sees it when their home post, or a node where they hold a tree role, lies on one path with the audience
+  node, inside it or above it. So a guide for a brigade is seen at its posts, by the administrators of the brigade,
+  of its corps and of the root; not at the posts of a sibling brigade. A guide for a post is not seen at the other
+  posts of its brigade (sibling posts are not on one path), but is seen by the brigade's and the corps' people.
+  System roles do not widen this; a user without a home post and without tree roles sees only guides without an
+  audience. Managers (`guide.update`, system administrators) see every guide. An archived audience node hides the
+  guide from everyone but managers, also from the users on its own path (only the node itself counts: a live post
+  below an archived brigade is still live). `services/guides.py`: `guide_visible(auth, audience)` is the rule,
+  `related_keys(auth)` the same rule as the set of audience keys (None for managers), both from the request's
+  `AuthContext` (no query).
+- A guide the caller does not see is left out of `GET /guides/` (in SQL, `audience_key IS NULL OR audience_key
+  IN (...)`, before the page is cut) and answers 404 `guide_not_found` (param `guide_id`), exactly as an unknown
+  guide, on `GET /{guide_id}`, the file download, PATCH, archive and restore of the guide and of its files, and
+  the upload. Writes check their permission first (403 from `require()`), then the lookup.
+- `guide_file_not_found` gains the optional param `file_id` (the file of the path; absent when the file row exists
+  but its file is gone from disk).
+- A failed audit row or commit of a guide file upload removes the file's folder before the rollback
+  (`discard_guide_file`): a rollback that fails (lost connection) no longer leaves the folder without its row.
+- Contract: the descriptions of `GET /guides/`, `GET /guides/{guide_id}`, the guide archive, the file download,
+  archive and restore; the optional property `file_id` of `GuideFileNotFoundProblem`.
 
 ## Authorization fixes (moves, type change, user writes)
 

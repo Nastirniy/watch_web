@@ -1,7 +1,7 @@
 """User guides (part 2): the tables, the system permissions guide.create / guide.update / guide.archive and the
 audit events of guides and their files (task 4); the guide CRUD routes, the stored audience, archive and restore
-(task 5); the files of a guide: upload, download, archive and restore (task 6). Audience filtering (task 7) comes
-later."""
+(task 5); the files of a guide: upload, download, archive and restore (task 6). Who sees a guide (task 7):
+tests/test_guides_audience.py."""
 import asyncio
 import hashlib
 import os
@@ -708,6 +708,7 @@ async def test_a_file_missing_on_disk_is_guide_file_not_found(client, db, header
     response = await client.get(download_path(guide["id"], body["id"]), headers=headers(admin))
     assert response.status_code == 404 and response.json()["code"] == "guide_file_not_found", response.text
     assert row.stored_name not in response.text and "_guides" not in response.text
+    assert "file_id" not in response.json(), "stored_file_response's missing= carries no params: absent, never null"
 
 
 async def test_a_file_of_another_guide_or_unknown_is_404(client, db, headers, storage):
@@ -716,12 +717,13 @@ async def test_a_file_of_another_guide_or_unknown_is_404(client, db, headers, st
     second = await _create(client, headers, admin, title="Second")
     body = await _uploaded(client, headers, admin, first["id"])
     h = headers(admin)
-    for method, path in (("GET", download_path(second["id"], body["id"])),
-                         ("GET", download_path(first["id"], body["id"] + 1000)),
-                         ("POST", file_archive_path(second["id"], body["id"])),
-                         ("POST", file_restore_path(second["id"], body["id"]))):
+    for method, path, file_id in (("GET", download_path(second["id"], body["id"]), body["id"]),
+                                  ("GET", download_path(first["id"], body["id"] + 1000), body["id"] + 1000),
+                                  ("POST", file_archive_path(second["id"], body["id"]), body["id"]),
+                                  ("POST", file_restore_path(second["id"], body["id"]), body["id"])):
         response = await client.request(method, path, headers=h)
         assert response.status_code == 404 and response.json()["code"] == "guide_file_not_found", (path, response.text)
+        assert response.json()["file_id"] == file_id, response.text
     unknown = await client.get(download_path(first["id"] + 1000, body["id"]), headers=h)
     assert unknown.status_code == 404 and unknown.json()["code"] == "guide_not_found"
 
@@ -926,6 +928,7 @@ async def test_archive_and_restore_a_file(client, db, headers, storage):
     assert (await client.post(file_archive_path(guide["id"], body["id"]), headers=h)).status_code == 200
     again = await client.post(file_archive_path(guide["id"], body["id"]), headers=h)
     assert again.status_code == 404 and again.json()["code"] == "guide_file_not_found", again.text
+    assert again.json()["file_id"] == body["id"]
     restored = await client.post(file_restore_path(guide["id"], body["id"]), headers=h)
     assert restored.status_code == 200 and restored.json() == body, restored.text
     assert (await client.get(download_path(guide["id"], body["id"]), headers=h)).status_code == 200
@@ -975,6 +978,31 @@ async def test_a_failed_audit_row_leaves_no_file_and_no_row(client, db, headers,
     assert response.status_code == 500 and response.json()["code"] == "internal_error", response.text
     assert (await db.exec(select(UserGuideFile))).all() == []
     assert _stored_files(storage) == []
+
+
+async def test_discard_removes_the_folder_even_when_the_rollback_fails(storage):
+    """A lost connection fails the rollback: the folder is gone all the same (removed before it), the error
+    propagates"""
+    from sqlalchemy.exc import OperationalError
+
+    folder = storage / "media" / "_guides" / "7" / "9"
+    folder.mkdir(parents=True)
+    (folder / "stored.pdf").write_bytes(PDF)
+
+    class LostConnection:
+        rolled_back = False
+
+        async def rollback(self):
+            self.rolled_back = True
+            raise OperationalError("ROLLBACK", {}, Exception("(2013, 'Lost connection')"))
+
+    session = LostConnection()
+    row = UserGuideFile(id=9, guide_id=7, file_name="stored.pdf", stored_name="stored.pdf", file_path="",
+                        content_type="application/pdf", format_id=1, size_bytes=len(PDF), sha256="ab" * 32,
+                        created_by=1)
+    with pytest.raises(OperationalError):
+        await file_store.discard_guide_file(session, row)
+    assert session.rolled_back and not folder.exists()
 
 
 async def test_two_uploads_to_one_guide_at_once_both_land(client, db, headers, storage):

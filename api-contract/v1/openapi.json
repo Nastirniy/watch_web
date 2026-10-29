@@ -31629,7 +31629,7 @@
           "GUIDES"
         ],
         "summary": "List Guides",
-        "description": "The guides with their files, by sort_order then title. Archived guides and files only with include_deleted\n(requires guide.archive).",
+        "description": "The guides the caller sees with their files, by sort_order then title: those without an audience, and\nthose whose audience node lies on one path with the caller's home post or with a node of the caller's tree\nroles (managers, guide.update: every guide). Archived guides and files only with include_deleted (requires\nguide.archive).",
         "operationId": "list_guides",
         "security": [
           {
@@ -31961,7 +31961,7 @@
           "GUIDES"
         ],
         "summary": "Get Guide",
-        "description": "One guide with its files. An archived guide only with include_deleted (requires guide.archive), which also\nlists its archived files; otherwise 404.",
+        "description": "One guide with its files. A guide whose audience the caller is not in: 404, as an unknown one. An archived\nguide only with include_deleted (requires guide.archive), which also lists its archived files; otherwise 404.",
         "operationId": "get_guide",
         "security": [
           {
@@ -32243,7 +32243,7 @@
           "GUIDES"
         ],
         "summary": "Archive Guide",
-        "description": "Archive a guide (is_deleted=true). Nothing is removed: its files stay, the guide is hidden from lists unless\ninclude_deleted=true. Undo with POST /{guide_id}/restore. Already archived or unknown: 404.",
+        "description": "Archive a guide (is_deleted=true). Nothing is removed: its files stay, the guide is hidden from lists unless\ninclude_deleted=true. Undo with POST /{guide_id}/restore. Already archived, unknown or not for the caller: 404.",
         "operationId": "archive_guide",
         "security": [
           {
@@ -32699,7 +32699,7 @@
           "GUIDES"
         ],
         "summary": "Download Guide File",
-        "description": "Download a file of a guide as an attachment under its file name (nginx serves it via X-Accel-Redirect;\notherwise the API, with Range support). An archived file, or a file of an archived guide, only with\ninclude_deleted (requires guide.archive); otherwise 404. A file gone from disk: 404 guide_file_not_found.",
+        "description": "Download a file of a guide as an attachment under its file name (nginx serves it via X-Accel-Redirect;\notherwise the API, with Range support). An archived file, or a file of an archived guide, only with\ninclude_deleted (requires guide.archive); otherwise 404. A guide whose audience the caller is not in: 404\nguide_not_found, as an unknown one. A file gone from disk: 404 guide_file_not_found.",
         "operationId": "download_guide_file",
         "security": [
           {
@@ -32944,7 +32944,7 @@
           "GUIDES"
         ],
         "summary": "Archive Guide File",
-        "description": "Archive a file of a guide (is_deleted=true): it stays on disk, is left out of the guide's files and its\ndownload answers 404, unless include_deleted. Undo with POST .../restore. Already archived or unknown: 404; a\nfile of an archived guide: 404 guide_not_found.",
+        "description": "Archive a file of a guide (is_deleted=true): it stays on disk, is left out of the guide's files and its\ndownload answers 404, unless include_deleted. Undo with POST .../restore. Already archived or unknown: 404; a\nfile of an archived guide, or of a guide the caller does not see: 404 guide_not_found.",
         "operationId": "archive_guide_file",
         "security": [
           {
@@ -33089,7 +33089,7 @@
           "GUIDES"
         ],
         "summary": "Restore Guide File",
-        "description": "Restore an archived file of a guide (is_deleted=false). Not archived: 409.",
+        "description": "Restore an archived file of a guide (is_deleted=false). Not archived: 409. A file of an archived guide, or of\na guide the caller does not see: 404 guide_not_found.",
         "operationId": "restore_guide_file",
         "security": [
           {
@@ -39836,6 +39836,10 @@
             "const": "guide_file_not_found",
             "title": "Code",
             "description": "Key of exactly this problem in the localization package"
+          },
+          "file_id": {
+            "type": "integer",
+            "title": "File Id"
           }
         },
         "additionalProperties": false,

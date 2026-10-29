@@ -237,8 +237,11 @@ async def store_guide_file(session: AsyncSession, guide: UserGuide, spooled: Pat
 
 
 async def discard_guide_file(session: AsyncSession, row: UserGuideFile) -> None:
-    """Undo store_guide_file when the caller's audit row or commit failed: the transaction rolled back, the file's
-    folder removed. The caller re-raises its error."""
-    guide_id, file_id = row.guide_id, row.id
-    await session.rollback()
-    await asyncio.to_thread(_remove_guide_folder, upload_root(), guide_id, file_id)
+    """Undo store_guide_file when the caller's audit row or commit failed: the file's folder removed, then the
+    transaction rolled back (as store_guide_file does: a rollback that fails, a lost connection, must not leave the
+    folder without its row). The caller re-raises its error."""
+    guide_id, file_id = row.guide_id, row.id     # read before the rollback expires the row
+    try:
+        await asyncio.to_thread(_remove_guide_folder, upload_root(), guide_id, file_id)
+    finally:
+        await session.rollback()

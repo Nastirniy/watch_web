@@ -6,8 +6,14 @@ write route requires X.view as well does not apply here, reading is open. Writes
 include_deleted (archived guides and files too) requires guide.archive.
 
 The audience ({kind: post | group, id}, null: everyone) is stored as the scope key of the node; an unknown or
-archived node answers 404 post_not_found / scope_group_not_found, as the assignment API does. Every live guide is
-listed for every user for now; filtering by audience comes with part 2, task 7.
+archived node answers 404 post_not_found / scope_group_not_found, as the assignment API does.
+
+Who sees a guide (services/guides.py guide_visible, plan decision 8): a guide without an audience, everyone; a guide
+for a node, the managers (guide.update) and the users related to the node: their home post or a node where they
+hold a tree role lies on one path with it (inside it or above it). An archived audience node hides the guide from
+everyone but managers. A guide the caller does not see is left out of the list (in SQL, before the page is cut) and
+answers 404 guide_not_found on every route of the guide and of its files, as an unknown guide does. Writes need
+their permission first (403 from require()), then the same lookup.
 
 Nothing is removed: POST /{guide_id}/archive hides a guide (is_deleted=true), POST /{guide_id}/restore brings it
 back. An archived guide answers 404 on update, a live one 409 on restore. Every write and its audit row
@@ -72,10 +78,11 @@ def _file_response(row: UserGuideFile, version: PublishedVersion) -> GuideFileRe
     return guide_file_to_response(guides_service.file_view(row), version)
 
 
-async def _guide_or_404(session: AsyncSession, guide_id: int, include_deleted: bool = False,
+async def _guide_or_404(session: AsyncSession, guide_id: int, auth: AuthContext, include_deleted: bool = False,
                         lock: bool = False) -> UserGuide:
+    """The guide when the caller sees it; unknown, archived (without include_deleted) or not for the caller: 404"""
     try:
-        return await guides_service.get_guide(session, guide_id, include_deleted, lock=lock)
+        return await guides_service.get_guide(session, guide_id, auth, include_deleted, lock=lock)
     except CodedError as exc:
         raise ApiError.from_coded(exc)
 
@@ -98,10 +105,12 @@ async def list_guides(
         auth: AuthContext = Depends(require()),
         version: PublishedVersion = Depends(request_version),
 ):
-    """The guides with their files, by sort_order then title. Archived guides and files only with include_deleted
-    (requires guide.archive)."""
+    """The guides the caller sees with their files, by sort_order then title: those without an audience, and
+    those whose audience node lies on one path with the caller's home post or with a node of the caller's tree
+    roles (managers, guide.update: every guide). Archived guides and files only with include_deleted (requires
+    guide.archive)."""
     AccessControlService.check_include_deleted(auth, filters, Permissions.GUIDE_ARCHIVE)
-    views = await guides_service.list_guides(session, guides_service.GuideFilterService.criteria(filters))
+    views = await guides_service.list_guides(session, guides_service.GuideFilterService.criteria(filters), auth)
     return [_response(view, version) for view in views]
 
 
@@ -153,10 +162,10 @@ async def get_guide(
         auth: AuthContext = Depends(require()),
         version: PublishedVersion = Depends(request_version),
 ):
-    """One guide with its files. An archived guide only with include_deleted (requires guide.archive), which also
-    lists its archived files; otherwise 404."""
+    """One guide with its files. A guide whose audience the caller is not in: 404, as an unknown one. An archived
+    guide only with include_deleted (requires guide.archive), which also lists its archived files; otherwise 404."""
     AccessControlService.check_include_deleted(auth, params, Permissions.GUIDE_ARCHIVE)
-    guide = await _guide_or_404(session, guide_id, include_deleted=params.include_deleted)
+    guide = await _guide_or_404(session, guide_id, auth, include_deleted=params.include_deleted)
     return _response(await guides_service.guide_view(session, guide, include_deleted_files=params.include_deleted),
                      version)
 
@@ -177,7 +186,7 @@ async def update_guide(
 ):
     """Change the fields sent. description: null clears it; audience: null makes the guide for everyone, left out
     keeps it (an unknown or archived node: 404). An archived guide: 404 (restore it first)."""
-    guide = await _guide_or_404(session, guide_id, lock=True)
+    guide = await _guide_or_404(session, guide_id, auth, lock=True)
     sent = data.model_fields_set
     changes = {field: getattr(data, field) for field in ("title", "description", "sort_order") if field in sent}
     if "audience" in sent:
@@ -241,8 +250,8 @@ async def archive_guide(
         version: PublishedVersion = Depends(request_version),
 ):
     """Archive a guide (is_deleted=true). Nothing is removed: its files stay, the guide is hidden from lists unless
-    include_deleted=true. Undo with POST /{guide_id}/restore. Already archived or unknown: 404."""
-    guide = await _guide_or_404(session, guide_id, lock=True)
+    include_deleted=true. Undo with POST /{guide_id}/restore. Already archived, unknown or not for the caller: 404."""
+    guide = await _guide_or_404(session, guide_id, auth, lock=True)
     return await _set_archived(request, session, auth, guide, archived=True, version=version)
 
 
@@ -259,7 +268,7 @@ async def restore_guide(
         version: PublishedVersion = Depends(request_version),
 ):
     """Restore an archived guide (is_deleted=false). Not archived: 409."""
-    guide = await _guide_or_404(session, guide_id, include_deleted=True, lock=True)
+    guide = await _guide_or_404(session, guide_id, auth, include_deleted=True, lock=True)
     if not guide.is_deleted:
         raise ApiError(ErrorCode.GUIDE_NOT_ARCHIVED)
     return await _set_archived(request, session, auth, guide, archived=False, version=version)
@@ -307,7 +316,7 @@ async def upload_guide_file(
     held in memory. Stored under the format's canonical Content-Type and the sanitised file name. An archived or
     unknown guide: 404."""
     language = guide_file_language(language)
-    await _guide_or_404(session, guide_id)             # a plain read: 404 before the body is copied
+    await _guide_or_404(session, guide_id, auth)       # a plain read: 404 before the body is copied
     registry = await formats.load_registry(session)
     spec = check_guide_format(registry, file.filename or "", file.content_type)
     if file.size and file.size > spec.effective_limit_bytes:
@@ -316,7 +325,7 @@ async def upload_guide_file(
     spooled = await file_store.spool_upload(file, Path(settings.storage.temp_path))
     try:
         # The write: the guide row first (an archive of the guide waits, or this answers 404), then the file row
-        guide = await _guide_or_404(session, guide_id, lock=True)
+        guide = await _guide_or_404(session, guide_id, auth, lock=True)
         try:
             row = await file_store.store_guide_file(session, guide, spooled, file.filename or "", language,
                                                     auth.user.id)
@@ -370,9 +379,10 @@ async def download_guide_file(
 ):
     """Download a file of a guide as an attachment under its file name (nginx serves it via X-Accel-Redirect;
     otherwise the API, with Range support). An archived file, or a file of an archived guide, only with
-    include_deleted (requires guide.archive); otherwise 404. A file gone from disk: 404 guide_file_not_found."""
+    include_deleted (requires guide.archive); otherwise 404. A guide whose audience the caller is not in: 404
+    guide_not_found, as an unknown one. A file gone from disk: 404 guide_file_not_found."""
     AccessControlService.check_include_deleted(auth, params, Permissions.GUIDE_ARCHIVE)
-    await _guide_or_404(session, guide_id, include_deleted=params.include_deleted)
+    await _guide_or_404(session, guide_id, auth, include_deleted=params.include_deleted)
     row = await _file_or_404(session, guide_id, file_id, include_deleted=params.include_deleted)
     response = stored_file_response(
         file_store.guide_file_location(row), content_type=row.content_type, filename=row.file_name,
@@ -386,11 +396,12 @@ async def download_guide_file(
 async def _set_file_archived(request: Request, session: AsyncSession, auth: AuthContext, guide_id: int,
                              file_id: int, archived: bool, version: PublishedVersion) -> GuideFileResponse:
     """Archive or restore a file of a live guide with its audit row, one transaction: the guide row locked first,
-    then the file row. Archive of an archived file: 404; restore of a live one: 409."""
-    guide = await _guide_or_404(session, guide_id, lock=True)
+    then the file row. A guide the caller does not see: 404 guide_not_found. Archive of an archived file: 404;
+    restore of a live one: 409."""
+    guide = await _guide_or_404(session, guide_id, auth, lock=True)
     row = await _file_or_404(session, guide_id, file_id, include_deleted=True, lock=True)
     if archived and row.is_deleted:
-        raise ApiError(ErrorCode.GUIDE_FILE_NOT_FOUND)
+        raise ApiError(ErrorCode.GUIDE_FILE_NOT_FOUND, file_id=file_id)
     if not archived and not row.is_deleted:
         raise ApiError(ErrorCode.GUIDE_FILE_NOT_ARCHIVED)
     old_values = row.model_dump()
@@ -425,7 +436,7 @@ async def archive_guide_file(
 ):
     """Archive a file of a guide (is_deleted=true): it stays on disk, is left out of the guide's files and its
     download answers 404, unless include_deleted. Undo with POST .../restore. Already archived or unknown: 404; a
-    file of an archived guide: 404 guide_not_found."""
+    file of an archived guide, or of a guide the caller does not see: 404 guide_not_found."""
     return await _set_file_archived(request, session, auth, guide_id, file_id, archived=True, version=version)
 
 
@@ -443,5 +454,6 @@ async def restore_guide_file(
         auth: AuthContext = Depends(require(all=[Permissions.GUIDE_ARCHIVE])),
         version: PublishedVersion = Depends(request_version),
 ):
-    """Restore an archived file of a guide (is_deleted=false). Not archived: 409."""
+    """Restore an archived file of a guide (is_deleted=false). Not archived: 409. A file of an archived guide, or of
+    a guide the caller does not see: 404 guide_not_found."""
     return await _set_file_archived(request, session, auth, guide_id, file_id, archived=False, version=version)
