@@ -4,6 +4,7 @@ audit events of guides and their files (task 4); the guide CRUD routes, the stor
 from typing import get_type_hints
 
 import pytest
+from pydantic_core import PydanticCustomError
 from sqlmodel import select
 
 from app.backend.api.v1 import V1
@@ -208,6 +209,64 @@ async def test_create_returns_the_guide(client, db, headers):
     assert body["created_at"] and body["updated_at"]
     row = await db.get(UserGuide, body["id"])
     assert (row.created_by, row.updated_by, row.audience_key) == (admin.id, admin.id, None)
+
+
+NATURAL_TITLE = "How to create, select, update and drop an observation"
+NATURAL_DESCRIPTION = "Select the post, then create the observation.\nTo update it: open it.\tTo drop a band: archive it."
+
+
+async def test_natural_text_with_sql_words_is_stored_and_returned_exactly(client, db, headers):
+    """Guide text is plain text (SecurityValidators.plain_text): SQL words are harmless, values are bound parameters"""
+    admin = await make_admin(db)
+    body = await _create(client, headers, admin, title=NATURAL_TITLE, description=NATURAL_DESCRIPTION)
+    assert (body["title"], body["description"]) == (NATURAL_TITLE, NATURAL_DESCRIPTION)
+    row = await db.get(UserGuide, body["id"])
+    assert (row.title, row.description) == (NATURAL_TITLE, NATURAL_DESCRIPTION)
+
+    patched = await client.patch(by_id(body["id"]), headers=headers(admin),
+                                 json={"title": "Drop or update: " + NATURAL_TITLE, "description": "SELECT * is fine"})
+    assert patched.status_code == 200, patched.text
+    assert (patched.json()["title"], patched.json()["description"]) == (
+        "Drop or update: " + NATURAL_TITLE, "SELECT * is fine")
+    assert (await client.get(by_id(body["id"]), headers=headers(admin))).json()["title"] == "Drop or update: " + NATURAL_TITLE
+
+
+CONTROL = "text_control_character"
+
+
+@pytest.mark.parametrize("method, body, pointer, code", [
+    ("POST", {"title": "Bad\x07title"}, "#/title", CONTROL),
+    ("POST", {"title": "Two\nlines"}, "#/title", CONTROL),
+    ("POST", {"title": "ok", "description": "Bad\x00text"}, "#/description", CONTROL),
+    # raw JSON with a lone surrogate escape: pydantic refuses it before the field validator
+    ("POST", '{"title": "ok", "description": "Lone \\ud800 surrogate"}', "#/description", "string_unicode"),
+    ("PATCH", {"title": "Bad\x1btitle"}, "#/title", CONTROL),
+    ("PATCH", {"description": "Bad\x7ftext"}, "#/description", CONTROL),
+])
+async def test_control_characters_are_refused(client, db, headers, method, body, pointer, code):
+    admin = await make_admin(db)
+    created = await _create(client, headers, admin)
+    path = GUIDES if method == "POST" else by_id(created["id"])
+    if isinstance(body, str):   # a lone surrogate escape: httpx cannot encode it, so the JSON text is sent as it is
+        response = await client.request(method, path, content=body.encode("ascii"),
+                                        headers={**headers(admin), "Content-Type": "application/json"})
+    else:
+        response = await client.request(method, path, headers=headers(admin), json=body)
+    assert response.status_code == 422, response.text
+    items = [item for item in response.json()["errors"] if item.get("pointer") == pointer]
+    assert [item["code"] for item in items] == [code], response.json()
+
+
+def test_plain_text_strips_and_limits():
+    from app.backend.utils.validators import SecurityValidators
+    assert SecurityValidators.plain_text("  Create the post  ", max_length=50) == "Create the post"
+    assert SecurityValidators.plain_text("a\r\nb\tc", max_length=50, multiline=True) == "a\r\nb\tc"
+    assert SecurityValidators.plain_text("SELECT, DROP <b>", max_length=50) == "SELECT, DROP <b>"
+    for text, code in [("x" * 51, "string_too_long"), ("a\nb", "text_control_character"),
+                       ("a\ud800b", "text_control_character"), ("a&#10;b", "text_control_character")]:
+        with pytest.raises(PydanticCustomError) as refused:
+            SecurityValidators.plain_text(text, max_length=50)
+        assert refused.value.type == code, text
 
 
 async def test_create_defaults(client, db, headers):

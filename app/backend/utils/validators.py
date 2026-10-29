@@ -4,6 +4,7 @@ Following OWASP security guidelines and industry standards
 """
 
 import re
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 from app.backend.utils.text import unescape_html, unescape_deep
@@ -134,6 +135,29 @@ class SecurityValidators:
             allowed_tags = ['b', 'i', 'u', 'em', 'strong', 'p', 'br']
             value = bleach.clean(value, tags=allowed_tags, strip=True)
 
+        return value
+
+    # Whitespace controls a multi-line text keeps (line breaks and tabs); every other control character is refused
+    MULTILINE_CONTROLS = frozenset("\n\r\t")
+
+    @classmethod
+    def plain_text(cls, value: str, max_length: int, multiline: bool = False) -> str:
+        """Natural plain text (user guide titles and descriptions): trimmed, at most max_length characters, without
+        control characters (multiline keeps line breaks and tabs) or lone surrogates.
+
+        Unlike sanitize_string it does not refuse SQL keywords or script patterns: the ORM binds every value as a
+        parameter, so "How to create an observation" is harmless at the database layer, and the API returns JSON
+        (escaping belongs to the renderer). Entities a client sends anyway are decoded first, as in sanitize_string,
+        so the checks see the real text ("&#7;" is a control character).
+        """
+        if not isinstance(value, str):
+            raise invalid(FieldErrorCode.VALUE_NOT_STRING)
+        value = unescape_html(value).strip()
+        if len(value) > max_length:
+            raise invalid(FieldErrorCode.STRING_TOO_LONG, max_length=max_length)
+        allowed = cls.MULTILINE_CONTROLS if multiline else frozenset()
+        if any(unicodedata.category(char) in ("Cc", "Cs") and char not in allowed for char in value):
+            raise invalid(FieldErrorCode.TEXT_CONTROL_CHARACTER)
         return value
 
     @classmethod

@@ -171,10 +171,15 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   one 409 `guide_not_archived` on restore. PATCH, archive and restore lock the row first (`lock_first`).
 - Audit: every write and its row (`user_guide.create` / `update` / `archive` / `restore`, param `guide_title`,
   system-wide: no scope) are one transaction.
+- Guide `title` and `description` are natural plain text (`SecurityValidators.plain_text`, `utils/validators.py`):
+  trimmed, length limits, no control characters (the description keeps line breaks and tabs), entities decoded
+  first as elsewhere. SQL keywords and script patterns are NOT refused there ("How to create an observation" is a
+  valid title): the ORM binds every value as a parameter and the API returns JSON. Every other field keeps
+  `sanitize_string`. New field error code `text_control_character` (422 item).
 - New problem types `guide_not_found` (404) and `guide_not_archived` (409).
 - Contract: the six operations above and the schemas `GuideCreate`, `GuideUpdate`, `GuideAudienceRef`,
-  `GuideResponse`, `GuideAudienceResponse`, `GuideFileResponse`, `GuideNotFoundProblem`, `GuideNotArchivedProblem`
-  (additions only).
+  `GuideResponse`, `GuideAudienceResponse`, `GuideFileResponse`, `GuideNotFoundProblem`, `GuideNotArchivedProblem`,
+  and the value `text_control_character` of the `FieldErrorCode` enum (additions only).
 
 ## Authorization fixes (moves, type change, user writes)
 

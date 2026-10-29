@@ -507,6 +507,7 @@ class FieldErrorCode(FieldCode):
     STRING_TOO_LONG = ("string_too_long", field("String should have at most {max_length} characters", max_length=int))
     TEXT_SQL_PATTERN = ("text_sql_pattern", field("Text contains a forbidden SQL keyword"))
     TEXT_SCRIPT_PATTERN = ("text_script_pattern", field("Text contains a forbidden script pattern"))
+    TEXT_CONTROL_CHARACTER = ("text_control_character", field("Text contains a control character"))
     USERNAME_INVALID = ("username_invalid", field("Username must be 3-50 characters: letters, digits and . _ -"))
     USERNAME_RESERVED = ("username_reserved", field("Username is reserved"))
     EMAIL_INVALID = ("email_invalid", field("Invalid email format"))

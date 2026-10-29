@@ -8,12 +8,14 @@ TITLE_MAX = 200
 DESCRIPTION_MAX = 2000
 
 
+# Guide text is natural plain text ("How to create an observation"): SecurityValidators.plain_text, not
+# sanitize_string (its SQL-keyword refusal would reject ordinary titles; values are bound parameters)
 def _title(value: str) -> str:
-    return SecurityValidators.sanitize_string(value.strip(), max_length=TITLE_MAX)
+    return SecurityValidators.plain_text(value, max_length=TITLE_MAX)
 
 
 def _description(value: Optional[str]) -> Optional[str]:
-    return SecurityValidators.sanitize_string(value.strip(), max_length=DESCRIPTION_MAX) if value is not None else value
+    return SecurityValidators.plain_text(value, max_length=DESCRIPTION_MAX, multiline=True) if value is not None else value
 
 
 class GuideAudienceRef(SecureBaseModel):

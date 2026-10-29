@@ -38427,6 +38427,7 @@
           "string_too_long",
           "text_sql_pattern",
           "text_script_pattern",
+          "text_control_character",
           "username_invalid",
           "username_reserved",
           "email_invalid",
