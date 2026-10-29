@@ -9,7 +9,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.models.media import MediaFile
-from app.backend.utils.content_type import served_content_type
+from app.backend.services.files.serve import STORED_FILE_CACHE_CONTROL, accel_headers, file_headers
 from app.backend.utils.row_locks import lock_first
 from app.backend.models.observation import Observation
 from app.backend.config import settings
@@ -47,12 +47,6 @@ async def get_media_or_404(session: AsyncSession, media_id: int, include_deleted
     if not media_file:
         raise ApiError(ErrorCode.MEDIA_NOT_FOUND)
     return media_file
-
-
-def accel_redirect_path(relative_path: str) -> str:
-    """nginx internal path for a file under the uploads root: {nginx_internal_uploads_prefix}/{relative}"""
-    prefix = settings.storage.nginx_internal_uploads_prefix.rstrip("/")
-    return f"{prefix}/{relative_path.replace(chr(92), '/').lstrip('/')}"
 
 
 _SINGLE_RANGE = re.compile(r"^bytes\s*=\s*(\d*)\s*-\s*(\d*)$", re.IGNORECASE)
@@ -100,40 +94,29 @@ def _read_range(path: Path, start: int, length: int) -> Iterator[bytes]:
             yield chunk
 
 
-def original_file_response(media_file: MediaFile, disposition: str, range_header: Optional[str] = None) -> Response:
-    """Serve the original file: X-Accel-Redirect behind nginx (which handles Range), otherwise the API streams it
-    and answers a single byte range itself (parse_byte_range)"""
-    filename = media_file.original_filename.replace('"', "")
-    headers = {
-        # the stored canonical name (text types with their charset); in the headers on both paths: Starlette would
-        # add its own charset to a media_type= text type
-        "Content-Type": served_content_type(media_file.mime_type),
-        "Content-Disposition": f'{disposition}; filename="{filename}"',
-        "Cache-Control": "private, max-age=3600",
-        "ETag": f'"{media_file.file_hash}"',
-        "X-File-Hash": media_file.file_hash,
-    }
-    # The API decides whether the file is there, also before handing it to nginx: otherwise nginx answered its
-    # own 404 page instead of media_file_missing (tests/test_media_download.py)
+def stored_file_response(path: Path, *, content_type: str, filename: str, disposition: str, etag: Optional[str],
+                         range_header: Optional[str], missing: ErrorCode = ErrorCode.MEDIA_FILE_MISSING) -> Response:
+    """The one answer for a stored file under the uploads root (services/files/serve.py has its headers): behind
+    nginx X-Accel-Redirect (nginx serves it, Range included, and adds the safety headers itself), otherwise the API
+    streams it and answers a single byte range itself (parse_byte_range); a 206 keeps every header.
+
+    The API decides whether the file is there, also before handing it to nginx: otherwise nginx answered its own
+    404 page instead of the problem `missing` (tests/test_media_download.py)."""
+    headers = file_headers(content_type=content_type, filename=filename, disposition=disposition, etag=etag)
     root = storage_root()
-    path = media_file.resolve_path(root)
     if not path.is_file():
-        raise ApiError(ErrorCode.MEDIA_FILE_MISSING)
+        raise ApiError(missing)
 
     if settings.storage.enable_nginx:
         try:
             relative = path.resolve().relative_to(root).as_posix()
         except ValueError:
             raise ApiError(ErrorCode.MEDIA_PATH_UNRESOLVED)
-        headers.update({
-            "X-Accel-Redirect": accel_redirect_path(relative),
-            "Accept-Ranges": "bytes",
-            "X-Accel-Buffering": "yes",
-        })
-        return Response(content=b"", status_code=200, headers=headers)
+        return Response(content=b"", status_code=200, headers=accel_headers(headers, relative))
 
     size = path.stat().st_size
     byte_range = parse_byte_range(range_header, size)
+    headers["Cache-Control"] = STORED_FILE_CACHE_CONTROL
     headers["Accept-Ranges"] = "bytes"
     if byte_range is None:
         start, length, status_code = 0, size, 200
@@ -145,6 +128,18 @@ def original_file_response(media_file: MediaFile, disposition: str, range_header
     return StreamingResponse(
         _read_range(path, start, length), status_code=status_code, headers=headers,
     )
+
+
+def original_file_response(media_file: MediaFile, disposition: str, range_header: Optional[str] = None) -> Response:
+    """The original of a media file (download: attachment, stream: inline) under its original name and stored type"""
+    response = stored_file_response(
+        media_file.resolve_path(storage_root()), content_type=media_file.mime_type,
+        filename=media_file.original_filename, disposition=disposition, etag=media_file.file_hash,
+        range_header=range_header,
+    )
+    # sha256 of the file (the stream location of nginx-app.conf answers it from here)
+    response.headers["X-File-Hash"] = media_file.file_hash
+    return response
 
 
 def source_file_exists(media_file: MediaFile) -> bool:

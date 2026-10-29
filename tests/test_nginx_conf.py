@@ -14,6 +14,7 @@ import yaml
 from app.backend.api.v1.auth import login
 from app.backend.config import settings
 from app.backend.services.files.formats import hard_limit_bytes
+from app.backend.services.files.serve import NGINX_ADDED_HEADERS
 from app.main import fastapi_app
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -334,3 +335,43 @@ def test_deployment_lists_every_media_root_line_to_edit():
 def test_stream_answers_cannot_be_framed_by_another_site():
     """/protected_uploads/ answered X-Frame-Options SAMEORIGIN; the stream location serves the same files"""
     assert "add_header X-Frame-Options SAMEORIGIN;" in _location(APP, STREAM)
+
+
+# ------------------------------------------------------------------ file answers: every header once (X-Accel-Redirect)
+# Checked live in nginx:1.27.5 (2026-10-29, the comment at /protected_uploads/ in nginx-app.conf): after an
+# X-Accel-Redirect nginx passes on only Content-Type, Content-Disposition, Cache-Control, Expires, Accept-Ranges and
+# Set-Cookie of the API's answer; any other header (nosniff, the CSP, ETag, X-File-Hash) is dropped. So nginx adds
+# the safety headers where it serves the file, and the API leaves out of its X-Accel answer every header the
+# location adds (services/files/serve.py NGINX_ADDED_HEADERS) and Accept-Ranges, which nginx's static module sends.
+# Before: Cache-Control arrived twice and Accept-Ranges three times on a download, nosniff once, no CSP.
+
+FILE_LOCATIONS = ("^~ /protected_uploads/", STREAM)
+# Without "always" (live check): with it nginx's own 416 (a Range past the end) carried both headers twice
+SANDBOX = "add_header Content-Security-Policy \"sandbox; default-src 'none'\";"
+NOSNIFF = "add_header X-Content-Type-Options nosniff;"
+
+
+def test_nginx_protected_uploads_sets_csp():
+    body = _location(APP, "^~ /protected_uploads/")
+    assert body.count(SANDBOX) == 1 and body.count(NOSNIFF) == 1
+    assert "Content-Security-Policy" not in body.replace(SANDBOX, "")
+
+
+def test_nginx_stream_sets_csp():
+    """The stream location serves the same files without the API's headers (auth_request): the same two headers"""
+    body = _location(APP, STREAM)
+    assert body.count(SANDBOX) == 1 and body.count(NOSNIFF) == 1
+    assert "Content-Security-Policy" not in body.replace(SANDBOX, "")
+
+
+def test_file_locations_add_no_header_the_api_or_nginx_already_sends():
+    """Accept-Ranges comes from nginx's static module (an add_header made it two or three); Content-Type and
+    Content-Disposition come from the API's answer on /protected_uploads/; one add_header per name"""
+    protected = _location(APP, "^~ /protected_uploads/")
+    assert "add_header Accept-Ranges" not in protected
+    assert "add_header Content-Type" not in protected and "add_header Content-Disposition" not in protected
+    for header in FILE_LOCATIONS:
+        names = re.findall(r"add_header (\S+) ", _location(APP, header))
+        assert len(names) == len(set(names)), (header, names)
+        for name in NGINX_ADDED_HEADERS:
+            assert name in names, (header, name)

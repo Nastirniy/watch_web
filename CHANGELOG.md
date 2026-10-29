@@ -94,6 +94,27 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - API.md: section "Media types" (canonical names, accepted aliases, the charset rule); the `.p12` blob example uses
   `application/pkcs12` (registered) instead of `application/x-pkcs12`.
 
+### File responses
+
+- One file response for every stored file: `services/files/serve.py` (`content_disposition`, `file_headers`,
+  `accel_headers`) and `stored_file_response` in `api/shared/helpers/media_helper.py` (`original_file_response` wraps
+  it). `GET /media/{id}/download`, `GET /media/{id}/stream` and `POST /observations/report` use it.
+- `Content-Disposition` names the file twice (RFC 6266, RFC 8187): an ASCII fallback in `filename="..."` (accents
+  dropped, every run of other characters one `_`, no `"`, `\` or `%`) and the real name in
+  `filename*=UTF-8''<percent-encoded>`; control and format characters (CR, LF, NUL, bidirectional overrides) are left
+  out of both. Before, the name went into `filename="..."` with only `"` removed: a name outside Latin-1 (stored
+  when upload name sanitising is off) answered 500.
+- Every file answer carries `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox; default-src
+  'none'` (a stored file opened as a page runs sandboxed, nothing loads; `<video>`, `<audio>` and `<img>` loads are
+  not documents, playback is unchanged), on 200 and 206. Without nginx the API sends them (before: none); behind
+  nginx `nginx-app.conf` adds both in `/protected_uploads/` and the stream location (before: nosniff only).
+- Behind nginx every header arrives once (checked live in nginx:1.27): nginx drops all but a few headers of an
+  X-Accel answer, so the API's X-Accel answer leaves out `Cache-Control`, `Accept-Ranges`, nosniff and the CSP, and
+  `/protected_uploads/` no longer adds `Accept-Ranges` (a download answered `Cache-Control` twice and `Accept-Ranges`
+  three times).
+- Contract: the 200 answers of `/media/{id}/download`, `/media/{id}/stream` and `/observations/report` declare
+  `X-Content-Type-Options` and `Content-Security-Policy`, and the new `Content-Disposition` form.
+
 ## Authorization fixes (moves, type change, user writes)
 
 ### Changed

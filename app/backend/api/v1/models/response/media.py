@@ -195,9 +195,22 @@ class MediaFormatsResponse(BaseModel):
     max_file_size_bytes: int
 
 
+# Headers of every file answer (services/files/serve.py file_headers); behind nginx nginx-app.conf sends them
+FILE_SAFETY_HEADERS = {
+    "X-Content-Type-Options": header("nosniff"),
+    "Content-Security-Policy": header("sandbox; default-src 'none' (the file opened as a page runs sandboxed)"),
+}
+
+
+def disposition_header(kind: str, name: str) -> dict:
+    """Content-Disposition with the name twice (RFC 6266, RFC 8187)"""
+    return header(f"{kind}; filename=\"<{name}, ASCII fallback>\"; filename*=UTF-8''<{name}, UTF-8 percent-encoded>")
+
+
 # Headers of the file and thumbnail routes
 ORIGINAL_FILE_HEADERS = {
-    "Content-Disposition": header('attachment (download) or inline (stream), with filename="<original name>"'),
+    "Content-Disposition": disposition_header("attachment (download) or inline (stream)", "original name"),
+    **FILE_SAFETY_HEADERS,
     "ETag": header("sha256 of the file, quoted"),
     "X-File-Hash": header("sha256 of the file"),
     "Accept-Ranges": header("bytes: the file can be read in parts with Range"),

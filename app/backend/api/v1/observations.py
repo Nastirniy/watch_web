@@ -58,9 +58,11 @@ from app.backend.api.v1.models.query.observations import ObservationFilterParams
 from app.backend.filters.observation_filter import ObservationFilterService
 from app.backend.filters.observation_report_filter import ObservationReportFilter
 from app.backend.services.observation_report_service import ObservationReportService
+from app.backend.services.files.serve import file_headers
+from app.backend.api.v1.models.response.media import FILE_SAFETY_HEADERS, disposition_header
 from app.backend.errors.problems import ApiError, field_problem
 from app.backend.enums.errors import AccessErrorCode, ErrorCode, FieldErrorCode
-from app.backend.api.shared.openapi_docs import file_response, header
+from app.backend.api.shared.openapi_docs import file_response
 from app.backend.errors.openapi import GUARDED, problems
 
 router = APIRouter(prefix=ObservationRoutes.BASE.value, tags=[ObservationRoutes.tag()])
@@ -435,7 +437,8 @@ async def get_report_types(
     response_class=Response,
     responses={
         **file_response("Excel report", [ContentType.XLSX],
-                            {"Content-Disposition": header('attachment; filename="<report>.xlsx"')}),
+                            {"Content-Disposition": disposition_header("attachment", "report.xlsx"),
+                             **FILE_SAFETY_HEADERS}),
         **problems(
             AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION,
             AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED, ErrorCode.REPORT_TOO_LARGE, *GUARDED,
@@ -512,8 +515,8 @@ async def generate_observation_report(
     filename = f"observations_report_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.xlsx"
     return Response(
         content=excel_bytes,
-        media_type=ContentType.XLSX.value,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers=file_headers(content_type=ContentType.XLSX.value, filename=filename, disposition="attachment",
+                             etag=None),
     )
 
 

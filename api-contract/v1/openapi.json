@@ -11820,7 +11820,19 @@
             "description": "Excel report",
             "headers": {
               "Content-Disposition": {
-                "description": "attachment; filename=\"<report>.xlsx\"",
+                "description": "attachment; filename=\"<report.xlsx, ASCII fallback>\"; filename*=UTF-8''<report.xlsx, UTF-8 percent-encoded>",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "description": "nosniff",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Security-Policy": {
+                "description": "sandbox; default-src 'none' (the file opened as a page runs sandboxed)",
                 "schema": {
                   "type": "string"
                 }
@@ -20938,7 +20950,19 @@
             },
             "headers": {
               "Content-Disposition": {
-                "description": "attachment (download) or inline (stream), with filename=\"<original name>\"",
+                "description": "attachment (download) or inline (stream); filename=\"<original name, ASCII fallback>\"; filename*=UTF-8''<original name, UTF-8 percent-encoded>",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "description": "nosniff",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Security-Policy": {
+                "description": "sandbox; default-src 'none' (the file opened as a page runs sandboxed)",
                 "schema": {
                   "type": "string"
                 }
@@ -21172,7 +21196,19 @@
             },
             "headers": {
               "Content-Disposition": {
-                "description": "attachment (download) or inline (stream), with filename=\"<original name>\"",
+                "description": "attachment (download) or inline (stream); filename=\"<original name, ASCII fallback>\"; filename*=UTF-8''<original name, UTF-8 percent-encoded>",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "description": "nosniff",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Security-Policy": {
+                "description": "sandbox; default-src 'none' (the file opened as a page runs sandboxed)",
                 "schema": {
                   "type": "string"
                 }
