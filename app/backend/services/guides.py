@@ -24,7 +24,7 @@ from app.backend.filters.simple_engine import ListCriteria, SimpleFilterEngine
 from app.backend.models.post import Post
 from app.backend.models.scope_group import ScopeGroup
 from app.backend.models.user_guide import UserGuide, UserGuideFile
-from app.backend.utils.row_locks import lock_first
+from app.backend.utils.row_locks import lock as lock_rows, lock_first
 
 AudienceKind = Literal["post", "group"]
 _DESCENDING = (SortOrder.DESCENDING, SortOrder.DESCENDING_NULLS_FIRST, SortOrder.DESCENDING_NULLS_LAST)
@@ -145,6 +145,13 @@ async def guide_views(session: AsyncSession, guides: Sequence[UserGuide],
     ) for guide in guides]
 
 
+def file_view(row: UserGuideFile) -> GuideFileView:
+    return GuideFileView(
+        id=row.id, guide_id=row.guide_id, file_name=row.file_name, content_type=row.content_type,
+        size_bytes=row.size_bytes, sha256=row.sha256, language=row.language, created_at=row.created_at,
+        is_deleted=row.is_deleted)
+
+
 async def _files_of(session: AsyncSession, guide_ids: List[int],
                     include_deleted: bool) -> Dict[int, List[GuideFileView]]:
     query = select(UserGuideFile).where(UserGuideFile.guide_id.in_(sorted(set(guide_ids))))
@@ -152,11 +159,22 @@ async def _files_of(session: AsyncSession, guide_ids: List[int],
         query = query.where(UserGuideFile.is_deleted == False)  # noqa: E712
     found: Dict[int, List[GuideFileView]] = {}
     for row in (await session.exec(query.order_by(UserGuideFile.id))).all():
-        found.setdefault(row.guide_id, []).append(GuideFileView(
-            id=row.id, guide_id=row.guide_id, file_name=row.file_name, content_type=row.content_type,
-            size_bytes=row.size_bytes, sha256=row.sha256, language=row.language, created_at=row.created_at,
-            is_deleted=row.is_deleted))
+        found.setdefault(row.guide_id, []).append(file_view(row))
     return found
+
+
+async def get_guide_file(session: AsyncSession, guide_id: int, file_id: int, include_deleted: bool = False,
+                         lock: bool = False) -> UserGuideFile:
+    """A file of the guide (archived only with include_deleted); lock=True locks it, inside a write that began with
+    the guide's lock (lock_first: the guide row first). Unknown, of another guide, or archived without
+    include_deleted: guide_file_not_found."""
+    query = select(UserGuideFile).where(UserGuideFile.id == file_id, UserGuideFile.guide_id == guide_id)
+    if not include_deleted:
+        query = query.where(UserGuideFile.is_deleted == False)  # noqa: E712
+    row = await lock_rows(session, query) if lock else (await session.exec(query)).first()
+    if row is None:
+        raise CodedError(ErrorCode.GUIDE_FILE_NOT_FOUND)
+    return row
 
 
 async def _audiences(session: AsyncSession, keys: Iterable[str]) -> Dict[str, GuideAudience]:

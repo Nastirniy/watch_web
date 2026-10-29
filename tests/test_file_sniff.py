@@ -1,5 +1,5 @@
 """One content sniffer for every upload (services/files/sniff.py): libmagic on the first 8 KB against the format's
-content type and aliases.
+content type and aliases, and the text rule for text/* formats (UTF-8, a BOM allowed, no NUL byte).
 
 The fixtures in tests/fixtures/files are small real files (make_fixtures.py writes the binary ones). The registry
 follows Debian's libmagic (the api image, production): re-check the aliases there whenever the image or the defaults
@@ -62,6 +62,40 @@ def test_detect_without_an_answer_is_octet_stream(tmp_path, monkeypatch):
     assert sniff.detect_content_type(path) == "application/octet-stream"
 
 
+@pytest.mark.parametrize("name", ["guide.md", "guide.txt", "guide.csv"])
+def test_utf8_text_passes(name):
+    sniff.check_text(FIXTURES / name, spec_of(name).content_type)
+
+
+CYRILLIC = "\u0406\u043d\u0441\u0442\u0440\u0443\u043a\u0446\u0456\u044f"   # Instruction, in Ukrainian
+
+
+@pytest.mark.parametrize("data", [
+    "\ufeffBOM first, then text".encode("utf-8"),
+    f"Cyrillic {CYRILLIC} split over chunks".encode("utf-8"),
+    b"",
+], ids=["bom", "split", "empty"])
+def test_text_rule_accepts(tmp_path, data):
+    path = tmp_path / "x.txt"
+    path.write_bytes(data)
+    sniff.check_text(path, "text/plain", chunk_size=3)     # chunks cut multi-byte characters
+
+
+@pytest.mark.parametrize("data", [
+    CYRILLIC.encode("cp1251"),
+    b"text with a NUL\x00 byte",
+    "ends inside a character \u0406".encode("utf-8")[:-1],
+    "UTF-16".encode("utf-16"),
+], ids=["cp1251", "nul", "truncated", "utf16"])
+def test_text_rule_refuses(tmp_path, data):
+    path = tmp_path / "x.txt"
+    path.write_bytes(data)
+    with pytest.raises(UnsupportedMediaFormat) as refused:
+        sniff.check_text(path, "text/plain", chunk_size=4)
+    assert refused.value.code == ErrorCode.DOCUMENT_TEXT_INVALID
+    assert refused.value.params == {"media_type": "document", "content_type": "text/plain"}
+
+
 async def store(db, tmp_path: Path, fixture: str) -> UnsupportedMediaFormat:
     """The store path refuses the fixture (named as the fixture says) before any row: the error it raises"""
     manager = MediaManager(storage_path=str(tmp_path / "media"), temp_path=str(tmp_path / "temp"))
@@ -80,6 +114,27 @@ async def test_html_named_pdf_is_415(db, tmp_path):
     refused = await store(db, tmp_path, "html_page.pdf")
     assert refused.code == ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED
     assert refused.params["content_type"] == "text/html"
+
+
+@pytest.mark.asyncio
+async def test_binary_markdown_is_415_document_text_invalid(db, tmp_path):
+    assert sniff.detect_content_type(FIXTURES / "binary.md") == "text/plain", "the head of the file is text"
+    refused = await store(db, tmp_path, "binary.md")
+    assert refused.code == ErrorCode.DOCUMENT_TEXT_INVALID
+    assert refused.params == {"media_type": "document", "content_type": "text/markdown"}
+
+
+@pytest.mark.asyncio
+async def test_utf16_text_is_415(db, tmp_path):
+    refused = await store(db, tmp_path, "utf16.txt")
+    assert refused.code == ErrorCode.DOCUMENT_TEXT_INVALID
+    assert refused.params == {"media_type": "document", "content_type": "text/plain"}
+
+
+def test_document_text_invalid_never_carries_the_bytes():
+    spec = ErrorCode.DOCUMENT_TEXT_INVALID
+    assert spec.status == 415
+    assert set(spec.params) == {"media_type", "accepted_content_types", "accepted_extensions", "content_type"}
 
 
 def test_the_sniffer_is_the_only_user_of_libmagic():

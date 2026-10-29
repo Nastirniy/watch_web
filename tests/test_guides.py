@@ -1,6 +1,11 @@
 """User guides (part 2): the tables, the system permissions guide.create / guide.update / guide.archive and the
 audit events of guides and their files (task 4); the guide CRUD routes, the stored audience, archive and restore
-(task 5). Files (task 6) and audience filtering (task 7) come later."""
+(task 5); the files of a guide: upload, download, archive and restore (task 6). Audience filtering (task 7) comes
+later."""
+import asyncio
+import hashlib
+import os
+from pathlib import Path
 from typing import get_type_hints
 
 import pytest
@@ -13,17 +18,21 @@ from app.backend.auth.context import load_auth_context
 from app.backend.auth.scope import ROOT
 from app.backend.auth.user_types import boundary
 from app.backend.bootstrap.permissions import PERMISSION_META, permission_level
+from app.backend.config import settings
 from app.backend.enums.audit import AuditCategory, AuditEvent, audit_event
 from app.backend.enums.general import BuiltinRole, PermissionLevel, Permissions, RoleKind, UserType
 from app.backend.enums.routes import GuideRoutes
 from app.backend.models import UserGuide, UserGuideFile
 from app.backend.models.audit import AuditLog
+from app.backend.models.media_format import MediaFormat
 from app.backend.models.post import Post
 from app.backend.models.role import Permission, Role, RolePermission
 from app.backend.models.role_assignment import RoleAssignment, scope_columns
 from app.backend.models.scope_group import ScopeGroup
 from app.backend.models.system_role_assignment import SystemRoleAssignment
 from app.backend.models.user import User
+from app.backend.services.files import formats as file_formats
+from app.backend.services.files import store as file_store
 from tests.helpers import builtin_role, make_admin, make_group, make_post, make_user
 
 GUIDE_PERMISSIONS = ("guide.create", "guide.update", "guide.archive")
@@ -550,3 +559,443 @@ async def test_a_refused_write_writes_no_audit_row(client, db, headers):
     await client.patch(by_id(created["id"]), headers=headers(admin), json={"audience": {"kind": "post", "id": 999999}})
     await client.post(restore_path(created["id"]), headers=headers(admin))
     assert [row.event for row in await _audit_rows(db, created["id"])] == ["user_guide.create"]
+
+
+# --- files (task 6) --------------------------------------------------------------------------------------------------
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "files"
+PDF = (FIXTURES / "guide.pdf").read_bytes()
+PREFIX = settings.storage.nginx_internal_uploads_prefix.rstrip("/")
+
+
+def files_path(guide_id: int) -> str:
+    return V1.path(GuideRoutes.FILES, guide_id=guide_id)
+
+
+def download_path(guide_id: int, file_id: int) -> str:
+    return V1.path(GuideRoutes.FILE_DOWNLOAD, guide_id=guide_id, file_id=file_id)
+
+
+def file_archive_path(guide_id: int, file_id: int) -> str:
+    return V1.path(GuideRoutes.FILE_ARCHIVE, guide_id=guide_id, file_id=file_id)
+
+
+def file_restore_path(guide_id: int, file_id: int) -> str:
+    return V1.path(GuideRoutes.FILE_RESTORE, guide_id=guide_id, file_id=file_id)
+
+
+@pytest.fixture
+def storage(tmp_path, monkeypatch):
+    """The uploads root and the spool directory under tmp_path; the API serves files itself (no nginx)"""
+    monkeypatch.setattr(settings.storage, "upload_path", str(tmp_path / "media"))
+    monkeypatch.setattr(settings.storage, "temp_path", str(tmp_path / "spool"))
+    monkeypatch.setattr(settings.storage, "enable_nginx", False)
+    (tmp_path / "media").mkdir()
+    return tmp_path
+
+
+def _stored_files(storage: Path) -> list:
+    """Every file and folder under <upload_path>/_guides/<guide_id>/ (temporary ones included), and every file of the
+    spool directory"""
+    found = []
+    guides = storage / "media" / "_guides"
+    if guides.exists():
+        found += sorted(path.relative_to(storage).as_posix() for guide in guides.iterdir() for path in guide.rglob("*"))
+    spool = storage / "spool"
+    if spool.exists():
+        found += sorted(path.relative_to(storage).as_posix() for path in spool.rglob("*") if path.is_file())
+    return found
+
+
+async def _upload(client, headers, user, guide_id: int, name: str = "guide.pdf", data: bytes = PDF,
+                  content_type: str = "application/pdf", **form):
+    return await client.post(files_path(guide_id), headers=headers(user), files={"file": (name, data, content_type)},
+                             data=form)
+
+
+async def _uploaded(client, headers, user, guide_id: int, **kwargs) -> dict:
+    response = await _upload(client, headers, user, guide_id, **kwargs)
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+async def _file_audit_rows(db, file_id: int):
+    return (await db.exec(select(AuditLog).where(
+        AuditLog.resource_type == "user_guide_file", AuditLog.resource_id == file_id).order_by(AuditLog.id))).all()
+
+
+async def test_upload_a_pdf(client, db, headers, storage):
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    body = await _uploaded(client, headers, admin, guide["id"], name="../Start guide.pdf", language="uk")
+
+    # the name as names.sanitize_filename leaves it (the one sanitiser): no path, no spaces, ASCII stem
+    assert body["file_name"] == "Start_guide.pdf" and body["content_type"] == "application/pdf"
+    assert (body["size_bytes"], body["sha256"]) == (len(PDF), hashlib.sha256(PDF).hexdigest())
+    assert (body["language"], body["is_deleted"]) == ("uk", False) and body["created_at"]
+    assert body["download_url"] == download_path(guide["id"], body["id"])
+    assert set(body) == {"id", "file_name", "content_type", "size_bytes", "sha256", "language", "created_at",
+                         "download_url", "is_deleted"}
+
+    row = await db.get(UserGuideFile, body["id"])
+    assert row.file_path == f"_guides/{guide['id']}/{row.id}/{row.stored_name}"
+    assert len(row.stored_name) == 36 and row.stored_name.endswith(".pdf")
+    pdf_format = (await db.exec(select(MediaFormat.id).where(MediaFormat.content_type == "application/pdf"))).one()
+    assert (row.guide_id, row.created_by, row.format_id) == (guide["id"], admin.id, pdf_format)
+    assert (storage / "media" / row.file_path).read_bytes() == PDF
+    folder = f"media/_guides/{guide['id']}/{row.id}"
+    assert _stored_files(storage) == [folder, f"{folder}/{row.stored_name}"], "the spool and the .tmp- folder are gone"
+
+    listed = (await client.get(by_id(guide["id"]), headers=headers(admin))).json()["files"]
+    assert listed == [body]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permissions")
+async def test_a_stored_file_is_0640_in_0750_folders(client, db, headers, storage):
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    body = await _uploaded(client, headers, admin, guide["id"])
+    row = await db.get(UserGuideFile, body["id"])
+    path = storage / "media" / row.file_path
+    assert path.stat().st_mode & 0o777 == 0o640
+    for folder in (path.parent, path.parent.parent, path.parent.parent.parent):
+        assert folder.stat().st_mode & 0o777 == 0o750, folder
+
+
+async def test_download_is_an_attachment(client, db, headers, storage):
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    body = await _uploaded(client, headers, admin, guide["id"], name="Start guide.pdf")
+    operator = await _operator(db)
+
+    response = await client.get(download_path(guide["id"], body["id"]), headers=headers(operator))
+    assert response.status_code == 200, response.text
+    assert response.content == PDF
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.headers["content-disposition"] == (
+        "attachment; filename=\"Start_guide.pdf\"; filename*=UTF-8''Start_guide.pdf")
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["content-security-policy"] == "sandbox; default-src 'none'"
+    assert response.headers["etag"] == f'"{body["sha256"]}"'
+    assert response.headers["x-file-hash"] == body["sha256"]
+    assert (await client.get(download_path(guide["id"], body["id"]))).status_code == 401
+
+
+async def test_download_behind_nginx_hands_the_path_over(client, db, headers, storage, monkeypatch):
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    body = await _uploaded(client, headers, admin, guide["id"])
+    row = await db.get(UserGuideFile, body["id"])
+    monkeypatch.setattr(settings.storage, "enable_nginx", True)
+
+    response = await client.get(download_path(guide["id"], body["id"]), headers=headers(admin))
+    assert response.status_code == 200, response.text
+    assert response.content == b""
+    assert response.headers["x-accel-redirect"] == f"{PREFIX}/_guides/{guide['id']}/{row.id}/{row.stored_name}"
+    assert response.headers["content-disposition"].startswith("attachment; ")
+    assert response.headers["content-type"] == "application/pdf"
+
+
+@pytest.mark.parametrize("enable_nginx", [True, False])
+async def test_a_file_missing_on_disk_is_guide_file_not_found(client, db, headers, storage, monkeypatch, enable_nginx):
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    body = await _uploaded(client, headers, admin, guide["id"])
+    row = await db.get(UserGuideFile, body["id"])
+    (storage / "media" / row.file_path).unlink()
+    monkeypatch.setattr(settings.storage, "enable_nginx", enable_nginx)
+
+    response = await client.get(download_path(guide["id"], body["id"]), headers=headers(admin))
+    assert response.status_code == 404 and response.json()["code"] == "guide_file_not_found", response.text
+    assert row.stored_name not in response.text and "_guides" not in response.text
+
+
+async def test_a_file_of_another_guide_or_unknown_is_404(client, db, headers, storage):
+    admin = await make_admin(db)
+    first = await _create(client, headers, admin)
+    second = await _create(client, headers, admin, title="Second")
+    body = await _uploaded(client, headers, admin, first["id"])
+    h = headers(admin)
+    for method, path in (("GET", download_path(second["id"], body["id"])),
+                         ("GET", download_path(first["id"], body["id"] + 1000)),
+                         ("POST", file_archive_path(second["id"], body["id"])),
+                         ("POST", file_restore_path(second["id"], body["id"]))):
+        response = await client.request(method, path, headers=h)
+        assert response.status_code == 404 and response.json()["code"] == "guide_file_not_found", (path, response.text)
+    unknown = await client.get(download_path(first["id"] + 1000, body["id"]), headers=h)
+    assert unknown.status_code == 404 and unknown.json()["code"] == "guide_not_found"
+
+
+async def test_upload_to_an_archived_or_unknown_guide_is_404(client, db, headers, storage):
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    await client.post(archive_path(guide["id"]), headers=headers(admin))
+    for guide_id in (guide["id"], guide["id"] + 1000):
+        response = await _upload(client, headers, admin, guide_id)
+        assert response.status_code == 404 and response.json()["code"] == "guide_not_found", response.text
+    assert (await db.exec(select(UserGuideFile))).all() == []
+    assert _stored_files(storage) == []
+
+
+async def test_file_writes_need_their_permissions(client, db, headers, storage):
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    operator = await _operator(db)
+    response = await _upload(client, headers, operator, guide["id"])
+    assert response.status_code == 403, response.text
+    assert response.json()["missing"] == ["guide.update"]
+    for path in (file_archive_path(guide["id"], 1), file_restore_path(guide["id"], 1)):
+        refused = await client.post(path, headers=headers(operator))
+        assert refused.status_code == 403 and refused.json()["missing"] == ["guide.archive"], refused.text
+    assert _stored_files(storage) == []
+
+
+async def test_an_upload_above_the_format_limit_is_413(client, db, headers, storage):
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    pdf = (await db.exec(select(MediaFormat).where(MediaFormat.content_type == "application/pdf"))).one()
+    pdf.max_file_size_bytes = 100
+    db.add(pdf)
+    await db.commit()
+    file_formats.invalidate_registry_cache()
+
+    response = await _upload(client, headers, admin, guide["id"])
+    assert response.status_code == 413, response.text
+    problem = response.json()
+    assert problem["code"] == "media_file_too_large"
+    assert (problem["max_file_size_bytes"], problem["content_type"]) == (100, "application/pdf")
+    assert (await db.exec(select(UserGuideFile))).all() == []
+    assert _stored_files(storage) == []
+
+
+@pytest.mark.parametrize("name, content_type, code", [
+    ("setup.exe", "application/octet-stream", "media_extension_dangerous"),
+    ("photo.png", "image/png", "media_extension_not_accepted"),
+    ("guide", "application/pdf", "media_extension_not_accepted"),
+    ("guide.pdf", "text/plain", "media_content_type_extension_mismatch"),
+    ("guide.pdf", "image/png", "media_content_type_not_accepted"),
+])
+async def test_a_file_outside_the_document_formats_is_415(client, db, headers, storage, name, content_type, code):
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    response = await _upload(client, headers, admin, guide["id"], name=name, content_type=content_type)
+    assert response.status_code == 415, response.text
+    assert response.json()["code"] == code
+    assert response.json()["media_type"] == "document"
+    assert "application/pdf" in response.headers["accept-post"] and "image/png" not in response.headers["accept-post"]
+    assert (await db.exec(select(UserGuideFile))).all() == []
+    assert _stored_files(storage) == []
+
+
+async def test_bytes_that_are_not_the_format_are_415(client, db, headers, storage):
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    html = (FIXTURES / "html_page.pdf").read_bytes()
+    response = await _upload(client, headers, admin, guide["id"], data=html)
+    assert response.status_code == 415, response.text
+    assert (response.json()["code"], response.json()["content_type"]) == ("media_content_type_not_accepted",
+                                                                          "text/html")
+    assert _stored_files(storage) == []
+
+
+async def test_an_empty_file_is_400(client, db, headers, storage):
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    response = await _upload(client, headers, admin, guide["id"], data=b"")
+    assert response.status_code == 400 and response.json()["code"] == "media_file_empty", response.text
+    assert _stored_files(storage) == []
+
+
+async def test_a_text_file_must_be_utf8(client, db, headers, storage):
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+
+    refused = await _upload(client, headers, admin, guide["id"], name="binary.md",
+                            data=(FIXTURES / "binary.md").read_bytes(), content_type="text/markdown")
+    assert refused.status_code == 415, refused.text
+    assert (refused.json()["code"], refused.json()["content_type"]) == ("document_text_invalid", "text/markdown")
+    utf16 = await _upload(client, headers, admin, guide["id"], name="guide.txt",
+                          data=(FIXTURES / "utf16.txt").read_bytes(), content_type="text/plain")
+    assert utf16.status_code == 415 and utf16.json()["code"] == "document_text_invalid", utf16.text
+    assert _stored_files(storage) == []
+
+    text = "\ufeff# \u0406\u043d\u0441\u0442\u0440\u0443\u043a\u0446\u0456\u044f\n\nUTF-8 with a BOM\n".encode("utf-8")
+    body = await _uploaded(client, headers, admin, guide["id"], name="guide.md", data=text,
+                           content_type="text/markdown")
+    assert body["content_type"] == "text/markdown"
+    served = await client.get(download_path(guide["id"], body["id"]), headers=headers(admin))
+    assert served.status_code == 200 and served.content == text
+    assert served.headers["content-type"] == "text/markdown; charset=UTF-8"
+    plain = await _uploaded(client, headers, admin, guide["id"], name="guide.txt",
+                            data=(FIXTURES / "guide.txt").read_bytes(), content_type="text/plain")
+    served = await client.get(download_path(guide["id"], plain["id"]), headers=headers(admin))
+    assert served.headers["content-type"] == "text/plain; charset=utf-8"
+
+
+async def test_the_canonical_content_type_is_stored(client, db, headers, storage):
+    """A .md file is text/plain to libmagic (an alias of Markdown): the row keeps the format's name"""
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    body = await _uploaded(client, headers, admin, guide["id"], name="guide.md",
+                           data=(FIXTURES / "guide.md").read_bytes(), content_type="application/octet-stream")
+    assert body["content_type"] == "text/markdown"
+
+
+@pytest.mark.parametrize("language", ["uk", "en", "en-US", "uk-UA", "zh-Hant", "es-419", "", None])
+async def test_language_tags_that_are_accepted(client, db, headers, storage, language):
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    form = {} if language is None else {"language": language}
+    body = await _uploaded(client, headers, admin, guide["id"], **form)
+    assert body["language"] == (language or None)
+
+
+@pytest.mark.parametrize("language, code", [
+    ("u", "language_tag_invalid"), ("english", "language_tag_invalid"), ("uk_UA", "language_tag_invalid"),
+    ("uk-", "language_tag_invalid"), ("-uk", "language_tag_invalid"), ("uk--UA", "language_tag_invalid"),
+    ("1k", "language_tag_invalid"), ("uk UA", "language_tag_invalid"), ("\u0443\u043a", "language_tag_invalid"),
+    ("en-US-x-123", "string_too_long"),
+])
+async def test_language_tags_that_are_refused(client, db, headers, storage, language, code):
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    response = await _upload(client, headers, admin, guide["id"], language=language)
+    assert response.status_code == 422, response.text
+    assert [(item["code"], item.get("pointer")) for item in response.json()["errors"]] == [(code, "#/language")]
+    assert (await db.exec(select(UserGuideFile))).all() == []
+    assert _stored_files(storage) == []
+
+
+async def test_archived_files_are_hidden_and_not_served(client, db, headers, storage):
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    kept = await _uploaded(client, headers, admin, guide["id"])
+    gone = await _uploaded(client, headers, admin, guide["id"], name="old.pdf")
+    h = headers(admin)
+
+    archived = await client.post(file_archive_path(guide["id"], gone["id"]), headers=h)
+    assert archived.status_code == 200, archived.text
+    assert archived.json() == {**gone, "is_deleted": True}
+    row = await db.get(UserGuideFile, gone["id"])
+    assert (storage / "media" / row.file_path).read_bytes() == PDF, "archiving keeps the file on disk"
+
+    operator = await _operator(db)
+    for user in (operator, admin):
+        one = (await client.get(by_id(guide["id"]), headers=headers(user))).json()
+        assert [item["id"] for item in one["files"]] == [kept["id"]]
+        listed = (await client.get(GUIDES, headers=headers(user))).json()
+        assert [item["id"] for item in listed[0]["files"]] == [kept["id"]]
+        response = await client.get(download_path(guide["id"], gone["id"]), headers=headers(user))
+        assert response.status_code == 404 and response.json()["code"] == "guide_file_not_found", response.text
+
+    with_archived = (await client.get(by_id(guide["id"]), headers=h, params={"include_deleted": True})).json()
+    assert [(item["id"], item["is_deleted"]) for item in with_archived["files"]] == [
+        (kept["id"], False), (gone["id"], True)]
+    served = await client.get(download_path(guide["id"], gone["id"]), headers=h, params={"include_deleted": True})
+    assert served.status_code == 200 and served.content == PDF
+
+    refused = await client.get(download_path(guide["id"], gone["id"]), headers=headers(operator),
+                               params={"include_deleted": True})
+    assert refused.status_code == 403, refused.text
+    assert refused.json()["code"] == "permission_required_for_action" and refused.json()["missing"] == ["guide.archive"]
+
+
+async def test_files_of_an_archived_guide_are_served_only_with_include_deleted(client, db, headers, storage):
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    body = await _uploaded(client, headers, admin, guide["id"])
+    await client.post(archive_path(guide["id"]), headers=headers(admin))
+    response = await client.get(download_path(guide["id"], body["id"]), headers=headers(admin))
+    assert response.status_code == 404 and response.json()["code"] == "guide_not_found"
+    served = await client.get(download_path(guide["id"], body["id"]), headers=headers(admin),
+                              params={"include_deleted": True})
+    assert served.status_code == 200 and served.content == PDF
+    for path in (file_archive_path(guide["id"], body["id"]), file_restore_path(guide["id"], body["id"])):
+        refused = await client.post(path, headers=headers(admin))
+        assert refused.status_code == 404 and refused.json()["code"] == "guide_not_found", refused.text
+
+
+async def test_archive_and_restore_a_file(client, db, headers, storage):
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin, title="Files guide")
+    body = await _uploaded(client, headers, admin, guide["id"])
+    h = headers(admin)
+
+    live = await client.post(file_restore_path(guide["id"], body["id"]), headers=h)
+    assert live.status_code == 409 and live.json()["code"] == "guide_file_not_archived", live.text
+    assert (await client.post(file_archive_path(guide["id"], body["id"]), headers=h)).status_code == 200
+    again = await client.post(file_archive_path(guide["id"], body["id"]), headers=h)
+    assert again.status_code == 404 and again.json()["code"] == "guide_file_not_found", again.text
+    restored = await client.post(file_restore_path(guide["id"], body["id"]), headers=h)
+    assert restored.status_code == 200 and restored.json() == body, restored.text
+    assert (await client.get(download_path(guide["id"], body["id"]), headers=h)).status_code == 200
+
+    rows = await _file_audit_rows(db, body["id"])
+    params = {"guide_title": "Files guide", "file_name": "guide.pdf", "size_bytes": len(PDF), "sha256": body["sha256"]}
+    assert [(row.event, row.category, row.params) for row in rows] == [
+        ("user_guide_file.upload", "dictionaries", params),
+        ("user_guide_file.archive", "dictionaries", params),
+        ("user_guide_file.restore", "dictionaries", params),
+    ]
+    assert all(row.user_id == admin.id and row.scope_key is None for row in rows)
+    assert rows[0].old_values is None and rows[0].new_values["id"] == body["id"]
+    assert (rows[1].old_values["is_deleted"], rows[1].new_values["is_deleted"]) == (False, True)
+
+
+async def test_a_failed_store_leaves_no_file_and_no_row(client, db, headers, storage, monkeypatch):
+    """An OSError in the rename of the .tmp- folder into place: 500 media_store_failed, nothing stays"""
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+
+    def storage_full(temporary: Path, target: Path) -> None:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(file_store, "_place", storage_full)
+    response = await _upload(client, headers, admin, guide["id"])
+    assert response.status_code == 500 and response.json()["code"] == "media_store_failed", response.text
+    assert "space" not in response.text
+    assert (await db.exec(select(UserGuideFile))).all() == []
+    assert _stored_files(storage) == []
+    assert (await db.exec(select(AuditLog).where(AuditLog.resource_type == "user_guide_file"))).all() == []
+
+
+async def test_a_failed_audit_row_leaves_no_file_and_no_row(client, db, headers, storage, monkeypatch):
+    """The file is in place before the commit: when the transaction fails, the folder goes too"""
+    from sqlalchemy.exc import OperationalError
+    from app.backend.api.v1 import guides as guide_routes
+
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+
+    async def audit_fails(*args, **kwargs):
+        raise OperationalError("INSERT INTO audit_logs ...", {}, Exception("(1020, 'Record has changed')"))
+
+    monkeypatch.setattr(guide_routes, "create_audit_log", audit_fails)
+    response = await _upload(client, headers, admin, guide["id"])
+    assert response.status_code == 500 and response.json()["code"] == "internal_error", response.text
+    assert (await db.exec(select(UserGuideFile))).all() == []
+    assert _stored_files(storage) == []
+
+
+async def test_two_uploads_to_one_guide_at_once_both_land(client, db, headers, storage):
+    """Both requests run at once on the event loop; each locks the guide row first (lock_first), then inserts its
+    row and writes its own folder. SQLite has no row locks (FOR UPDATE is left out) and the test engine has one
+    connection, so this proves only that two uploads in flight share nothing: distinct rows, folders and stored
+    names, both files whole and listed. The lock order itself is checked against MariaDB in the live run."""
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    other = PDF + b"\n% a second file\n"
+    first, second = await asyncio.gather(
+        _upload(client, headers, admin, guide["id"], name="one.pdf"),
+        _upload(client, headers, admin, guide["id"], name="two.pdf", data=other),
+    )
+    assert (first.status_code, second.status_code) == (201, 201), (first.text, second.text)
+    rows = (await db.exec(select(UserGuideFile).order_by(UserGuideFile.id))).all()
+    assert sorted(row.file_name for row in rows) == ["one.pdf", "two.pdf"]
+    assert len({row.file_path for row in rows}) == 2
+    for row in rows:
+        expected = PDF if row.file_name == "one.pdf" else other
+        assert (storage / "media" / row.file_path).read_bytes() == expected
+        assert row.sha256 == hashlib.sha256(expected).hexdigest()
+    listed = (await client.get(by_id(guide["id"]), headers=headers(admin))).json()["files"]
+    assert len(listed) == 2

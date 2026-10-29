@@ -3,7 +3,7 @@
 Every upload is checked against the active rows four times: the declared
 Content-Type, the file extension, the MIME type detected from the bytes
 (services/files/sniff.py, the one sniffer), and the size against the format's
-max_file_size_bytes. Anything outside is
+max_file_size_bytes; a text/* format also holds the file to UTF-8. Anything outside is
 answered with 415 (format) or 413 (size), with an Accept-Post header naming
 what is accepted. GET /media/formats returns the same list for clients;
 administrators manage the rows through /media-formats.

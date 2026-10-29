@@ -288,6 +288,11 @@ class GuideRoutes(str, Enum):
     GUIDE_BY_ID = "/{guide_id}"
     GUIDE_ARCHIVE = "/{guide_id}/archive"
     GUIDE_RESTORE = "/{guide_id}/restore"
+    # Files of a guide: upload (multipart), download (attachment), archive and restore; never deleted
+    FILES = "/{guide_id}/files"
+    FILE_DOWNLOAD = "/{guide_id}/files/{file_id}/download"
+    FILE_ARCHIVE = "/{guide_id}/files/{file_id}/archive"
+    FILE_RESTORE = "/{guide_id}/files/{file_id}/restore"
 
     @staticmethod
     def tag() -> str:

@@ -10,6 +10,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.models.media import MediaFile
 from app.backend.services.files.serve import STORED_FILE_CACHE_CONTROL, accel_headers, file_headers
+from app.backend.services.files.store import upload_root
 from app.backend.utils.row_locks import lock_first
 from app.backend.models.observation import Observation
 from app.backend.config import settings
@@ -18,8 +19,8 @@ from app.backend.enums.errors import ErrorCode
 
 
 def storage_root() -> Path:
-    root = Path(settings.storage.upload_path)
-    return root if root.is_absolute() else root.resolve()
+    """The uploads root, absolute (services/files/store.py upload_root)"""
+    return upload_root()
 
 
 async def get_observation_from_media(session: AsyncSession, media_file: MediaFile) -> Observation:

@@ -1,9 +1,11 @@
+import re
 from typing import Literal, Optional
 
 from pydantic import Field, PositiveInt, field_validator
 
 from app.backend.enums.errors import FieldErrorCode
 from app.backend.errors.coded import invalid
+from app.backend.errors.problems import field_problem
 from app.backend.utils.validators import SecureBaseModel, SecurityValidators, not_null
 
 TITLE_MAX = 200
@@ -79,3 +81,22 @@ class GuideUpdate(SecureBaseModel):
     @classmethod
     def validate_description(cls, v: Optional[str]) -> Optional[str]:
         return _description(v)
+
+
+# The form field language of POST /guides/{guide_id}/files (multipart: the file is a File() parameter, so the field is
+# a Form() parameter of the route, not a model; FastAPI documents a form model with a file as urlencoded)
+LANGUAGE_MAX = 8
+LANGUAGE_DESCRIPTION = ("Language of the file, a BCP 47 style tag: 2 or 3 letters, then optional subtags of 1 to 8 "
+                        "letters or digits joined by hyphens, at most 8 characters (uk, en, en-US, zh-Hant, es-419); "
+                        "empty or left out: none")
+_LANGUAGE_TAG = re.compile(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*", re.ASCII)
+
+
+def guide_file_language(value: Optional[str]) -> Optional[str]:
+    """The language tag as sent (tags are case-insensitive: it is not rewritten), None for empty; anything else is
+    422 language_tag_invalid at #/language. Not a full BCP 47 parser: the shape of language-subtags, no registry."""
+    if value is None or value == "":
+        return None
+    if not _LANGUAGE_TAG.fullmatch(value):
+        raise field_problem(FieldErrorCode.LANGUAGE_TAG_INVALID, ("body", "language"))
+    return value

@@ -14,7 +14,7 @@ from app.backend.auth.context import AuthContext
 from app.backend.auth.access_control import AccessControlService
 from app.backend.services.media_manager import FileValidationConfig
 from app.backend.services.files import formats
-from app.backend.services.files.names import extension_of
+from app.backend.services.files.names import DANGEROUS_EXTENSIONS, extension_of
 from app.backend.services.media import jobs, renderer, urls as thumb_urls
 from app.backend.services.media.probe import has_no_video_stream, metadata_for, resolve_tools
 from app.backend.enums.general import MediaType, Permissions, UploadPurpose, ThumbnailFormat, ThumbnailSize
@@ -52,7 +52,8 @@ def format_rejected(registry: formats.FormatRegistry, exc: formats.UnsupportedMe
 
 
 def store_rejected(exc: CodedError, headers: dict = None) -> ApiError:
-    """A file refused by MediaManager.store_file_from_path; the status comes with its problem type"""
+    """A file refused by MediaManager.store_file_from_path or services/files/store.store_guide_file; the status comes
+    with its problem type"""
     return ApiError.from_coded(exc, headers=headers)
 
 
@@ -75,6 +76,30 @@ def check_declared_format(registry: formats.FormatRegistry, media_type: str, fil
         spec = None
     if spec is None:
         raise _unsupported(registry, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, media_type, extension=extension_of(filename))
+    _check_declared_content_type(registry, spec, content_type)
+    return spec
+
+
+def check_guide_format(registry: formats.FormatRegistry, filename: str, content_type: str = None) -> formats.FormatSpec:
+    """The document format of a user guide file, before the body is read (registry: formats.load_registry): a
+    dangerous extension, an extension of no document format or a declared Content-Type outside the format is 415
+    with Accept-Post (the store checks the bytes again: services/files/store.py)"""
+    media_type = MediaType.DOCUMENT.value
+    extension = extension_of(filename)
+    if extension in DANGEROUS_EXTENSIONS:
+        raise _unsupported(registry, ErrorCode.MEDIA_EXTENSION_DANGEROUS, media_type, extension=extension)
+    spec = registry.resolve(UploadPurpose.USER_GUIDE, filename)
+    if spec is None:
+        raise _unsupported(registry, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, media_type, extension=extension)
+    _check_declared_content_type(registry, spec, content_type)
+    return spec
+
+
+def _check_declared_content_type(registry: formats.FormatRegistry, spec: formats.FormatSpec,
+                                 content_type: Optional[str]) -> None:
+    """The Content-Type the client declared for the file: absent or opaque (application/octet-stream) is left to the
+    sniffer; another type of the format's media type is a mismatch, any other type not accepted (415)"""
+    media_type = spec.media_type
     declared = formats.normalise_content_type(content_type)
     if declared is None and content_type and content_type.strip():
         # malformed (utils/content_type.py): refused like a type outside the registry, the header never echoed
@@ -84,7 +109,6 @@ def check_declared_format(registry: formats.FormatRegistry, media_type: str, fil
             raise _unsupported(registry, ErrorCode.MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH, media_type,
                                content_type=declared, expected_content_type=spec.content_type)
         raise _unsupported(registry, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED, media_type, content_type=declared)
-    return spec
 
 
 async def load_observation_for_upload(session: AsyncSession, auth: AuthContext, observation_id: int) -> Observation:

@@ -514,6 +514,13 @@ The help section: every authenticated user reads `GET /api/v1/guides/` and `GET 
   `innerHTML`, no markdown-to-HTML without a sanitiser). The API refuses script patterns (`text_script_pattern`)
   and control characters (`text_control_character`) but accepts any other natural text, SQL words included.
 - `description` keeps its line breaks (show them with `white-space: pre-line`); an empty one is null.
+- Files: `POST /api/v1/guides/{guide_id}/files` (multipart `file`, optional `language`, needs `guide.update`) adds
+  one, of a format of media type `document`; refusals are the media upload ones (415 with `Accept-Post`, 413
+  `media_file_too_large` with `max_file_size_bytes`), plus 415 `document_text_invalid` for a Markdown, text or CSV
+  file that is not UTF-8. `language` is a short tag (`uk`, `en-US`, at most 8 characters) or empty. Each file of
+  `GuideResponse.files` has a `download_url`: open it with the token as any download (`attachment`, the file's own
+  `Content-Type`, sandboxed). Archived files are left out and answer 404 unless `include_deleted=true`
+  (`guide.archive`). The stored `file_name` is the sanitised upload name (ASCII stem, see `sanitize_filename`).
 
 ## Media types
 

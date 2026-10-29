@@ -413,6 +413,10 @@ class ErrorCode(ProblemType):
         415, "Content-Type does not match the file extension",
         "Content-Type '{content_type}' does not match the file extension (expected {expected_content_type})",
         content_type=str, expected_content_type=str, **_FORMATS))
+    # A text/* format (Markdown, plain text, CSV) is stored only as UTF-8 without NUL bytes; content_type is the format's
+    DOCUMENT_TEXT_INVALID = ("document_text_invalid", problem(
+        415, "Document text is not valid UTF-8",
+        "A {content_type} file must be UTF-8 text without NUL bytes", content_type=str, **_FORMATS))
     MEDIA_FILE_TOO_LARGE = ("media_file_too_large", problem(
         413, "File too large for its format", "File exceeds the {max_file_size_bytes} byte limit for {content_type}",
         content_type=str, max_file_size_bytes=int, file_size_bytes=Optional[int]))
@@ -466,6 +470,9 @@ class ErrorCode(ProblemType):
     # ---------------------------------------------------------------- user guides
     GUIDE_NOT_FOUND = ("guide_not_found", problem(404, "User guide not found", guide_id=int))
     GUIDE_NOT_ARCHIVED = ("guide_not_archived", problem(409, "User guide is not archived"))
+    # A file of the guide in the path: unknown, of another guide, archived (without include_deleted), or gone from disk
+    GUIDE_FILE_NOT_FOUND = ("guide_file_not_found", problem(404, "User guide file not found"))
+    GUIDE_FILE_NOT_ARCHIVED = ("guide_file_not_archived", problem(409, "User guide file is not archived"))
 
     # ---------------------------------------------------------------- resumable uploads
     UPLOAD_SESSION_NOT_FOUND = ("upload_session_not_found", problem(404, "Upload session not found"))
@@ -508,6 +515,8 @@ class FieldErrorCode(FieldCode):
     TEXT_SQL_PATTERN = ("text_sql_pattern", field("Text contains a forbidden SQL keyword"))
     TEXT_SCRIPT_PATTERN = ("text_script_pattern", field("Text contains a forbidden script pattern"))
     TEXT_CONTROL_CHARACTER = ("text_control_character", field("Text contains a control character"))
+    LANGUAGE_TAG_INVALID = ("language_tag_invalid", field(
+        "Not a language tag: 2 or 3 letters, then subtags of letters or digits joined by hyphens (uk, en-US)"))
     USERNAME_INVALID = ("username_invalid", field("Username must be 3-50 characters: letters, digits and . _ -"))
     USERNAME_RESERVED = ("username_reserved", field("Username is reserved"))
     EMAIL_INVALID = ("email_invalid", field("Invalid email format"))

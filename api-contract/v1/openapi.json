@@ -32490,6 +32490,753 @@
           }
         }
       }
+    },
+    "/api/v1/guides/{guide_id}/files": {
+      "post": {
+        "tags": [
+          "GUIDES"
+        ],
+        "summary": "Upload Guide File",
+        "description": "Add a file to a guide (multipart: file, optional language). The file must be of a document format: the\nextension, the declared Content-Type and the bytes are checked (415 with Accept-Post), its size against the\nformat's limit (413 media_file_too_large with max_file_size_bytes); a text format (Markdown, plain text, CSV)\nmust be UTF-8 without NUL bytes (415 document_text_invalid). The body is spooled to disk in 1 MB chunks, never\nheld in memory. Stored under the format's canonical Content-Type and the sanitised file name. An archived or\nunknown guide: 404.",
+        "operationId": "upload_guide_file",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "guide_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Guide Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_guide_file"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuideFileResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error; `media_store_failed`: Failed to store the file",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/InternalErrorProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MediaStoreFailedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "internal_error": "#/components/schemas/InternalErrorProblem",
+                      "media_store_failed": "#/components/schemas/MediaStoreFailedProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`media_file_empty`: File is empty",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaFileEmptyProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`: Insufficient permissions",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`guide_not_found`: User guide not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuideNotFoundProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`media_file_too_large`: File too large for its format",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaFileTooLargeProblem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`document_text_invalid`: Document text is not valid UTF-8; `media_content_type_extension_mismatch`: Content-Type does not match the file extension; `media_content_type_not_accepted`: Content type not accepted; `media_extension_dangerous`: File extension not allowed; `media_extension_not_accepted`: File extension not accepted",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/DocumentTextInvalidProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MediaContentTypeExtensionMismatchProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MediaContentTypeNotAcceptedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MediaExtensionDangerousProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MediaExtensionNotAcceptedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "document_text_invalid": "#/components/schemas/DocumentTextInvalidProblem",
+                      "media_content_type_extension_mismatch": "#/components/schemas/MediaContentTypeExtensionMismatchProblem",
+                      "media_content_type_not_accepted": "#/components/schemas/MediaContentTypeNotAcceptedProblem",
+                      "media_extension_dangerous": "#/components/schemas/MediaExtensionDangerousProblem",
+                      "media_extension_not_accepted": "#/components/schemas/MediaExtensionNotAcceptedProblem"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/guides/{guide_id}/files/{file_id}/download": {
+      "get": {
+        "tags": [
+          "GUIDES"
+        ],
+        "summary": "Download Guide File",
+        "description": "Download a file of a guide as an attachment under its file name (nginx serves it via X-Accel-Redirect;\notherwise the API, with Range support). An archived file, or a file of an archived guide, only with\ninclude_deleted (requires guide.archive); otherwise 404. A file gone from disk: 404 guide_file_not_found.",
+        "operationId": "download_guide_file",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "guide_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Guide Id"
+            }
+          },
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "File Id"
+            }
+          },
+          {
+            "name": "include_deleted",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Archived guides and archived files too (requires guide.archive)",
+              "default": false,
+              "title": "Include Deleted"
+            },
+            "description": "Archived guides and archived files too (requires guide.archive)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file (attachment), in its format's Content-Type (text types with charset)",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            },
+            "headers": {
+              "Content-Disposition": {
+                "description": "attachment; filename=\"<file_name, ASCII fallback>\"; filename*=UTF-8''<file_name, UTF-8 percent-encoded>",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "description": "nosniff",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Security-Policy": {
+                "description": "sandbox; default-src 'none' (the file opened as a page runs sandboxed)",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "sha256 of the file, quoted",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-File-Hash": {
+                "description": "sha256 of the file",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Accept-Ranges": {
+                "description": "bytes: the file can be read in parts with Range",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "private, max-age=3600",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error; `media_path_unresolved`: Cannot resolve file path relative to storage root",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/InternalErrorProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MediaPathUnresolvedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "internal_error": "#/components/schemas/InternalErrorProblem",
+                      "media_path_unresolved": "#/components/schemas/MediaPathUnresolvedProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "The requested byte range (Range header)",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            },
+            "headers": {
+              "Content-Range": {
+                "description": "bytes start-end/size",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_required_for_action`: Permission required for this action",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionRequiredForActionProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`guide_file_not_found`: User guide file not found; `guide_not_found`: User guide not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/GuideFileNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GuideNotFoundProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "guide_file_not_found": "#/components/schemas/GuideFileNotFoundProblem",
+                      "guide_not_found": "#/components/schemas/GuideNotFoundProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "416": {
+            "description": "`range_not_satisfiable`: Range not satisfiable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RangeNotSatisfiableProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/guides/{guide_id}/files/{file_id}/archive": {
+      "post": {
+        "tags": [
+          "GUIDES"
+        ],
+        "summary": "Archive Guide File",
+        "description": "Archive a file of a guide (is_deleted=true): it stays on disk, is left out of the guide's files and its\ndownload answers 404, unless include_deleted. Undo with POST .../restore. Already archived or unknown: 404; a\nfile of an archived guide: 404 guide_not_found.",
+        "operationId": "archive_guide_file",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "guide_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Guide Id"
+            }
+          },
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "File Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuideFileResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`: Insufficient permissions",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`guide_file_not_found`: User guide file not found; `guide_not_found`: User guide not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/GuideFileNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GuideNotFoundProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "guide_file_not_found": "#/components/schemas/GuideFileNotFoundProblem",
+                      "guide_not_found": "#/components/schemas/GuideNotFoundProblem"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/guides/{guide_id}/files/{file_id}/restore": {
+      "post": {
+        "tags": [
+          "GUIDES"
+        ],
+        "summary": "Restore Guide File",
+        "description": "Restore an archived file of a guide (is_deleted=false). Not archived: 409.",
+        "operationId": "restore_guide_file",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "guide_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Guide Id"
+            }
+          },
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "File Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuideFileResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_denied`: Insufficient permissions",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionDeniedProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`guide_file_not_found`: User guide file not found; `guide_not_found`: User guide not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/GuideFileNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GuideNotFoundProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "guide_file_not_found": "#/components/schemas/GuideFileNotFoundProblem",
+                      "guide_not_found": "#/components/schemas/GuideNotFoundProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`guide_file_not_archived`: User guide file is not archived",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuideFileNotArchivedProblem"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -33920,6 +34667,34 @@
           "file"
         ],
         "title": "Body_upload_complete_file"
+      },
+      "Body_upload_guide_file": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File",
+            "description": "The document, of a format of media type document"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 8
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language",
+            "description": "Language of the file, a BCP 47 style tag: 2 or 3 letters, then optional subtags of 1 to 8 letters or digits joined by hyphens, at most 8 characters (uk, en, en-US, zh-Hant, es-419); empty or left out: none"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_guide_file"
       },
       "BrigadeCreate": {
         "properties": {
@@ -38241,6 +39016,105 @@
         "title": "DatabaseUndoRestoreAuditParams",
         "description": "Params of database.undo_restore (Database restore undone)"
       },
+      "DocumentTextInvalidProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Document text is not valid UTF-8",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 415,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "A {content_type} file must be UTF-8 text without NUL bytes"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "document_text_invalid",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type"
+          },
+          "media_type": {
+            "type": "string",
+            "title": "Media Type"
+          },
+          "accepted_content_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Accepted Content Types"
+          },
+          "accepted_extensions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Accepted Extensions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code",
+          "content_type",
+          "media_type",
+          "accepted_content_types",
+          "accepted_extensions"
+        ],
+        "title": "DocumentTextInvalidProblem",
+        "description": "Document text is not valid UTF-8 (HTTP 415). Problem type document_text_invalid.",
+        "examples": [
+          {
+            "accepted_content_types": [
+              "image/jpeg",
+              "image/png"
+            ],
+            "accepted_extensions": [
+              ".jpg",
+              ".png"
+            ],
+            "code": "document_text_invalid",
+            "content_type": "<content_type>",
+            "detail": "A <content_type> file must be UTF-8 text without NUL bytes",
+            "instance": "/api/v1/...",
+            "media_type": "<media_type>",
+            "status": 415,
+            "title": "Document text is not valid UTF-8",
+            "type": "https://example.org/problems/document_text_invalid"
+          }
+        ]
+      },
       "ExcessAssignment": {
         "properties": {
           "kind": {
@@ -38428,6 +39302,7 @@
           "text_sql_pattern",
           "text_script_pattern",
           "text_control_character",
+          "language_tag_invalid",
           "username_invalid",
           "username_reserved",
           "email_invalid",
@@ -38860,6 +39735,132 @@
         ],
         "title": "GuideCreate"
       },
+      "GuideFileNotArchivedProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "User guide file is not archived",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "User guide file is not archived"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "guide_file_not_archived",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "GuideFileNotArchivedProblem",
+        "description": "User guide file is not archived (HTTP 409). Problem type guide_file_not_archived.",
+        "examples": [
+          {
+            "code": "guide_file_not_archived",
+            "detail": "User guide file is not archived",
+            "instance": "/api/v1/...",
+            "status": 409,
+            "title": "User guide file is not archived",
+            "type": "https://example.org/problems/guide_file_not_archived"
+          }
+        ]
+      },
+      "GuideFileNotFoundProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "User guide file not found",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 404,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "User guide file not found"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "guide_file_not_found",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "GuideFileNotFoundProblem",
+        "description": "User guide file not found (HTTP 404). Problem type guide_file_not_found.",
+        "examples": [
+          {
+            "code": "guide_file_not_found",
+            "detail": "User guide file not found",
+            "instance": "/api/v1/...",
+            "status": 404,
+            "title": "User guide file not found",
+            "type": "https://example.org/problems/guide_file_not_found"
+          }
+        ]
+      },
       "GuideFileResponse": {
         "properties": {
           "id": {
@@ -38868,11 +39869,13 @@
           },
           "file_name": {
             "type": "string",
-            "title": "File Name"
+            "title": "File Name",
+            "description": "The uploaded name, sanitised; the download is saved under it"
           },
           "content_type": {
             "type": "string",
-            "title": "Content Type"
+            "title": "Content Type",
+            "description": "The canonical Content-Type of the file's format"
           },
           "size_bytes": {
             "type": "integer",
@@ -38891,12 +39894,18 @@
                 "type": "null"
               }
             ],
-            "title": "Language"
+            "title": "Language",
+            "description": "Language tag (uk, en-US) or null"
           },
           "created_at": {
             "type": "string",
             "format": "date-time",
             "title": "Created At"
+          },
+          "download_url": {
+            "type": "string",
+            "title": "Download Url",
+            "description": "Path of the download in this API version (GET, attachment)"
           },
           "is_deleted": {
             "type": "boolean",
@@ -38913,6 +39922,7 @@
           "sha256",
           "language",
           "created_at",
+          "download_url",
           "is_deleted"
         ],
         "title": "GuideFileResponse",

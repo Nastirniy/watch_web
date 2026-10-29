@@ -8,6 +8,12 @@ from typing import Optional
 
 MAX_FILENAME_LENGTH = 255
 
+# Refused whatever a format lists (every upload: media and user guides)
+DANGEROUS_EXTENSIONS = frozenset({
+    '.exe', '.bat', '.cmd', '.com', '.pif', '.scr', '.vbs', '.js', '.jar',
+    '.app', '.deb', '.pkg', '.dmg', '.iso', '.msi', '.run', '.rpm'
+})
+
 
 def extension_of(filename: Optional[str]) -> str:
     """Lower-case extension with the dot; "" when the name has none"""

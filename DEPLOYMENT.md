@@ -50,6 +50,8 @@ Notes for network shares:
 
 Ownership: run `id -u <owner>` and `id -g <owner>` of `MEDIA_ROOT` and put the numbers in `MEDIA_UID` / `MEDIA_GID`. The containers run as that user. nginx only reads, so it needs group or world read (`chmod -R g+rX` or `o+rX`). The uid does not need an account inside the image: the image sets `USER`, `LOGNAME` and `HOME` so libraries that look up the current user keep working.
 
+User guide files (`MEDIA_ROOT/_guides/<guide_id>/<file_id>/`) are written 0640 in 0750 folders: nginx reads them through the group only, so the nginx user must be a member of `MEDIA_GID` (world read, `o+rX`, is not enough there). A share mounted with a fixed `file_mode` / `dir_mode` keeps its own modes.
+
 ## Host nginx
 
 Install the four files on the host:

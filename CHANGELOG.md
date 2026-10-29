@@ -186,6 +186,48 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - Contract: the six operations above and the schemas `GuideCreate`, `GuideUpdate`, `GuideAudienceRef`,
   `GuideResponse`, `GuideAudienceResponse`, `GuideFileResponse`, `GuideNotFoundProblem`, `GuideNotArchivedProblem`,
   and the value `text_control_character` of the `FieldErrorCode` enum (additions only).
+- Guide files: `POST /{guide_id}/files` (multipart `file` + optional `language`, `guide.update`, 201
+  `GuideFileResponse`), `GET /{guide_id}/files/{file_id}/download` (any authenticated user),
+  `POST /{guide_id}/files/{file_id}/archive` and `.../restore` (`guide.archive`). `GuideRoutes.FILES`,
+  `FILE_DOWNLOAD`, `FILE_ARCHIVE`, `FILE_RESTORE`.
+- Upload: the format is resolved for `UploadPurpose.USER_GUIDE` (document formats only). Before the body is read: a
+  dangerous extension is 415 `media_extension_dangerous`, an extension of no document format 415
+  `media_extension_not_accepted`, a declared Content-Type outside the format 415
+  `media_content_type_extension_mismatch` / `media_content_type_not_accepted` (all with `Accept-Post`). The body is
+  spooled in 1 MB chunks (`services/files/store.py` `spool_upload`, which `MediaManager.spool_upload` now uses: one
+  implementation; `move_into_place` moved there too, and `DANGEROUS_EXTENSIONS` to `services/files/names.py`).
+  The spooled file is checked again: size against the format's `max_file_size_bytes` capped by
+  `storage.max_file_size_gb` (413 `media_file_too_large` with `max_file_size_bytes`), empty (400
+  `media_file_empty`), the sniffed type against the format's content type and aliases (415
+  `media_content_type_not_accepted`), and for a `text/*` format the text rule: UTF-8 (a BOM allowed) without NUL
+  bytes, else 415 `document_text_invalid` (new problem type, params `content_type` and the format lists; declared on
+  the guide upload only; `check_text` in `services/files/sniff.py`, also applied by `MediaManager` to a `text/*`
+  format). The row stores the format's canonical content type and `format_id`, the sanitised file name
+  (`names.sanitize_filename`), `size_bytes`, `sha256` and `language`.
+- `language`: optional form field, at most 8 characters (422 `string_too_long`), a BCP 47 style tag: 2 or 3 letters,
+  then subtags of 1 to 8 letters or digits joined by hyphens (`uk`, `en-US`, `zh-Hant`, `es-419`); stored as sent;
+  empty is none. Otherwise 422 item `language_tag_invalid` (new `FieldErrorCode`).
+- Storage: `<upload_path>/_guides/<guide_id>/<file_id>/<uuid hex + extension>`, written through a `.tmp-` folder
+  renamed into place, files 0640, folders 0750 (the nginx user must be in `MEDIA_GID`: DEPLOYMENT.md); nginx serves
+  them from `/protected_uploads/` (no new location). The
+  upload locks the guide row first (`lock_first`; an archived or unknown guide is 404 `guide_not_found`), inserts
+  the row, writes the folder and commits it with its audit row; when the write (500 `media_store_failed`), the audit
+  row or the commit fails, the folder is removed and nothing stays. Files are never deleted.
+- Download: always `attachment` under the file name (`stored_file_response`: RFC 6266 name, nosniff, sandbox CSP,
+  `ETag` and `X-File-Hash` the sha256, Range; behind nginx `X-Accel-Redirect` to
+  `/protected_uploads/_guides/...`), `Content-Type` the stored type with its charset for text types
+  (`text/markdown; charset=UTF-8`, `text/plain; charset=utf-8`). A file gone from disk, of another guide, unknown
+  or archived is 404 `guide_file_not_found` (new problem type, no params; never a path); a file of an archived
+  guide 404 `guide_not_found`. `include_deleted=true` (requires `guide.archive`) serves archived ones.
+- Archive and restore of a file lock the guide row, then the file row; a file of an archived guide is 404
+  `guide_not_found`, an archived file 404 on archive, a live one 409 `guide_file_not_archived` (new problem type) on
+  restore. Archived files stay on disk and are left out of `GuideResponse.files` unless `include_deleted`.
+- Audit: `user_guide_file.upload` / `archive` / `restore` (params `guide_title`, `file_name`, `size_bytes`,
+  `sha256`; system-wide; `resource_id` the file id), each in the transaction of its change.
+- `GuideFileResponse` gains `download_url` (the path of the download in the request's version).
+- Contract: the four operations above, the schemas `Body_upload_guide_file`, `DocumentTextInvalidProblem`,
+  `GuideFileNotFoundProblem`, `GuideFileNotArchivedProblem`, the field `download_url` (and descriptions) of
+  `GuideFileResponse` and the value `language_tag_invalid` of `FieldErrorCode` (additions only).
 
 ## Authorization fixes (moves, type change, user writes)
 

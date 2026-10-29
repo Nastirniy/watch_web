@@ -1,6 +1,5 @@
 import os
 import asyncio
-import shutil
 import hashlib
 import uuid
 from pathlib import Path
@@ -15,8 +14,9 @@ from pydantic import BaseModel, Field, field_validator
 from app.backend.models.media import MediaFile
 from app.backend.services.media.jobs import enqueue_poster
 from app.backend.services.files.formats import UnsupportedMediaFormat, FileTooLarge, content_type_allowed, hard_limit_bytes
-from app.backend.services.files.names import extension_of, sanitize_filename
-from app.backend.services.files.sniff import detect_content_type
+from app.backend.services.files.names import DANGEROUS_EXTENSIONS, extension_of, sanitize_filename
+from app.backend.services.files.sniff import check_text, detect_content_type, is_text_format
+from app.backend.services.files.store import move_into_place as _move_into_place, spool_upload
 from app.backend.services.media.probe import image_dimensions
 from app.backend.enums.general import MediaType
 from app.backend.utils.logging_config import get_logger
@@ -26,11 +26,7 @@ from app.backend.enums.errors import ErrorCode
 _logger = get_logger("media_manager")
 
 # Accepted formats live in app/backend/services/files/formats.py (single registry), the sniffer in
-# services/files/sniff.py; these extensions are refused whatever a format lists
-DANGEROUS_EXTENSIONS = frozenset({
-    '.exe', '.bat', '.cmd', '.com', '.pif', '.scr', '.vbs', '.js', '.jar',
-    '.app', '.deb', '.pkg', '.dmg', '.iso', '.msi', '.run', '.rpm'
-})
+# services/files/sniff.py; DANGEROUS_EXTENSIONS (services/files/names.py) are refused whatever a format lists
 
 
 class FileValidationConfig(BaseModel):
@@ -55,29 +51,6 @@ class FileValidationConfig(BaseModel):
     def validate_mime_types(cls, v):
         # Compared with the sniffed type, which is lower case (libmagic says application/CDFV2)
         return {mime.lower() for mime in v} if v else set()
-
-
-def _move_into_place(source: Path, destination: Path) -> None:
-    """Rename on the same filesystem, copy and delete across filesystems (blocking: run it in a thread).
-
-    The copy goes to a temporary name in the destination directory and is replaced into place, so a copy that fails
-    halfway (a full share, a dropped mount) never leaves a partial file under the final name. On any failure the
-    temporary file is removed and the error raised; the source stays for the caller's cleanup."""
-    try:
-        source.rename(destination)
-    except OSError:
-        temporary = destination.with_name(f".tmp-{uuid.uuid4().hex}-{destination.name}")
-        try:
-            shutil.copy2(str(source), str(temporary))
-            os.replace(temporary, destination)
-        except BaseException:
-            try:
-                temporary.unlink(missing_ok=True)
-            except OSError as cleanup_error:
-                _logger.warning(f"Could not remove temporary copy {temporary}: {cleanup_error!r}")
-            raise
-        source.unlink()
-    os.chmod(destination, 0o644)
 
 
 def _walk_storage(root: Path) -> Optional[tuple[int, int]]:
@@ -196,21 +169,13 @@ class MediaManager:
         return dimensions
 
     async def spool_upload(self, upload, chunk_size: int = 1024 * 1024) -> Path:
-        """Copy a Starlette UploadFile to a temp file in 1 MB chunks so the body never sits in memory.
+        """Copy a Starlette UploadFile to a temp file in 1 MB chunks so the body never sits in memory
+        (services/files/store.py spool_upload, the one implementation).
 
         The caller passes the returned path to store_file_from_path, which moves
         it into storage, and removes it on failure.
         """
-        self.temp_path.mkdir(parents=True, exist_ok=True)
-        suffix = extension_of(sanitize_filename(upload.filename or ""))[:10]
-        target = self.temp_path / f"upload_{uuid.uuid4().hex}{suffix}"
-        async with aiofiles.open(target, 'wb') as out:
-            while True:
-                chunk = await upload.read(chunk_size)
-                if not chunk:
-                    break
-                await out.write(chunk)
-        return target
+        return await spool_upload(upload, self.temp_path, chunk_size)
 
     async def store_file_from_path(
             self,
@@ -227,7 +192,8 @@ class MediaManager:
         The file is never loaded entirely into memory -- hash is computed by streaming,
         MIME type is detected from the first 8KB (services/files/sniff.py), and the file is moved (not copied)
         to its final storage location. Checks, in order: size, extension, the sniffed type against the format's
-        content type and aliases. The row stores the format's canonical content type (validation_config.content_type).
+        content type and aliases, the text rule for a text/* format. The row stores the format's canonical content
+        type (validation_config.content_type).
 
         Commits the new row before the move (a file in storage always has its row) and deletes it again when the
         move fails. A new video row keeps its poster hold (enqueue_poster): the caller releases it once the file is
@@ -274,6 +240,8 @@ class MediaManager:
             mime_type = await asyncio.to_thread(detect_content_type, source)
             if config.allowed_mime_types and mime_type not in config.allowed_mime_types:
                 raise UnsupportedMediaFormat(ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED, media_type, content_type=mime_type)
+            if config.content_type and is_text_format(config.content_type):
+                await asyncio.to_thread(check_text, source, config.content_type)
             # Stored and served under the format's canonical name (an MKV libmagic calls video/x-matroska is
             # video/matroska), never the detector's alias
             stored_type = config.content_type or mime_type
