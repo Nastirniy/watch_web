@@ -172,7 +172,10 @@ class AccessErrorCode(ProblemType):
     UPLOAD_SESSION_NOT_OWNER = ("upload_session_not_owner", problem(403, "You can only use upload sessions you opened", **_ACCESS))
     USER_SELF_ONLY = ("user_self_only", problem(403, "You can only view your own account or users of your assigned posts", **_ACCESS))
     # A role assigned at a node (missing: its permissions the caller does not hold there), permissions added to or
-    # removed from a role, a role archived or restored (missing: what the caller does not hold anywhere)
+    # removed from a role, a role archived or restored (missing: what the caller does not hold anywhere), a post or
+    # group moved or restored (missing: what the assignments it puts in effect there give that the caller does not
+    # hold at the node, other users' assignments included), a type change (missing: what the new type switches on
+    # that the caller does not hold at the assignment's node)
     GRANT_EXCEEDS_OWN_PERMISSIONS = ("grant_exceeds_own_permissions", problem(
         403, "You can only grant or revoke permissions you hold yourself", **_ACCESS))
     # Fields, home post, sessions or archive state of a user the caller's user.* permission does not cover, or who

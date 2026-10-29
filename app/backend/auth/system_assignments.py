@@ -35,7 +35,7 @@ from app.backend.auth.assignments import (
 )
 from app.backend.auth.context import AuthContext
 from app.backend.auth.privileges import check_admin_kept, check_assign_at, check_target_user, holds_admin_at_root, \
-    role_permission_names
+    removable_permissions, role_permission_names
 from app.backend.auth.scope import ROOT
 from app.backend.auth.user_types import excess_permissions
 from app.backend.enums.errors import ErrorCode
@@ -91,7 +91,7 @@ async def delete_system_assignment(session: AsyncSession, auth: AuthContext, tar
         SystemRoleAssignment.id == assignment_id, SystemRoleAssignment.user_id == target.id))).first()
     if assignment is None:
         raise ApiError(ErrorCode.ASSIGNMENT_NOT_FOUND)
-    check_assign_at(auth, await role_permission_names(session, [assignment.role_id]), ROOT)
+    check_assign_at(auth, await removable_permissions(session, assignment.role_id, RoleKind.SYSTEM), ROOT)
     role = (await session.exec(select(Role).where(Role.id == assignment.role_id))).one()
     await _check_not_last_of_user(session, target, role, system_id=assignment.id)
 

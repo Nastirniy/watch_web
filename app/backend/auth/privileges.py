@@ -14,14 +14,18 @@ Nobody becomes able to do more than they could by changing access:
 - check_grant_at: an assignment at a node (a new user's default assignment, the assignment API) needs every permission
   of the role covered at that node (AuthContext.covers). 403 grant_exceeds_own_permissions. check_assign_at (the
   assignment API, create and delete) also needs user.update covered at the node, so a role without permissions
-  cannot be placed or removed outside the caller's reach.
+  cannot be placed or removed outside the caller's reach. A removal (removable_permissions) counts only what the
+  assignment could put in effect for some type: a name the catalog does not know, a permission of the other level
+  or a role of the other kind than its table never acts, so it never blocks the removal of a dead assignment.
 - check_target_user: a change to a user (fields, home post, sessions, archive state, assignments, certificates) needs
   the user record visible to the caller first (check_user_view: user.view covering the user, the same 403
   user_self_only as GET /users/{id}, so a write tells nothing a read would not), then the route's user.* permission
   covering the user (their home post, the root for a user without one) and, for another user, that the caller could
-  grant every assignment the user has: each role's permissions, as the role holds them (every_assignment: not
-  through the target's boundary, which a type change widens), covered at its node, assignments of archived roles
-  included (they come back with the role's restore). 403 target_user_more_privileged.
+  grant every assignment the user has: each role's permissions that some user type could put in effect
+  (every_assignment: not through the target's boundary, which a type change widens; names unknown to the catalog,
+  of the other level or of a role of the other kind are left out, as no type puts them in effect), covered at its
+  node, assignments of archived roles included (they come back with the role's restore). 403
+  target_user_more_privileged. It returns what it read, so a type change reuses it.
 - check_boundary_change: a type change puts in effect what the new boundary lets through of the target's existing
   assignments; whatever it switches on that the old boundary left out needs the caller covering it at the
   assignment's node (403 grant_exceeds_own_permissions). For another user check_target_user already asked for every
@@ -30,20 +34,26 @@ Nobody becomes able to do more than they could by changing access:
   group_id, PATCH /scope-groups/{id} parent_id, PATCH /brigades/{id} corps_id) puts every grant at the destination's
   ancestors that are not already above the moved node in effect at the moved subtree; the restore of an archived
   post or group (scope group, corps, brigade) revives every grant at that node. Both equal assigning those roles at
-  the node, so both need what the assignment API needs (rule 1): the caller holds every permission of each such
-  assignment's role at the moved or restored node, before the change (check_grant_at, 403
-  grant_exceeds_own_permissions with every permission lacking).
-  Decision (2026-10-29, audit H1): the grants of every user count, not only the caller's. Moving a post under the
-  administrator of another brigade gives that administrator the post, its users and its data; the assignment API
-  would refuse the mover that grant, so the move is refused too ("nobody becomes able to do more than they could
-  by changing access" covers giving access to others). The caller's own grants are the same rule: a grant the
-  caller holds above the destination is covered at the moved node only if the caller already held it there. What
-  the moved node already received (common ancestors) is not counted. Assignments of archived roles are left out
-  (the role's restore checks every node it is assigned at, check_role_grant), those of archived users counted (as
-  role_nodes does). Permissions are the role's own, not filtered by the holder's boundary (as check_target_user).
-  A move to an ancestor (archive of a unit without cascade: its posts go to its parent) adds nothing. The checks
-  read the scope tree again inside the write, after the route's locks (lock_groups / lock_unit: the old and the new
-  parent, then the moved row), so a concurrent move of an ancestor is seen as committed.
+  the node, so both need what the assignment API needs (rule 1): the caller holds, at the moved or restored node
+  before the change, every permission such an assignment newly gives its user there (check_grant_at, 403
+  grant_exceeds_own_permissions listing every permission lacking).
+  Decision (2026-10-29, audit H1 and its review): the grants of every user count, not only the caller's. Moving a
+  post under the administrator of another brigade gives that administrator the post, its users and its data; the
+  assignment API would refuse the mover that grant, so the move is refused too ("nobody becomes able to do more
+  than they could by changing access" covers giving access to others). The caller's own grants are the same rule: a
+  grant the caller holds above the destination is covered at the moved node only if the caller already held it
+  there. "Newly" is per user: what the moved node already received (common ancestors) is not counted, and neither is
+  what the assignment's user already holds at the node through other assignments (a user holding administrator at
+  both brigades gains nothing when a post moves between them). Left out as well: assignments of archived roles (the
+  role's restore checks every node it is assigned at, check_role_grant) and of archived users (restore_user and a
+  reactivation run check_target_user, which needs every assignment of the user grantable at its node, which covers
+  the moved node); permissions are counted as check_target_user counts them (switchable_permissions: the role's own,
+  not filtered by the holder's boundary, but never names no type can put in effect). A move to an ancestor (archive
+  of a unit without cascade: its posts go to its parent) adds nothing. The checks read the scope tree again inside
+  the write, after the route's locks (lock_groups / lock_unit: the old and the new parent, then the moved row). The
+  new parent's row is locked, so its own place in the tree and its archived state are as committed and stay so until
+  the commit; an ancestor further up is not locked and may be moved concurrently, which is safe: that move is
+  checked by its own mover at that ancestor, and covering the ancestor covers the moved node below it.
 - check_an_admin_remains / check_admin_kept: run after the change is written to the session (flushed here, committed
   by the route): the caller has not taken the built-in admin role at the root from themselves (409
   cannot_remove_own_admin, check_admin_kept, answered first; whether they held it is read with holds_admin_at_root
@@ -59,7 +69,7 @@ What the caller holds is their AuthContext (context.load_grants: in effect, insi
 holds is every_assignment, the same rows with the archived roles and without the target's boundary.
 """
 from dataclasses import replace
-from typing import Dict, FrozenSet, Iterable, List, Set, Tuple, Union
+from typing import Dict, FrozenSet, Iterable, List, Optional, Set, Tuple, Union
 
 from loguru import logger
 from sqlmodel import select
@@ -70,10 +80,10 @@ from app.backend.auth.access_errors import access_denied
 from app.backend.auth.context import (
     AuthContext, grant_rows, grants_of, load_scope_tree, permission_name, system_grant_rows,
 )
-from app.backend.auth.integrity import administrators_query, effective_permissions
+from app.backend.auth.integrity import administrators_query, effective_permissions, switchable_permissions
 from app.backend.auth.scope import Grant, Node, ROOT
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
-from app.backend.enums.general import BuiltinRole, Permissions, UserType
+from app.backend.enums.general import BuiltinRole, Permissions, RoleKind, UserType
 from app.backend.errors.problems import ApiError
 from app.backend.models.role import Permission, Role, RolePermission
 from app.backend.models.role_assignment import RoleAssignment
@@ -145,6 +155,13 @@ def check_role_grant(auth: AuthContext, nodes: Iterable[Node], added: Iterable[s
         raise access_denied(AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, missing=sorted(missing))
 
 
+async def removable_permissions(session: AsyncSession, role_id: int, kind: RoleKind) -> FrozenSet[str]:
+    """The permissions an assignment of the role in the table of the kind could put in effect for some type
+    (switchable_permissions): what its removal revokes, and so what the remover must hold"""
+    role_kind = (await session.exec(select(Role.kind).where(Role.id == role_id))).one()
+    return switchable_permissions(kind, await role_permission_names(session, [role_id]), role_kind)
+
+
 def check_assign_at(auth: AuthContext, permissions: Iterable[str], node: Node) -> None:
     """An assignment made or removed at the node through the assignment API: user.update covered at the node itself
     and every permission of the role there, in one 403 grant_exceeds_own_permissions whose missing lists both. A role
@@ -153,34 +170,42 @@ def check_assign_at(auth: AuthContext, permissions: Iterable[str], node: Node) -
 
 
 async def every_assignment(session: AsyncSession, user: User) -> Tuple[Grant, ...]:
-    """Every assignment of the user as a grant holding its role's permissions as the role holds them (not filtered by
-    the user's boundary or the role's level: what a type change or a boundary in code could put in effect), system
-    assignments (at the root) and those of archived roles included: an archived role grants nothing now (grant_rows,
-    AuthContext) but its assignments come back with the role's restore"""
+    """Every assignment of the user as a grant holding what some user type could put in effect of its role
+    (switchable_permissions: not filtered by the user's boundary, which a type change or a boundary in code can
+    widen; a name unknown to the catalog, of the other level or of a role of the other kind than its table is left
+    out, no type ever puts it in effect), system assignments (at the root) and those of archived roles included: an
+    archived role grants nothing now (grant_rows, AuthContext) but its assignments come back with the role's
+    restore"""
     tree = grants_of((await session.exec(grant_rows(user.id, include_archived_roles=True))).all())
     system = grants_of((await session.exec(system_grant_rows(user.id, include_archived_roles=True))).all(),
                        kind="system")
-    return tree + system
+    return tuple(replace(grant, permissions=switchable_permissions(grant.kind, grant.permissions, grant.role_kind))
+                 for grant in tree + system)
 
 
 async def check_target_user(session: AsyncSession, auth: AuthContext, target: User,
-                            permission: Union[Permissions, str] = Permissions.USER_UPDATE) -> None:
+                            permission: Union[Permissions, str] = Permissions.USER_UPDATE
+                            ) -> Optional[Tuple[Grant, ...]]:
     """The target's record is visible to the caller (403 user_self_only, as GET /users/{id}), the caller's permission
-    covers the target user, and the caller could grant every existing assignment of the target with its role's
-    permissions, archived roles included (the caller themselves always could)"""
+    covers the target user, and the caller could grant every existing assignment of the target (every_assignment),
+    archived roles included (the caller themselves always could). Returns the target's assignments it read, None for
+    the caller themselves (nothing read)."""
     AccessControlService.check_user_view(auth, target)
     name = permission_name(permission)
     missing: List[str] = []
+    grants: Optional[Tuple[Grant, ...]] = None
     if not auth.covers_user(name, target):
         missing = [name]
     elif target.id != auth.user.id:
+        grants = await every_assignment(session, target)
         lacking: Set[str] = set()
-        for grant in await every_assignment(session, target):
+        for grant in grants:
             lacking |= _not_covered(auth, grant.permissions, grant.node)
         missing = sorted(lacking)
     if missing:
         logger.warning(f"User {auth.user.username} tried to change user {target.id} beyond their reach: {missing}")
         raise access_denied(AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, missing=missing)
+    return grants
 
 
 def check_boundary_change(auth: AuthContext, grants: Iterable[Grant], old_type: UserType, new_type: UserType) -> None:
@@ -198,37 +223,57 @@ def check_boundary_change(auth: AuthContext, grants: Iterable[Grant], old_type: 
 
 
 # ------------------------------------------------------------------ the scope tree: moves and restores of nodes
-async def _assignments_at(session: AsyncSession, nodes: Iterable[Node]) -> Dict[int, FrozenSet[str]]:
-    """assignment id -> its role's permissions, for every tree assignment at the nodes (any user, archived users
-    included) of a role that is not archived (system assignments act at the root, which a move never adds)"""
+async def _assignments_at(session: AsyncSession, nodes: Iterable[Node]) -> List[Tuple[int, str, FrozenSet[str]]]:
+    """(user id, scope key, permissions) of every tree assignment at the nodes of a tree role that is not archived,
+    held by a user who is not archived; the permissions are what some type could put in effect
+    (switchable_permissions). System assignments act at the root, which a move never adds."""
     keys = sorted({node.key for node in nodes})
     if not keys:
-        return {}
+        return []
     rows = (await session.exec(
-        select(RoleAssignment.id, Permission.name)
+        select(RoleAssignment.id, RoleAssignment.user_id, RoleAssignment.scope_key, Permission.name)
         .join(Role, Role.id == RoleAssignment.role_id)
+        .join(User, User.id == RoleAssignment.user_id)
         .outerjoin(RolePermission, RolePermission.role_id == Role.id)
         .outerjoin(Permission, Permission.id == RolePermission.permission_id)
-        .where(RoleAssignment.scope_key.in_(keys), Role.is_deleted == False)  # noqa: E712
+        .where(RoleAssignment.scope_key.in_(keys), Role.is_deleted == False,  # noqa: E712
+               Role.kind == RoleKind.TREE.value, User.is_deleted == False)  # noqa: E712
     )).all()
-    held: Dict[int, Set[str]] = {}
-    for assignment_id, name in rows:
-        names = held.setdefault(assignment_id, set())
+    heads: Dict[int, Tuple[int, str]] = {}
+    names: Dict[int, Set[str]] = {}
+    for assignment_id, user_id, scope_key, name in rows:
+        heads[assignment_id] = (user_id, scope_key)
+        held = names.setdefault(assignment_id, set())
         if name:
-            names.add(name)
-    return {assignment_id: frozenset(names) for assignment_id, names in held.items()}
+            held.add(name)
+    return [(*heads[assignment_id], switchable_permissions(RoleKind.TREE, names[assignment_id]))
+            for assignment_id in sorted(heads)]
 
 
-def _check_could_grant(auth: AuthContext, assignments: Dict[int, FrozenSet[str]], node: Node, change: str) -> None:
-    """check_grant_at of every assignment at the node, one 403 grant_exceeds_own_permissions listing everything
-    lacking"""
-    missing: Set[str] = set()
-    for permissions in assignments.values():
-        missing |= _not_covered(auth, permissions, node)
+async def _newly_given(session: AsyncSession, added: Iterable[Node], already: Iterable[Node]) -> FrozenSet[str]:
+    """Every permission the assignments at the added nodes give their user that the user does not hold already
+    through an assignment at the already nodes (where the target node gets its grants from now)"""
+    added_keys = {node.key for node in added}
+    if not added_keys:
+        return frozenset()
+    held: Dict[int, Set[str]] = {}
+    new: List[Tuple[int, FrozenSet[str]]] = []
+    for user_id, scope_key, permissions in await _assignments_at(session, [*added, *already]):
+        if scope_key in added_keys:
+            new.append((user_id, permissions))
+        else:
+            held.setdefault(user_id, set()).update(permissions)
+    return frozenset().union(*(permissions - held.get(user_id, set()) for user_id, permissions in new))
+
+
+def _check_could_grant(auth: AuthContext, permissions: FrozenSet[str], node: Node, change: str) -> None:
+    """check_grant_at of what the change newly gives at the node, one 403 grant_exceeds_own_permissions listing
+    everything lacking"""
+    missing = sorted(_not_covered(auth, permissions, node))
     if missing:
-        logger.warning(f"User {auth.user.username} tried a {change} of {node.key} putting in effect "
-                       f"{len(assignments)} assignments with permissions they lack there: {sorted(missing)}")
-        raise access_denied(AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, missing=sorted(missing))
+        logger.warning(f"User {auth.user.username} tried a {change} of {node.key} putting in effect permissions they "
+                       f"lack there: {missing}")
+        raise access_denied(AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, missing=missing)
 
 
 async def _committed(session: AsyncSession, auth: AuthContext) -> AuthContext:
@@ -236,24 +281,33 @@ async def _committed(session: AsyncSession, auth: AuthContext) -> AuthContext:
     return replace(auth, tree=await load_scope_tree(session))
 
 
+def _live(tree, nodes: Iterable[Node]) -> List[Node]:
+    return [node for node in nodes if not tree.is_archived(node)]
+
+
 async def check_move(session: AsyncSession, auth: AuthContext, moved: Node, new_parent: Node) -> None:
     """A move of the post or group moved under new_parent (a group, the root): every assignment at the new
     parent's ancestors (itself included) that is not already above the moved node, nor inside it, nor at an
-    archived node, applies at the moved subtree after the move; the caller could grant each of them at the moved
-    node, as it stands before the move"""
+    archived node, applies at the moved subtree after the move; the caller could grant at the moved node, as it
+    stands before the move, what each of them newly gives its user there (_newly_given: less what the user already
+    holds at the moved node)"""
     current = await _committed(session, auth)
     tree = current.tree
     above = set(tree.ancestors(moved)[1:])
-    added = [node for node in tree.ancestors(new_parent)
-             if node not in above and not tree.contains(moved, node) and not tree.is_archived(node)]
-    _check_could_grant(current, await _assignments_at(session, added), moved, "move")
+    added = [node for node in _live(tree, tree.ancestors(new_parent))
+             if node not in above and not tree.contains(moved, node)]
+    given = await _newly_given(session, added, _live(tree, tree.ancestors(moved)))
+    _check_could_grant(current, given, moved, "move")
 
 
 async def check_node_restore(session: AsyncSession, auth: AuthContext, node: Node) -> None:
-    """A restore of the archived post or group: every assignment at it applies again; the caller could grant each
-    of them there (a grant at the archived node itself, the caller's own included, covers nothing)"""
+    """A restore of the archived post or group: every assignment at it applies again; the caller could grant there
+    what each of them newly gives its user (less what the user holds at the node through its live ancestors). A grant
+    at the archived node itself, the caller's own included, covers nothing."""
     current = await _committed(session, auth)
-    _check_could_grant(current, await _assignments_at(session, [node]), node, "restore")
+    tree = current.tree
+    given = await _newly_given(session, [node], _live(tree, tree.ancestors(node)[1:]))
+    _check_could_grant(current, given, node, "restore")
 
 
 def _admin_at_root():

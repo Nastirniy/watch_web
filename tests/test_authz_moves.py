@@ -11,19 +11,20 @@ boundary, and a type change needs the caller to cover what the new boundary puts
 L1: every user write route needs user.view in effect at the target first: the same 403 user_self_only as
 GET /users/{id}.
 """
+import pytest
 from sqlmodel import select
 
 from app.backend.api.v1 import V1
 from app.backend.auth.context import AuthContext, load_scope_tree
 from app.backend.auth.privileges import role_permission_names
 from app.backend.auth.scope import Grant, Node, ROOT
-from app.backend.enums.general import BuiltinRole, Permissions as P, UserType
+from app.backend.enums.general import BuiltinRole, Permissions as P, RoleKind, UserType
 from app.backend.enums.routes import (
     AuthRoutes, BrigadeRoutes, CorpsRoutes, PostRoutes, ScopeGroupRoutes, UserRoutes,
 )
 from app.backend.errors.problems import ApiError
 from app.backend.models.post import Post
-from app.backend.models.role import Role
+from app.backend.models.role import Permission, Role, RolePermission
 from app.backend.models.role_assignment import RoleAssignment, scope_columns
 from app.backend.models.scope_group import ScopeGroup
 from app.backend.models.user import User
@@ -373,3 +374,135 @@ async def test_user_writes_without_user_view_at_the_target_answer_like_get(clien
                                           assignment_id=1), headers=headers(caller)))
     await db.commit()   # a fresh read of what the request committed
     assert (await db.exec(select(User.username_alias).where(User.id == target.id))).one() == "x"
+
+
+# ---------------------------------------------------------------- review of 367bf02: what can never act, per user
+async def _dead_role(db, dead: str) -> Role:
+    """A role in the tree table that holds observation.view and something no type can put in effect: a name the
+    catalog does not know, a system permission in a tree role, or the role itself of the system kind"""
+    if dead == "unknown":
+        role = await make_role(db, [P.OBSERVATION_VIEW])
+        stale = Permission(name="legacy.removed", level="tree")
+        db.add(stale)
+        await db.flush()
+        db.add(RolePermission(role_id=role.id, permission_id=stale.id))
+        await db.commit()
+        return role
+    if dead == "other_level":
+        return await make_role(db, [P.OBSERVATION_VIEW, P.AUDIT_VIEW], kind=RoleKind.TREE, allow_mixed=True)
+    return await make_role(db, [P.AUDIT_VIEW], kind=RoleKind.SYSTEM)    # a system role in role_assignments
+
+
+@pytest.mark.parametrize("dead", ["unknown", "other_level", "other_kind"])
+async def test_names_no_type_can_put_in_effect_block_nobody(client, db, headers, dead):
+    """A dead assignment (what no type ever puts in effect) does not lock out the system administrator or the
+    administrator above the node: they edit the user, end its sessions, move a post into the node and remove the
+    dead assignment"""
+    corps = await make_group(db, f"CorpsDead{dead}", kind="corps")
+    b1 = await make_group(db, f"B1{dead}", parent_id=corps.id, kind="brigade")
+    b2 = await make_group(db, f"B2{dead}", parent_id=corps.id, kind="brigade")
+    home = await make_post(db, f"Home{dead}", group_id=b1.id)
+    moving = await make_post(db, f"Q{dead}", group_id=b1.id)
+    target = await _user(db, UserType.OPERATOR, post_id=home.id)
+    await _raw_assign(db, target, await _builtin(db, BuiltinRole.OPERATOR), Node.post(home.id))
+    dead_row = await _raw_assign(db, target, await _dead_role(db, dead), Node.group(b2.id))
+    system_admin = await make_admin(db)
+    corps_admin = await _admin_at(db, Node.group(corps.id))
+
+    user_url = V1.path(UserRoutes.USER_BY_ID, user_id=target.id)
+    post_url = V1.path(PostRoutes.POST_BY_ID, post_id=moving.id)
+    for actor in (system_admin, corps_admin):
+        edited = await client.patch(user_url, data={"username_alias": f"by {actor.id}"}, headers=headers(actor))
+        assert edited.status_code == 200, edited.text
+        ended = await client.post(V1.path(UserRoutes.USER_SESSIONS_END, user_id=target.id), headers=headers(actor))
+        assert ended.status_code == 200, ended.text
+        there = await client.put(post_url, json={"group_id": b2.id}, headers=headers(actor))
+        assert there.status_code == 200, there.text
+        back = await client.put(post_url, json={"group_id": b1.id}, headers=headers(actor))
+        assert back.status_code == 200, back.text
+    removed = await client.delete(V1.path(UserRoutes.USER_ASSIGNMENT_BY_ID, user_id=target.id,
+                                          assignment_id=dead_row.id), headers=headers(corps_admin))
+    assert removed.status_code == 204, removed.text
+
+
+async def test_a_move_counts_what_each_user_newly_gets(client, db, headers):
+    """Review probe: X holds administrator at both brigades; a maintainer (post.view and post.update at the corps)
+    moves a post from one to the other: nobody gains anything at the post. Another user holding administrator at
+    the destination alone still blocks."""
+    corps = await make_group(db, "CorpsDup", kind="corps")
+    b1 = await make_group(db, "Dup1", parent_id=corps.id, kind="brigade")
+    b2 = await make_group(db, "Dup2", parent_id=corps.id, kind="brigade")
+    post = await make_post(db, "DupPost", group_id=b1.id)
+    await make_admin(db)
+    x = await _admin_at(db, Node.group(b1.id))
+    await _raw_assign(db, x, await _builtin(db, BuiltinRole.ADMINISTRATOR), Node.group(b2.id))
+    maintainer = await _user(db, UserType.ADMINISTRATOR)
+    await _raw_assign(db, maintainer, await make_role(db, [P.POST_VIEW, P.POST_UPDATE]), Node.group(corps.id))
+    url = V1.path(PostRoutes.POST_BY_ID, post_id=post.id)
+    moved = await client.put(url, json={"group_id": b2.id}, headers=headers(maintainer))
+    assert moved.status_code == 200, moved.text
+
+    await _admin_at(db, Node.group(b1.id))      # a second administrator, at the first brigade only
+    _grant_refused(await client.put(url, json={"group_id": b1.id}, headers=headers(maintainer)), P.USER_UPDATE)
+
+
+async def test_archived_users_and_archived_roles_do_not_count(client, db, headers):
+    """Their assignments apply nowhere: restore_user and a reactivation run check_target_user at every node of the
+    user, the restore of a role check_role_grant at every node of the role"""
+    corps = await make_group(db, "CorpsGone", kind="corps")
+    brigade = await make_group(db, "BrigadeGone", parent_id=corps.id, kind="brigade")
+    group = await make_group(db, "GroupArchivedRole")
+    post = await make_post(db, "Movable")
+    await make_admin(db)
+    gone = await _admin_at(db, Node.group(brigade.id))
+    gone.is_deleted, gone.is_active = True, False
+    db.add(gone)
+    await db.commit()
+    holder = await _user(db, UserType.ADMINISTRATOR)
+    archived_role = await make_role(db, [P.USER_UPDATE, P.USER_VIEW, P.OBSERVATION_VIEW])
+    await _raw_assign(db, holder, archived_role, Node.group(group.id))
+    await _archive(db, archived_role)
+    maintainer = await _user(db, UserType.ADMINISTRATOR)
+    await _raw_assign(db, maintainer, await make_role(db, [P.POST_VIEW, P.POST_UPDATE, P.POST_ARCHIVE]), ROOT)
+
+    url = V1.path(PostRoutes.POST_BY_ID, post_id=post.id)
+    under_gone = await client.put(url, json={"group_id": brigade.id}, headers=headers(maintainer))
+    assert under_gone.status_code == 200, under_gone.text
+    under_role = await client.put(url, json={"group_id": group.id}, headers=headers(maintainer))
+    assert under_role.status_code == 200, under_role.text
+
+    # The same for a restore: the administrator of an archived post is an archived user
+    archived_post = await make_post(db, "ArchivedHolder")
+    gone_holder = await _admin_at(db, Node.post(archived_post.id))
+    gone_holder.is_deleted, gone_holder.is_active = True, False
+    db.add(gone_holder)
+    await _archive(db, archived_post)
+    restored = await client.post(V1.path(PostRoutes.POST_RESTORE, post_id=archived_post.id),
+                                 headers=headers(maintainer))
+    assert restored.status_code == 200, restored.text
+
+
+async def test_brigade_moved_through_scope_groups_is_checked(client, db, headers):
+    corps_mine = await make_group(db, "CorpsMineSG", kind="corps")
+    corps_theirs = await make_group(db, "CorpsTheirsSG", kind="corps")
+    brigade = await make_group(db, "BrigadeSG", parent_id=corps_theirs.id, kind="brigade")
+    await make_post(db, "InBrigadeSG", group_id=brigade.id)
+    admin = await make_admin(db)
+    mover = await _admin_at(db, Node.group(corps_mine.id))
+    await _raw_assign(db, mover, await make_role(db, STRUCTURE), ROOT)
+    url = V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=brigade.id)
+    _grant_refused(await client.patch(url, json={"parent_id": corps_mine.id}, headers=headers(mover)), P.USER_UPDATE)
+    assert await _group_parent(db, brigade.id) == corps_theirs.id
+    moved = await client.patch(url, json={"parent_id": corps_mine.id}, headers=headers(admin))
+    assert moved.status_code == 200, moved.text
+
+
+async def test_plain_group_restore_by_the_administrator_above(client, db, headers):
+    parent = await make_group(db, "ParentR")
+    group = await make_group(db, "ChildR", parent_id=parent.id)
+    await make_admin(db)
+    await _admin_at(db, Node.group(group.id))
+    await _archive(db, group)
+    above = await _admin_at(db, Node.group(parent.id))
+    restored = await client.post(V1.path(ScopeGroupRoutes.GROUP_RESTORE, group_id=group.id), headers=headers(above))
+    assert restored.status_code == 200, restored.text

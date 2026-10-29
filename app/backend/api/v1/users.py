@@ -413,7 +413,7 @@ async def update_user(
     else:
         user = await _get_user_or_404(session, user_id, lock="administrators")
     # Scope before the state: an outsider gets the same 403 for an archived and a live user
-    await check_target_user(session, auth, user, Permissions.USER_UPDATE)
+    target_grants = await check_target_user(session, auth, user, Permissions.USER_UPDATE)
     if user.is_deleted:
         raise ApiError(ErrorCode.USER_NOT_FOUND)
 
@@ -460,7 +460,7 @@ async def update_user(
         # Spec section 6 rule 4 (auth/assignments.py): None when the type stays the same
         type_change = None
         if update_data.user_type is not None:
-            type_change = await change_user_type(session, auth, user, update_data.user_type)
+            type_change = await change_user_type(session, auth, user, update_data.user_type, target_grants)
 
         # Deactivation and a new type end every live session in the same transaction as the change, so the user's
         # tokens stop working the moment the update is committed (the request dependency rejects them). A new type

@@ -52,20 +52,27 @@ def other_level(kind: Union[RoleKind, str], names: Iterable[str]) -> List[str]:
                   if PERMISSION_LEVELS.get(name) is None or PERMISSION_LEVELS[name].value != kind.value)
 
 
+def switchable_permissions(kind: Union[RoleKind, str], names: Iterable[str],
+                           role_kind: Union[RoleKind, str, None] = None) -> FrozenSet[str]:
+    """What a grant of the kind (its table) could put in effect for a user of some type: the names the catalog knows
+    at the kind's level; nothing for a role whose kind (role_kind) is not the grant's. No boundary is applied:
+    delegation counts what a type change could switch on (auth/privileges.py), never what no type can."""
+    kind = RoleKind(kind)
+    if role_kind is not None and RoleKind(role_kind) is not kind:
+        return frozenset()
+    return frozenset(name for name in set(names)
+                     if PERMISSION_LEVELS.get(name) is not None and PERMISSION_LEVELS[name].value == kind.value)
+
+
 def effective_permissions(user_type: Union[UserType, str], kind: Union[RoleKind, str],
                           names: Iterable[str], role_kind: Union[RoleKind, str, None] = None
                           ) -> Tuple[FrozenSet[str], FrozenSet[str]]:
-    """(kept, left out) of the permissions a grant of the kind (its table) holds for a user of the type. A name the
-    catalog does not know (a row left in the database) is left out; a role whose kind (role_kind) is not the
-    grant's puts nothing in effect."""
-    kind = RoleKind(kind)
+    """(kept, left out) of the permissions a grant of the kind (its table) holds for a user of the type: the
+    switchable ones inside the boundary of the type. A name the catalog does not know (a row left in the database) is
+    left out; a role whose kind (role_kind) is not the grant's puts nothing in effect."""
     names = frozenset(names)
-    if role_kind is not None and RoleKind(role_kind) is not kind:
-        return frozenset(), names
-    allowed = boundary(UserType(user_type), kind)
-    kept = frozenset(name for name in names
-                     if name in allowed and PERMISSION_LEVELS.get(name) is not None
-                     and PERMISSION_LEVELS[name].value == kind.value)
+    allowed = boundary(UserType(user_type), RoleKind(kind))
+    kept = frozenset(name for name in switchable_permissions(kind, names, role_kind) if name in allowed)
     return kept, names - kept
 
 

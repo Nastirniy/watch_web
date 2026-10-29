@@ -54,7 +54,7 @@ converts them into its response model).
 """
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, Iterable, List, Optional, Set
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from loguru import logger
 from sqlalchemy import delete as sa_delete, func
@@ -64,8 +64,9 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.auth.context import AuthContext
 from app.backend.auth.privileges import (
     check_admin_kept, check_assign_at, check_boundary_change, check_target_user, every_assignment, holds_admin_at_root,
-    role_permission_names,
+    removable_permissions, role_permission_names,
 )
+from app.backend.auth.scope import Grant
 from app.backend.auth.scope import Node, NodeKind, ROOT
 from app.backend.auth.user_types import USER_TYPES, excess_permissions
 from app.backend.config import settings
@@ -225,7 +226,7 @@ async def delete_assignment(session: AsyncSession, auth: AuthContext, target: Us
     )).first()
     if assignment is None:
         raise ApiError(ErrorCode.ASSIGNMENT_NOT_FOUND)
-    check_assign_at(auth, await role_permission_names(session, [assignment.role_id]), assignment.node)
+    check_assign_at(auth, await removable_permissions(session, assignment.role_id, RoleKind.TREE), assignment.node)
     role = (await session.exec(select(Role).where(Role.id == assignment.role_id))).one()
     await _check_not_last_of_user(session, target, role, tree_id=assignment.id)
 
@@ -324,18 +325,19 @@ async def _held_nodes(session: AsyncSession, user_id: int, role_id: int) -> Dict
     )).all())
 
 
-async def change_user_type(session: AsyncSession, auth: AuthContext, target: User,
-                           new_type: UserType) -> Optional[TypeChange]:
+async def change_user_type(session: AsyncSession, auth: AuthContext, target: User, new_type: UserType,
+                           target_grants: Optional[Tuple[Grant, ...]] = None) -> Optional[TypeChange]:
     """Give the target another type (written to the session and flushed, not committed). The route has run rule 2
-    (check_target_user with user.update) and, after this, ends the user's sessions and runs check_admin_kept. None
-    when the type stays the same: nothing changes."""
+    (check_target_user with user.update; target_grants: what it returned, read again when None) and, after this,
+    ends the user's sessions and runs check_admin_kept. None when the type stays the same: nothing changes."""
     await _lock_user(session, target)
     old_type = UserType(target.user_type)
     if new_type is old_type:
         return None
     # A grant the old boundary left out and the new one lets through comes into effect: the caller holds it there
     # (for another user check_target_user asked for every permission already; this covers a change of oneself)
-    check_boundary_change(auth, await every_assignment(session, target), old_type, new_type)
+    grants = target_grants if target_grants is not None else await every_assignment(session, target)
+    check_boundary_change(auth, grants, old_type, new_type)
     old_spec, new_spec = USER_TYPES[old_type], USER_TYPES[new_type]
     old_base = await _builtin_role(session, old_spec.tree_base.role)
     new_base = await _builtin_role(session, new_spec.tree_base.role)
