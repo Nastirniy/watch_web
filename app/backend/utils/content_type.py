@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Mapping, Optional
 
-from app.backend.enums.media_types import ContentType
+from app.backend.enums.media_types import ContentType, TopLevelType
 
 _TOKEN = r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+"
 _QUOTED = r'"(?:[\t \x21\x23-\x5b\x5d-\x7e\x80-\xff]|\\[\t \x21-\x7e\x80-\xff])*"'
@@ -95,6 +95,6 @@ def served_content_type(essence: str) -> str:
     if parsed is None:
         return essence
     name = parsed.essence
-    if parsed.type != "text" or name in _NO_CHARSET:
+    if parsed.type != TopLevelType.TEXT or name in _NO_CHARSET:
         return name
     return format_content_type(name, charset=_CHARSET_SPELLING.get(name, "utf-8"))

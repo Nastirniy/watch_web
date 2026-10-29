@@ -213,3 +213,47 @@ async def test_an_opaque_alias_written_before_the_rule_never_accepts(db):
     assert "application/octet-stream" not in registry.mime_set("document")
     from app.backend.api.shared.helpers.upload_helper import validation_config_for
     assert validation_config_for(spec).allowed_mime_types == {"application/x-old", "application/x-old2"}
+
+
+SVG = b'<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>\n'
+
+
+@pytest.mark.asyncio
+async def test_a_forbidden_type_written_before_the_rule_never_accepts(client, db, headers):
+    """An image/svg+xml format created before content_type_forbidden existed (or by hand), and an alias that runs
+    code on another row: the registry leaves both out of what the formats accept, as it does opaque types, and logs
+    each row once; an .svg upload is refused 415"""
+    from loguru import logger
+
+    from app.backend.enums.routes import MediaRoutes
+    from tests.test_media_formats import _scene
+
+    db.add(MediaFormat(media_type="image", content_type="image/svg+xml", label="SVG", extensions=[".svg"],
+                       aliases=["Image/SVG+XML; charset=utf-8"], max_file_size_bytes=formats.MB))
+    db.add(MediaFormat(media_type="document", content_type="application/x-old", label="Old", extensions=[".old"],
+                       aliases=["text/html", "application/x-old2"], max_file_size_bytes=formats.MB))
+    await db.commit()
+    lines = []
+    sink = logger.add(lambda message: lines.append(message.record["message"]), level="WARNING")
+    try:
+        for _ in range(2):
+            registry = await formats.load_registry(db, use_cache=False)
+    finally:
+        logger.remove(sink)
+    svg = next(spec for spec in registry.formats_for("image") if spec.extensions == (".svg",))
+    assert svg.all_mimes == () and svg.aliases == ()
+    old = next(spec for spec in registry.formats_for("document") if spec.content_type == "application/x-old")
+    assert old.all_mimes == ("application/x-old", "application/x-old2")
+    assert "image/svg+xml" not in registry.mime_set() and "text/html" not in registry.mime_set()
+    refused = [line for line in lines if "types no format may accept" in line]
+    assert len(refused) == 2, refused        # one per row, not one per load
+    assert any("image/svg+xml" in line for line in refused) and any("text/html" in line for line in refused)
+
+    formats.invalidate_registry_cache()
+    user, observation = await _scene(db)
+    data = {"observation_id": observation.id, "media_type": "image"}
+    for declared in ("image/svg+xml", "application/octet-stream"):
+        response = await client.post(V1.path(MediaRoutes.UPLOAD), data=data, headers=headers(user),
+                                     files={"file": ("drawing.svg", SVG, declared)})
+        assert response.status_code == 415, response.text
+        assert response.json()["code"] == "media_content_type_not_accepted"

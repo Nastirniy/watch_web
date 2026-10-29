@@ -33,7 +33,9 @@ class FileValidationConfig(BaseModel):
     """What store_file_from_path holds a file to, built from its format (upload_helper.validation_config_for)"""
     max_size: int = Field(default_factory=hard_limit_bytes)
     allowed_extensions: Set[str] = set()
-    allowed_mime_types: Set[str] = set()
+    # None: no check (no format given); a set, even empty, is what the format accepts (a legacy row whose only types
+    # the registry leaves out accepts nothing, never everything)
+    allowed_mime_types: Optional[Set[str]] = None
     # The format's canonical name, stored for an accepted file (the sniffed type, possibly an alias, only decides
     # acceptance); None stores the sniffed type
     content_type: Optional[str] = None
@@ -50,7 +52,7 @@ class FileValidationConfig(BaseModel):
     @classmethod
     def validate_mime_types(cls, v):
         # Compared with the sniffed type, which is lower case (libmagic says application/CDFV2)
-        return {mime.lower() for mime in v} if v else set()
+        return None if v is None else {mime.lower() for mime in v}
 
 
 def _walk_storage(root: Path) -> Optional[tuple[int, int]]:
@@ -238,7 +240,7 @@ class MediaManager:
 
             # -- Content type from the bytes (first 8KB, libmagic): never from the name --
             mime_type = await asyncio.to_thread(detect_content_type, source)
-            if config.allowed_mime_types and mime_type not in config.allowed_mime_types:
+            if config.allowed_mime_types is not None and mime_type not in config.allowed_mime_types:
                 raise UnsupportedMediaFormat(ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED, media_type, content_type=mime_type)
             if config.content_type and is_text_format(config.content_type):
                 await asyncio.to_thread(check_text, source, config.content_type)

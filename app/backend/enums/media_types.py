@@ -87,3 +87,18 @@ class ContentType(str, Enum):
 
     def __str__(self) -> str:
         return self.value
+
+
+class TopLevelType(str, Enum):
+    """A top-level type used alone (RFC 6838 section 4.2): the family of a media type ("image" of image/png), as
+    utils/content_type.py parses it; the family rule of services/files/formats.py and the text rule of
+    services/files/sniff.py compare with these"""
+
+    APPLICATION = "application"
+    AUDIO = "audio"
+    IMAGE = "image"
+    TEXT = "text"
+    VIDEO = "video"
+
+    def __str__(self) -> str:
+        return self.value

@@ -15,12 +15,11 @@ import magic
 
 from app.backend.enums.errors import ErrorCode
 from app.backend.enums.general import MediaType
-from app.backend.enums.media_types import ContentType
+from app.backend.enums.media_types import ContentType, TopLevelType
 from app.backend.services.files.formats import UnsupportedMediaFormat, normalise_content_type
 from app.backend.utils.content_type import parse_content_type
 
 SNIFF_BYTES = 8192
-TEXT_TOP_LEVEL = "text"
 TEXT_CHUNK_BYTES = 1024 * 1024
 UNKNOWN_CONTENT_TYPE = ContentType.OCTET_STREAM
 
@@ -36,7 +35,7 @@ def detect_content_type(path: Path) -> str:
 def is_text_format(content_type: str) -> bool:
     """A format held to the text rule: its content type is text/*"""
     parsed = parse_content_type(content_type)
-    return parsed is not None and parsed.type == TEXT_TOP_LEVEL
+    return parsed is not None and parsed.type == TopLevelType.TEXT
 
 
 def check_text(path: Path, content_type: str, chunk_size: int = TEXT_CHUNK_BYTES) -> None:

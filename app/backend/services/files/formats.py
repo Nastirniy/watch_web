@@ -23,7 +23,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.config import settings
 from app.backend.enums.general import MediaType, UploadPurpose
-from app.backend.enums.media_types import ContentType as CT
+from app.backend.enums.media_types import ContentType as CT, TopLevelType
 from app.backend.services.files.names import extension_of
 from app.backend.enums.errors import ErrorCode
 from app.backend.models.media_format import MediaFormat
@@ -47,11 +47,11 @@ PURPOSE_MEDIA_TYPES: Dict[UploadPurpose, FrozenSet[str]] = {
 }
 
 # The top-level Content-Type types a format of each media type may have (the one family rule)
-ALLOWED_TOP_LEVEL: Dict[str, FrozenSet[str]] = {
-    MediaType.IMAGE.value: frozenset({"image"}),
-    MediaType.VIDEO.value: frozenset({"video"}),
-    MediaType.AUDIO.value: frozenset({"audio"}),
-    MediaType.DOCUMENT.value: frozenset({"application", "text"}),
+ALLOWED_TOP_LEVEL: Dict[str, FrozenSet[TopLevelType]] = {
+    MediaType.IMAGE.value: frozenset({TopLevelType.IMAGE}),
+    MediaType.VIDEO.value: frozenset({TopLevelType.VIDEO}),
+    MediaType.AUDIO.value: frozenset({TopLevelType.AUDIO}),
+    MediaType.DOCUMENT.value: frozenset({TopLevelType.APPLICATION, TopLevelType.TEXT}),
 }
 
 # Types that run code in a browser or on a desktop when opened: never a format's content type or alias
@@ -92,23 +92,47 @@ class FormatSpec:
 
     @property
     def all_mimes(self) -> Tuple[str, ...]:
-        """What the format accepts: its content type and aliases, never an opaque type (a row written before the API
-        refused them must not switch the content check off)"""
-        return tuple(mime for mime in (self.content_type, *self.aliases) if not _opaque(mime))
+        """What the format accepts: its content type and aliases, never an opaque or a forbidden type (a row written
+        before the API refused them must neither switch the content check off nor accept a type that runs code)"""
+        return tuple(mime for mime in (self.content_type, *self.aliases) if not _refused(mime))
 
     @classmethod
     def from_row(cls, row: MediaFormat) -> "FormatSpec":
+        """The spec of a row; an opaque or forbidden alias of a row written before the rule is left out, and with a
+        forbidden or opaque content type in all_mimes (logged once per row)"""
+        aliases = tuple(row.aliases or ())
+        _log_refused(row, [value for value in (row.content_type, *aliases) if _refused(value)])
         return cls(
             media_type=row.media_type, content_type=row.content_type,
             extensions=tuple(row.extensions or ()), label=row.label,
             max_file_size_bytes=int(row.max_file_size_bytes),
-            aliases=tuple(alias for alias in (row.aliases or ()) if not _opaque(alias)),
+            aliases=tuple(alias for alias in aliases if not _refused(alias)),
             id=row.id, is_active=row.is_active, sort_order=row.sort_order,
         )
 
 
-def _opaque(value: str) -> bool:
-    return (value or "").strip().lower() in OPAQUE_CONTENT_TYPES
+def _essence(value: Optional[str]) -> str:
+    parsed = parse_content_type(value)
+    return parsed.essence if parsed is not None else (value or "").strip().lower()
+
+
+def _refused(value: str) -> bool:
+    """A type no format may accept: opaque (switches the content check off) or forbidden (runs code when opened)"""
+    essence = _essence(value)
+    return essence in OPAQUE_CONTENT_TYPES or essence in FORBIDDEN_CONTENT_TYPES
+
+
+# (row id, the refused values) already logged: the registry reloads every REGISTRY_CACHE_TTL_SECONDS
+_logged_refused: set = set()
+
+
+def _log_refused(row: MediaFormat, refused: List[str]) -> None:
+    key = (row.id, tuple(refused))
+    if not refused or key in _logged_refused:
+        return
+    _logged_refused.add(key)
+    _logger.warning(f"Media format {row.id} ({row.content_type}) holds types no format may accept, left out of what "
+                    f"it accepts: {', '.join(refused)}; edit or archive the format")
 
 
 def hard_limit_bytes() -> int:

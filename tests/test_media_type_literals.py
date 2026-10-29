@@ -84,3 +84,23 @@ def test_the_vocabulary_is_the_only_place_and_migrations_do_not_import_it():
     assert media_type_literals(VOCABULARY.read_text(encoding="utf-8"))
     for path in MIGRATIONS.rglob("*.py"):
         assert "enums.media_types" not in path.read_text(encoding="utf-8"), path
+
+
+# The modules that compare a parsed top-level type with a name: they use enums.media_types.TopLevelType, the one
+# set of those names (final review, item 8)
+TOP_LEVEL_USERS = ("services/files/sniff.py", "utils/content_type.py", "services/files/formats.py")
+
+
+def test_top_level_names_used_alone_come_from_the_vocabulary():
+    from app.backend.enums.media_types import TopLevelType
+    from app.backend.services.files.formats import ALLOWED_TOP_LEVEL
+
+    offenders = []
+    for rel in TOP_LEVEL_USERS:
+        tree = ast.parse((BACKEND / rel).read_text(encoding="utf-8"))
+        docstrings = _docstrings(tree)
+        offenders += [f"{rel}:{node.lineno}: {node.value!r}" for node in ast.walk(tree)
+                      if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings
+                      and node.value.strip().lower() in TOP_LEVEL]
+    assert offenders == [], "use app.backend.enums.media_types.TopLevelType:\n" + "\n".join(offenders)
+    assert all(isinstance(name, TopLevelType) for names in ALLOWED_TOP_LEVEL.values() for name in names)
