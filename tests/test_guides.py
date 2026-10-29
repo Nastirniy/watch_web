@@ -291,8 +291,8 @@ async def test_an_empty_description_is_stored_as_null(client, db, headers):
     assert emptied.status_code == 200 and emptied.json()["description"] is None
 
 
-@pytest.mark.parametrize("char", [" ", " ", "‪", "‫", "‬", "‭", "‮", "⁦",
-                                  "⁧", "⁨", "⁩", "‎", "‏", "؜"])
+@pytest.mark.parametrize("char", ["\u2028", "\u2029", "\u202a", "\u202b", "\u202c", "\u202d", "\u202e", "\u2066",
+                                  "\u2067", "\u2068", "\u2069", "\u200e", "\u200f", "\u061c"])
 async def test_a_title_refuses_separators_and_bidi_controls(client, db, headers, char):
     admin = await make_admin(db)
     response = await client.post(GUIDES, headers=headers(admin), json={"title": f"invoice{char}txt.exe"})
@@ -303,7 +303,7 @@ async def test_a_title_refuses_separators_and_bidi_controls(client, db, headers,
 
 async def test_a_title_keeps_zwj_and_zwnj(client, db, headers):
     admin = await make_admin(db)
-    title = "Joined‍word and non‌joined"
+    title = "Joined\u200dword and non\u200cjoined"
     assert (await _create(client, headers, admin, title=title))["title"] == title
 
 
