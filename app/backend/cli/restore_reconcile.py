@@ -7,8 +7,10 @@ Usage:
     python -m app.backend.cli.restore_reconcile            # dry run: what it would do
     python -m app.backend.cli.restore_reconcile --apply    # do it (one audit row)
 
-Media files no row names go to <upload_path>/_orphaned/<time>/, certificate packages no row names (private keys) to
-<store_dir>/.quarantine/<time>/; nothing is deleted but derived posters and storyboards of ids without a row.
+Media files no row names go to <upload_path>/_orphaned/<time>/, user guide files no user_guide_files row names (and
+.tmp- folders of interrupted guide uploads) to <upload_path>/_orphaned/<time>/_guides/, certificate packages no row
+names (private keys) to <store_dir>/.quarantine/<time>/; nothing is deleted but derived posters and storyboards of
+ids without a row.
 Exit code 1: something could not be moved (logged).
 """
 import argparse
@@ -30,6 +32,7 @@ SECTIONS = (
     ("stale_derived", "derived file of an id without a row", "deleted"),
     ("returned_originals", "original of a row found under _orphaned", "moved back"),
     ("orphan_packages", "certificate package without a row", "moved to .quarantine"),
+    ("orphan_guide_files", "user guide file without a row", "moved to _orphaned"),
 )
 
 
@@ -40,6 +43,9 @@ def _print(report: ReconcileReport, applied: bool) -> None:
         for item in items:
             print(f"  {item}")
     print(f"{len(report.missing_originals)} row(s) whose original is missing: {list(report.missing_originals)}")
+    print(f"{len(report.missing_guide_files)} user guide file row(s) whose file is missing")
+    for item in report.missing_guide_files:
+        print(f"  guide {item.guide_id} file {item.file_id}: {item.file_name}")
     for item in report.failed:
         print(f"FAILED: {item} (see the log)")
 
@@ -53,9 +59,12 @@ async def run(session: AsyncSession, *, apply: bool, upload_path: Path, store_di
         return 0
     done = await asyncio.to_thread(apply_reconcile, report, upload_path, store_dir, now)
     _print(done, applied=True)
+    # The event's params are part of the API contract: user guide files count as files (orphan_files) and as
+    # originals (missing_originals); the printed report and the log tell them apart
     await create_audit_log(session, AuditEvent.DATABASE_RECONCILE, params={
-        "orphan_files": len(done.orphan_files), "stale_derived": len(done.stale_derived),
-        "returned_originals": len(done.returned_originals), "missing_originals": len(done.missing_originals),
+        "orphan_files": len(done.orphan_files) + len(done.orphan_guide_files), "stale_derived": len(done.stale_derived),
+        "returned_originals": len(done.returned_originals),
+        "missing_originals": len(done.missing_originals) + len(done.missing_guide_files),
         "orphan_packages": len(done.orphan_packages), "failed": len(done.failed)})
     await session.commit()
     return 1 if done.failed else 0

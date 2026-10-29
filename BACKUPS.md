@@ -168,7 +168,7 @@ docker compose stop api media-worker
 docker compose run --rm db-backup restore <id>           # shows the plan, asks for "yes"
 docker compose up -d
 docker compose exec api python -m app.backend.cli.pki crl   # with PKI: publish the CRL now
-docker compose exec api python -m app.backend.cli.restore_reconcile           # dry run: files without rows
+docker compose exec api python -m app.backend.cli.restore_reconcile           # dry run: files without rows (media, guides, PKI)
 docker compose exec api python -m app.backend.cli.restore_reconcile --apply   # move them aside
 ```
 
@@ -233,6 +233,15 @@ Refusals (exit 3):
   (they are rebuilt from the original), moves back an original a row names again (an undo after an `--apply`), and
   lists rows whose original is missing (only after manual deletion: archiving never removes files). Files younger
   than 10 minutes and `_tmp` are never touched. One audit row (`reconcile`) per `--apply`.
+- **User guide files:** they live under `MEDIA_ROOT/_guides/<guide_id>/<file_id>/<stored name>` and are not media:
+  the media walk skips `_guides`, and `restore_reconcile` compares them with the `user_guide_files` rows, live or
+  archived (archiving a file never removes it). A file no row names by its guide, file id and stored name (uploaded
+  after the backup) moves, with `--apply`, to `MEDIA_ROOT/_orphaned/<time>/_guides/<same path>`; a `.tmp-` folder
+  of an interrupted upload (`_guides/<guide_id>/.tmp-...`) moves there as a whole once it and everything in it is
+  older than 10 minutes (younger: an upload on its way, left alone). A guide file counts as old only when its folder
+  is old too. A row whose file is missing is listed (`guide <id> file <id>: <file name>`); one whose file sits under
+  `_orphaned` (an undo after an `--apply`) gets it back. Nothing is deleted. The audit row counts guide files with the
+  media ones (`orphan_files`, `missing_originals`).
 - **PKI:** the CA key and the CRL file live in `PKI_DIR` (PKI.md, offline encrypted backup of `private/`). Package
   folders of certificates no row names (made after the backup for users the backup lacks) hold private keys:
   `restore_reconcile --apply` moves them to `PKI_DIR/issued/.quarantine/<time>/`; delete them once checked.

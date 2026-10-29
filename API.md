@@ -520,6 +520,19 @@ The help section: every authenticated user reads `GET /api/v1/guides/` and `GET 
 - A guide the caller does not see is simply absent: left out of the list, and 404 `guide_not_found` on
   `GET /guides/{guide_id}` and on every file route, the same answer as for a guide that does not exist. Show it as
   "not found", never as "access denied".
+- List: `GET /api/v1/guides/` answers a JSON array of `GuideResponse` (no envelope), in the guides' order
+  (`sort_order`, then `title`; `sort_by=title` the other way round), `page` / `page_size` (50, at most 200), `q`
+  (title contains). Each guide carries its `files`, so the help page needs one call.
+- Get: `GET /api/v1/guides/{guide_id}` answers one `GuideResponse` (404 `guide_not_found` as above).
+- Download: `GET` the file's `download_url` (`/api/v1/guides/{guide_id}/files/{file_id}/download`) with the token,
+  as any download: always `attachment` under `file_name`, `Content-Type` the file's format (text types with their
+  charset), `ETag` / `X-File-Hash` the sha256, `Range` supported. A file gone or archived is 404
+  `guide_file_not_found`.
+- Render as text: a guide's text and the content of its text files are shown as text. A `.txt` or `.csv` file is
+  shown as text (`textContent`, a `<pre>`) or offered as the download. A Markdown file (`text/markdown`) is rendered
+  only through a Markdown renderer with raw HTML off (markdown-it `html: false`) whose output goes through an HTML
+  sanitiser (DOMPurify) before it reaches the page, links limited to `http`, `https` and `mailto`; never pass it to
+  `v-html` / `innerHTML` as it is. Every other format (PDF, office documents) is only offered as the download.
 
 - A guide's `title` and `description` are untrusted text: render them as text, never as HTML (no `v-html`, no
   `innerHTML`, no markdown-to-HTML without a sanitiser). The API refuses script patterns (`text_script_pattern`)

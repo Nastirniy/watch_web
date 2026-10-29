@@ -251,6 +251,18 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   (`discard_guide_file`): a rollback that fails (lost connection) no longer leaves the folder without its row.
 - Contract: the descriptions of `GET /guides/`, `GET /guides/{guide_id}`, the guide archive, the file download,
   archive and restore; the optional property `file_id` of `GuideFileNotFoundProblem`.
+- Restore reconcile (`services/backups/reconcile.py`, `cli/restore_reconcile.py`): the media walk skips `_guides`
+  (`SKIPPED_TOP`), so guide files are no longer taken for media orphans and moved after a restore. A walk of their
+  own compares `_guides/<guide_id>/<file_id>/<stored_name>` with the `user_guide_files` rows, live or archived: a
+  file no row names moves with `--apply` to `_orphaned/<time>/_guides/<same path>`, a `.tmp-` folder of an
+  interrupted upload moves there as a whole once it and everything in it is older than the age guard (10 minutes;
+  younger ones are left alone), a guide file counts as old only with its folder. A row whose file is missing is
+  reported in the new list `missing_guide_files` (guide id, file id, file name; printed by the CLI); one whose file
+  sits under `_orphaned` gets it back (`returned_originals`). Nothing is deleted. The `database.reconcile` audit
+  row keeps its params (they are in the contract): guide files are counted in `orphan_files` and
+  `missing_originals`. BACKUPS.md "What a rollback does not bring back".
+- API.md "User guides": list, get and download, and how the web renders guide text and files (as text; Markdown
+  only through a renderer with raw HTML off and a sanitiser). No contract change.
 
 ## Authorization fixes (moves, type change, user writes)
 
