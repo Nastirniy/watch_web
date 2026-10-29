@@ -21,7 +21,7 @@ from app.backend.api.shared.helpers import upload_helper
 from app.backend.api.v1 import V1, media_uploads, search
 from app.backend.config import settings
 from app.backend.enums.routes import (
-    BrigadeRoutes, CategoryRoutes, CorpsRoutes, MediaFormatRoutes, MediaRoutes, PostRoutes, RoleRoutes,
+    BrigadeRoutes, CategoryRoutes, CorpsRoutes, GuideRoutes, MediaFormatRoutes, MediaRoutes, PostRoutes, RoleRoutes,
     ScopeGroupRoutes, SearchRoutes, SignalTypeRoutes, TagRoutes, UserRoutes,
 )
 from app.backend.models.audit import AuditLog
@@ -35,6 +35,7 @@ from app.backend.models.role import Permission, Role
 from app.backend.models.scope_group import ScopeGroup
 from app.backend.models.user_certificate import UserCertificate
 from app.backend.models.user import User
+from app.backend.models.user_guide import UserGuide
 from tests.helpers import make_admin, make_dictionary, make_group, make_observation, make_post, make_role, make_user
 from tests.test_poster_jobs import MP4_BYTES
 from tests.test_username_validation import make_certificate
@@ -85,7 +86,15 @@ async def _scene(db) -> Dict[str, Any]:
             "post_id": (await make_post(db)).id, "role_id": role.id, "empty_role_id": empty_role.id,
             "view_permission_id": permissions["tag.view"], "create_permission_id": permissions["post.view"],
             "group_id": group.id, "other_group_id": other_group.id, "corps_id": corps.id,
-            "other_corps_id": other_corps.id, "brigade_id": brigade.id}
+            "other_corps_id": other_corps.id, "brigade_id": brigade.id, "guide_id": await _guide(db, user)}
+
+
+async def _guide(db, user) -> int:
+    guide = UserGuide(title="A guide", created_by=user.id, updated_by=user.id)
+    db.add(guide)
+    await db.commit()
+    await db.refresh(guide)
+    return guide.id
 
 
 def _category_create(client, headers, user, ids):
@@ -209,6 +218,15 @@ def _brigade_move(client, headers, user, ids):
                         json={"corps_id": ids["other_corps_id"]})
 
 
+def _guide_create(client, headers, user, ids):
+    return client.post(V1.path(GuideRoutes.ROOT), headers=headers(user), json={"title": "New guide"})
+
+
+def _guide_update(client, headers, user, ids):
+    return client.patch(V1.path(GuideRoutes.GUIDE_BY_ID, guide_id=ids["guide_id"]), headers=headers(user),
+                        json={"title": "Renamed guide", "audience": {"kind": "post", "id": ids["post_id"]}})
+
+
 GROUPS = "api.shared.helpers.scope_group_helper"
 
 WRITES = {
@@ -239,6 +257,8 @@ WRITES = {
     "brigade_create": Case(GROUPS, ScopeGroup, "scope_group", "create", _brigade_create, status=201),
     "brigade_update": Case(GROUPS, ScopeGroup, "scope_group", "update", _brigade_update, "brigade_id"),
     "brigade_move": Case(GROUPS, ScopeGroup, "scope_group", "update", _brigade_move, "brigade_id"),
+    "guide_create": Case("guides", UserGuide, "user_guide", "create", _guide_create, status=201),
+    "guide_update": Case("guides", UserGuide, "user_guide", "update", _guide_update, "guide_id"),
 }
 
 

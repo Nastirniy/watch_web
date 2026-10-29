@@ -8,7 +8,7 @@ import pytest
 
 from app.backend.api.v1 import V1
 from app.backend.enums.routes import (
-    CategoryRoutes, CertificateRoutes, MediaFormatRoutes, MediaRoutes, ObservationRoutes, PostRoutes, RoleRoutes,
+    CategoryRoutes, CertificateRoutes, GuideRoutes, MediaFormatRoutes, MediaRoutes, ObservationRoutes, PostRoutes, RoleRoutes,
     ScopeGroupRoutes, SearchRoutes, SignalTypeRoutes, TagRoutes, UserRoutes,
 )
 from app.backend.models.observation import SignalType
@@ -32,7 +32,7 @@ FILTER_URLS = [
     V1.path(route) for route in (
         ObservationRoutes.LIST_ALL, MediaRoutes.ROOT, PostRoutes.ROOT, UserRoutes.ROOT, RoleRoutes.ROOT,
         TagRoutes.LIST_ALL, CategoryRoutes.LIST_ALL, SignalTypeRoutes.LIST_ALL, MediaFormatRoutes.LIST_ALL,
-        ScopeGroupRoutes.ROOT,
+        ScopeGroupRoutes.ROOT, GuideRoutes.ROOT,
         CertificateRoutes.ROOT, SearchRoutes.OBSERVATIONS, SearchRoutes.MEDIA, SearchRoutes.POSTS, SearchRoutes.USERS,
         SearchRoutes.ROLES, SearchRoutes.TAGS, SearchRoutes.CATEGORIES, SearchRoutes.SIGNAL_TYPES,
         SearchRoutes.MEDIA_FORMATS,

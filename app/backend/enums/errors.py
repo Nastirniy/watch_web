@@ -463,6 +463,10 @@ class ErrorCode(ProblemType):
         "Content-Type(s) {content_types} already belong to format '{format_content_type}' ({format_id})",
         content_types=List[str], format_content_type=str, format_id=int))
 
+    # ---------------------------------------------------------------- user guides
+    GUIDE_NOT_FOUND = ("guide_not_found", problem(404, "User guide not found", guide_id=int))
+    GUIDE_NOT_ARCHIVED = ("guide_not_archived", problem(409, "User guide is not archived"))
+
     # ---------------------------------------------------------------- resumable uploads
     UPLOAD_SESSION_NOT_FOUND = ("upload_session_not_found", problem(404, "Upload session not found"))
     UPLOAD_SESSION_CLOSED = ("upload_session_closed", problem(

@@ -281,6 +281,19 @@ class TagRoutes(str, Enum):
         return "TAGS"
 
 
+class GuideRoutes(str, Enum):
+    """User guides: the help section, titled entries with their files (api/v1/guides.py)"""
+    BASE = "/guides"
+    ROOT = "/"  # collection: list and create
+    GUIDE_BY_ID = "/{guide_id}"
+    GUIDE_ARCHIVE = "/{guide_id}/archive"
+    GUIDE_RESTORE = "/{guide_id}/restore"
+
+    @staticmethod
+    def tag() -> str:
+        return "GUIDES"
+
+
 class SearchRoutes(str, Enum):
     """Unified search routes"""
     BASE = "/search"
@@ -371,6 +384,7 @@ class Routes:
     CATEGORIES = CategoryRoutes
     SIGNAL_TYPES = SignalTypeRoutes
     TAGS = TagRoutes
+    GUIDES = GuideRoutes
     SEARCH = SearchRoutes
     DATABASE = DatabaseRoutes
     AUDIT = AuditRoutes

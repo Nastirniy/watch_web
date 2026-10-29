@@ -145,6 +145,37 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   unions of `GET /audit-logs/` and `GET /audit-logs/{audit_id}` gain the seven events (schemas
   `UserGuide*AuditEntry`, `UserGuide*AuditParams`). Permission names are not part of the document.
 
+### User guides
+
+- New routes under `/api/v1/guides` (`GuideRoutes`, `api/v1/guides.py`, tag `GUIDES`): `GET /` (list),
+  `POST /` (create, 201), `GET /{guide_id}`, `PATCH /{guide_id}`, `POST /{guide_id}/archive`,
+  `POST /{guide_id}/restore`. Reading needs only an authenticated user (there is no `guide.view`); create needs
+  `guide.create`, PATCH `guide.update`, archive and restore `guide.archive` (system permissions: 403
+  `permission_denied` otherwise). `include_deleted` (list and `GET /{guide_id}`) requires `guide.archive` (403
+  `permission_required_for_action`).
+- Body `GuideCreate {title (1-200), description? (plain text, at most 2000), sort_order? (default 0), audience?}`
+  and `GuideUpdate` (the same fields, only those sent change; `title` and `sort_order` refuse null with 422
+  `value_null`, `description: null` clears it, `audience: null` makes the guide for everyone, an absent `audience`
+  keeps it). `audience` is `{kind: "post" | "group", id}`, stored as the scope key (`p:<id>` / `g:<id>`) in
+  `user_guides.audience_key`; an unknown or archived post or group answers 404 `post_not_found` /
+  `scope_group_not_found`, as the assignment API does. `is_deleted` is never accepted in a body.
+- Response `GuideResponse {id, title, description, sort_order, audience: {kind, id, name} | null, files, is_deleted,
+  created_at, updated_at}`; the audience is named as the node is now. `files` (`GuideFileResponse {id, file_name,
+  content_type, size_bytes, sha256, language, created_at, is_deleted}`) is always empty until uploads exist (task 6
+  adds them, with `download_url`); archived files only with `include_deleted`.
+- List query `GuideFilterParams`: `q` (title contains, case-insensitive), `page`, `page_size`, `sort_by`
+  (`sort_order` (default) or `title`, the other one follows, then the id), `sort_order`, `include_deleted`. Criteria
+  `GuideCriteria` / `GuideFilterService` in `services/guides.py`.
+- Every guide is listed for every user for now: filtering by audience comes with a later step. An archived guide
+  answers 404 `guide_not_found` (param `guide_id`) on GET without `include_deleted`, on PATCH and on archive; a live
+  one 409 `guide_not_archived` on restore. PATCH, archive and restore lock the row first (`lock_first`).
+- Audit: every write and its row (`user_guide.create` / `update` / `archive` / `restore`, param `guide_title`,
+  system-wide: no scope) are one transaction.
+- New problem types `guide_not_found` (404) and `guide_not_archived` (409).
+- Contract: the six operations above and the schemas `GuideCreate`, `GuideUpdate`, `GuideAudienceRef`,
+  `GuideResponse`, `GuideAudienceResponse`, `GuideFileResponse`, `GuideNotFoundProblem`, `GuideNotArchivedProblem`
+  (additions only).
+
 ## Authorization fixes (moves, type change, user writes)
 
 ### Changed

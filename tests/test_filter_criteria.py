@@ -12,6 +12,7 @@ import pytest
 from app.backend.api.v1.models.query.audit import AuditFilterParams, AuditSortField
 from app.backend.api.v1.models.query.categories import CategoryFilterParams, CategorySortField
 from app.backend.api.v1.models.query.certificates import CertificateFilterParams, CertificateSortField
+from app.backend.api.v1.models.query.guides import GuideFilterParams, GuideSortField
 from app.backend.api.v1.models.query.media import MediaFilterParams, MediaSortField
 from app.backend.api.v1.models.query.media_formats import MediaFormatFilterParams, MediaFormatSortField
 from app.backend.api.v1.models.query.observations import ObservationFilterParams, ObservationSortField
@@ -35,11 +36,13 @@ from app.backend.filters.simple_engine import as_criteria
 from app.backend.filters.tag_filter import TagFilterService
 from app.backend.filters.user_filter import UserFilterService
 from app.backend.services.audit.query import AuditFilterService
+from app.backend.services.guides import GuideFilterService
 
 V1_LISTS = [
     (AuditFilterParams, AuditSortField, AuditFilterService),
     (CategoryFilterParams, CategorySortField, CategoryFilterService),
     (CertificateFilterParams, CertificateSortField, CertificateFilterService),
+    (GuideFilterParams, GuideSortField, GuideFilterService),
     (MediaFilterParams, MediaSortField, MediaFilterService),
     (MediaFormatFilterParams, MediaFormatSortField, MediaFormatFilterService),
     (ObservationFilterParams, ObservationSortField, ObservationFilterService),
