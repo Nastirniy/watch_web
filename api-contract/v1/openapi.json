@@ -20968,13 +20968,13 @@
                 }
               },
               "ETag": {
-                "description": "sha256 of the file, quoted",
+                "description": "sha256 of the file, quoted (/stream always; /download only when the API serves the file itself: behind nginx nginx's own ETag)",
                 "schema": {
                   "type": "string"
                 }
               },
               "X-File-Hash": {
-                "description": "sha256 of the file",
+                "description": "sha256 of the file (/stream always; /download only when the API serves the file itself, absent behind nginx)",
                 "schema": {
                   "type": "string"
                 }
@@ -21214,13 +21214,13 @@
                 }
               },
               "ETag": {
-                "description": "sha256 of the file, quoted",
+                "description": "sha256 of the file, quoted (/stream always; /download only when the API serves the file itself: behind nginx nginx's own ETag)",
                 "schema": {
                   "type": "string"
                 }
               },
               "X-File-Hash": {
-                "description": "sha256 of the file",
+                "description": "sha256 of the file (/stream always; /download only when the API serves the file itself, absent behind nginx)",
                 "schema": {
                   "type": "string"
                 }
@@ -32365,7 +32365,7 @@
           "GUIDES"
         ],
         "summary": "Restore Guide",
-        "description": "Restore an archived guide (is_deleted=false). Not archived: 409.",
+        "description": "Restore an archived guide (is_deleted=false). Unknown or not for the caller: 404. Not archived: 409.",
         "operationId": "restore_guide",
         "security": [
           {
@@ -32769,13 +32769,13 @@
                 }
               },
               "ETag": {
-                "description": "sha256 of the file, quoted",
+                "description": "sha256 of the file, quoted, when the API serves the file itself; behind nginx nginx's own ETag (the sha256 is GuideFileResponse.sha256)",
                 "schema": {
                   "type": "string"
                 }
               },
               "X-File-Hash": {
-                "description": "sha256 of the file",
+                "description": "sha256 of the file, only when the API serves the file itself; absent behind nginx (the sha256 is GuideFileResponse.sha256)",
                 "schema": {
                   "type": "string"
                 }

@@ -104,8 +104,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `filename*=UTF-8''<percent-encoded>`; control characters (CR, LF, NUL), lone surrogates, the bidi controls
   (U+202A-202E, U+2066-2069, U+200E, U+200F, U+061C) and U+FEFF are left out of both (ZWJ / ZWNJ stay). A name
   longer than 512 UTF-8 bytes is cut between characters, its extension kept (fallback: 512 characters), so the
-  header stays under about 2.1 KB, well inside nginx's 4 KB default `proxy_buffer_size`. Before, the name went into `filename="..."` with only `"` removed: a name outside Latin-1 (stored
-  when upload name sanitising is off) answered 500.
+  header stays under about 2.1 KB, well inside nginx's 4 KB default `proxy_buffer_size`. Before, the name went into
+  `filename="..."` with only `"` removed: a name outside Latin-1 (stored when upload name sanitising is off)
+  answered 500.
 - Every file answer carries `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox; default-src
   'none'` (a stored file opened as a page runs sandboxed, nothing loads; `<video>`, `<audio>` and `<img>` loads are
   not documents, playback is unchanged), on 200 and 206. Without nginx the API sends them (before: none); behind
@@ -129,16 +130,16 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   the actor columns (as 028) nor on `format_id`; no CHECK constraints. Both tables are listed in
   `TABLES_OWNED_BY_LATER_REVISIONS` of `002_sync_schema` and every create is guarded with an inspector check (a
   second run or a database built with create_all is left as it is). The downgrade drops both tables; files under
-  `<upload_path>/_guides/` stay on disk. No route uses them yet.
+  `<upload_path>/_guides/` stay on disk.
 - New system permissions `guide.create`, `guide.update`, `guide.archive` (Ukrainian display names: create / edit /
   archive user guides; `PERMISSION_META`, `_SYSTEM_PERMISSIONS`). Seeding inserts them with level `system` and
   grants them to the built-in `system_administrator` role (every system permission); only the
   `system_administrator` user type may hold them (the `administrator` type's system boundary is unchanged). Reading
-  guides will need only an authenticated user: there is no `guide.view`.
+  guides needs only an authenticated user: there is no `guide.view`.
 - Audit catalog events (category `dictionaries`, system-wide: no scope): `user_guide.create`, `user_guide.update`,
   `user_guide.archive`, `user_guide.restore` (param `guide_title`) and `user_guide_file.upload`,
   `user_guide_file.archive`, `user_guide_file.restore` (params `guide_title`, `file_name`, `size_bytes`, `sha256`).
-  No writer yet. Their (resource_type, action) pairs are added at the end of the mapping of
+  Their (resource_type, action) pairs are added at the end of the mapping of
   `migrations/support/audit_events_v1.py` (no row written before 031 has them; rows written by them map back after a
   downgrade of 031 and an upgrade again, as for every catalog event).
 - Contract: the event enum of `AuditEventResponse` and the `event` filter of `GET /audit-logs/`, and the entry
@@ -161,14 +162,14 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `scope_group_not_found`, as the assignment API does. `is_deleted` is never accepted in a body.
 - Response `GuideResponse {id, title, description, sort_order, audience: {kind, id, name} | null, files, is_deleted,
   created_at, updated_at}`; the audience is named as the node is now. `files` (`GuideFileResponse {id, file_name,
-  content_type, size_bytes, sha256, language, created_at, is_deleted}`) is always empty until uploads exist (task 6
-  adds them, with `download_url`); archived files only with `include_deleted`.
+  content_type, size_bytes, sha256, language, created_at, is_deleted, download_url}`, see Guide files below) lists
+  the guide's files; archived files only with `include_deleted`.
 - List query `GuideFilterParams`: `q` (title contains, case-insensitive), `page`, `page_size`, `sort_by`
   (`sort_order` (default) or `title`, the other one follows, then the id), `sort_order`, `include_deleted`. Criteria
   `GuideCriteria` / `GuideFilterService` in `services/guides.py`.
-- Who sees a guide: see the audience entry below. An archived guide
-  answers 404 `guide_not_found` (param `guide_id`) on GET without `include_deleted`, on PATCH and on archive; a live
-  one 409 `guide_not_archived` on restore. PATCH, archive and restore lock the row first (`lock_first`).
+- Who sees a guide: see the audience entry below. An archived guide answers 404 `guide_not_found` (param
+  `guide_id`) on GET without `include_deleted`, on PATCH and on archive; a live one 409 `guide_not_archived` on
+  restore. PATCH, archive and restore lock the row first (`lock_first`).
 - Audit: every write and its row (`user_guide.create` / `update` / `archive` / `restore`, param `guide_title`,
   system-wide: no scope) are one transaction.
 - Guide `title` and `description` are natural plain text (`SecurityValidators.plain_text`, `utils/validators.py`):
@@ -214,12 +215,13 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   the row, writes the folder and commits it with its audit row; when the write (500 `media_store_failed`), the audit
   row or the commit fails, the folder is removed and nothing stays. Files are never deleted.
 - Download: always `attachment` under the file name (`stored_file_response`: RFC 6266 name, nosniff, sandbox CSP,
-  `ETag` and `X-File-Hash` the sha256, Range; behind nginx `X-Accel-Redirect` to
-  `/protected_uploads/_guides/...`), `Content-Type` the stored type with its charset for text types
-  (`text/markdown; charset=UTF-8`, `text/plain; charset=utf-8`). A file gone from disk, of another guide, unknown
-  or archived is 404 `guide_file_not_found` (new problem type, param `file_id`, absent when the file is gone from
-  disk; never a path); a file of an archived guide 404 `guide_not_found`. `include_deleted=true` (requires
-  `guide.archive`) serves archived ones.
+  Range; behind nginx `X-Accel-Redirect` to `/protected_uploads/_guides/...`), `Content-Type` the stored type with its
+  charset for text types (`text/markdown; charset=UTF-8`, `text/plain; charset=utf-8`). A file gone from disk, of
+  another guide, unknown or archived is 404 `guide_file_not_found` (new problem type, param `file_id`, absent when the
+  file is gone from disk; never a path); a file of an archived guide 404 `guide_not_found`. `include_deleted=true`
+  (requires `guide.archive`) serves archived ones. The file's sha256 is `GuideFileResponse.sha256`: behind nginx the
+  download carries no `X-File-Hash` and nginx's own `ETag`; only an API serving the file itself sends both as the
+  sha256.
 - Archive and restore of a file lock the guide row, then the file row; a file of an archived guide is 404
   `guide_not_found`, an archived file 404 on archive, a live one 409 `guide_file_not_archived` (new problem type) on
   restore. Archived files stay on disk and are left out of `GuideResponse.files` unless `include_deleted`.
@@ -263,6 +265,41 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `missing_originals`. BACKUPS.md "What a rollback does not bring back".
 - API.md "User guides": list, get and download, and how the web renders guide text and files (as text; Markdown
   only through a renderer with raw HTML off and a sanitiser). No contract change.
+
+### Final review fixes
+
+- Guide ids reused after a restore: a restore from a backup without the guide tables (before 033), or a downgrade
+  of 033 and an upgrade, starts their ids again at 1, and an old `_guides/<guide_id>/<file_id>/` folder made the
+  next upload of that id answer 500 `media_store_failed`. `restore_reconcile --apply` now moves a file's folder no
+  row names to `_orphaned/<time>/_guides/...` as a whole, even empty (and a guide's folder no row names, with
+  everything in it), never deleting, with the same age guard, each entry checked again at apply; a folder holding a
+  hidden or NAS name (`.x`, `@eaDir`, `#recycle`) is not moved whole, those names stay as in the media walk. The
+  CLI line reads "user guide file or folder without a row". The upload takes over an empty folder of its id and
+  still refuses one with anything in it. Folders a guide file needs when it moves back from `_orphaned` are made
+  0750, as the store makes them. BACKUPS.md "Ids": the counters of tables the backup does not have start at 1.
+- A media format row written before the forbidden rule (an `image/svg+xml` format, a `text/html` alias) keeps its
+  values in the table, but the registry leaves forbidden types out of what the format accepts, as it does opaque
+  ones (logged once per row): an `.svg` upload answers 415 `media_content_type_not_accepted`. A format left with no
+  accepted type now refuses every file (the store took an empty list for "no check").
+- Migration 032 first reads which aliases occur (distinct `mime_type` and `playback_type` bases) and updates only
+  those, still in batches of 10,000 ids with the extension rule; no alias, no batch. DEPLOYMENT.md "Media types
+  (migration 032)": what it rewrites, duration, a run stopped halfway.
+- One set of top-level type names used alone (`TopLevelType` in `enums/media_types.py`) for the family rule, the
+  text rule and the charset rule.
+- Docs: the guide download's sha256 is `GuideFileResponse.sha256`; behind nginx the download (guides and
+  `/media/{id}/download`) carries no `X-File-Hash` and nginx's own `ETag` (API.md, the header descriptions).
+- Contract: descriptions only: the `ETag` and `X-File-Hash` headers of `/media/{id}/download`, `/media/{id}/stream`
+  and the guide file download, and `POST /guides/{guide_id}/restore` (404 for a guide not for the caller).
+
+### Rollback
+
+- Before running older code on this database, archive the ten document formats (`POST /media-formats/{id}/archive`,
+  media type `document`) or restore the backup made before the deploy: older code knows no upload purpose and would
+  accept document uploads (`.pdf`, `.docx`, ...) as observation media.
+- `PATCH /users/{id}` parses its Content-Type with the one parser now: an unquoted parameter (a `boundary`) with a
+  character outside an RFC 9110 token (`:`, a space, `=`) answers 415 `form_content_type_required` (before, only
+  the part before `;` was read). Clients that send such a boundary must quote it (browsers and common HTTP clients
+  send token-only boundaries).
 
 ## Authorization fixes (moves, type change, user writes)
 

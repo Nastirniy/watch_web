@@ -66,8 +66,10 @@ def guide_to_response(view: GuideView, version: PublishedVersion) -> GuideRespon
 GUIDE_FILE_HEADERS = {
     "Content-Disposition": disposition_header("attachment", "file_name"),
     **FILE_SAFETY_HEADERS,
-    "ETag": header("sha256 of the file, quoted"),
-    "X-File-Hash": header("sha256 of the file"),
+    "ETag": header("sha256 of the file, quoted, when the API serves the file itself; behind nginx nginx's own ETag "
+                   "(the sha256 is GuideFileResponse.sha256)"),
+    "X-File-Hash": header("sha256 of the file, only when the API serves the file itself; absent behind nginx "
+                          "(the sha256 is GuideFileResponse.sha256)"),
     "Accept-Ranges": header("bytes: the file can be read in parts with Range"),
     "Cache-Control": header("private, max-age=3600"),
 }

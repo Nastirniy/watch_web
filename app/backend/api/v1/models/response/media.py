@@ -211,8 +211,10 @@ def disposition_header(kind: str, name: str) -> dict:
 ORIGINAL_FILE_HEADERS = {
     "Content-Disposition": disposition_header("attachment (download) or inline (stream)", "original name"),
     **FILE_SAFETY_HEADERS,
-    "ETag": header("sha256 of the file, quoted"),
-    "X-File-Hash": header("sha256 of the file"),
+    "ETag": header("sha256 of the file, quoted (/stream always; /download only when the API serves the file "
+                   "itself: behind nginx nginx's own ETag)"),
+    "X-File-Hash": header("sha256 of the file (/stream always; /download only when the API serves the file itself, "
+                          "absent behind nginx)"),
     "Accept-Ranges": header("bytes: the file can be read in parts with Range"),
     "Cache-Control": header("private, max-age=3600"),
 }

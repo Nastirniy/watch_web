@@ -526,7 +526,9 @@ The help section: every authenticated user reads `GET /api/v1/guides/` and `GET 
 - Get: `GET /api/v1/guides/{guide_id}` answers one `GuideResponse` (404 `guide_not_found` as above).
 - Download: `GET` the file's `download_url` (`/api/v1/guides/{guide_id}/files/{file_id}/download`) with the token,
   as any download: always `attachment` under `file_name`, `Content-Type` the file's format (text types with their
-  charset), `ETag` / `X-File-Hash` the sha256, `Range` supported. A file gone or archived is 404
+  charset), `Range` supported. The file's sha256 is `GuideFileResponse.sha256` in the guide listing: behind nginx
+  (production) the download carries no `X-File-Hash` and its `ETag` is nginx's own, not the sha256 (only an API
+  serving the file itself, without nginx, sends both as the sha256). A file gone or archived is 404
   `guide_file_not_found`.
 - Render as text: a guide's text and the content of its text files are shown as text. A `.txt` or `.csv` file is
   shown as text (`textContent`, a `<pre>`) or offered as the download. A Markdown file (`text/markdown`) is rendered
@@ -605,6 +607,8 @@ own problem (`401`, `403`, `404 media_not_found`, ...). What follows for the cli
 - Access taken away (logout, a revoked session or certificate, a removed permission, archived media) stops a stream
   within about 30 seconds, not at once (nginx counts whole seconds; measured 30.4 to 31.4 s).
 - `If-None-Match` on `/stream` answers `200` with the file, never `304`; `ETag` and `X-File-Hash` are the file hash.
+  `/download` behind nginx carries no `X-File-Hash` and nginx's own `ETag` (not the file hash); only an API serving
+  the file itself, without nginx, sends both as the sha256 there.
 - An unsatisfiable `Range` on `/stream` or `/download` is answered by nginx (`416`, by status, like any
   infrastructure error); the `range_not_satisfiable` problem comes only from an API without nginx in front.
 - A `<video>` or `<audio>` element cannot send the Bearer token: register the starter service worker of

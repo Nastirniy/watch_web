@@ -267,7 +267,7 @@ async def restore_guide(
         auth: AuthContext = Depends(require(all=[Permissions.GUIDE_ARCHIVE])),
         version: PublishedVersion = Depends(request_version),
 ):
-    """Restore an archived guide (is_deleted=false). Not archived: 409."""
+    """Restore an archived guide (is_deleted=false). Unknown or not for the caller: 404. Not archived: 409."""
     guide = await _guide_or_404(session, guide_id, auth, include_deleted=True, lock=True)
     if not guide.is_deleted:
         raise ApiError(ErrorCode.GUIDE_NOT_ARCHIVED)
