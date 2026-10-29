@@ -92,16 +92,23 @@ class FormatSpec:
 
     @property
     def all_mimes(self) -> Tuple[str, ...]:
-        return (self.content_type, *self.aliases)
+        """What the format accepts: its content type and aliases, never an opaque type (a row written before the API
+        refused them must not switch the content check off)"""
+        return tuple(mime for mime in (self.content_type, *self.aliases) if not _opaque(mime))
 
     @classmethod
     def from_row(cls, row: MediaFormat) -> "FormatSpec":
         return cls(
             media_type=row.media_type, content_type=row.content_type,
             extensions=tuple(row.extensions or ()), label=row.label,
-            max_file_size_bytes=int(row.max_file_size_bytes), aliases=tuple(row.aliases or ()),
+            max_file_size_bytes=int(row.max_file_size_bytes),
+            aliases=tuple(alias for alias in (row.aliases or ()) if not _opaque(alias)),
             id=row.id, is_active=row.is_active, sort_order=row.sort_order,
         )
+
+
+def _opaque(value: str) -> bool:
+    return (value or "").strip().lower() in OPAQUE_CONTENT_TYPES
 
 
 def hard_limit_bytes() -> int:

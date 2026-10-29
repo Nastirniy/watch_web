@@ -19,9 +19,11 @@ def _clean_content_type(value: str) -> str:
     value = value.strip().lower()
     if not CONTENT_TYPE_RE.match(value):
         raise invalid(FieldErrorCode.CONTENT_TYPE_INVALID)
-    # Opaque types name no format, and as an alias the sniffer's answer for unknown bytes would pass any file
-    if value in FORBIDDEN_CONTENT_TYPES or value in OPAQUE_CONTENT_TYPES:
+    if value in FORBIDDEN_CONTENT_TYPES:
         raise invalid(FieldErrorCode.CONTENT_TYPE_FORBIDDEN, content_type=value)
+    # Opaque types name no format, and as an alias the sniffer's answer for unknown bytes would pass any file
+    if value in OPAQUE_CONTENT_TYPES:
+        raise invalid(FieldErrorCode.CONTENT_TYPE_OPAQUE, content_type=value)
     return value
 
 

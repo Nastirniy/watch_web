@@ -57,7 +57,12 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   hand-written "cut parameters, lower-case" parsers (`formats.normalise_content_type`, `PATCH /users/{id}`, the probe's
   playback type) and the `startswith("image/")` check of the store. A malformed declared Content-Type keeps its
   answer: 415 `media_content_type_not_accepted` (uploads), `upload_chunk_content_type` (chunks),
-  `form_content_type_required` (`PATCH /users/{id}`).
+  `form_content_type_required` (`PATCH /users/{id}`), and is never echoed: the param `content_type` of
+  `media_content_type_not_accepted` and `form_content_type_required` is optional now, present with the parsed type
+  (`application/json`, the sniffed type) and left out when the header did not parse; their details no longer quote
+  it ("The content type is not accepted for {media_type}", "Send the fields as multipart/form-data or
+  application/x-www-form-urlencoded"). Contract: `content_type` is no longer required in
+  `MediaContentTypeNotAcceptedProblem` and `FormContentTypeRequiredProblem`.
 - The Matroska format is `video/matroska` (RFC 9559); `video/x-matroska` stays accepted as its alias. The other
   defaults already had their IANA name first: `audio/flac` (`audio/x-flac`), `audio/mpeg` (`audio/mp3`),
   `audio/mp4` (`audio/x-m4a`, `audio/aac`), `image/jpeg` (`image/pjpeg`), `video/mp4` (`video/x-m4v`), `audio/wav`
@@ -67,16 +72,20 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `/download`, `/stream` (X-Accel-Redirect and the API's own streaming) serve it, text types with `charset=utf-8`
   (`text/markdown` with `charset=UTF-8`, RFC 7763). A resumable upload keeps a declared alias as the format's name.
 - The storyboard WebVTT is `text/vtt` without `charset=utf-8` (WebVTT defines no parameter: it is always UTF-8).
-- The `mime_type` filter of `GET /media` and the media search parses its value and maps an alias of a default
-  format to its canonical name (`Video/X-Matroska` finds `video/matroska`); its description in the contract says so
-  (the only change of `api-contract/v1/openapi.json`).
+- The `mime_type` filter of `GET /media` and the media search parses its value and matches it and its canonical
+  name (`Video/X-Matroska` finds rows stored as `video/matroska` and rows still stored as `video/x-matroska`;
+  `video/matroska` finds only the first); its description in the contract says so.
 - `application/octet-stream` and `binary/octet-stream` are refused as a format's content type or alias with 422
-  `validation_error` item `content_type_forbidden` (create and update): the sniffer answers `application/octet-stream`
-  for bytes it cannot name, so such an alias switched the content check of the format off. The item's detail now
-  reads "... it runs code when opened or names no format" (code and params unchanged).
+  `validation_error` item `content_type_opaque` (new field code, param `content_type`; create and update): the
+  sniffer answers `application/octet-stream` for bytes it cannot name, so such an alias switched the content check of
+  the format off. `content_type_forbidden` keeps its one meaning (a type that runs code). A row that already holds an
+  opaque alias (written before this rule) keeps it in the table, but the registry leaves it out of what the format
+  accepts when it loads the rows (`FormatSpec.all_mimes`, the aliases of a loaded row).
 - Migration `032_canonical_media_types`: through a frozen map (`migrations/support/media_types_v1.py`) the aliases of
   the default formats in `media_files.mime_type`, the base of `media_files.playback_type` (in batches of 10,000 ids)
-  and `upload_sessions.declared_content_type` become canonical; `text/plain` by the file extension (`.md`, `.csv`);
+  and `upload_sessions.declared_content_type` become canonical, only on rows whose file extension belongs to the
+  target format (`application/ogg` on an `.ogv` file or `video/x-matroska` on a `.webm` file stays as it is);
+  `text/plain` by the file extension (`.md`, `.csv`);
   the seeded Matroska row is renamed to `video/matroska` (its old name the first alias) while it still holds
   `video/x-matroska`, and the trimmed document alias lists are replaced while still exactly as seeded. An
   administrator's own values and formats stay. Downgrade changes nothing (the canonical names are valid before 032).

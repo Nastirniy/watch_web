@@ -144,6 +144,10 @@ async def test_a_malformed_declared_type_keeps_its_415(db):
     assert refused.value.status_code == 415
     from app.backend.enums.errors import ErrorCode
     assert refused.value.code == ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED
+    assert "content_type" not in refused.value.params      # a malformed header is never echoed
+    with pytest.raises(ApiError) as unknown:
+        check_declared_format(registry, "video", "clip.mkv", "Video/Unknown; x=1")
+    assert unknown.value.params["content_type"] == "video/unknown"
 
 
 @pytest.mark.asyncio
@@ -156,6 +160,9 @@ async def test_patch_user_with_a_malformed_content_type_answers_415(client, db, 
                                   headers={**headers(admin), "Content-Type": "multipart form-data"})
     assert response.status_code == 415
     assert response.json()["code"] == "form_content_type_required"
+    assert "content_type" not in response.json()                # the malformed header is never echoed
+    as_json = await client.patch(USER.format(user_id=target.id), json={"username": "x"}, headers=headers(admin))
+    assert as_json.status_code == 415 and as_json.json()["content_type"] == "application/json"
     ok = await client.patch(USER.format(user_id=target.id), data={"username_alias": "Renamed"},
                             headers=headers(admin))
     assert ok.status_code == 200, ok.text

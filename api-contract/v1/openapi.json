@@ -37482,6 +37482,7 @@
           "media_type_not_accepted",
           "content_type_outside_media_type",
           "content_type_forbidden",
+          "content_type_opaque",
           "confidence_level_invalid",
           "pagination_negative",
           "date_filters_conflict",
@@ -37522,7 +37523,7 @@
             "title": "Detail",
             "description": "Explanation of this occurrence",
             "examples": [
-              "Send the fields as multipart/form-data or application/x-www-form-urlencoded, not {content_type}"
+              "Send the fields as multipart/form-data or application/x-www-form-urlencoded"
             ]
           },
           "instance": {
@@ -37549,16 +37550,14 @@
           "status",
           "detail",
           "instance",
-          "code",
-          "content_type"
+          "code"
         ],
         "title": "FormContentTypeRequiredProblem",
         "description": "Form fields required (HTTP 415). Problem type form_content_type_required.",
         "examples": [
           {
             "code": "form_content_type_required",
-            "content_type": "<content_type>",
-            "detail": "Send the fields as multipart/form-data or application/x-www-form-urlencoded, not <content_type>",
+            "detail": "Send the fields as multipart/form-data or application/x-www-form-urlencoded",
             "instance": "/api/v1/...",
             "status": 415,
             "title": "Form fields required",
@@ -39457,7 +39456,7 @@
             "title": "Detail",
             "description": "Explanation of this occurrence",
             "examples": [
-              "Content type '{content_type}' is not accepted for {media_type}"
+              "The content type is not accepted for {media_type}"
             ]
           },
           "instance": {
@@ -39503,7 +39502,6 @@
           "detail",
           "instance",
           "code",
-          "content_type",
           "media_type",
           "accepted_content_types",
           "accepted_extensions"
@@ -39521,8 +39519,7 @@
               ".png"
             ],
             "code": "media_content_type_not_accepted",
-            "content_type": "<content_type>",
-            "detail": "Content type '<content_type>' is not accepted for <media_type>",
+            "detail": "The content type is not accepted for <media_type>",
             "instance": "/api/v1/...",
             "media_type": "<media_type>",
             "status": 415,

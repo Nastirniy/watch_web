@@ -77,8 +77,8 @@ def check_declared_format(registry: formats.FormatRegistry, media_type: str, fil
         raise _unsupported(registry, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, media_type, extension=extension_of(filename))
     declared = formats.normalise_content_type(content_type)
     if declared is None and content_type and content_type.strip():
-        # malformed (utils/content_type.py): refused like a type outside the registry
-        raise _unsupported(registry, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED, media_type, content_type=content_type.strip())
+        # malformed (utils/content_type.py): refused like a type outside the registry, the header never echoed
+        raise _unsupported(registry, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED, media_type)
     if declared and declared not in formats.OPAQUE_CONTENT_TYPES and declared not in spec.all_mimes:
         if declared in registry.mime_set(media_type):
             raise _unsupported(registry, ErrorCode.MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH, media_type,

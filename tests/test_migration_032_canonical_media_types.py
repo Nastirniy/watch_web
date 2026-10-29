@@ -35,6 +35,10 @@ MEDIA = {
     9: (("audio/mp3", "audio/mp3", ".mp3"), ("audio/mpeg", "audio/mpeg")),
     10: (("audio/x-wavpack", "audio/x-wavpack", ".wv"), ("audio/x-wavpack", "audio/x-wavpack")),   # not a prefix match
     11: (("audio/x-m4a", 'audio/x-m4a; codecs="mp4a.40.2"', ".m4a"), ("audio/mp4", 'audio/mp4; codecs="mp4a.40.2"')),
+    # an alias on a file of another format: the extension does not belong to the target format, the row stays
+    12: (("video/x-matroska", 'video/x-matroska; codecs="vp9"', ".webm"), ("video/x-matroska", 'video/x-matroska; codecs="vp9"')),
+    13: (("application/ogg", 'application/ogg; codecs="theora"', ".ogv"), ("application/ogg", 'application/ogg; codecs="theora"')),
+    14: (("image/pjpeg", None, "jpeg"), ("image/jpeg", None)),             # an older row: extension without the dot
     FAR_ID: (("video/x-m4v", 'video/x-m4v; codecs="avc1"', ".m4v"), ("video/mp4", 'video/mp4; codecs="avc1"')),
 }
 # id: (original_filename, declared_content_type) -> declared_content_type after 032
@@ -44,6 +48,7 @@ SESSIONS = {
     "u3": (("clip.mkv", "application/octet-stream"), "application/octet-stream"),
     "u4": (("Guide.MD", "text/plain"), "text/markdown"),
     "u5": (("photo.jpg", "image/pjpeg"), "image/jpeg"),
+    "u6": (("clip.webm", "video/x-matroska"), "video/x-matroska"),        # not a Matroska format file: stays
 }
 
 
@@ -146,6 +151,10 @@ def test_the_frozen_map():
     assert media_types_v1.BY_EXTENSION == {
         "text/plain": {".md": "text/markdown", ".markdown": "text/markdown", ".csv": "text/csv"}}
     assert media_types_v1.SEEDED_RENAMES == {"video/x-matroska": "video/matroska"}
+    assert media_types_v1.EXTENSIONS == {
+        "image/jpeg": (".jpg", ".jpeg"), "video/mp4": (".mp4", ".m4v"), "video/matroska": (".mkv",),
+        "audio/mpeg": (".mp3",), "audio/wav": (".wav",), "audio/flac": (".flac",),
+        "audio/ogg": (".ogg", ".oga", ".opus"), "audio/mp4": (".m4a",), "application/rtf": (".rtf",)}
     assert {name: (old, new) for name, (old, new) in media_types_v1.SEEDED_ALIASES.items()} == {
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document": (["application/zip"], []),
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": (["application/zip"], []),
@@ -159,6 +168,7 @@ def test_the_frozen_map():
     for alias, canonical in FROZEN_ALIASES.items():
         assert alias in defaults[canonical].aliases, alias
         assert formats.canonical_content_type(alias) == canonical, alias
+        assert defaults[canonical].extensions == media_types_v1.EXTENSIONS[canonical], canonical
     for name, (_, aliases) in media_types_v1.SEEDED_ALIASES.items():
         assert list(defaults[name].aliases) == aliases, name
     for old, new in media_types_v1.SEEDED_RENAMES.items():

@@ -212,7 +212,8 @@ class ErrorCode(ProblemType):
     DATA_TOO_LONG = ("data_too_long", problem(422, "Data too long for one or more fields"))
     FORM_CONTENT_TYPE_REQUIRED = ("form_content_type_required", problem(
         415, "Form fields required",
-        "Send the fields as multipart/form-data or application/x-www-form-urlencoded, not {content_type}", content_type=str))
+        # content_type: the type sent, left out when it could not be parsed (a header is never echoed as sent)
+        "Send the fields as multipart/form-data or application/x-www-form-urlencoded", content_type=Optional[str]))
     HEALTH_RATE_LIMITED = ("health_rate_limited", problem(
         429, "Rate limit exceeded", "Rate limit exceeded: at most {max_requests} requests per {window_seconds} seconds",
         max_requests=int, window_seconds=int))
@@ -405,8 +406,9 @@ class ErrorCode(ProblemType):
     MEDIA_EXTENSION_DANGEROUS = ("media_extension_dangerous", problem(
         415, "File extension not allowed", "File extension '{extension}' is not allowed", extension=str, **_FORMATS))
     MEDIA_CONTENT_TYPE_NOT_ACCEPTED = ("media_content_type_not_accepted", problem(
-        415, "Content type not accepted", "Content type '{content_type}' is not accepted for {media_type}",
-        content_type=str, **_FORMATS))
+        # content_type: the declared or detected type, left out when a declared one could not be parsed
+        415, "Content type not accepted", "The content type is not accepted for {media_type}",
+        content_type=Optional[str], **_FORMATS))
     MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH = ("media_content_type_extension_mismatch", problem(
         415, "Content-Type does not match the file extension",
         "Content-Type '{content_type}' does not match the file extension (expected {expected_content_type})",
@@ -533,7 +535,10 @@ class FieldErrorCode(FieldCode):
     CONTENT_TYPE_OUTSIDE_MEDIA_TYPE = ("content_type_outside_media_type", field(
         "content_type must belong to the families of media type {media_type} (put other spellings into aliases)", media_type=str))
     CONTENT_TYPE_FORBIDDEN = ("content_type_forbidden", field(
-        "Content-Type '{content_type}' is never accepted: it runs code when opened or names no format", content_type=str))
+        "Content-Type '{content_type}' is never accepted: it runs code when opened", content_type=str))
+    CONTENT_TYPE_OPAQUE = ("content_type_opaque", field(
+        "Content-Type '{content_type}' names no format: octet-stream is what the sniffer answers for unknown bytes",
+        content_type=str))
     CONFIDENCE_LEVEL_INVALID = ("confidence_level_invalid", field("confidence_level must be one of: {accepted}", accepted=List[str]))
     PAGINATION_NEGATIVE = ("pagination_negative", field("Pagination values must be non-negative"))
     DATE_FILTERS_CONFLICT = ("date_filters_conflict", field(

@@ -189,10 +189,27 @@ async def test_an_opaque_type_is_never_a_format_type_or_alias(client, db, header
     for refused_body in (body, dict(body, content_type="application/x-opq", aliases=[opaque])):
         refused = await client.post(CREATE, json=refused_body, headers=headers(admin))
         assert refused.status_code == 422, refused.text
-        assert refused.json()["errors"][0]["code"] == "content_type_forbidden"
+        assert refused.json()["errors"][0]["code"] == "content_type_opaque"
+        assert refused.json()["errors"][0]["content_type"] == opaque.lower()
     created = await client.post(CREATE, json=dict(body, content_type="application/x-opq"), headers=headers(admin))
     assert created.status_code == 200, created.text
     url = BY_ID.format(format_id=created.json()["id"])
     for change in ({"content_type": opaque}, {"aliases": [opaque]}):
         refused = await client.put(url, json=change, headers=headers(admin))
-        assert refused.status_code == 422 and refused.json()["errors"][0]["code"] == "content_type_forbidden"
+        assert refused.status_code == 422 and refused.json()["errors"][0]["code"] == "content_type_opaque"
+
+
+@pytest.mark.asyncio
+async def test_an_opaque_alias_written_before_the_rule_never_accepts(db):
+    """A row written before the API refused opaque aliases (or by hand) keeps them in the table, but the registry
+    never accepts them: application/octet-stream is the sniffer's answer for unknown bytes"""
+    db.add(MediaFormat(media_type="document", content_type="application/x-old", label="Old", extensions=[".old"],
+                       aliases=["application/octet-stream", "Binary/Octet-Stream", "application/x-old2"],
+                       max_file_size_bytes=formats.MB))
+    await db.commit()
+    registry = await formats.load_registry(db, use_cache=False)
+    spec = next(spec for spec in registry.formats_for("document") if spec.content_type == "application/x-old")
+    assert spec.all_mimes == ("application/x-old", "application/x-old2")
+    assert "application/octet-stream" not in registry.mime_set("document")
+    from app.backend.api.shared.helpers.upload_helper import validation_config_for
+    assert validation_config_for(spec).allowed_mime_types == {"application/x-old", "application/x-old2"}

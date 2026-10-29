@@ -512,13 +512,17 @@ format's canonical `content_type` and its `aliases`.
 
 - **Stored and served:** a file is stored under its format's canonical name, whatever name the client declared or the
   server's detector reported; `mime_type` in media responses, the base of `playback_type`, and the `Content-Type` of
-  `/download` and `/stream` are that name. Files stored before migration 032 under an alias of a default format were rewritten to it.
+  `/download` and `/stream` are that name. Files stored before migration 032 under an alias of a default format were
+  rewritten to it (when the file's extension belongs to that format; any other row keeps its type).
 - **Accepted on upload** (declared `Content-Type`, `content_type` of a resumable upload): the canonical name or an
   alias of the format (table below). `application/octet-stream` (or no `Content-Type`) means "detect from the
   bytes". Administrators may add formats and aliases (`/media-formats`); `application/octet-stream` and
-  `binary/octet-stream` are never a format's type or alias (`422 content_type_forbidden`).
+  `binary/octet-stream` are never a format's type or alias (`422` item `content_type_opaque`). A malformed
+  `Content-Type` is refused like an unknown one (`media_content_type_not_accepted`, `form_content_type_required`)
+  without the `content_type` param: it is present only when the header parsed.
 - **Filters:** `mime_type` of `GET /media` and the media search takes any of these names, in any case, with or
-  without parameters (`Video/X-Matroska` finds `video/matroska`).
+  without parameters, and finds the rows stored under that name and under its canonical one (`Video/X-Matroska`
+  finds `video/matroska` and `video/x-matroska` rows).
 - **Charset:** text types are served with `charset=utf-8` (`text/markdown` with `charset=UTF-8`, which RFC 7763
   requires); `text/vtt` (storyboards) carries no parameter: WebVTT is always UTF-8.
 - **Names to use in the web client:** `application/pkcs12` for a `.p12` blob (not `application/x-pkcs12`),

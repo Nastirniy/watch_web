@@ -173,3 +173,25 @@ async def test_mime_type_filter_accepts_an_alias(client, db, headers, search, sp
     assert response.status_code == 200, response.text
     items = response.json()["items"] if search else response.json()
     assert [item["id"] for item in items] == [mkv.id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("search", [False, True])
+async def test_mime_type_filter_finds_a_row_under_its_own_spelling(client, db, headers, search):
+    """A row 032 left under an alias (an x-matroska file named .webm) stays findable by that spelling: the filter
+    matches the parsed value and its canonical name"""
+    admin = await make_admin(db)
+    post = await make_post(db)
+    ids = await make_dictionary(db)
+    observation = await make_observation(db, admin, post, ids["signal_type_id"])
+    canonical = await make_media(db, observation, admin, media_type="video", file_extension=".mkv",
+                                 mime_type="video/matroska")
+    alias = await make_media(db, observation, admin, media_type="video", file_extension=".webm",
+                             mime_type="video/x-matroska")
+    await make_media(db, observation, admin, media_type="video")
+    url = V1.path(SearchRoutes.MEDIA if search else MediaRoutes.ROOT)
+    for spelling, expected in (("Video/X-Matroska", {canonical.id, alias.id}), ("video/matroska", {canonical.id})):
+        response = await client.get(url, params={"mime_type": spelling}, headers=headers(admin))
+        assert response.status_code == 200, response.text
+        items = response.json()["items"] if search else response.json()
+        assert {item["id"] for item in items} == expected, spelling

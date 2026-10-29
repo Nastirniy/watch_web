@@ -408,7 +408,7 @@ async def update_user(
         raise ApiError(
             ErrorCode.FORM_CONTENT_TYPE_REQUIRED,
             headers={"Accept-Patch": ", ".join(FORM_CONTENT_TYPES)},
-            content_type=parsed_type.essence if parsed_type is not None else raw_type,
+            content_type=parsed_type.essence if parsed_type is not None else None,   # never the header as sent
         )
 
     if update_data.user_type is not None:

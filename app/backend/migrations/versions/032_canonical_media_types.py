@@ -6,6 +6,9 @@ first; services/files/formats.py). Rows written before hold what the sniffer sai
 - media_files.mime_type and the base of media_files.playback_type ('video/x-matroska; codecs="..."' ->
   'video/matroska; codecs="..."'), in batches of 10,000 ids, never past the highest id read at the start;
 - upload_sessions.declared_content_type (a short-lived table: one statement per name);
+- only on a row whose file extension belongs to the target format (EXTENSIONS: media_files.file_extension with or
+  without the dot, the extension of upload_sessions.original_filename): application/ogg on a .ogv file or
+  video/x-matroska on a .webm file is not that format, and keeps its value;
 - an alias shared by several default formats (text/plain) by the row's file extension (media_files.file_extension,
   the extension of upload_sessions.original_filename); a row neither decides keeps its value;
 - the seeded media_formats rows whose canonical name changed (video/x-matroska -> video/matroska), only while a row
@@ -32,7 +35,9 @@ import json
 from alembic import op
 import sqlalchemy as sa
 
-from app.backend.migrations.support.media_types_v1 import ALIASES, BY_EXTENSION, SEEDED_ALIASES, SEEDED_RENAMES
+from app.backend.migrations.support.media_types_v1 import (
+    ALIASES, BY_EXTENSION, EXTENSIONS, SEEDED_ALIASES, SEEDED_RENAMES,
+)
 
 revision = "032_canonical_media_types"
 down_revision = "031_audit_events"
@@ -69,9 +74,20 @@ def downgrade() -> None:
     """No-op: canonical names stay valid (see the module docstring)"""
 
 
-def _extension_values(extension: str) -> list:
+def _extension_values(*extensions: str) -> list:
     """file_extension as stored: with the dot (every upload since the registry), without it in older rows"""
-    return [extension, extension.lstrip(".")]
+    return sorted({value for extension in extensions for value in (extension, extension.lstrip("."))})
+
+
+def _media_of(canonical: str):
+    """A media row whose extension belongs to the format of canonical"""
+    return sa.func.lower(MEDIA.c.file_extension).in_(_extension_values(*EXTENSIONS[canonical]))
+
+
+def _session_of(canonical: str):
+    """An upload session whose file name ends with an extension of the format of canonical"""
+    name = sa.func.lower(SESSIONS.c.original_filename)
+    return sa.or_(*[name.like("%" + extension) for extension in EXTENSIONS[canonical]])
 
 
 def _media_files(conn) -> None:
@@ -83,12 +99,14 @@ def _media_files(conn) -> None:
         end = min(start + BATCH - 1, high)
         in_batch = MEDIA.c.id.between(start, end)
         for alias, canonical in sorted(ALIASES.items()):
-            changed += conn.execute(sa.update(MEDIA).where(in_batch, MEDIA.c.mime_type == alias)
+            of_format = _media_of(canonical)
+            changed += conn.execute(sa.update(MEDIA).where(in_batch, MEDIA.c.mime_type == alias, of_format)
                                     .values(mime_type=canonical)).rowcount or 0
             # the base of the RFC 6381 string: the alias alone or followed by its parameters
             rest = sa.func.substr(MEDIA.c.playback_type, len(alias) + 1, type_=sa.String)
             conn.execute(sa.update(MEDIA).where(
-                in_batch, sa.or_(MEDIA.c.playback_type == alias, MEDIA.c.playback_type.like(alias + ";%")))
+                in_batch, of_format,
+                sa.or_(MEDIA.c.playback_type == alias, MEDIA.c.playback_type.like(alias + ";%")))
                 .values(playback_type=sa.literal(canonical, sa.String) + rest))
         for alias, by_extension in sorted(BY_EXTENSION.items()):
             for extension, canonical in sorted(by_extension.items()):
@@ -103,7 +121,8 @@ def _media_files(conn) -> None:
 def _upload_sessions(conn) -> None:
     changed = 0
     for alias, canonical in sorted(ALIASES.items()):
-        changed += conn.execute(sa.update(SESSIONS).where(SESSIONS.c.declared_content_type == alias)
+        changed += conn.execute(sa.update(SESSIONS).where(SESSIONS.c.declared_content_type == alias,
+                                                          _session_of(canonical))
                                 .values(declared_content_type=canonical)).rowcount or 0
     for alias, by_extension in sorted(BY_EXTENSION.items()):
         for extension, canonical in sorted(by_extension.items()):
