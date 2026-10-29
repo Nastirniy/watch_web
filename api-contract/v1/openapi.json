@@ -11975,7 +11975,7 @@
           "OBSERVATIONS"
         ],
         "summary": "Archive Observation",
-        "description": "Archive an observation (is_deleted=true). observation.view and observation.archive in effect at its post;\nowner or observation.manage_any in effect there.\n\nNothing is removed: media files stay attached, the row is hidden from lists unless include_deleted=true.\nUndo with POST /{observation_id}/restore. Already archived or unknown: 404. In an archived post it also needs\npost.archive in effect at the post (otherwise 409 post_archived); a grant on the archived post itself no longer\napplies (403).",
+        "description": "Archive an observation (is_deleted=true). observation.view and observation.archive in effect at its post;\nowner or observation.manage_any in effect there.\n\nNothing is removed: media files stay attached, the row is hidden from lists unless include_deleted=true. Every\npending resumable upload of the observation is cancelled at once (status aborted, error observation_not_found;\nits received bytes are deleted); a restore does not reopen it. Undo with POST /{observation_id}/restore. Already\narchived or unknown: 404. In an archived post it also needs post.archive in effect at the post (otherwise 409\npost_archived); a grant on the archived post itself no longer applies (403).",
         "operationId": "archive_observation",
         "security": [
           {
@@ -14500,7 +14500,7 @@
           "POSTS"
         ],
         "summary": "Archive Post",
-        "description": "Archive a post (is_deleted=true). post.view and post.archive must be in effect at the post.\n\nNothing is removed and no user row changes. Role assignments made on the post itself stop applying until it is\nrestored; assignments inherited from a group or the root keep read access to its data. Its observations and media\nbecome read-only history: writes answer 409 post_archived, except that callers with post.archive in effect at the\npost (plus observation.view, observation.archive and ownership or observation.manage_any) still archive and\nrestore its observations. It cannot become a home post. Hidden from lists unless include_deleted=true.\nUndo with POST /{post_id}/restore. Already archived or unknown: 404.",
+        "description": "Archive a post (is_deleted=true). post.view and post.archive must be in effect at the post.\n\nNothing is removed and no user row changes. Role assignments made on the post itself stop applying until it is\nrestored; assignments inherited from a group or the root keep read access to its data. Its observations and media\nbecome read-only history: writes answer 409 post_archived, except that callers with post.archive in effect at the\npost (plus observation.view, observation.archive and ownership or observation.manage_any) still archive and\nrestore its observations. It cannot become a home post. Hidden from lists unless include_deleted=true. Every\npending resumable upload of its observations is cancelled at once (status aborted, error post_archived; the\nreceived bytes are deleted); a restore does not reopen it. Undo with POST /{post_id}/restore. Already archived or\nunknown: 404.",
         "operationId": "archive_post",
         "security": [
           {
@@ -16637,7 +16637,7 @@
           "CORPS"
         ],
         "summary": "Archive Corps",
-        "description": "Archive a corps (is_deleted=true); the answer is the corps. scope_group.archive must cover its parent, the\nroot (a holder at the corps manages its brigades, not the corps). Without\ncascade: a corps with an active brigade answers 409 corps_has_brigades (move or archive its brigades first), the\nactive posts directly in it leave it (directly under the root), which needs post.update and post.view covering the\ncorps and the root. With cascade=true: its active brigades and every active post below are archived too, which\nneeds post.archive and post.view covering the corps. No post permission is asked when no active post would change.\nMissing permissions: 403 permission_required_for_action, nothing changes. Holders of a role at the\ncorps lose the posts that left it. Archived, unknown, another kind or outside scope_group.view: 404. Undo with\nPOST /{corps_id}/restore (the corps only)",
+        "description": "Archive a corps (is_deleted=true); the answer is the corps. scope_group.archive must cover its parent, the\nroot (a holder at the corps manages its brigades, not the corps). Without\ncascade: a corps with an active brigade answers 409 corps_has_brigades (move or archive its brigades first), the\nactive posts directly in it leave it (directly under the root), which needs post.update and post.view covering the\ncorps and the root. With cascade=true: its active brigades and every active post below are archived too, which\nneeds post.archive and post.view covering the corps, and every pending resumable upload of their observations is\ncancelled (status aborted, error post_archived). No post permission is asked when no active post would change.\nMissing permissions: 403 permission_required_for_action, nothing changes. Holders of a role at the\ncorps lose the posts that left it. Archived, unknown, another kind or outside scope_group.view: 404. Undo with\nPOST /{corps_id}/restore (the corps only)",
         "operationId": "archive_corps",
         "security": [
           {
@@ -18715,7 +18715,7 @@
           "BRIGADES"
         ],
         "summary": "Archive Brigade",
-        "description": "Archive a brigade (is_deleted=true); the answer is the brigade. scope_group.archive must cover its corps.\nWithout cascade its active posts move into its corps, which needs post.update and post.view covering the brigade\nand the corps; with cascade=true they are archived, which needs post.archive and post.view covering the brigade.\nNo post permission is asked when the brigade has no active post.\nMissing permissions: 403 permission_required_for_action, nothing changes. Holders of a role at the brigade lose its posts. Archived,\nunknown, another kind or outside scope_group.view: 404. Undo with POST /{brigade_id}/restore (the brigade only)",
+        "description": "Archive a brigade (is_deleted=true); the answer is the brigade. scope_group.archive must cover its corps.\nWithout cascade its active posts move into its corps, which needs post.update and post.view covering the brigade\nand the corps; with cascade=true they are archived, which needs post.archive and post.view covering the brigade,\nand every pending resumable upload of their observations is cancelled (status aborted, error post_archived).\nNo post permission is asked when the brigade has no active post.\nMissing permissions: 403 permission_required_for_action, nothing changes. Holders of a role at the brigade lose its posts. Archived,\nunknown, another kind or outside scope_group.view: 404. Undo with POST /{brigade_id}/restore (the brigade only)",
         "operationId": "archive_brigade",
         "security": [
           {
@@ -23500,7 +23500,7 @@
           "MEDIA"
         ],
         "summary": "Create Upload Session",
-        "description": "Open a resumable upload. Format, declared Content-Type and size are checked here, before any byte is sent.\nAn observation of an archived post: 409 post_archived.",
+        "description": "Open a resumable upload. Format, declared Content-Type and size are checked here, before any byte is sent.\nAn unknown or archived observation: 404 observation_not_found; an observation of an archived post: 409\npost_archived. Archiving the observation, its post or a unit with its posts later cancels the session (status\naborted, see UPLOADS.md).",
         "operationId": "create_upload_session",
         "security": [
           {
@@ -23913,7 +23913,7 @@
           "MEDIA"
         ],
         "summary": "Append Upload Chunk",
-        "description": "Append one chunk. Headers: Upload-Offset (must equal the session's received_bytes),\nContent-Type application/offset+octet-stream, Content-Length. Body: raw bytes.\n204 with the new Upload-Offset; 409 with the real Upload-Offset when they disagree;\n413 when the chunk is larger than max_chunk_bytes or overruns the declared size; 410 when the session is not open\n(or the stored bytes are gone: the session is aborted); 409 while a complete stores the file.",
+        "description": "Append one chunk. Headers: Upload-Offset (must equal the session's received_bytes),\nContent-Type application/offset+octet-stream, Content-Length. Body: raw bytes.\n204 with the new Upload-Offset; 409 with the real Upload-Offset when they disagree;\n413 when the chunk is larger than max_chunk_bytes or overruns the declared size; 410 when the session is not open\n(or the stored bytes are gone: the session is aborted; an archive of its observation, post or unit cancels it);\n409 while a complete stores the file; 404 observation_not_found when its observation is archived.",
         "operationId": "append_upload_chunk",
         "security": [
           {
@@ -24115,11 +24115,25 @@
             }
           },
           "404": {
-            "description": "`upload_session_not_found`: Upload session not found",
+            "description": "`observation_not_found`: Observation not found; `upload_session_not_found`: Upload session not found",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UploadSessionNotFoundProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ObservationNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UploadSessionNotFoundProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "observation_not_found": "#/components/schemas/ObservationNotFoundProblem",
+                      "upload_session_not_found": "#/components/schemas/UploadSessionNotFoundProblem"
+                    }
+                  }
                 }
               }
             }
@@ -24219,7 +24233,7 @@
           "MEDIA"
         ],
         "summary": "Complete Upload Session",
-        "description": "Turn a fully received session into a media file: size, optional sha256, format and content checks,\nthen the same storage path as the other uploads. Calling it again on a completed session returns the same\nmedia file (200). 409 when bytes are missing (resend from Upload-Offset) or while another complete stores the\nfile; 422 on hash mismatch (session aborted); 415 / 413 as for other uploads (session aborted). The post of the\nsession archived: 409 post_archived, the session stays open and completes after a restore.",
+        "description": "Turn a fully received session into a media file: size, optional sha256, format and content checks,\nthen the same storage path as the other uploads. Calling it again on a completed session returns the same\nmedia file (200). 409 when bytes are missing (resend from Upload-Offset) or while another complete stores the\nfile; 422 on hash mismatch (session aborted); 415 / 413 as for other uploads (session aborted). An archive of the\nobservation, its post or a unit with its posts cancels the session: 410 upload_session_closed (aborted). An\narchived observation: 404 observation_not_found; the post archived: 409 post_archived (the session stays open\nwhen nothing cancelled it). When the archive comes while the file is being stored, the store refuses it (404\nobservation_not_found or 409 post_archived) and the session ends aborted.",
         "operationId": "complete_upload_session",
         "security": [
           {
@@ -24401,11 +24415,25 @@
             }
           },
           "404": {
-            "description": "`upload_session_not_found`: Upload session not found",
+            "description": "`observation_not_found`: Observation not found; `upload_session_not_found`: Upload session not found",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UploadSessionNotFoundProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ObservationNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UploadSessionNotFoundProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "observation_not_found": "#/components/schemas/ObservationNotFoundProblem",
+                      "upload_session_not_found": "#/components/schemas/UploadSessionNotFoundProblem"
+                    }
+                  }
                 }
               }
             }

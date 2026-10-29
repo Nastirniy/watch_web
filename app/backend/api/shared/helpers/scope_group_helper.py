@@ -19,6 +19,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.api.shared.helpers.audit_helper import client_info
+from app.backend.api.shared.helpers.upload_helper import cancel_pending_uploads, remove_cancelled_parts
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.context import AuthContext
 from app.backend.auth.privileges import check_node_restore
@@ -166,7 +167,8 @@ async def archive_unit(request: Request, session: AsyncSession, auth: AuthContex
     unit and where its posts go (its parent). The post checks are skipped while the request's tree shows no active
     post the archive would change (_posts_changed: for a detach only the posts directly in the unit) and asked after
     all if the database held one and the service archived or moved it; then services/scope_groups.py archive_unit
-    (409 corps_has_brigades). One audit row per changed row; committed."""
+    (409 corps_has_brigades). One audit row per changed row; with cascade the pending uploads of the archived posts
+    are cancelled in the same transaction (error post_archived, part files removed after the commit); committed."""
     unit = await lock_unit(session, auth, kind, unit_id)
     action = f"archive_{ScopeGroupKind(kind).value}"
     AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_ARCHIVE, parent_node(unit), action)
@@ -201,7 +203,9 @@ async def archive_unit(request: Request, session: AsyncSession, auth: AuthContex
             new_values=change.new_values,
             **client_info(request, auth)
         )
+    cancelled = await cancel_pending_uploads(request, session, auth, changes.pending_uploads, ErrorCode.POST_ARCHIVED)
     await session.commit()
+    await remove_cancelled_parts(cancelled)
     await session.refresh(unit)
     return unit
 

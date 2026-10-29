@@ -232,7 +232,8 @@ async def archive_brigade(
 ):
     """Archive a brigade (is_deleted=true); the answer is the brigade. scope_group.archive must cover its corps.
     Without cascade its active posts move into its corps, which needs post.update and post.view covering the brigade
-    and the corps; with cascade=true they are archived, which needs post.archive and post.view covering the brigade.
+    and the corps; with cascade=true they are archived, which needs post.archive and post.view covering the brigade,
+    and every pending resumable upload of their observations is cancelled (status aborted, error post_archived).
     No post permission is asked when the brigade has no active post.
     Missing permissions: 403 permission_required_for_action, nothing changes. Holders of a role at the brigade lose its posts. Archived,
     unknown, another kind or outside scope_group.view: 404. Undo with POST /{brigade_id}/restore (the brigade only)"""

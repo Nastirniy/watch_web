@@ -2,7 +2,7 @@
 problems, the observation an upload goes to, and what every upload does once the file is stored."""
 
 import asyncio
-from typing import Optional
+from typing import Iterable, List, Optional
 
 from fastapi import BackgroundTasks, Request
 from sqlmodel import select
@@ -10,12 +10,14 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.models.media import MediaFile
 from app.backend.models.observation import Observation
+from app.backend.models.post import Post
+from app.backend.models.upload_session import UploadSession
 from app.backend.auth.context import AuthContext
 from app.backend.auth.access_control import AccessControlService
 from app.backend.services.media_manager import FileValidationConfig
 from app.backend.services.files import formats
 from app.backend.services.files.names import DANGEROUS_EXTENSIONS, extension_of
-from app.backend.services.media import jobs, renderer, urls as thumb_urls
+from app.backend.services.media import jobs, renderer, uploads, urls as thumb_urls
 from app.backend.services.media.probe import has_no_video_stream, metadata_for, resolve_tools
 from app.backend.enums.general import MediaType, Permissions, UploadPurpose, ThumbnailFormat, ThumbnailSize
 from app.backend.api.shared.helpers.audit_helper import client_info
@@ -29,7 +31,7 @@ from app.backend.api.shared.helpers.post_helper import ensure_post_not_archived
 from app.backend.enums.errors import ErrorCode
 from app.backend.errors.problems import ApiError
 from app.backend.errors.coded import CodedError
-from app.backend.utils.row_locks import lock_first, start_write
+from app.backend.utils.row_locks import lock, lock_first, start_write
 
 _logger = get_api_logger()
 
@@ -111,18 +113,64 @@ def _check_declared_content_type(registry: formats.FormatRegistry, spec: formats
         raise _unsupported(registry, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED, media_type, content_type=declared)
 
 
-async def load_observation_for_upload(session: AsyncSession, auth: AuthContext, observation_id: int) -> Observation:
+async def load_observation_for_upload(session: AsyncSession, auth: AuthContext, observation_id: int,
+                                     lock_parents: bool = False) -> Observation:
     """The observation an upload goes to: 404 when missing or archived, 403 without media.view and media.create in
-    effect at its post, 409 post_archived when its post is archived"""
-    observation = (await session.exec(
-        select(Observation).where(Observation.id == observation_id, Observation.is_deleted == False)
-    )).first()
-    if not observation:
+    effect at its post, 409 post_archived when its post is archived.
+
+    lock_parents for a write that inserts a row of the observation now (an upload session): its post (shared, the
+    columns only: the Post entity's presence subqueries would take the snapshot) as the first statement of the
+    write, then the observation (shared), as the observation create does (posts before observations). An archive of
+    the observation, of the post or of a unit above it waits for the write, or the write sees it archived, and the
+    insert never meets a parent row changed after the snapshot (MariaDB error 1020)."""
+    if not lock_parents:
+        observation = (await session.exec(
+            select(Observation).where(Observation.id == observation_id, Observation.is_deleted == False)
+        )).first()
+        if not observation:
+            raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
+        AccessControlService.check_post(auth, Permissions.MEDIA_VIEW, observation.post_id, "media")
+        AccessControlService.check_post(auth, Permissions.MEDIA_CREATE, observation.post_id, "media")
+        await ensure_post_not_archived(session, observation.post_id)
+        return observation
+
+    # An observation never changes its post: read in the request's read transaction, which lock_first ends
+    post_id = (await session.exec(select(Observation.post_id).where(Observation.id == observation_id))).first()
+    if post_id is None:
+        raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
+    post = await lock_first(session, select(Post.id, Post.is_deleted).where(Post.id == post_id), shared=True)
+    observation = await lock(session, select(Observation).where(Observation.id == observation_id), shared=True)
+    if observation is None or observation.is_deleted:
         raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
     AccessControlService.check_post(auth, Permissions.MEDIA_VIEW, observation.post_id, "media")
     AccessControlService.check_post(auth, Permissions.MEDIA_CREATE, observation.post_id, "media")
-    await ensure_post_not_archived(session, observation.post_id)
+    if post is not None and post.is_deleted:
+        raise ApiError(ErrorCode.POST_ARCHIVED, post_id=post_id)
     return observation
+
+
+async def cancel_pending_uploads(request: Request, session: AsyncSession, auth: AuthContext,
+                                 rows: Iterable[UploadSession], code: ErrorCode) -> List[UploadSession]:
+    """An archive cancels the pending uploads of what it archives (services/media/uploads.py cancel_pending): the
+    sessions it locked (uploads.lock_pending) end as aborted by code, each with its upload_session.abort audit row
+    (the archiving user, the archive's client), in the archive's transaction. Returns the cancelled sessions: the
+    caller removes their part files after its commit (uploads.remove_parts)."""
+    async def audit(row: UploadSession) -> None:
+        await create_audit_log(
+            session, AuditEvent.UPLOAD_SESSION_ABORT,
+            params={"upload_id": row.id, "media_type": row.media_type, "observation_id": row.observation_id,
+                    "file_name": row.original_filename},
+            scope=Node.post(row.post_id), user_id=auth.user.id,
+            new_values={"received_bytes": row.received_bytes, "expected_size": row.expected_size,
+                        "error": code.value},
+            **client_info(request, auth),
+        )
+    return await uploads.cancel_pending(session, rows, code, record=audit)
+
+
+async def remove_cancelled_parts(rows: Iterable[UploadSession]) -> None:
+    """The part files of the sessions cancel_pending_uploads ended, after the archive's commit"""
+    await uploads.remove_parts(rows, storage_root())
 
 
 async def record_upload(

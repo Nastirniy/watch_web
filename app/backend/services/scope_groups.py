@@ -15,6 +15,8 @@ from app.backend.enums.general import ScopeGroupKind
 from app.backend.errors.coded import CodedError
 from app.backend.models.post import Post
 from app.backend.models.scope_group import ScopeGroup
+from app.backend.models.upload_session import UploadSession
+from app.backend.services.media import uploads
 
 # Levels of nested groups between the root and a post: a root group is level 1
 MAX_GROUP_DEPTH = 6
@@ -128,6 +130,9 @@ class ArchiveChanges:
     archived_post_ids: List[int] = field(default_factory=list)
     moved_post_ids: List[int] = field(default_factory=list)
     rows: List[RowChange] = field(default_factory=list)
+    # cascade: the pending upload sessions of the archived posts, locked (services/media/uploads.py lock_pending);
+    # the caller cancels them in its transaction
+    pending_uploads: List[UploadSession] = field(default_factory=list)
 
 
 async def archive_unit(session: AsyncSession, unit: ScopeGroup, cascade: bool) -> ArchiveChanges:
@@ -136,8 +141,10 @@ async def archive_unit(session: AsyncSession, unit: ScopeGroup, cascade: bool) -
     Locks the active units inside it, then the active posts it holds directly or through them, each in id order
     (groups before posts, as every writer does). cascade=True archives all of them; otherwise the posts move one level
     up (a brigade's into its corps, a corps' under the root), and a corps with an active brigade raises
-    corps_has_brigades before anything changes. Posts archived before stay as they are. The caller writes the audit
-    rows (rows) and commits.
+    corps_has_brigades before anything changes. Posts archived before stay as they are. With cascade the posts are
+    locked by id first, then their pending upload sessions (pending_uploads), then the Post entities, whose presence
+    subqueries take the snapshot: a chunk writer renewing its claim meanwhile waits for the archive. The caller
+    cancels pending_uploads, writes the audit rows (rows) and commits.
     """
     changes = ArchiveChanges()
     now = datetime.now(timezone.utc)
@@ -146,6 +153,10 @@ async def archive_unit(session: AsyncSession, unit: ScopeGroup, cascade: bool) -
     if children and not cascade:
         raise CodedError(ErrorCode.CORPS_HAS_BRIGADES)
     holders = [unit.id, *(child.id for child in children)]
+    if cascade:
+        post_ids = await lock_all(session, select(Post.id).where(
+            Post.group_id.in_(holders), Post.is_deleted == False).order_by(Post.id))  # noqa: E712
+        changes.pending_uploads = await uploads.lock_pending(session, post_ids=post_ids)
     posts = await lock_all(session, select(Post).where(
         Post.group_id.in_(holders), Post.is_deleted == False).order_by(Post.id))  # noqa: E712
 

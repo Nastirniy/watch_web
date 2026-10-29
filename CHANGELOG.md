@@ -30,6 +30,23 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   stored value is no address) and `user_agent` is null. New required field `device_masked` on `UserSessionResponse`
   (true when masked). Session `id`, `status` and times are unchanged, so the session can still be ended.
   `GET /auth/sessions` (the caller's own) stays in clear. The audit log is unchanged.
+- An archive cancels every pending upload of what it archives: `POST /observations/{id}/archive`,
+  `POST /posts/{id}/archive` and `POST /corps/{id}/archive` / `POST /brigades/{id}/archive` with `cascade=true` end
+  every `open` resumable upload session of the affected observations as `aborted` in the archive's transaction
+  (`error` `observation_not_found` for an observation, `post_archived` for a post or unit; one
+  `upload_session.abort` audit row each, by the archiving user) and delete the part files after the commit. A
+  restore does not reopen them. A completion that is storing its file is not cancelled: its insert refuses the
+  archived observation or post and the session ends aborted. No schema change (status `aborted` and `error` exist).
+- `PATCH /media/uploads/{id}` and `POST /media/uploads/{id}/complete` answer 404 `observation_not_found` for an
+  archived observation (both now declare it); create answered it already. A completed session still answers its
+  file again.
+- Every media insert (`POST /media/upload`, `POST /media/nginx-upload`, resumable complete) begins its write with the
+  post and observation rows locked shared (`MediaManager._lock_parents`): an observation or post archived while the
+  file was being checked is refused (404 `observation_not_found`, 409 `post_archived`, both declared already).
+  `POST /media/uploads` locks the post and the observation first, complete the observation before the session row.
+  This ends the MariaDB 1020 answers (500) on the `upload_sessions` insert of create and the `media_files` insert of
+  complete seen live on 2026-10-29: reproduced against MariaDB 11.8.9 (snapshot isolation on) with concurrent
+  archives and observation edits, none after the change.
 
 ## User guides and file formats
 

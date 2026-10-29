@@ -21,6 +21,16 @@ applies once, in one place.
 
 `error` of a session is the problem code that ended it, never an internal
 reason (those go to the log).
+
+An archive cancels the pending uploads of what it archives (owner decision
+2026-10-29): the archive of an observation, of a post, or of a unit with its
+posts locks their open sessions (lock_pending) right after its own row and
+ends them as aborted in its transaction (cancel_pending: error
+observation_not_found or post_archived); their part files go after the commit
+(remove_parts). A completion that is storing its file right now is left to
+finish: the transaction that inserts its media row begins with the post and
+observation locks and refuses an archived one (MediaManager.store_file_from_path),
+so nothing lands in an archived observation either way.
 """
 from __future__ import annotations
 
@@ -41,10 +51,11 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.config import settings
 from app.backend.enums.errors import ErrorCode
 from app.backend.models.media import MediaFile
+from app.backend.models.observation import Observation
 from app.backend.models.upload_session import UploadSession
 from app.backend.errors.coded import CodedError
 from app.backend.utils.logging_config import get_logger
-from app.backend.utils.row_locks import lock_first
+from app.backend.utils.row_locks import lock as lock_row, lock_all, lock_first
 
 _logger = get_logger("uploads")
 
@@ -63,6 +74,8 @@ STATUS_COMPLETING = "completing"
 STATUS_COMPLETED = "completed"
 STATUS_ABORTED = "aborted"
 STATUS_EXPIRED = "expired"
+# Sessions an archive cancels: not final yet
+PENDING_STATUSES = (STATUS_OPEN, STATUS_COMPLETING)
 
 # What `error` may answer: problem codes (rows written before codes hold free text, never answered)
 _PROBLEM_CODES = frozenset(code.value for code in ErrorCode)
@@ -125,13 +138,82 @@ def new_session(
     )
 
 
-async def get_session_row(session: AsyncSession, upload_id: str, lock: bool = False) -> Optional[UploadSession]:
+async def get_session_row(session: AsyncSession, upload_id: str, lock: bool = False,
+                          first: bool = True) -> Optional[UploadSession]:
     """The upload session as committed; lock=True locks it as the first statement of the write (utils/row_locks.py),
-    so a chunk, a complete and an abort of one session claim it one after another"""
+    so a chunk, a complete and an abort of one session claim it one after another. first=False: a later lock of a
+    write that began with another one (complete locks the observation first)."""
     query = select(UploadSession).where(UploadSession.id == upload_id)
     if lock:
-        return await lock_first(session, query)
+        return await (lock_first if first else lock_row)(session, query)
     return (await session.exec(query.execution_options(populate_existing=True))).first()
+
+
+async def lock_observation(session: AsyncSession, observation_id: int):
+    """The observation of a session (its id and is_deleted), locked shared as the first statement of a complete's
+    write: an archive of the observation (FOR UPDATE, then its pending sessions) waits for the claim, or the
+    complete sees the observation archived. None when there is none."""
+    return await lock_first(session, select(Observation.id, Observation.is_deleted)
+                            .where(Observation.id == observation_id), shared=True)
+
+
+# ---- cancellation by an archive -------------------------------------------------
+
+async def lock_pending(session: AsyncSession, observation_id: Optional[int] = None,
+                       post_ids: Iterable[int] = ()) -> List[UploadSession]:
+    """The sessions not final yet of the observation, or of the posts, locked (FOR UPDATE, id order): a later lock
+    of an archive, right after its own row and before its first plain read (the snapshot on MariaDB), so that a chunk
+    writer renewing its claim meanwhile waits for the archive instead of meeting it (error 1020). A create and a
+    complete take the parent row first and wait for the archive the same way."""
+    query = select(UploadSession).where(UploadSession.status.in_(PENDING_STATUSES))
+    if observation_id is not None:
+        query = query.where(UploadSession.observation_id == observation_id)
+    else:
+        ids = sorted(set(post_ids))
+        if not ids:
+            return []
+        query = query.where(UploadSession.post_id.in_(ids))
+    return await lock_all(session, query.order_by(UploadSession.id))
+
+
+def _cancellable(row: UploadSession, now: datetime) -> bool:
+    """Open (a chunk writer that may be streaming stops at its next check), or a completion claim that went stale;
+    a completion that is running is left to finish: its media insert refuses the archived observation"""
+    if row.status == STATUS_OPEN:
+        return True
+    since = _aware(row.writer_since)
+    stale = since is not None and since < now - timedelta(seconds=COMPLETION_STALE_SECONDS)
+    return row.status == STATUS_COMPLETING and stale
+
+
+async def cancel_pending(session: AsyncSession, rows: Iterable[UploadSession], code: ErrorCode,
+                         record: Optional[Callable[[UploadSession], Awaitable[None]]] = None) -> List[UploadSession]:
+    """End the locked sessions (lock_pending) as aborted by code, in the caller's transaction (no commit): the abort
+    of abort_session for every one that can end now. record (the caller's audit row) runs for each. Returns the
+    cancelled sessions; the caller removes their part files after its commit (remove_parts)."""
+    now = utcnow()
+    cancelled = [row for row in rows if _cancellable(row, now)]
+    if not cancelled:
+        return []
+    await session.execute(
+        update(UploadSession)
+        .execution_options(synchronize_session=False)
+        .where(UploadSession.id.in_([row.id for row in cancelled]), _endable(now))
+        .values(status=STATUS_ABORTED, error=code.value, writer_token=None, writer_since=None,
+                updated_at=now, last_activity_at=now)
+    )
+    for row in cancelled:
+        _logger.info(f"upload session {row.id} cancelled: its observation {row.observation_id} is archived "
+                     f"({code.value})")
+        if record is not None:
+            await record(row)
+    return cancelled
+
+
+async def remove_parts(rows: Iterable[UploadSession], storage_root: Path) -> None:
+    """The part files of cancelled sessions, after the commit that cancelled them"""
+    for row in rows:
+        await remove_part(row, storage_root)
 
 
 async def list_sessions(

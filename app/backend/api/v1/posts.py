@@ -10,6 +10,8 @@ from app.backend.api.shared.helpers.db_errors import is_unique_violation
 from app.backend.database import get_session
 from app.backend.utils.row_locks import lock, lock_first
 from app.backend.api.shared.helpers.scope_group_helper import lock_groups
+from app.backend.api.shared.helpers.upload_helper import cancel_pending_uploads, remove_cancelled_parts
+from app.backend.services.media import uploads
 from app.backend.models.post import Post
 from app.backend.auth.context import AuthContext
 from app.backend.api.v1.models.request.posts import PostCreate, PostUpdate
@@ -299,12 +301,20 @@ async def _set_post_archived(
 ) -> PostResponse:
     """Shared body of archive / restore: post.view (403 post_access_denied), then post.archive (403 post_write_denied)
     at the post, state checks, flag flip, audit row. An archived post is restored only through grants inherited from
-    a group or the root (a grant on the post itself stops applying while it is archived)."""
+    a group or the root (a grant on the post itself stops applying while it is archived). An archive cancels the
+    pending uploads of the post's observations in its transaction (upload_helper.cancel_pending_uploads)."""
     current_user = auth.user
     AccessControlService.check_post(auth, Permissions.POST_VIEW, post_id)
     AccessControlService.check_post(auth, Permissions.POST_ARCHIVE, post_id)
     # A restore locks the group first (groups before posts): an archive of the group cannot slip in between
     started = await lock_groups(session, auth.tree, [] if archived else [auth.tree.post_group.get(post_id)])
+    pending = []
+    if archived:
+        # The post row by its id (the entity's presence subqueries are a plain read: the snapshot), then its pending
+        # upload sessions, before that snapshot: a chunk writer renewing its claim waits for the archive
+        await (lock if started else lock_first)(session, select(Post.id).where(Post.id == post_id))
+        pending = await uploads.lock_pending(session, post_ids=[post_id])
+        started = True
     post = await (lock if started else lock_first)(session, select(Post).where(Post.id == post_id))
     if not post or (archived and post.is_deleted):
         raise ApiError(ErrorCode.POST_NOT_FOUND)
@@ -329,7 +339,9 @@ async def _set_post_archived(
         new_values=post.model_dump(),
         **client_info(request, auth)
     )
+    cancelled = await cancel_pending_uploads(request, session, auth, pending, ErrorCode.POST_ARCHIVED)
     await session.commit()
+    await remove_cancelled_parts(cancelled)
     await session.refresh(post)
     return await _post_response(session, auth, post)
 
@@ -354,8 +366,10 @@ async def archive_post(
     restored; assignments inherited from a group or the root keep read access to its data. Its observations and media
     become read-only history: writes answer 409 post_archived, except that callers with post.archive in effect at the
     post (plus observation.view, observation.archive and ownership or observation.manage_any) still archive and
-    restore its observations. It cannot become a home post. Hidden from lists unless include_deleted=true.
-    Undo with POST /{post_id}/restore. Already archived or unknown: 404.
+    restore its observations. It cannot become a home post. Hidden from lists unless include_deleted=true. Every
+    pending resumable upload of its observations is cancelled at once (status aborted, error post_archived; the
+    received bytes are deleted); a restore does not reopen it. Undo with POST /{post_id}/restore. Already archived or
+    unknown: 404.
     """
     return await _set_post_archived(request, session, auth, post_id, archived=True)
 

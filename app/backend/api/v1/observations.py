@@ -44,6 +44,8 @@ from app.backend.api.v1.models.response.observations import (
     ObservationFrequencyResponse,
 )
 from app.backend.api.shared.helpers.post_helper import ensure_post_not_archived, refuse_archived_post
+from app.backend.api.shared.helpers.upload_helper import cancel_pending_uploads, remove_cancelled_parts
+from app.backend.services.media import uploads
 from app.backend.api.shared.helpers.observation_helper import (
     get_observation_for_write,
     get_frequency_or_404,
@@ -539,11 +541,15 @@ async def _set_observation_archived(
     """Shared body of archive / restore: observation.view and observation.archive in effect at the post, ownership
     (observation.manage_any in effect there overrides), flag flip, audit row. In an archived post only grants
     inherited from a group or the root apply (a grant on the post itself stops applying: 403), and only callers with
-    post.archive in effect at the post archive and restore; everyone else gets 409 post_archived."""
+    post.archive in effect at the post archive and restore; everyone else gets 409 post_archived. An archive cancels
+    the pending uploads of the observation in its transaction (upload_helper.cancel_pending_uploads)."""
     current_user = auth.user
     observation = await lock_first(session, select(Observation).where(Observation.id == observation_id))
     if not observation:
         raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
+    # Its pending upload sessions next, before any plain read (the snapshot): a chunk writer renewing its claim waits
+    # for the archive; a create or a complete waits on the observation row
+    pending = await uploads.lock_pending(session, observation_id=observation.id) if archived else []
 
     AccessControlService.check_post(auth, Permissions.OBSERVATION_VIEW, observation.post_id, "observation")
     AccessControlService.check_post(auth, Permissions.OBSERVATION_ARCHIVE, observation.post_id, "observation")
@@ -583,8 +589,11 @@ async def _set_observation_archived(
         new_values=observation.model_dump(),
         **client_info(request, auth)
     )
+    cancelled = await cancel_pending_uploads(request, session, auth, pending, ErrorCode.OBSERVATION_NOT_FOUND)
     await session.commit()
-    logger.info(f"User {current_user.username} {action}d observation {observation.id}")
+    await remove_cancelled_parts(cancelled)
+    logger.info(f"User {current_user.username} {action}d observation {observation.id}"
+                + (f", {len(cancelled)} pending uploads cancelled" if cancelled else ""))
     return await _load_observation_response(session, observation.id)
 
 
@@ -606,10 +615,11 @@ async def archive_observation(
     """Archive an observation (is_deleted=true). observation.view and observation.archive in effect at its post;
     owner or observation.manage_any in effect there.
 
-    Nothing is removed: media files stay attached, the row is hidden from lists unless include_deleted=true.
-    Undo with POST /{observation_id}/restore. Already archived or unknown: 404. In an archived post it also needs
-    post.archive in effect at the post (otherwise 409 post_archived); a grant on the archived post itself no longer
-    applies (403).
+    Nothing is removed: media files stay attached, the row is hidden from lists unless include_deleted=true. Every
+    pending resumable upload of the observation is cancelled at once (status aborted, error observation_not_found;
+    its received bytes are deleted); a restore does not reopen it. Undo with POST /{observation_id}/restore. Already
+    archived or unknown: 404. In an archived post it also needs post.archive in effect at the post (otherwise 409
+    post_archived); a grant on the archived post itself no longer applies (403).
     """
     return await _set_observation_archived(request, session, auth, observation_id, archived=True)
 

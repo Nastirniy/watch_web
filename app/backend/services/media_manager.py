@@ -12,6 +12,8 @@ import aiofiles.os
 from pydantic import BaseModel, Field, field_validator
 
 from app.backend.models.media import MediaFile
+from app.backend.models.observation import Observation
+from app.backend.models.post import Post
 from app.backend.services.media.jobs import enqueue_poster
 from app.backend.services.files.formats import UnsupportedMediaFormat, FileTooLarge, content_type_allowed, hard_limit_bytes
 from app.backend.services.files.names import DANGEROUS_EXTENSIONS, extension_of, sanitize_filename
@@ -22,6 +24,7 @@ from app.backend.enums.general import MediaType
 from app.backend.utils.logging_config import get_logger
 from app.backend.errors.coded import CodedError
 from app.backend.enums.errors import ErrorCode
+from app.backend.utils.row_locks import lock, lock_first
 
 _logger = get_logger("media_manager")
 
@@ -146,6 +149,26 @@ class MediaManager:
 
         return organized_path
 
+    @staticmethod
+    async def _lock_parents(session: AsyncSession, observation_id: int) -> None:
+        """The first statements of the write that inserts the media row: the post of the observation, then the
+        observation, both shared and by their columns only (the Post entity's presence subqueries would take the
+        snapshot), as the observation create does (posts before observations). An archive of the observation, of
+        its post or of a unit with its posts waits for the insert, or the insert sees it archived: CodedError
+        observation_not_found, post_archived (nothing lands in an archived observation, owner decision
+        2026-10-29). The insert never meets a parent row changed after the snapshot (MariaDB error 1020)."""
+        # An observation never changes its post: read in the transaction lock_first ends
+        post_id = (await session.exec(select(Observation.post_id).where(Observation.id == observation_id))).first()
+        if post_id is None:
+            raise CodedError(ErrorCode.OBSERVATION_NOT_FOUND)
+        post = await lock_first(session, select(Post.id, Post.is_deleted).where(Post.id == post_id), shared=True)
+        observation = await lock(session, select(Observation.id, Observation.is_deleted)
+                                 .where(Observation.id == observation_id), shared=True)
+        if observation is None or observation.is_deleted:
+            raise CodedError(ErrorCode.OBSERVATION_NOT_FOUND)
+        if post is not None and post.is_deleted:
+            raise CodedError(ErrorCode.POST_ARCHIVED, post_id=post_id)
+
     async def _compute_file_hash(self, file_path: Path, chunk_size: int = 1024 * 1024) -> str:
         """Compute SHA256 hash by streaming the file in chunks (default 1MB), never loading entirely into memory"""
         sha256 = hashlib.sha256()
@@ -197,6 +220,8 @@ class MediaManager:
         content type and aliases, the text rule for a text/* format. The row stores the format's canonical content
         type (validation_config.content_type).
 
+        The write of the row begins with the post and observation locks (_lock_parents): an archived observation
+        is CodedError observation_not_found, an archived post post_archived, whatever the caller checked before.
         Commits the new row before the move (a file in storage always has its row) and deletes it again when the
         move fails. A new video row keeps its poster hold (enqueue_poster): the caller releases it once the file is
         in storage, in its last transaction with the audit row of the upload (record_upload).
@@ -255,6 +280,9 @@ class MediaManager:
             dimensions = None
             if content_type_allowed(MediaType.IMAGE.value, stored_type):
                 dimensions = await self._extract_image_dimensions(source)
+
+            # -- The parent rows, locked: the write that inserts the row begins here --
+            await self._lock_parents(session, observation_id)
 
             # -- Deduplication --
             if self.enable_deduplication:

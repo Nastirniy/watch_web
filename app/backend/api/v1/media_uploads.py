@@ -13,6 +13,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, Request, Response, status as fapi_status
 from starlette.requests import ClientDisconnect
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.config import settings
@@ -24,6 +25,7 @@ from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.auth.scope import Node
 from app.backend.enums.audit import AuditEvent
 from app.backend.services.audit import create_audit_log
+from app.backend.models.observation import Observation
 from app.backend.models.upload_session import UploadSession
 from app.backend.api.shared.helpers.media_helper import storage_root
 from app.backend.api.shared.helpers.post_helper import ensure_post_not_archived
@@ -142,6 +144,18 @@ def _incomplete(row: UploadSession) -> ApiError:
     )
 
 
+async def _refuse_archived_observation(session: AsyncSession, row: UploadSession,
+                                      archived: Optional[bool] = None) -> None:
+    """404 observation_not_found when the observation of an open session is archived (an archive cancels the
+    sessions of what it archives: one archived without that, before this rule or by a restored backup, is refused
+    here). archived: the flag of the locked row, read here otherwise."""
+    if archived is None:
+        archived = (await session.exec(
+            select(Observation.is_deleted).where(Observation.id == row.observation_id))).first()
+    if archived is None or archived:
+        raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND, headers=_session_headers(row))
+
+
 async def _require_open(session: AsyncSession, row: UploadSession) -> UploadSession:
     """409 while a complete stores the file, 410 Gone with the final status when the session can no longer
     take chunks"""
@@ -196,8 +210,11 @@ async def create_upload_session(
     version: PublishedVersion = Depends(request_version),
 ):
     """Open a resumable upload. Format, declared Content-Type and size are checked here, before any byte is sent.
-    An observation of an archived post: 409 post_archived."""
-    observation = await load_observation_for_upload(session, auth, body.observation_id)
+    An unknown or archived observation: 404 observation_not_found; an observation of an archived post: 409
+    post_archived. Archiving the observation, its post or a unit with its posts later cancels the session (status
+    aborted, see UPLOADS.md)."""
+    # The write begins with the post and the observation (shared): an archive waits for it or is seen
+    observation = await load_observation_for_upload(session, auth, body.observation_id, lock_parents=True)
     registry = await formats.observation_registry(session)
     spec = check_declared_format(registry, body.media_type, body.original_filename, body.content_type)
     if body.expected_size > spec.effective_limit_bytes:
@@ -277,7 +294,7 @@ async def head_upload_session(
             ErrorCode.UPLOAD_OFFSET_MISMATCH, ErrorCode.UPLOAD_WRITER_BUSY, ErrorCode.UPLOAD_SESSION_CLOSED,
             ErrorCode.UPLOAD_SESSION_COMPLETING, ErrorCode.UPLOAD_BYTES_MISSING,
             ErrorCode.UPLOAD_CHUNK_OVERRUN, ErrorCode.UPLOAD_CHUNK_TOO_LARGE, ErrorCode.UPLOAD_CHUNK_CONTENT_TYPE,
-            *GUARDED,
+            ErrorCode.OBSERVATION_NOT_FOUND, *GUARDED,
         ),
     },
 )
@@ -293,9 +310,11 @@ async def append_upload_chunk(
     Content-Type application/offset+octet-stream, Content-Length. Body: raw bytes.
     204 with the new Upload-Offset; 409 with the real Upload-Offset when they disagree;
     413 when the chunk is larger than max_chunk_bytes or overruns the declared size; 410 when the session is not open
-    (or the stored bytes are gone: the session is aborted); 409 while a complete stores the file.
+    (or the stored bytes are gone: the session is aborted; an archive of its observation, post or unit cancels it);
+    409 while a complete stores the file; 404 observation_not_found when its observation is archived.
     """
     row = await _require_open(session, await _owned_session(session, auth, upload_id, lock=True))
+    await _refuse_archived_observation(session, row)
 
     raw_offset = upload_offset
     if raw_offset is None or not raw_offset.isdigit():
@@ -369,7 +388,8 @@ async def append_upload_chunk(
         ErrorCode.MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED,
         ErrorCode.MEDIA_EXTENSION_DANGEROUS, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, ErrorCode.MEDIA_TYPE_UNKNOWN,
         ErrorCode.UPLOAD_CHECKSUM_MISMATCH, ErrorCode.MEDIA_STORE_FAILED, ErrorCode.POST_ARCHIVED,
-        ErrorCode.MEDIA_UPLOADS_BUSY, ErrorCode.UPLOAD_SESSION_COMPLETING, ErrorCode.UPLOAD_WRITER_BUSY, *GUARDED,
+        ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_UPLOADS_BUSY, ErrorCode.UPLOAD_SESSION_COMPLETING,
+        ErrorCode.UPLOAD_WRITER_BUSY, *GUARDED,
     ),
 )
 async def complete_upload_session(
@@ -383,15 +403,24 @@ async def complete_upload_session(
     Turn a fully received session into a media file: size, optional sha256, format and content checks,
     then the same storage path as the other uploads. Calling it again on a completed session returns the same
     media file (200). 409 when bytes are missing (resend from Upload-Offset) or while another complete stores the
-    file; 422 on hash mismatch (session aborted); 415 / 413 as for other uploads (session aborted). The post of the
-    session archived: 409 post_archived, the session stays open and completes after a restore.
+    file; 422 on hash mismatch (session aborted); 415 / 413 as for other uploads (session aborted). An archive of the
+    observation, its post or a unit with its posts cancels the session: 410 upload_session_closed (aborted). An
+    archived observation: 404 observation_not_found; the post archived: 409 post_archived (the session stays open
+    when nothing cancelled it). When the archive comes while the file is being stored, the store refuses it (404
+    observation_not_found or 409 post_archived) and the session ends aborted.
     """
-    row = await _expire_if_due(session, await _owned_session(session, auth, upload_id, lock=True))
+    # Ownership and scope on the session as read, then the write begins with the observation row (shared): an archive
+    # of the observation waits for the claim or is seen; then the session row
+    row = await _owned_session(session, auth, upload_id)
+    observation = await uploads.lock_observation(session, row.observation_id)
+    row = await _expire_if_due(session, await uploads.get_session_row(session, upload_id, lock=True, first=False))
     if row.status == uploads.STATUS_COMPLETED and row.media_file_id:
         return await _completed_result(session, row)
     if row.status not in (uploads.STATUS_OPEN, uploads.STATUS_COMPLETING):
         raise _closed(row)
-    # A completed session above answers its file again (no write); nothing new goes into an archived post
+    # A completed session above answers its file again (no write); nothing new goes into an archived observation or
+    # post
+    await _refuse_archived_observation(session, row, observation.is_deleted if observation is not None else None)
     await ensure_post_not_archived(session, row.post_id)
     if int(row.received_bytes) != int(row.expected_size):
         raise _incomplete(row)
