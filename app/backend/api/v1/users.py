@@ -170,7 +170,10 @@ async def create_user(
     With certificate (PEM or DER) the user gets a certificate row (source uploaded) with its plain values (CN,
     serial, validity), the hashes the login matches and certificate_label as its readable name (default: the CN cut to
     64 characters). The same certificate registered already, for any user, answers 400 certificate_taken; an expired
-    one is accepted. Without a certificate the user exists but cannot log in until one is issued or uploaded.
+    one is accepted. Without a certificate the user exists but cannot log in until one is issued or uploaded. A
+    certificate needs what POST /users/{user_id}/certificates/upload needs: certificate.view and certificate.create in
+    effect at the new user's home node (the home post, the root without one), else 403
+    permission_required_for_action (missing names the first one lacking) and nothing is written.
 
     The form fields are described by UserCreateForm. The user gets the base roles of user_type (GET /user-types): the
     tree base role at the home post (post_id), or at the root without a home post or for a type whose base role
@@ -185,6 +188,11 @@ async def create_user(
 
     # Scope before the post: an outsider gets the same 403 for an unknown, an archived and a live post outside it
     base_roles = await _base_assignments(session, auth, user_data.user_type, user_data.post_id)
+    if certificate is not None:
+        # A login certificate is registered for the new user: the rule of the certificate upload
+        home = ROOT if user_data.post_id is None else Node.post(user_data.post_id)
+        for permission in (Permissions.CERTIFICATE_VIEW, Permissions.CERTIFICATE_CREATE):
+            AccessControlService.check_covers(auth, permission, home, "register_certificate")
     if user_data.post_id is not None:
         post = (await session.exec(select(Post).where(Post.id == user_data.post_id))).first()
         if not post:

@@ -15,6 +15,12 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   used to read the user's assignments before the lock, so an assignment added meanwhile could pass a stale check.
   Answers and codes are unchanged. `pki issue` takes the same lock (`lock_certificate_owner` in
   `services/certificates.py`).
+- `POST /users/` with a `certificate` file needs `certificate.view` and `certificate.create` in effect at the new
+  user's home node (the home post, the root without one), as `POST /users/{user_id}/certificates/upload` does; else
+  403 `permission_required_for_action` (`permission` and `missing` name the first one lacking, `action`
+  `register_certificate`) and nothing is written. It used to register the login certificate with `user.create`
+  alone. Without a certificate nothing changes. Contract: the description of `create_user` (the code was declared
+  already).
 
 ## User guides and file formats
 

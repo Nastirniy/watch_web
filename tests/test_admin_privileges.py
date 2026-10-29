@@ -195,7 +195,9 @@ async def test_grants_are_checked_at_the_node(db):
 @pytest.mark.asyncio
 async def test_create_user_only_with_a_base_role_within_the_callers_permissions(client, db, headers):
     post = await make_post(db)
-    creator = await make_user(db, perms=[ADMIN_TRUE, "user.view", "user.create", *VIEW], post_id=post.id)
+    # certificate.view and certificate.create: the certificate file of the requests (POST /users with a certificate)
+    creator = await make_user(db, perms=[ADMIN_TRUE, "user.view", "user.create", "certificate.view",
+                                         "certificate.create", *VIEW], post_id=post.id)
 
     for name, fields in (("would_be_admin", {"user_type": "system_administrator"}), ("rootless_viewer", {"user_type": "viewer"})):
         response = await client.post(USERS, headers=headers(creator), files=certificate_file(f"cn-{name}"),
@@ -217,7 +219,8 @@ async def test_create_user_only_with_a_base_role_within_the_callers_permissions(
 async def test_create_user_needs_user_create_covering_the_node(client, db, headers):
     a, b = await make_post(db), await make_post(db)
     creator = await make_user(db)
-    await assign(db, creator, await make_role(db, ["user.view", "user.create", *VIEW]), Node.post(a.id))
+    await assign(db, creator, await make_role(db, ["user.view", "user.create", "certificate.view", "certificate.create",
+                                                   *VIEW]), Node.post(a.id))
 
     outside = await client.post(USERS, headers=headers(creator), files=certificate_file("cn-outside"),
                                 data={"username": "outside", "username_alias": "Outside", "user_type": "viewer",
