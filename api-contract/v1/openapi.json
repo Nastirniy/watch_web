@@ -457,7 +457,7 @@
           "AUTHENTICATION"
         ],
         "summary": "Get User Sessions",
-        "description": "The caller's live sessions (online or idle), newest first",
+        "description": "The caller's live sessions (online or idle), newest first, with their address and user agent in clear (the\ncaller's own sessions are never masked)",
         "operationId": "get_user_sessions",
         "responses": {
           "200": {
@@ -2136,7 +2136,7 @@
           "USERS"
         ],
         "summary": "List User Sessions",
-        "description": "Login sessions of a user, newest first. status is computed when read: online (a request within\nsecurity.online_threshold_seconds), idle (live, client quiet) or ended; a session past its absolute end or\nidle timeout is ended even if nothing has recorded it yet. user.view must cover the user (403 user_self_only\notherwise); an archived user, like GET /{user_id}, only for callers with user.archive covering them (404\notherwise).",
+        "description": "Login sessions of a user, newest first. status is computed when read: online (a request within\nsecurity.online_threshold_seconds), idle (live, client quiet) or ended; a session past its absolute end or\nidle timeout is ended even if nothing has recorded it yet. user.view must cover the user (403 user_self_only\notherwise); an archived user, like GET /{user_id}, only for callers with user.archive covering them (404\notherwise).\n\nOnly the user themself sees the device of their sessions: for any other caller ip_address is masked to its\nnetwork (IPv4 /16, IPv6 /48, CIDR form; null when the stored value is no address), user_agent is null and\ndevice_masked is true. id, status and times stay, so an administrator sees that a session exists and can end it\n(POST /users/{user_id}/sessions/{session_id}/end).",
         "operationId": "list_user_sessions",
         "security": [
           {
@@ -2444,7 +2444,7 @@
           "USERS"
         ],
         "summary": "End User Session",
-        "description": "Revoke one live session of a user (revoke_cause ended_by_admin). Ended already: 409 with its end_reason.\nArchived users: 404. Needs user.view covering the user (403 user_self_only, as GET /users/{user_id}), user.update\ncovering the user and every assignment of the user grantable by the caller (403 target_user_more_privileged),\nanswered before the archived state of the user and the session.",
+        "description": "Revoke one live session of a user (revoke_cause ended_by_admin). Ended already: 409 with its end_reason.\nArchived users: 404. Needs user.view covering the user (403 user_self_only, as GET /users/{user_id}), user.update\ncovering the user and every assignment of the user grantable by the caller (403 target_user_more_privileged),\nanswered before the archived state of the user and the session. The answer masks the device of the session for\na caller other than the user, as GET /users/{user_id}/sessions does (device_masked).",
         "operationId": "end_user_session",
         "security": [
           {
@@ -69065,7 +69065,8 @@
                 "type": "null"
               }
             ],
-            "title": "Ip Address"
+            "title": "Ip Address",
+            "description": "The client address of the login. Masked (device_masked) for a caller other than the user: the network in CIDR form, IPv4 /16 (192.168.0.0/16), IPv6 /48 (2001:db8:1::/48), null when the stored value is no address"
           },
           "user_agent": {
             "anyOf": [
@@ -69076,7 +69077,8 @@
                 "type": "null"
               }
             ],
-            "title": "User Agent"
+            "title": "User Agent",
+            "description": "The User-Agent of the login; null when masked (device_masked)"
           },
           "created_at": {
             "type": "string",
@@ -69100,6 +69102,11 @@
               }
             ],
             "title": "Last Activity At"
+          },
+          "device_masked": {
+            "type": "boolean",
+            "title": "Device Masked",
+            "description": "True when the caller is not the user of the session: ip_address shows only its network and user_agent is null"
           },
           "ended_at": {
             "anyOf": [
@@ -69141,10 +69148,11 @@
           "id",
           "status",
           "created_at",
-          "expires_at"
+          "expires_at",
+          "device_masked"
         ],
         "title": "UserSessionResponse",
-        "description": "A session as the session routes of a user list it, ended ones included"
+        "description": "A session as the session routes of a user list it, ended ones included. Only the user themself sees the device\nof their sessions in clear; for anyone else ip_address is masked to its network and user_agent is null\n(device_masked true): the session's id, status and times stay, enough to end it."
       },
       "UserSessionsResponse": {
         "properties": {

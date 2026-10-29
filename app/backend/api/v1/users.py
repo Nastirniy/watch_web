@@ -658,7 +658,12 @@ async def list_user_sessions(
     security.online_threshold_seconds), idle (live, client quiet) or ended; a session past its absolute end or
     idle timeout is ended even if nothing has recorded it yet. user.view must cover the user (403 user_self_only
     otherwise); an archived user, like GET /{user_id}, only for callers with user.archive covering them (404
-    otherwise)."""
+    otherwise).
+
+    Only the user themself sees the device of their sessions: for any other caller ip_address is masked to its
+    network (IPv4 /16, IPv6 /48, CIDR form; null when the stored value is no address), user_agent is null and
+    device_masked is true. id, status and times stay, so an administrator sees that a session exists and can end it
+    (POST /users/{user_id}/sessions/{session_id}/end)."""
     target = await _get_user_or_404(session, user_id)
     # Visibility before the state: an outsider gets the same 403 for an archived and a live user
     AccessControlService.check_user_view(auth, target)
@@ -669,7 +674,8 @@ async def list_user_sessions(
         query = query.where(session_lifetimes.live_clause())
     rows = (await session.exec(query.order_by(UserSession.created_at.desc()).limit(limit))).all()
     now = datetime.now(timezone.utc)
-    return [build_session_response(row, session_lifetimes.session_state(row, now)) for row in rows]
+    masked = target.id != auth.user.id
+    return [build_session_response(row, session_lifetimes.session_state(row, now), masked) for row in rows]
 
 
 @router.post(
@@ -725,7 +731,8 @@ async def end_user_session(
     """Revoke one live session of a user (revoke_cause ended_by_admin). Ended already: 409 with its end_reason.
     Archived users: 404. Needs user.view covering the user (403 user_self_only, as GET /users/{user_id}), user.update
     covering the user and every assignment of the user grantable by the caller (403 target_user_more_privileged),
-    answered before the archived state of the user and the session."""
+    answered before the archived state of the user and the session. The answer masks the device of the session for
+    a caller other than the user, as GET /users/{user_id}/sessions does (device_masked)."""
     target = await _get_user_or_404(session, user_id, lock="user")
     # Scope before the state: an outsider gets the same 403 for an archived and a live user
     await check_target_user(session, auth, target, Permissions.USER_UPDATE)
@@ -757,7 +764,7 @@ async def end_user_session(
     )
     await session.commit()
     await session.refresh(row)
-    return build_session_response(row, session_lifetimes.session_state(row))
+    return build_session_response(row, session_lifetimes.session_state(row), masked=target.id != auth.user.id)
 
 
 # Role assignments: a role held at one node of the scope tree (auth/assignments.py has the rules and their order)

@@ -22,6 +22,15 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   alone. Without a certificate nothing changes. Contract: the description of `create_user` (the code was declared
   already).
 
+### Changed
+
+- Session details are the user's own: `GET /users/{user_id}/sessions` and the answer of
+  `POST /users/{user_id}/sessions/{session_id}/end` mask the device for any caller other than the user:
+  `ip_address` is the network in CIDR form (IPv4 `/16`, IPv6 `/48`, an IPv4-mapped address as IPv4; null when the
+  stored value is no address) and `user_agent` is null. New required field `device_masked` on `UserSessionResponse`
+  (true when masked). Session `id`, `status` and times are unchanged, so the session can still be ended.
+  `GET /auth/sessions` (the caller's own) stays in clear. The audit log is unchanged.
+
 ## User guides and file formats
 
 ### Changed

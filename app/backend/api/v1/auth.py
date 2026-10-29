@@ -310,7 +310,8 @@ async def get_user_sessions(
         auth: AuthContext = Depends(require()),
         session: AsyncSession = Depends(get_session)
 ):
-    """The caller's live sessions (online or idle), newest first"""
+    """The caller's live sessions (online or idle), newest first, with their address and user agent in clear (the
+    caller's own sessions are never masked)"""
     rows = (await session.exec(
         select(UserSession)
         .where(UserSession.user_id == auth.user.id, live_clause())

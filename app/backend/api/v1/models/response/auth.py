@@ -1,3 +1,4 @@
+import ipaddress
 from typing import Dict, Iterable, Optional, List
 from pydantic import BaseModel, Field
 
@@ -89,8 +90,24 @@ class SessionInfoResponse(BaseModel):
     last_activity_at: Optional[ResponseDatetime] = None
 
 
+# Prefix lengths of the network a masked address shows (owner decision 2026-10-29)
+MASK_PREFIX_IPV4 = 16
+MASK_PREFIX_IPV6 = 48
+
+
 class UserSessionResponse(SessionInfoResponse):
-    """A session as the session routes of a user list it, ended ones included"""
+    """A session as the session routes of a user list it, ended ones included. Only the user themself sees the device
+    of their sessions in clear; for anyone else ip_address is masked to its network and user_agent is null
+    (device_masked true): the session's id, status and times stay, enough to end it."""
+    ip_address: Optional[str] = Field(
+        default=None, description="The client address of the login. Masked (device_masked) for a caller other than "
+                                  "the user: the network in CIDR form, IPv4 /16 (192.168.0.0/16), IPv6 /48 "
+                                  "(2001:db8:1::/48), null when the stored value is no address")
+    user_agent: Optional[str] = Field(
+        default=None, description="The User-Agent of the login; null when masked (device_masked)")
+    device_masked: bool = Field(
+        description="True when the caller is not the user of the session: ip_address shows only its network and "
+                    "user_agent is null")
     ended_at: Optional[ResponseDatetime] = None
     end_reason: Optional[SessionEndReason] = Field(
         default=None, description="Ended sessions: logout, expired, idle_timeout or revoked (null for sessions "
@@ -176,14 +193,30 @@ def build_login_response(auth: AuthContext, assignments: Iterable[AssignmentView
     )
 
 
-def build_session_response(row: UserSession, state: SessionState) -> UserSessionResponse:
-    """A session with its computed state; the end fields are set only for ended sessions"""
+def masked_ip_address(value: Optional[str]) -> Optional[str]:
+    """The network of an address in CIDR form: IPv4 /16, IPv6 /48 (an IPv4-mapped IPv6 address as its IPv4 network);
+    None for a value that is no address"""
+    try:
+        address = ipaddress.ip_address(value or "")
+    except ValueError:
+        return None
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped
+    if isinstance(address, ipaddress.IPv4Address):
+        return str(ipaddress.IPv4Network((int(address), MASK_PREFIX_IPV4), strict=False))
+    return str(ipaddress.IPv6Network((int(address), MASK_PREFIX_IPV6), strict=False))
+
+
+def build_session_response(row: UserSession, state: SessionState, masked: bool = False) -> UserSessionResponse:
+    """A session with its computed state; the end fields are set only for ended sessions. masked for every caller
+    but the user of the session: the address cut to its network (masked_ip_address), no user agent."""
     ended = state.status is SessionStatus.ENDED
     return UserSessionResponse(
         id=row.id,
         status=state.status,
-        ip_address=row.ip_address,
-        user_agent=row.user_agent,
+        ip_address=masked_ip_address(row.ip_address) if masked else row.ip_address,
+        user_agent=None if masked else row.user_agent,
+        device_masked=masked,
         created_at=row.created_at,
         expires_at=row.expires_at if ended else state.ends_at,
         last_activity_at=row.last_activity,
