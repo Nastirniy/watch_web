@@ -232,3 +232,48 @@ def test_migration_is_idempotent(tmp_path):
     assert after[40] == ("video/matroska", "video/matroska")
     assert {k: v for k, v in after.items() if k != 40} == {k: v for k, v in before.items() if k != 40}
     assert _formats(db_file) == formats_before
+
+
+def _database_with_media(tmp_path: Path, rows) -> Path:
+    """A database at 031 with only the given media rows (id, mime_type, playback_type, extension)"""
+    db_file = tmp_path / "media_types_only.db"
+    assert run_migrate(db_file).returncode == 0
+    assert _run_downgrade(db_file, PREVIOUS).returncode == 0
+    conn = sqlite3.connect(db_file)
+    for row in rows:
+        _insert_media(conn, *row)
+    conn.commit()
+    conn.close()
+    return db_file
+
+
+def test_only_the_aliases_that_occur_are_looped_over(tmp_path):
+    """One read of the distinct values picks the aliases: the log names exactly those found (mime_type, and the base
+    of playback_type), every other alias of the map gets no statement"""
+    db_file = _database_at_031(tmp_path, SEEDED_AT_031)
+    up = run_migrate(db_file)
+    assert up.returncode == 0, up.stdout + up.stderr
+    out = up.stdout + up.stderr
+    assert ("media_files aliases found: mime_type ['application/ogg', 'audio/mp3', 'audio/x-m4a', 'audio/x-wav', "
+            "'image/pjpeg', 'video/x-m4v', 'video/x-matroska', 'text/plain'], playback_type ['application/ogg', "
+            "'audio/mp3', 'audio/x-m4a', 'audio/x-wav', 'video/x-m4v', 'video/x-matroska']") in out
+
+
+def test_an_alias_only_in_playback_type_is_made_canonical(tmp_path):
+    """A row whose mime_type is canonical but whose playback_type still starts with the alias"""
+    db_file = _database_with_media(tmp_path, [(1, "video/matroska", 'video/x-matroska; codecs="vp8"', ".mkv"),
+                                              (2, "video/mp4", "video/mp4", ".mp4")])
+    up = run_migrate(db_file)
+    assert up.returncode == 0, up.stdout + up.stderr
+    assert "mime_type [], playback_type ['video/x-matroska']" in up.stdout + up.stderr
+    assert _media(db_file) == {1: ("video/matroska", 'video/matroska; codecs="vp8"'), 2: ("video/mp4", "video/mp4")}
+
+
+def test_no_alias_found_runs_no_batch(tmp_path):
+    db_file = _database_with_media(tmp_path, [(1, "video/mp4", 'video/mp4; codecs="avc1"', ".mp4"),
+                                              (2, "image/png", None, ".png")])
+    up = run_migrate(db_file)
+    assert up.returncode == 0, up.stdout + up.stderr
+    out = up.stdout + up.stderr
+    assert "media_files aliases found: mime_type [], playback_type []" in out and "batches" not in out
+    assert _media(db_file) == {1: ("video/mp4", 'video/mp4; codecs="avc1"'), 2: ("image/png", None)}

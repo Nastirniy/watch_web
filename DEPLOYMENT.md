@@ -364,6 +364,35 @@ unknown permission name; seeding never deletes it). A rollback that must keep th
 the backup of step 1 (`BACKUPS.md`), which loses everything written since; otherwise stay on the new version and fix
 forward.
 
+### Media types (migration 032)
+
+Migration `032_canonical_media_types` rewrites stored media types to their canonical (IANA first) names through a
+frozen map (`migrations/support/media_types_v1.py`; CHANGELOG, "Media types"): the aliases in
+`media_files.mime_type` and at the start of `media_files.playback_type` (`video/x-matroska` -> `video/matroska`,
+`audio/x-wav` -> `audio/wav`, `image/pjpeg` -> `image/jpeg`, ...), only on rows whose file extension belongs to the
+target format, `text/plain` on `.md` / `.csv` files by the extension, `upload_sessions.declared_content_type`, the
+seeded Matroska format row while it still holds `video/x-matroska`, and the trimmed alias lists of the seeded
+document formats while they are still exactly as seeded. An administrator's own values and formats stay. No schema
+change; `033_user_guides` after it only creates two empty tables.
+
+1. Make a backup first (`BACKUPS.md`).
+2. The start runs it, like every migration; coming from before 031 the start runs 031 and then 032 in the same
+   start (see "Audit log (migration 031)" for 031's duration, which dominates). Stop the api and let the start of the
+   new version migrate. Every statement commits on its own, so a run that stops halfway is finished by the next
+   start (the version stays 031 until 032 ends; a second run changes only rows still holding an alias).
+3. Expected duration: seconds per million media rows. 032 reads the distinct `mime_type` and `playback_type` values
+   once (two full reads of `media_files`), then updates, in batches of 10,000 ids, only for the aliases that occur:
+   with one alias present that is 100 batches of 2 UPDATEs over a primary-key range per million rows, none when no
+   alias occurs. Estimated, not measured on MariaDB at that size: on SQLite (1,000,000 rows on a workstation, 1% of
+   them `video/x-matroska`) the whole upgrade 031 -> 033 took 5.0 s (1.8 s with no alias, of which 1.3 s is
+   Alembic's start); the previous form of 032 (29 UPDATEs per batch whatever occurred) took 10.8 s and 7.9 s there.
+   On MariaDB count about 1 minute per million rows as an upper bound (the reads plus a few hundred range UPDATEs
+   and the rewritten rows; the test server's 7,002 rows were done within its 14 s start). Count the rows first:
+   `SELECT COUNT(*) FROM media_files`.
+
+Rollback: the downgrade changes nothing (the canonical names are valid for the code before 032). Older code accepts
+document uploads as observation media: see the CHANGELOG rollback note before running it.
+
 ### Scheduled cleanup (cron)
 
 Every installation that accepts offloaded uploads needs this job; without it rejected upload bodies (up to the format

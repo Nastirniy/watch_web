@@ -4,7 +4,9 @@ The code stores an upload under its format's canonical name since this revision 
 first; services/files/formats.py). Rows written before hold what the sniffer said, which may be an alias
 (video/x-matroska, audio/x-wav, image/pjpeg). Through the frozen map migrations/support/media_types_v1.py:
 - media_files.mime_type and the base of media_files.playback_type ('video/x-matroska; codecs="..."' ->
-  'video/matroska; codecs="..."'), in batches of 10,000 ids, never past the highest id read at the start;
+  'video/matroska; codecs="..."'), in batches of 10,000 ids, never past the highest id read at the start; first one
+  read of the distinct mime_type and playback_type values (up to that id) picks the aliases that occur (compared in
+  lower case, as MariaDB's collation compares), and the batches update only those (none occurring: no batch);
 - upload_sessions.declared_content_type (a short-lived table: one statement per name);
 - only on a row whose file extension belongs to the target format (EXTENSIONS: media_files.file_extension with or
   without the dot, the extension of upload_sessions.original_filename): application/ogg on a .ogv file or
@@ -90,26 +92,45 @@ def _session_of(canonical: str):
     return sa.or_(*[name.like("%" + extension) for extension in EXTENSIONS[canonical]])
 
 
+def _present(conn, high: int) -> tuple:
+    """The aliases of the map that occur up to id high: (in mime_type, as the base of playback_type, of BY_EXTENSION
+    in mime_type), each compared in lower case (MariaDB's collation matches case-insensitively; the updates decide)"""
+    up_to = MEDIA.c.id <= high
+    mime = {value.lower() for (value,) in conn.execute(sa.select(MEDIA.c.mime_type).where(up_to).distinct())
+            if value}
+    playback = {value.split(";", 1)[0].lower() for (value,) in conn.execute(
+        sa.select(MEDIA.c.playback_type).where(up_to, MEDIA.c.playback_type.is_not(None)).distinct()) if value}
+    return (sorted(alias for alias in ALIASES if alias.lower() in mime),
+            sorted(alias for alias in ALIASES if alias.lower() in playback),
+            sorted(alias for alias in BY_EXTENSION if alias.lower() in mime))
+
+
 def _media_files(conn) -> None:
     low, high = conn.execute(sa.select(sa.func.min(MEDIA.c.id), sa.func.max(MEDIA.c.id))).one()
     if low is None:
+        return
+    in_mime, in_playback, shared = _present(conn, high)
+    _log(f"media_files aliases found: mime_type {in_mime + shared}, playback_type {in_playback}")
+    if not (in_mime or in_playback or shared):
         return
     start, batches, changed = low, 0, 0
     while start <= high:
         end = min(start + BATCH - 1, high)
         in_batch = MEDIA.c.id.between(start, end)
-        for alias, canonical in sorted(ALIASES.items()):
-            of_format = _media_of(canonical)
-            changed += conn.execute(sa.update(MEDIA).where(in_batch, MEDIA.c.mime_type == alias, of_format)
-                                    .values(mime_type=canonical)).rowcount or 0
+        for alias in in_mime:
+            changed += conn.execute(sa.update(MEDIA).where(in_batch, MEDIA.c.mime_type == alias,
+                                                           _media_of(ALIASES[alias]))
+                                    .values(mime_type=ALIASES[alias])).rowcount or 0
+        for alias in in_playback:
+            canonical = ALIASES[alias]
             # the base of the RFC 6381 string: the alias alone or followed by its parameters
             rest = sa.func.substr(MEDIA.c.playback_type, len(alias) + 1, type_=sa.String)
             conn.execute(sa.update(MEDIA).where(
-                in_batch, of_format,
+                in_batch, _media_of(canonical),
                 sa.or_(MEDIA.c.playback_type == alias, MEDIA.c.playback_type.like(alias + ";%")))
                 .values(playback_type=sa.literal(canonical, sa.String) + rest))
-        for alias, by_extension in sorted(BY_EXTENSION.items()):
-            for extension, canonical in sorted(by_extension.items()):
+        for alias in shared:
+            for extension, canonical in sorted(BY_EXTENSION[alias].items()):
                 changed += conn.execute(sa.update(MEDIA).where(
                     in_batch, MEDIA.c.mime_type == alias,
                     sa.func.lower(MEDIA.c.file_extension).in_(_extension_values(extension)))
