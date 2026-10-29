@@ -9,7 +9,7 @@ from app.backend.errors.coded import invalid
 from app.backend.enums.errors import FieldErrorCode
 from app.backend.services.files.formats import FORBIDDEN_CONTENT_TYPES, OPAQUE_CONTENT_TYPES, content_type_allowed
 
-ACCEPTED_MEDIA_TYPES = (MediaType.IMAGE.value, MediaType.VIDEO.value, MediaType.AUDIO.value, MediaType.DOCUMENT.value)
+ACCEPTED_MEDIA_TYPES = tuple(member.value for member in MediaType)
 # RFC 6838 type/subtype, lower case only
 CONTENT_TYPE_RE = re.compile(r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$")
 EXTENSION_RE = re.compile(r"^\.[a-z0-9]{1,10}$")

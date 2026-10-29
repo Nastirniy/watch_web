@@ -131,6 +131,7 @@ async def probe_missing(limit: int, refresh: bool = False) -> int:
     """
     from sqlmodel import select
     from app.backend import database
+    from app.backend.enums.general import TIMED_MEDIA_TYPES, MediaType
     from app.backend.models.media import MediaFile
     from app.backend.services.media import probe
 
@@ -143,7 +144,7 @@ async def probe_missing(limit: int, refresh: bool = False) -> int:
     done = failed = 0
     try:
         async with session_maker() as session:
-            query = select(MediaFile).where(MediaFile.is_deleted == False, MediaFile.media_type.in_(("video", "audio")))
+            query = select(MediaFile).where(MediaFile.is_deleted == False, MediaFile.media_type.in_(sorted(TIMED_MEDIA_TYPES)))
             if not refresh:
                 query = query.where(MediaFile.playback_type.is_(None))
             rows = (await session.exec(query.order_by(MediaFile.id).limit(limit))).all()
@@ -160,7 +161,7 @@ async def probe_missing(limit: int, refresh: bool = False) -> int:
                       f"size={values.get('width')}x{values.get('height')}")
             if refresh:
                 images = (await session.exec(
-                    select(MediaFile).where(MediaFile.is_deleted == False, MediaFile.media_type == "image")
+                    select(MediaFile).where(MediaFile.is_deleted == False, MediaFile.media_type == MediaType.IMAGE.value)
                     .order_by(MediaFile.id).limit(limit)
                 )).all()
                 for row in images:

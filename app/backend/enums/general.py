@@ -193,11 +193,23 @@ class AppEnvironment(Enum):
     PRODUCTION = "production"
 
 
+# Media type of a stored file (media_files.media_type, media_formats.media_type)
 class MediaType(Enum):
     IMAGE = "image"
     VIDEO = "video"
     AUDIO = "audio"
     DOCUMENT = "document"
+
+
+# Media types a player plays: they have a duration and codecs (services/media/probe.py), so a playback_type
+TIMED_MEDIA_TYPES = frozenset({MediaType.VIDEO.value, MediaType.AUDIO.value})
+
+
+class UploadTransport(str, Enum):
+    """How an uploaded file reached the API (audit param via of media.create)"""
+    MULTIPART = "multipart"            # one multipart/form-data request
+    NGINX_OFFLOAD = "nginx_offload"    # body stored by nginx, the API gets its path
+    RESUMABLE = "resumable"            # upload session in chunks (UPLOADS.md)
 
 
 class UploadPurpose(str, Enum):

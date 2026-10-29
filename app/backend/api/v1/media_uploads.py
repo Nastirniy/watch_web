@@ -18,7 +18,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.config import settings
 from app.backend.database import get_session
-from app.backend.enums.general import Permissions
+from app.backend.enums.general import Permissions, UploadTransport
 from app.backend.enums.media_types import ContentType
 from app.backend.enums.routes import MediaRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
@@ -440,14 +440,14 @@ async def complete_upload_session(
         await uploads.release_completion(session, upload_id, token)
         raise
 
-    media_file = await record_upload(request, session, auth, media_file_id, row.observation_id, row.post_id, row.original_filename, background_tasks, "resumable", upload_id=row.id)
-    return upload_result(media_file, "resumable", upload_id=row.id)
+    media_file = await record_upload(request, session, auth, media_file_id, row.observation_id, row.post_id, row.original_filename, background_tasks, UploadTransport.RESUMABLE, upload_id=row.id)
+    return upload_result(media_file, UploadTransport.RESUMABLE, upload_id=row.id)
 
 
 async def _completed_result(session: AsyncSession, row: UploadSession) -> UploadResultResponse:
     """A completed session answers its media file again: nothing is stored, probed or audited"""
     media_file = await uploads.completed_media(session, row)
-    return upload_result(media_file, "resumable, already completed", upload_id=row.id)
+    return upload_result(media_file, UploadTransport.RESUMABLE, upload_id=row.id, repeated=True)
 
 
 async def _claim_refused(session: AsyncSession, upload_id: str) -> UploadResultResponse:

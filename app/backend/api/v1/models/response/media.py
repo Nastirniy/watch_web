@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, model_validator
 from sqlalchemy import inspect as sa_inspect
 
+from app.backend.enums.general import TIMED_MEDIA_TYPES, UploadTransport
 from app.backend.models.media import MediaFile
 from app.backend.api.v1.models.response.users import UserPublicResponse
 from app.backend.utils.validators import PlainTextModel, ResponseDatetime
@@ -10,6 +11,7 @@ from app.backend.config import settings
 from app.backend.services.media.storyboards import client_status
 from app.backend.services.media.urls import thumbnail_urls
 from app.backend.api.shared.openapi_docs import header
+from app.backend.enums.media_types import Disposition
 
 
 class ThumbnailUrls(BaseModel):
@@ -44,7 +46,7 @@ def media_info_payload(media: MediaFile) -> Dict[str, Any]:
         "duration_seconds": media.duration_seconds,
         "video_codec": media.video_codec,
         "audio_codec": media.audio_codec,
-        "playback_type": media.playback_type or (media.mime_type if media.media_type in ("video", "audio") else None),
+        "playback_type": media.playback_type or (media.mime_type if media.media_type in TIMED_MEDIA_TYPES else None),
         "user": user,
     }
 
@@ -149,10 +151,12 @@ class UploadResultResponse(BaseModel):
     upload_id: Optional[str] = None
 
 
-def upload_result(media_file: MediaFile, transport: str, upload_id: Optional[str] = None) -> UploadResultResponse:
-    """The body every upload route answers once the file is stored and recorded"""
+def upload_result(media_file: MediaFile, transport: UploadTransport, upload_id: Optional[str] = None,
+                  repeated: bool = False) -> UploadResultResponse:
+    """The body every upload route answers once the file is stored and recorded (repeated: a complete of an upload
+    session that completed before)"""
     return UploadResultResponse(
-        message=f"File uploaded successfully ({transport})",
+        message=f"File uploaded successfully ({transport.value}{', already completed' if repeated else ''})",
         media_file_id=media_file.id,
         original_filename=media_file.original_filename,
         file_size=media_file.file_size,
@@ -203,13 +207,14 @@ FILE_SAFETY_HEADERS = {
 
 
 def disposition_header(kind: str, name: str) -> dict:
+    # kind: a Disposition value, or prose naming the ones a route answers
     """Content-Disposition with the name twice (RFC 6266, RFC 8187)"""
     return header(f"{kind}; filename=\"<{name}, ASCII fallback>\"; filename*=UTF-8''<{name}, UTF-8 percent-encoded>")
 
 
 # Headers of the file and thumbnail routes
 ORIGINAL_FILE_HEADERS = {
-    "Content-Disposition": disposition_header("attachment (download) or inline (stream)", "original name"),
+    "Content-Disposition": disposition_header(f"{Disposition.ATTACHMENT} (download) or {Disposition.INLINE} (stream)", "original name"),
     **FILE_SAFETY_HEADERS,
     "ETag": header("sha256 of the file, quoted (/stream always; /download only when the API serves the file "
                    "itself: behind nginx nginx's own ETag)"),

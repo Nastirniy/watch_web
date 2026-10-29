@@ -337,11 +337,12 @@ async def test_session_list_scope(client, db, headers, storage):
 async def test_upload_result_is_built_from_the_stored_row(db, storage):
     """Every upload route answers the same body, built by the v1 response module from the stored media row"""
     from app.backend.api.v1.models.response.media import UploadResultResponse, upload_result
+    from app.backend.enums.general import UploadTransport
     from tests.helpers import make_media
 
     _, user, observation = await _scene(db)
     media = await make_media(db, observation, user)
-    result = upload_result(media, "resumable", upload_id="abc")
+    result = upload_result(media, UploadTransport.RESUMABLE, upload_id="abc")
     assert isinstance(result, UploadResultResponse)
     assert result.model_dump(exclude={"thumbnail_urls"}) == {
         "message": "File uploaded successfully (resumable)", "media_file_id": media.id,

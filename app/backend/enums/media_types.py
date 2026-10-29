@@ -102,3 +102,25 @@ class TopLevelType(str, Enum):
 
     def __str__(self) -> str:
         return self.value
+
+
+class StreamType(str, Enum):
+    """The type of one stream inside a container, as ffprobe reports it (codec_type); services/media/probe.py reads
+    the first stream of each"""
+
+    VIDEO = "video"
+    AUDIO = "audio"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class Disposition(str, Enum):
+    """How a served file is presented (Content-Disposition type, RFC 6266 section 4.2); services/files/serve.py
+    builds the header"""
+
+    ATTACHMENT = "attachment"   # saved as a download
+    INLINE = "inline"           # shown or played in the page
+
+    def __str__(self) -> str:
+        return self.value

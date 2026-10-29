@@ -5,6 +5,7 @@ from pydantic import Field
 from app.backend.api.v1.models.response.media import FILE_SAFETY_HEADERS, disposition_header
 from app.backend.api.shared.openapi_docs import header
 from app.backend.api.versioning import PublishedVersion
+from app.backend.enums.media_types import Disposition
 from app.backend.enums.routes import GuideRoutes
 from app.backend.services.guides import GuideFileView, GuideView
 from app.backend.utils.validators import ResponseDatetime, SecureBaseModel
@@ -64,7 +65,7 @@ def guide_to_response(view: GuideView, version: PublishedVersion) -> GuideRespon
 
 # Headers of GET /guides/{guide_id}/files/{file_id}/download
 GUIDE_FILE_HEADERS = {
-    "Content-Disposition": disposition_header("attachment", "file_name"),
+    "Content-Disposition": disposition_header(Disposition.ATTACHMENT.value, "file_name"),
     **FILE_SAFETY_HEADERS,
     "ETag": header("sha256 of the file, quoted, when the API serves the file itself; behind nginx nginx's own ETag "
                    "(the sha256 is GuideFileResponse.sha256)"),

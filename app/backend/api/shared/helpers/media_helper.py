@@ -16,6 +16,7 @@ from app.backend.models.observation import Observation
 from app.backend.config import settings
 from app.backend.errors.problems import ApiError
 from app.backend.enums.errors import ErrorCode
+from app.backend.enums.media_types import Disposition
 
 
 def storage_root() -> Path:
@@ -95,7 +96,7 @@ def _read_range(path: Path, start: int, length: int) -> Iterator[bytes]:
             yield chunk
 
 
-def stored_file_response(path: Path, *, content_type: str, filename: str, disposition: str, etag: Optional[str],
+def stored_file_response(path: Path, *, content_type: str, filename: str, disposition: Disposition, etag: Optional[str],
                          range_header: Optional[str], missing: ErrorCode = ErrorCode.MEDIA_FILE_MISSING) -> Response:
     """The one answer for a stored file under the uploads root (services/files/serve.py has its headers): behind
     nginx X-Accel-Redirect (nginx serves it, Range included, and adds the safety headers itself), otherwise the API
@@ -131,7 +132,7 @@ def stored_file_response(path: Path, *, content_type: str, filename: str, dispos
     )
 
 
-def original_file_response(media_file: MediaFile, disposition: str, range_header: Optional[str] = None) -> Response:
+def original_file_response(media_file: MediaFile, disposition: Disposition, range_header: Optional[str] = None) -> Response:
     """The original of a media file (download: attachment, stream: inline) under its original name and stored type"""
     response = stored_file_response(
         media_file.resolve_path(storage_root()), content_type=media_file.mime_type,

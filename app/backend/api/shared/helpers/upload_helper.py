@@ -19,7 +19,7 @@ from app.backend.services.files import formats
 from app.backend.services.files.names import DANGEROUS_EXTENSIONS, extension_of
 from app.backend.services.media import jobs, renderer, uploads, urls as thumb_urls
 from app.backend.services.media.probe import has_no_video_stream, metadata_for, resolve_tools
-from app.backend.enums.general import MediaType, Permissions, UploadPurpose, ThumbnailFormat, ThumbnailSize
+from app.backend.enums.general import TIMED_MEDIA_TYPES, MediaType, Permissions, UploadPurpose, UploadTransport, ThumbnailFormat, ThumbnailSize
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.auth.scope import Node
 from app.backend.enums.audit import AuditEvent
@@ -182,7 +182,7 @@ async def record_upload(
     post_id: int,
     original_filename: str,
     background_tasks: BackgroundTasks,
-    transport: str,
+    transport: UploadTransport,
     upload_id: Optional[str] = None,
 ) -> MediaFile:
     """The last transaction of an upload, once the file is in storage: probed video/audio metadata, the release of
@@ -195,11 +195,11 @@ async def record_upload(
     takes the poster like any other (it probes the metadata too; `media_tools probe-missing` fills metadata of
     other media types).
 
-    transport: how the file came (the audit param via, an identifier): multipart, nginx_offload or resumable."""
+    transport: how the file came (the audit param via)."""
     media_file = (await session.exec(select(MediaFile).where(MediaFile.id == media_file_id))).one()
     await start_write(session)
     metadata = None
-    if media_file.media_type in (MediaType.VIDEO.value, MediaType.AUDIO.value):
+    if media_file.media_type in TIMED_MEDIA_TYPES:
         metadata = await _probe_headers(media_file)
 
     # The write begins with the row lock, on the committed copy: a worker may have claimed the poster meanwhile (a
@@ -221,7 +221,7 @@ async def record_upload(
     await create_audit_log(
         session, AuditEvent.MEDIA_CREATE,
         params={"observation_id": observation_id, "file_name": original_filename, "media_type": media_file.media_type,
-                "via": transport, **({"upload_id": upload_id} if upload_id else {})},
+                "via": transport.value, **({"upload_id": upload_id} if upload_id else {})},
         scope=Node.post(post_id), resource_id=media_file_id,
         user_id=auth.user.id, new_values=media_file.model_dump(),
         **client_info(request, auth),

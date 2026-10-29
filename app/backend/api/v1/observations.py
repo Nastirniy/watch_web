@@ -18,7 +18,7 @@ from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
 from app.backend.auth.access_control import AccessControlService
 from app.backend.enums.general import Permissions, ObservationStatus, ObservationReportType
-from app.backend.enums.media_types import ContentType
+from app.backend.enums.media_types import ContentType, Disposition
 from app.backend.enums.routes import ObservationRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.api.shared.helpers.db_errors import is_write_conflict
@@ -439,7 +439,7 @@ async def get_report_types(
     response_class=Response,
     responses={
         **file_response("Excel report", [ContentType.XLSX],
-                            {"Content-Disposition": disposition_header("attachment", "report.xlsx"),
+                            {"Content-Disposition": disposition_header(Disposition.ATTACHMENT.value, "report.xlsx"),
                              **FILE_SAFETY_HEADERS}),
         **problems(
             AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION,
@@ -517,7 +517,7 @@ async def generate_observation_report(
     filename = f"observations_report_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.xlsx"
     return Response(
         content=excel_bytes,
-        headers=file_headers(content_type=ContentType.XLSX.value, filename=filename, disposition="attachment",
+        headers=file_headers(content_type=ContentType.XLSX.value, filename=filename, disposition=Disposition.ATTACHMENT,
                              etag=None),
     )
 

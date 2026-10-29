@@ -54,7 +54,7 @@ from app.backend.database import get_session
 from app.backend.enums.audit import AuditEvent
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.enums.general import Permissions
-from app.backend.enums.media_types import ContentType
+from app.backend.enums.media_types import ContentType, Disposition
 from app.backend.enums.routes import GuideRoutes
 from app.backend.errors.coded import CodedError
 from app.backend.errors.openapi import GUARDED, problems
@@ -386,7 +386,7 @@ async def download_guide_file(
     row = await _file_or_404(session, guide_id, file_id, include_deleted=params.include_deleted)
     response = stored_file_response(
         file_store.guide_file_location(row), content_type=row.content_type, filename=row.file_name,
-        disposition="attachment", etag=row.sha256, range_header=request.headers.get("range"),
+        disposition=Disposition.ATTACHMENT, etag=row.sha256, range_header=request.headers.get("range"),
         missing=ErrorCode.GUIDE_FILE_NOT_FOUND,
     )
     response.headers["X-File-Hash"] = row.sha256

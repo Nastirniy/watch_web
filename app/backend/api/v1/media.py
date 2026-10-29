@@ -29,8 +29,8 @@ from app.backend.services.files import formats
 from app.backend.services.media import jobs, renderer, uploads, urls as thumb_urls
 from app.backend.services.media.storyboards import build_vtt, layout_usable, status_for
 from app.backend.services.files.formats import UnsupportedMediaFormat, FileTooLarge
-from app.backend.enums.general import Permissions, PosterStatus, StoryboardStatus, ThumbnailFormat, ThumbnailSize, ThumbnailStatus
-from app.backend.enums.media_types import ContentType
+from app.backend.enums.general import Permissions, UploadTransport, PosterStatus, StoryboardStatus, ThumbnailFormat, ThumbnailSize, ThumbnailStatus
+from app.backend.enums.media_types import ContentType, Disposition
 from app.backend.enums.routes import MediaRoutes
 from app.backend.utils.content_type import served_content_type
 from app.backend.api.shared.helpers.audit_helper import client_info
@@ -227,7 +227,7 @@ async def download_media_file(
     media_file = await get_media_or_404(session, media_id)
     observation = await get_observation_from_media(session, media_file)
     AccessControlService.check_post(auth, Permissions.MEDIA_VIEW, observation.post_id, "media")
-    return original_file_response(media_file, "attachment", request.headers.get("range"))
+    return original_file_response(media_file, Disposition.ATTACHMENT, request.headers.get("range"))
 
 
 @router.get(
@@ -253,7 +253,7 @@ async def stream_media_file(
     media_file = await get_media_or_404(session, media_id)
     observation = await get_observation_from_media(session, media_file)
     AccessControlService.check_post(auth, Permissions.MEDIA_VIEW, observation.post_id, "media")
-    return original_file_response(media_file, "inline", request.headers.get("range"))
+    return original_file_response(media_file, Disposition.INLINE, request.headers.get("range"))
 
 
 async def _set_media_archived(request: Request, session: AsyncSession, auth: AuthContext, media_id: int, archived: bool) -> MediaFileInfo:
@@ -404,8 +404,8 @@ async def upload_complete_file(
     finally:
         temp_path.unlink(missing_ok=True)
 
-    media_file = await record_upload(request, session, auth, media_file_id, observation_id, post_id, original_filename, background_tasks, "multipart")
-    return upload_result(media_file, "multipart")
+    media_file = await record_upload(request, session, auth, media_file_id, observation_id, post_id, original_filename, background_tasks, UploadTransport.MULTIPART)
+    return upload_result(media_file, UploadTransport.MULTIPART)
 
 
 @router.post(
@@ -481,8 +481,8 @@ async def nginx_upload_file(
             _logger.warning(f"Nginx upload: could not remove temp file {temp_file}: {exc!r}")
 
     media_file = await record_upload(request, session, auth, media_file_id, observation_id, post_id, original_filename,
-                                     background_tasks, "nginx_offload")
-    return upload_result(media_file, "nginx offload")
+                                     background_tasks, UploadTransport.NGINX_OFFLOAD)
+    return upload_result(media_file, UploadTransport.NGINX_OFFLOAD)
 
 
 @router.post(

@@ -23,10 +23,10 @@ from typing import Callable, Dict, Mapping, Optional
 from urllib.parse import quote
 
 from app.backend.config import settings
+from app.backend.enums.media_types import Disposition
 from app.backend.services.files.names import extension_of
 from app.backend.utils.content_type import served_content_type
 
-DISPOSITIONS = frozenset({"attachment", "inline"})
 CONTENT_SECURITY_POLICY = "sandbox; default-src 'none'"
 NOSNIFF = "nosniff"
 # Cache-Control of a stored file; nginx-app.conf sends the same where it serves one
@@ -98,19 +98,18 @@ def _ascii_fallback(filename: str) -> str:
     return "".join(out)
 
 
-def content_disposition(disposition: str, filename: str) -> str:
+def content_disposition(disposition: Disposition, filename: str) -> str:
     """'attachment; filename="<ASCII fallback>"; filename*=UTF-8''<name, percent-encoded>' (RFC 6266, RFC 8187).
     Both parts always: for an ASCII name they are the same. A name longer than FILENAME_BYTE_BUDGET is cut, its
     extension kept; the header is at most MAX_CONTENT_DISPOSITION_LENGTH. ValueError for another disposition"""
-    if disposition not in DISPOSITIONS:
-        raise ValueError("disposition must be attachment or inline")
+    disposition = Disposition(disposition)
     name = _cut(_printable(filename).strip() or _EMPTY_NAME, _utf8_size)
     encoded = quote(name.encode("utf-8"), safe=_ATTR_CHAR_SAFE)
     fallback = _cut(_ascii_fallback(name), len)
-    return f"{disposition}; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
+    return f"{disposition.value}; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
 
 
-def file_headers(*, content_type: str, filename: str, disposition: str, etag: Optional[str]) -> Dict[str, str]:
+def file_headers(*, content_type: str, filename: str, disposition: Disposition, etag: Optional[str]) -> Dict[str, str]:
     """Headers of every file answer: the served Content-Type (text types with their charset), the name, nosniff,
     the sandbox CSP, and the ETag when the file has one (quoted here)"""
     headers = {

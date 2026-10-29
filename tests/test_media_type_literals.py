@@ -86,21 +86,56 @@ def test_the_vocabulary_is_the_only_place_and_migrations_do_not_import_it():
         assert "enums.media_types" not in path.read_text(encoding="utf-8"), path
 
 
-# The modules that compare a parsed top-level type with a name: they use enums.media_types.TopLevelType, the one
-# set of those names (final review, item 8)
-TOP_LEVEL_USERS = ("services/files/sniff.py", "utils/content_type.py", "services/files/formats.py")
+# The names of the media vocabulary used alone: a top-level type, a stream type of ffprobe, a Content-Disposition
+# type, the media type of a row and the upload transport each have their enum. Their values are written only in
+# app/backend/enums (the enum is the one set of those names), never as a string constant elsewhere in app/backend.
+ENUMS = BACKEND / "enums"
 
 
-def test_top_level_names_used_alone_come_from_the_vocabulary():
-    from app.backend.enums.media_types import TopLevelType
+def _vocabulary_names() -> dict:
+    from app.backend.enums.general import MediaType, UploadTransport
+    from app.backend.enums.media_types import Disposition, StreamType, TopLevelType
+
+    names = {}
+    for enum in (TopLevelType, StreamType, Disposition, MediaType, UploadTransport):
+        for member in enum:
+            names.setdefault(member.value.lower(), []).append(f"{enum.__name__}.{member.name}")
+    return names
+
+
+def vocabulary_name_literals(source: str, names: dict, name: str = "<source>") -> list:
+    tree = ast.parse(source, filename=name)
+    docstrings = _docstrings(tree)
+    return sorted((node.lineno, node.value) for node in ast.walk(tree)
+                  if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings
+                  and node.value.strip().lower() in names)
+
+
+def test_the_name_scan_finds_what_it_must():
+    source = '''
+"""video in a docstring is fine"""
+A = kind == "video"
+B = media_type in ("Image", "audio")
+C = disposition_header("attachment", "x")
+D = record(transport="nginx_offload")
+E = "a video in prose"
+F = {"message": "m", "model": "x"}
+'''
+    assert vocabulary_name_literals(source, _vocabulary_names()) == [
+        (3, "video"), (4, "Image"), (4, "audio"), (5, "attachment"), (6, "nginx_offload")]
+
+
+def test_vocabulary_names_used_alone_come_from_their_enum():
     from app.backend.services.files.formats import ALLOWED_TOP_LEVEL
+    from app.backend.enums.media_types import TopLevelType
 
+    names = _vocabulary_names()
     offenders = []
-    for rel in TOP_LEVEL_USERS:
-        tree = ast.parse((BACKEND / rel).read_text(encoding="utf-8"))
-        docstrings = _docstrings(tree)
-        offenders += [f"{rel}:{node.lineno}: {node.value!r}" for node in ast.walk(tree)
-                      if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings
-                      and node.value.strip().lower() in TOP_LEVEL]
-    assert offenders == [], "use app.backend.enums.media_types.TopLevelType:\n" + "\n".join(offenders)
+    for path in sorted(BACKEND.rglob("*.py")):
+        if ENUMS in path.parents or MIGRATIONS in path.parents:
+            continue
+        for line, value in vocabulary_name_literals(path.read_text(encoding="utf-8"), names, str(path)):
+            offenders.append(f"{path.relative_to(BACKEND).as_posix()}:{line}: {value!r} "
+                             f"(use {' or '.join(names[value.strip().lower()])})")
+    assert offenders == [], "a vocabulary name written as a literal:\n" + "\n".join(offenders)
     assert all(isinstance(name, TopLevelType) for names in ALLOWED_TOP_LEVEL.values() for name in names)

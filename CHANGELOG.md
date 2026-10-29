@@ -48,6 +48,19 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   complete seen live on 2026-10-29: reproduced against MariaDB 11.8.9 (snapshot isolation on) with concurrent
   archives and observation edits, none after the change.
 
+## Media vocabulary without literals
+
+### Changed
+
+- The names of the media vocabulary used alone have one enum each and are no longer written as literals in
+  `app/backend`: `TopLevelType` (MIME family), `StreamType` (ffprobe stream type, new), `Disposition`
+  (`attachment` / `inline`, RFC 6266, new; `services/files/serve.py` takes a member), `MediaType` (row media type)
+  and `UploadTransport` (`multipart`, `nginx_offload`, `resumable`: the audit param `via` of `media.create`, new).
+  `tests/test_media_type_literals.py` now checks every module of `app/backend` (it checked three) against the values
+  of these enums.
+- The `message` of an upload answer behind nginx reads `File uploaded successfully (nginx_offload)` (was
+  `nginx offload`); `message` is prose, no client reads it.
+
 ## User guides and file formats
 
 ### Changed

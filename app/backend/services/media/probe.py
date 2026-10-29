@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Mapping, Optional, Tuple
 
 from app.backend.config import settings
+from app.backend.enums.media_types import StreamType
 from app.backend.utils.content_type import parse_content_type
 from app.backend.services.media.posters import PosterError, _run, resolve_binary
 
@@ -153,14 +154,14 @@ def _probe_json(ffprobe: str, source: Path, timeout: float) -> ProbeResult:
         pass
     for stream in data.get("streams", []):
         kind = stream.get("codec_type")
-        if kind == "video" and result.video_codec is None:
+        if kind == StreamType.VIDEO and result.video_codec is None:
             result.video_codec = stream.get("codec_name")
             result.video_profile = stream.get("profile")
             level = stream.get("level")
             result.video_level = int(level) if isinstance(level, int) and level > 0 else None
             result.width, result.height = _displayed(stream.get("width") or None, stream.get("height") or None,
                                                      _stream_rotation(stream))
-        elif kind == "audio" and result.audio_codec is None:
+        elif kind == StreamType.AUDIO and result.audio_codec is None:
             result.audio_codec = stream.get("codec_name")
             result.audio_profile = stream.get("profile")
     return result
