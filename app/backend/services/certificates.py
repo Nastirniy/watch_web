@@ -230,15 +230,27 @@ async def session_certificate(session: AsyncSession, user_id: int,
     return result.first()
 
 
-async def lock_certificate_owner(session: AsyncSession, user_id: int) -> Optional[User]:
+async def lock_certificate_owner(session: AsyncSession, user_id: int, administrators: bool = False) -> Optional[User]:
     """The first locks of every certificate write (issue, upload, export, revoke): the user row as the first
     statement of the write (its id only), then the User entity, read as committed (utils/row_locks.py); None when
     there is no such user. The caller checks the target (check_target_user) after these locks: every writer of a
     user's assignments locks the user row first, so the check reads the assignments as they stand until the commit.
     The id comes first because locking the entity reads its presence subqueries (user_sessions), a plain read that
     takes the snapshot on MariaDB: the snapshot then starts after the user row is held, as in _lock_user_and_roles
-    (api/v1/users.py), and a session touch (which holds the user row shared, auth/sessions.py) commits before it."""
-    if await lock_first(session, select(User.id).where(User.id == user_id)) is None:
+    (api/v1/users.py), and a session touch (which holds the user row shared, auth/sessions.py) commits before it.
+
+    administrators: for a revocation, which may take an effective administrator away: integrity.lock_administrators
+    becomes the first statement of the write and the user row the next lock, the one order of every such write."""
+    # integrity imports this module (state_clause): imported here to avoid the cycle
+    from app.backend.auth.integrity import lock_administrators
+
+    user_row = select(User.id).where(User.id == user_id)
+    if administrators:
+        await lock_administrators(session)
+        found = await lock_row(session, user_row)
+    else:
+        found = await lock_first(session, user_row)
+    if found is None:
         return None
     return await lock_row(session, select(User).where(User.id == user_id))
 
@@ -399,16 +411,21 @@ async def revoke_certificate(
         write_audit: WriteAudit,
 ) -> UserCertificate:
     """Revoke a certificate (final): the user row (locked again: the caller began the write with
-    lock_certificate_owner), then the certificate row and read it again, CodedError
+    lock_certificate_owner(administrators=True)), then the certificate row and read it again, CodedError
     certificate_already_revoked when it is revoked; set revoked_at, revoked_by and revocation_reason, end the live
     sessions bound to it, write the audit row (write_audit), commit. Everything lands in one transaction: a session of
     the revoked device never outlives the revocation. The CRL is published by the caller after the commit
     (crl_publisher.publish_crl).
 
-    The user row is the first lock (lock_certificate_owner), as for every write that ends sessions of the user: a
-    session touch takes it shared (auth/sessions.py touch_session), so it waits for the revocation instead of
-    changing a session row this write reads and then ends (MariaDB error 1020)."""
-    # auth.service imports this module (login looks certificates up): imported here to avoid the cycle
+    Where login requires a client certificate the last effective administrator keeps an active one: a revocation that
+    leaves no effective administrator is CodedError last_admin_required, nothing changes (integrity.py; the same
+    guard as a deactivation, under the same lock).
+
+    The user row is the first lock after the administrators' one (lock_certificate_owner), as for every write that
+    ends sessions of the user: a session touch takes it shared (auth/sessions.py touch_session), so it waits for the
+    revocation instead of changing a session row this write reads and then ends (MariaDB error 1020)."""
+    # auth.service and auth.integrity import this module: imported here to avoid the cycle
+    from app.backend.auth.integrity import an_administrator_exists, is_administrator, login_requires_client_certificate
     from app.backend.auth.service import AuthService
 
     await lock_row(session, select(User.id).where(User.id == certificate.user_id))
@@ -417,10 +434,16 @@ async def revoke_certificate(
         raise CodedError(ErrorCode.CERTIFICATE_NOT_FOUND)
     if row.revoked_at is not None:
         raise CodedError(ErrorCode.CERTIFICATE_ALREADY_REVOKED)
+    was_administrator = login_requires_client_certificate() and await is_administrator(session, row.user_id)
     row.revoked_at = _now()
     row.revoked_by = revoked_by
     row.revocation_reason = reason.value
     session.add(row)
+    if was_administrator:
+        await session.flush()
+        if not await an_administrator_exists(session):
+            _logger.warning(f"Refused to revoke certificate {row.id}: it would leave no effective administrator")
+            raise CodedError(ErrorCode.LAST_ADMIN_REQUIRED)
     ended = await AuthService.invalidate_certificate_sessions(
         session, row.user_id, row.fingerprint_hash, SessionRevokeCause.CERTIFICATE_REVOKED,
         actor_user_id=revoked_by, commit=False)

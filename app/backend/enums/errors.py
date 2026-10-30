@@ -268,7 +268,7 @@ class ErrorCode(ProblemType):
     # Seeding restores the permissions of every built-in role at start; the API never changes their set (clone it)
     BUILTIN_ROLE_PERMISSIONS_FIXED = ("builtin_role_permissions_fixed", problem(
         409, "The permissions of built-in roles cannot be changed"))
-    LAST_ADMIN_REQUIRED = ("last_admin_required", problem(409, "This change would leave no active administrator"))
+    LAST_ADMIN_REQUIRED = ("last_admin_required", problem(409, "This change would leave no effective administrator"))
     CANNOT_REMOVE_OWN_ADMIN = ("cannot_remove_own_admin", problem(409, "You cannot remove administrator access from yourself"))
     ROLE_DELETE_REQUIRES_ARCHIVE = ("role_delete_requires_archive", problem(409, "Role must be archived before it can be deleted permanently"))
     ROLE_HAS_ACTIVE_USERS = ("role_has_active_users", problem(

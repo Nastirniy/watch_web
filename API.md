@@ -272,10 +272,31 @@ the user (`session_expired`, `revoke_cause` `user_type_changed`): the new pages 
 | `scope_group_name_taken` | 409 | The name is used under the same parent |
 | `scope_group_parent_not_allowed` | 409 | A group of this kind cannot sit there (`group_kind`, `parent_kind`; `root` for none) |
 | `corps_has_brigades` | 409 | Archive without cascade of a corps that still has active brigades |
-| `last_admin_required`, `cannot_remove_own_admin` | 409 | The built-in `system_administrator` system role must stay with an active user and cannot be taken from oneself |
+| `last_admin_required`, `cannot_remove_own_admin` | 409 | The change would take the last effective administrator away, or the caller would stop being one (see "The last administrator") |
 
 Field codes inside `validation_error`: `scope_id_required` (a group or post scope without `id`),
 `scope_id_not_allowed` (the root with an `id`).
+
+### The last administrator
+
+One **effective administrator** must remain, someone who can log in and act as the administrator: an active, not
+archived user holding the built-in `system_administrator` system role and the built-in `administrator` role at the
+root, whose user type puts every permission of both in effect (only the type `system_administrator` does: holding the
+roles under another type does not count), and, where login requires a client certificate (every environment but
+development), with at least one active certificate (not revoked, not expired).
+
+- A change that takes the last one away answers 409 `last_admin_required` and changes nothing: deactivating
+  (`PATCH /users/{user_id}`) or archiving (`POST /users/{user_id}/archive`) them, changing their `user_type`
+  (`PATCH /users/{user_id}`), removing their `administrator` assignment at the root
+  (`DELETE /users/{user_id}/assignments/{assignment_id}`) or their `system_administrator` assignment
+  (`DELETE /users/{user_id}/system-assignments/{assignment_id}`), or revoking their last active certificate
+  (`POST /users/{user_id}/certificates/{certificate_id}/revoke`).
+- An effective administrator cannot stop being one by taking a role or their type from themselves, whoever else
+  remains: 409 `cannot_remove_own_admin`, answered first. Revoking one's own last certificate is allowed while another
+  effective administrator remains.
+- A change to a user who is not an effective administrator is never refused by this rule. Time is not guarded: when
+  the certificate of the last one expires, nobody is refused, `GET /health` shows `system_administrators` 0 and
+  `degraded`, and the operator issues a new certificate on the server (PKI.md).
 
 ### Corps and brigades
 

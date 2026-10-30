@@ -161,8 +161,9 @@ async def test_touch_takes_a_shared_lock_on_its_user_first(db, session_maker, en
 
 
 async def test_certificate_revoke_locks_the_user_first(client, db, headers, engine):
-    """The revocation ends the sessions of the certificate: like every other end of a user's sessions it begins with
-    the user row, so it waits for a touch of the user instead of meeting it (1020)"""
+    """The revocation ends the sessions of the certificate: like every other end of a user's sessions it holds the
+    user row before anything else of the user, after the administrators' lock (a revocation may take an effective
+    administrator away), so it waits for a touch of the user instead of meeting it (1020)"""
     from app.backend.api.v1 import V1
     from app.backend.enums.general import CertificateSource
     from app.backend.enums.routes import UserRoutes
@@ -179,10 +180,11 @@ async def test_certificate_revoke_locks_the_user_first(client, db, headers, engi
         stop()
     assert response.status_code == 200, response.text
     write = _write_of(seen, "UPDATE user_certificates")
-    assert write[0].startswith("SELECT users.id FROM users WHERE users.id = ?"), write
+    assert write[0].startswith("SELECT roles.id") and "roles.builtin_key = ?" in write[0], write
+    assert write[1].startswith("SELECT users.id FROM users WHERE users.id = ?"), write
     # Then the user entity (lock_certificate_owner), the checks of the target, the certificate row
-    assert write[1].startswith("SELECT users.id, users.username"), write
-    assert any(statement.startswith("SELECT user_certificates.") for statement in write[2:]), write
+    assert write[2].startswith("SELECT users.id, users.username"), write
+    assert any(statement.startswith("SELECT user_certificates.") for statement in write[3:]), write
 
 
 def test_the_touch_lock_is_shared(monkeypatch):

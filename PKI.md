@@ -302,8 +302,10 @@ replaced.
    imported there, delete it in Settings > Privacy & Security > Certificates > View Certificates > Authorities.
 5. Retire it when no old certificate is in use any more. `legacy` rows have no expiry date (only hashes), so they stay
    `active` in the list until revoked: revoke the remaining ones (`GET /api/v1/certificates/?source=legacy&state=active`,
-   reason `superseded` or `cessation_of_operation`); files of the old root uploaded after the upgrade (`source`
-   `uploaded`, `ca_issued` false) expire on their own. Then in one change: the bundle becomes `client-ca.crt` alone,
+   reason `superseded` or `cessation_of_operation`; the last active certificate of the last effective administrator
+   answers 409 `last_admin_required`, API.md "The last administrator": issue theirs first); files of the old root
+   uploaded after the upgrade (`source` `uploaded`, `ca_issued` false) expire on their own. Then in one change: the
+   bundle becomes `client-ca.crt` alone,
    `MYSETTINGS_PKI__EXTRA_CRL_PATHS` goes, restart the api, `pki crl`, `nginx -t && nginx -s reload`, delete
    `ca/legacy-root.crt` and `crl/legacy-root.crl`.
 

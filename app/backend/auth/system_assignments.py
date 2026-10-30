@@ -98,11 +98,12 @@ async def delete_system_assignment(session: AsyncSession, auth: AuthContext, tar
     removed = assignment.model_dump()
     administrator = role.builtin_key == BuiltinRole.SYSTEM_ADMINISTRATOR.value
     held_before = administrator and await holds_admin_at_root(session, auth.user.id)
+    target_was_admin = administrator and await holds_admin_at_root(session, target.id)
     session.expunge(assignment)
     # A core statement: no ORM cascade or relationship bookkeeping in the async session
     await session.execute(sa_delete(SystemRoleAssignment).where(SystemRoleAssignment.id == assignment_id))
     if administrator:
-        await check_admin_kept(session, auth, held_before)
+        await check_admin_kept(session, auth, held_before, target_was_admin)
     logger.info(f"User {auth.user.username} removes system assignment {assignment_id} of user {target.id}")
     return removed
 

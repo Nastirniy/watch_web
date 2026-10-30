@@ -87,7 +87,7 @@ async def test_export_checks_the_target_after_locking_it(client, db, headers, en
     _assert_locked_then_checked(_write_of(seen, "UPDATE user_certificates"))
 
 
-async def test_revoke_checks_the_target_after_locking_it(client, db, headers, engine):
+async def test_revoke_takes_the_administrators_lock_then_checks_the_target_after_locking_it(client, db, headers, engine):
     admin, user = await make_admin(db), await _target(db)
     certificate = await make_certificate_row(db, user, CertificateSource.LEGACY)
     seen, stop = _statements(engine)
@@ -98,4 +98,7 @@ async def test_revoke_checks_the_target_after_locking_it(client, db, headers, en
     finally:
         stop()
     assert response.status_code == 200, response.text
-    _assert_locked_then_checked(_write_of(seen, "UPDATE user_certificates"))
+    write = _write_of(seen, "UPDATE user_certificates")
+    # A revocation may take an effective administrator away: lock_administrators first, one order for such writes
+    assert write[0].startswith("SELECT roles.id") and "roles.builtin_key = ?" in write[0], write
+    _assert_locked_then_checked(write[1:])

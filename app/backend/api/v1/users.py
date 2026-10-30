@@ -23,8 +23,8 @@ from app.backend.auth.system_assignments import (
     create_system_assignment, delete_system_assignment, system_assignment_views,
 )
 from app.backend.auth.privileges import (
-    check_admin_kept, check_an_admin_remains, check_grant_at, check_target_user, lock_administrators,
-    role_permission_names,
+    check_admin_kept, check_an_admin_remains, check_grant_at, check_target_user, holds_admin_at_root,
+    lock_administrators, role_permission_names,
 )
 from app.backend.auth.scope import Node, ROOT
 from app.backend.auth.user_types import USER_TYPES
@@ -405,9 +405,11 @@ async def update_user(
     user_self_only), user.update covering them (their home post, the root for a user without one) and, for
     another user, that the caller could grant every assignment they have, each with all of its role's permissions
     whatever the user's type puts in effect (403 target_user_more_privileged); this
-    answers before the archived state of the user. A deactivation or a type change must leave an active holder of the
-    built-in admin role at the root (409 last_admin_required), and a caller cannot take it from themselves (409
-    cannot_remove_own_admin).
+    answers before the archived state of the user. A deactivation or a type change that takes the last effective
+    administrator away answers 409 last_admin_required, and a caller who is one cannot stop being one (409
+    cannot_remove_own_admin). An effective administrator is an active, not archived user holding the built-in
+    system_administrator system role and administrator at the root, whose user type puts both in effect and, where
+    login requires a client certificate (every environment but development), with an active certificate.
     """
     current_user = auth.user
     raw_type = (request.headers.get("content-type") or "").strip()
@@ -427,6 +429,8 @@ async def update_user(
     target_grants = await check_target_user(session, auth, user, Permissions.USER_UPDATE)
     if user.is_deleted:
         raise ApiError(ErrorCode.USER_NOT_FOUND)
+    # Before any change is written (the guard below counts only a change that takes an effective administrator away)
+    target_was_admin = await holds_admin_at_root(session, user.id)
 
     # Store old values for auditing
     old_values = user.model_dump()
@@ -494,12 +498,12 @@ async def update_user(
             )
 
         if type_change is not None:
-            # The old type's built-in role may have been the admin role at the root: the caller keeps theirs, and
-            # someone keeps it (a deactivation too)
-            await check_admin_kept(session, auth, type_change.admin_held_before)
-        elif deactivating:
-            # A change that may take the admin role at the root from its last holder (deactivating oneself is
-            # refused above)
+            # The old type's built-in role may have been the admin role at the root, and the new type's boundary
+            # may leave the administrator roles out: the caller stays an administrator, and one remains (a
+            # deactivation too)
+            await check_admin_kept(session, auth, type_change.admin_held_before, target_was_admin)
+        elif deactivating and target_was_admin:
+            # May take the last effective administrator away (deactivating oneself is refused above)
             await check_an_admin_remains(session)
 
         new_values = user.model_dump()
@@ -554,7 +558,11 @@ async def archive_user(
     lists unless include_deleted=true. Undo with POST /{user_id}/restore. Already archived or unknown: 404.
     Needs user.view covering the user (403 user_self_only, as GET /users/{user_id}), user.archive covering the user
     and every assignment of the user grantable by the caller (403 target_user_more_privileged), answered before the archived state of the user, so an outsider gets the same 403
-    for an archived and a live user; the last administrator: 409.
+    for an archived and a live user.
+
+    409 last_admin_required for the last effective administrator: an active, not archived user holding the built-in
+    system_administrator system role and administrator at the root, whose user type puts both in effect and, where
+    login requires a client certificate (every environment but development), with an active certificate.
     """
     current_user = auth.user
     user = await _get_user_or_404(session, user_id, lock="administrators")
@@ -565,12 +573,14 @@ async def archive_user(
     if user.is_deleted:
         raise ApiError(ErrorCode.USER_NOT_FOUND)
 
+    target_was_admin = await holds_admin_at_root(session, user.id)
     old_values = user.model_dump()
     user.is_deleted = True
     user.is_active = False
     user.updated_at = datetime.now(timezone.utc)
     session.add(user)
-    await check_an_admin_remains(session)
+    if target_was_admin:
+        await check_an_admin_remains(session)
 
     await AuthService.invalidate_all_user_sessions(
         session=session,
@@ -868,8 +878,11 @@ async def delete_user_assignment(
     grant_exceeds_own_permissions); the user's last assignment of either kind 409 last_assignment_required (an
     assignment of a live role needs another one of a live role to remain: an assignment of an archived role grants
     nothing; one of an archived role needs any other assignment to remain); the built-in administrator role at the
-    root is half of the administrator: an administrator (system_administrator and administrator at the root, active)
-    must remain (409 last_admin_required) and it cannot be taken from oneself while one (409 cannot_remove_own_admin).
+    root is half of the administrator: removing it from the last effective administrator answers 409
+    last_admin_required, and an effective administrator cannot take it from themselves (409 cannot_remove_own_admin).
+    An effective administrator is an active, not archived user holding the built-in system_administrator system role
+    and administrator at the root, whose user type puts both in effect and, where login requires a client certificate
+    (every environment but development), with an active certificate.
     """
     target = await _get_user_or_404(session, user_id, lock="administrators")
     removed = await delete_assignment(session, auth, target, assignment_id)
@@ -978,8 +991,11 @@ async def delete_user_system_assignment(
     covering the user and every assignment of the user grantable by the caller (403 target_user_more_privileged); an archived user 404 user_not_found; a system assignment that is not this
     user's 404 assignment_not_found; user.update and every permission of its role held by the caller at the root
     (403 grant_exceeds_own_permissions); the user's last assignment of either kind 409 last_assignment_required; the
-    built-in system_administrator role must stay with an active user (409 last_admin_required) and cannot be taken
-    from oneself (409 cannot_remove_own_admin).
+    built-in system_administrator role cannot be taken from the last effective administrator (409
+    last_admin_required) nor by an effective administrator from themselves (409 cannot_remove_own_admin). An effective
+    administrator is an active, not archived user holding the built-in system_administrator system role and
+    administrator at the root, whose user type puts both in effect and, where login requires a client certificate
+    (every environment but development), with an active certificate.
     """
     target = await _get_user_or_404(session, user_id, lock="administrators")
     removed = await delete_system_assignment(session, auth, target, assignment_id)

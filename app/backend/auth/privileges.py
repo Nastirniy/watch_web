@@ -55,15 +55,19 @@ Nobody becomes able to do more than they could by changing access:
   the commit; an ancestor further up is not locked and may be moved concurrently, which is safe: that move is
   checked by its own mover at that ancestor, and covering the ancestor covers the moved node below it.
 - check_an_admin_remains / check_admin_kept: run after the change is written to the session (flushed here, committed
-  by the route): the caller has not taken the built-in admin role at the root from themselves (409
-  cannot_remove_own_admin, check_admin_kept, answered first; whether they held it is read with holds_admin_at_root
-  before the change), and an active, non-archived user still holds it (409 last_admin_required). The administrator
-  is a user holding the built-in system_administrator system role and the built-in administrator role at the root
-  (_admin_at_root), nothing else: removing either from the last one is refused.
-- lock_administrators: the first statement of every write that may take that role from someone (an assignment
-  removed, a user deactivated, archived or given another type). Such writes run one after another, so the count of
-  check_an_admin_remains sees the one before: two administrators deactivating each other at once can no longer
-  both succeed.
+  by the route): the caller, an effective administrator before the change, still is one (409
+  cannot_remove_own_admin, check_admin_kept, answered first; read with holds_admin_at_root before the change), and
+  an effective administrator remains (409 last_admin_required). The effective administrator is the one definition of
+  integrity.administrators_query: active, not archived, the built-in system_administrator system role and the
+  built-in administrator role at the root, a user type that puts both in effect, and an active certificate where
+  login requires one. The check runs for a change that takes an effective administrator away (target_was_admin, read
+  with holds_admin_at_root before the change): a certificate that expired on the last administrator must not block
+  the changes of other users (a brigade administrator deactivating an operator). A revocation is guarded the same
+  way in services/certificates.revoke_certificate.
+- lock_administrators (integrity.py): the first statement of every write that may take an effective administrator
+  away (an assignment removed, a user deactivated, archived or given another type, a certificate revoked). Such
+  writes run one after another, so the count of check_an_admin_remains sees the one before: two administrators
+  deactivating each other at once can no longer both succeed.
 
 What the caller holds is their AuthContext (context.load_grants: in effect, inside their boundary); what a target
 holds is every_assignment, the same rows with the archived roles and without the target's boundary.
@@ -80,16 +84,17 @@ from app.backend.auth.access_errors import access_denied
 from app.backend.auth.context import (
     AuthContext, grant_rows, grants_of, load_scope_tree, permission_name, system_grant_rows,
 )
-from app.backend.auth.integrity import administrators_query, effective_permissions, switchable_permissions
+from app.backend.auth.integrity import (
+    an_administrator_exists, effective_permissions, is_administrator, lock_administrators, switchable_permissions,
+)
 from app.backend.auth.scope import Grant, Node, ROOT
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
-from app.backend.enums.general import BuiltinRole, Permissions, RoleKind, UserType
+from app.backend.enums.general import Permissions, RoleKind, UserType
 from app.backend.errors.problems import ApiError
 from app.backend.models.role import Permission, Role, RolePermission
 from app.backend.models.role_assignment import RoleAssignment
 from app.backend.models.system_role_assignment import SystemRoleAssignment
 from app.backend.models.user import User
-from app.backend.utils.row_locks import lock_first
 
 
 async def role_permission_names(session: AsyncSession, role_ids: Iterable[int]) -> FrozenSet[str]:
@@ -310,44 +315,29 @@ async def check_node_restore(session: AsyncSession, auth: AuthContext, node: Nod
     _check_could_grant(current, given, node, "restore")
 
 
-def _admin_at_root():
-    """The administrators: holders of system_administrator and of administrator at the root
-    (integrity.administrators_query, the one definition)"""
-    return administrators_query()
-
-
-async def lock_administrators(session: AsyncSession) -> None:
-    """The first statement of a write that may take the built-in system_administrator role from someone: that role's
-    row locked (utils/row_locks.py). Later locks of the write (the user) use row_locks.lock."""
-    await lock_first(session, select(Role).where(Role.builtin_key == BuiltinRole.SYSTEM_ADMINISTRATOR.value))
-
-
 async def holds_admin_at_root(session: AsyncSession, user_id: int) -> bool:
-    """The user holds the built-in system_administrator role (as written to the session: flush first when it
-    changed)"""
-    return (await session.exec(
-        _admin_at_root().where(SystemRoleAssignment.user_id == user_id).limit(1))).first() is not None
+    """The user is an effective administrator (integrity.is_administrator; as written to the session: flush first
+    when it changed)"""
+    return await is_administrator(session, user_id)
 
 
 async def check_an_admin_remains(session: AsyncSession) -> None:
-    """After the change: an active, non-archived user holds the built-in admin role at the root"""
+    """After the change: an effective administrator remains"""
     await session.flush()
-    admin = (await session.exec(
-        _admin_at_root().join(User, User.id == SystemRoleAssignment.user_id)
-        .where(User.is_active == True, User.is_deleted == False)
-        .limit(1)
-    )).first()
-    if admin is None:
-        logger.warning("Refused a change that would leave no active administrator")
+    if not await an_administrator_exists(session):
+        logger.warning("Refused a change that would leave no effective administrator")
         raise ApiError(ErrorCode.LAST_ADMIN_REQUIRED)
 
 
-async def check_admin_kept(session: AsyncSession, auth: AuthContext, held_before: bool) -> None:
-    """After a change that may take the admin role at the root from its holders: the caller, who held it before the
-    change (held_before: holds_admin_at_root read before it), still holds it (checked first: the answer to an
-    administrator taking it from themselves, the last one included), and someone keeps it"""
+async def check_admin_kept(session: AsyncSession, auth: AuthContext, held_before: bool,
+                           target_was_admin: bool = True) -> None:
+    """After a change that may take an administrator away: the caller, who was an effective administrator before the
+    change (held_before: holds_admin_at_root read before it), still is (checked first: the answer to an administrator
+    taking it from themselves, the last one included), and, when the user changed was one (target_was_admin), someone
+    remains"""
     await session.flush()
     if held_before and not await holds_admin_at_root(session, auth.user.id):
         logger.warning(f"User {auth.user.username} tried to remove the admin role at the root from themselves")
         raise ApiError(ErrorCode.CANNOT_REMOVE_OWN_ADMIN)
-    await check_an_admin_remains(session)
+    if target_was_admin:
+        await check_an_admin_remains(session)

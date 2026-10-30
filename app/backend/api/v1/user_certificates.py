@@ -59,13 +59,15 @@ _logger = get_api_logger()
 _OWNER_PROBLEMS = (ErrorCode.USER_NOT_FOUND, AccessErrorCode.USER_SELF_ONLY, *GUARDED)
 
 
-async def _certificate_owner(session: AsyncSession, auth: AuthContext, user_id: int, lock: bool = False) -> User:
+async def _certificate_owner(session: AsyncSession, auth: AuthContext, user_id: int, lock: bool = False,
+                             administrators: bool = False) -> User:
     """The user of the path, visible to the caller as GET /users/{user_id} shows it, with certificate.view covering
     them. lock for a write: the user row locked as the first statement of the write (lock_certificate_owner), so
     that check_target_user, which the write runs next, reads the user's assignments as they stand until the commit
-    (every writer of a user's assignments locks the user first)."""
+    (every writer of a user's assignments locks the user first); administrators for a revocation: the
+    administrators' lock before it."""
     if lock:
-        user = await lock_certificate_owner(session, user_id)
+        user = await lock_certificate_owner(session, user_id, administrators=administrators)
     else:
         user = (await session.exec(select(User).where(User.id == user_id))).first()
     if not user:
@@ -256,7 +258,7 @@ async def export_user_certificate(
     UserRoutes.USER_CERTIFICATE_REVOKE.value,
     response_model=CertificateResponse,
     responses=problems(
-        ErrorCode.CERTIFICATE_NOT_FOUND, ErrorCode.CERTIFICATE_ALREADY_REVOKED,
+        ErrorCode.CERTIFICATE_NOT_FOUND, ErrorCode.CERTIFICATE_ALREADY_REVOKED, ErrorCode.LAST_ADMIN_REQUIRED,
         AccessErrorCode.TARGET_USER_MORE_PRIVILEGED, *_OWNER_PROBLEMS,
     ),
 )
@@ -276,8 +278,13 @@ async def revoke_user_certificate(
 
     Needs certificate.revoke covering the user and every assignment of the user grantable by the caller (403
     target_user_more_privileged). 409 certificate_already_revoked for a revoked one. The body may be left out
-    (reason unspecified)."""
-    user = await _certificate_owner(session, auth, user_id, lock=True)
+    (reason unspecified).
+
+    409 last_admin_required: where login requires a client certificate (every environment but development) one
+    effective administrator must remain: an active, not archived user holding the built-in system_administrator
+    system role and administrator at the root, whose user type puts both in effect, with an active certificate. The
+    last active certificate of the last one cannot be revoked."""
+    user = await _certificate_owner(session, auth, user_id, lock=True, administrators=True)
     await check_target_user(session, auth, user, Permissions.CERTIFICATE_REVOKE)
     reason = (data or CertificateRevokeRequest()).reason
     try:

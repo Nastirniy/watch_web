@@ -234,11 +234,12 @@ async def delete_assignment(session: AsyncSession, auth: AuthContext, target: Us
     # administrator at the root is half of the administrator (system_administrator is the other half)
     anchor = role.builtin_key == BuiltinRole.ADMINISTRATOR.value and removed["scope_key"] == ROOT.key
     held_before = anchor and await holds_admin_at_root(session, auth.user.id)
+    target_was_admin = anchor and await holds_admin_at_root(session, target.id)
     session.expunge(assignment)
     # A core statement: no ORM cascade or relationship bookkeeping in the async session
     await session.execute(sa_delete(RoleAssignment).where(RoleAssignment.id == assignment_id))
     if anchor:
-        await check_admin_kept(session, auth, held_before)
+        await check_admin_kept(session, auth, held_before, target_was_admin)
     logger.info(f"User {auth.user.username} removes assignment {assignment_id} ({removed['scope_key']}) of user {target.id}")
     return removed
 

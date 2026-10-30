@@ -4,8 +4,8 @@ check_authorization_catalog stops the start on an error of the code or of a migr
 level differs from PERMISSION_META's (a level is changed only by a migration, never by seeding), or a built-in role
 whose kind or permissions differ from auth/builtin_roles.py after seeding, or a type whose base roles leave its
 boundary. log_authorization_report logs an error of the data, fixed through the API: every grant that puts less in
-effect than its role holds (ids and permission names only), and an ERROR line when no active user holds the
-built-in system_administrator role.
+effect than its role holds (ids and permission names only), and an ERROR line without an effective administrator
+(auth/integrity.py).
 """
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -56,6 +56,8 @@ async def log_authorization_report(session: AsyncSession) -> None:
                         f"{violation.role_id} at {violation.scope_key}): {sorted(violation.left_out)} not in effect "
                         f"(level or boundary of the user's type); fix it through the API")
     if report.system_administrators == 0:
-        _logger.error("No active user holds the built-in system_administrator role: create one on the server with "
+        _logger.error("No effective administrator (an active user of type system_administrator holding both built-in "
+                      "administrator roles, with an active certificate where login requires one): create one on the "
+                      "server with "
                       "python -m app.backend.cli.init_user <certificate.pem> --username <name> --alias <display name> "
                       "--user-type system_administrator")

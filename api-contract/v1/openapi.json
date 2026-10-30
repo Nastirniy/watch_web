@@ -1587,7 +1587,7 @@
           "USERS"
         ],
         "summary": "Update User",
-        "description": "Update user fields - all fields are optional\n\nSupports updating:\n- username: Unique username (3-50 characters)\n- username_alias: User's display name (1-255 characters)\n- post_id: Home post (membership: who manages the user; it grants nothing by itself). Moving the user needs\n  user.update covering the new post too (403 permission_required_for_action, the same for an unknown or\n  archived post outside the caller's scope); inside it an unknown post answers 404 post_not_found and an\n  archived one 409 post_archived (sending the current home post again changes nothing and is accepted)\n- is_active: User's active status (boolean)\n- user_type: Another type (GET /user-types). Every assignment of the old type's built-in role gets the new type's\n  built-in role at the same node (at the root when the new one holds system permissions, as for a new user; an\n  assignment of the new role the user already has at that node is kept and the old one merged into it). The\n  caller needs user.update and every permission of the new built-in role at each of these nodes and at the node\n  a new user of the type would get it (the home post; the root without one or for a system role), also when\n  nothing is replaced (403 grant_exceeds_own_permissions); every other assignment, those of archived roles\n  included, must fit the ceiling of the new type (409 user_type_ceiling_exceeded with the assignments and their\n  excess_permissions). A concurrent assignment of the new built-in role at the same node answers 409\n  assignment_exists. The user's sessions end (revoke_cause user_type_changed), so the web never shows the pages\n  of the old type. The same type again changes nothing.\n\nOnly provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).\nCertificates are not changed here: a new one is issued or uploaded and the old one revoked (a certificate form\nfield is ignored).\nThe fields are form fields: any other body (JSON included) answers 415 instead of being ignored.\n\nChanging a user needs the user visible to the caller (user.view covering them, as GET /users/{user_id}: 403\nuser_self_only), user.update covering them (their home post, the root for a user without one) and, for\nanother user, that the caller could grant every assignment they have, each with all of its role's permissions\nwhatever the user's type puts in effect (403 target_user_more_privileged); this\nanswers before the archived state of the user. A deactivation or a type change must leave an active holder of the\nbuilt-in admin role at the root (409 last_admin_required), and a caller cannot take it from themselves (409\ncannot_remove_own_admin).",
+        "description": "Update user fields - all fields are optional\n\nSupports updating:\n- username: Unique username (3-50 characters)\n- username_alias: User's display name (1-255 characters)\n- post_id: Home post (membership: who manages the user; it grants nothing by itself). Moving the user needs\n  user.update covering the new post too (403 permission_required_for_action, the same for an unknown or\n  archived post outside the caller's scope); inside it an unknown post answers 404 post_not_found and an\n  archived one 409 post_archived (sending the current home post again changes nothing and is accepted)\n- is_active: User's active status (boolean)\n- user_type: Another type (GET /user-types). Every assignment of the old type's built-in role gets the new type's\n  built-in role at the same node (at the root when the new one holds system permissions, as for a new user; an\n  assignment of the new role the user already has at that node is kept and the old one merged into it). The\n  caller needs user.update and every permission of the new built-in role at each of these nodes and at the node\n  a new user of the type would get it (the home post; the root without one or for a system role), also when\n  nothing is replaced (403 grant_exceeds_own_permissions); every other assignment, those of archived roles\n  included, must fit the ceiling of the new type (409 user_type_ceiling_exceeded with the assignments and their\n  excess_permissions). A concurrent assignment of the new built-in role at the same node answers 409\n  assignment_exists. The user's sessions end (revoke_cause user_type_changed), so the web never shows the pages\n  of the old type. The same type again changes nothing.\n\nOnly provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).\nCertificates are not changed here: a new one is issued or uploaded and the old one revoked (a certificate form\nfield is ignored).\nThe fields are form fields: any other body (JSON included) answers 415 instead of being ignored.\n\nChanging a user needs the user visible to the caller (user.view covering them, as GET /users/{user_id}: 403\nuser_self_only), user.update covering them (their home post, the root for a user without one) and, for\nanother user, that the caller could grant every assignment they have, each with all of its role's permissions\nwhatever the user's type puts in effect (403 target_user_more_privileged); this\nanswers before the archived state of the user. A deactivation or a type change that takes the last effective\nadministrator away answers 409 last_admin_required, and a caller who is one cannot stop being one (409\ncannot_remove_own_admin). An effective administrator is an active, not archived user holding the built-in\nsystem_administrator system role and administrator at the root, whose user type puts both in effect and, where\nlogin requires a client certificate (every environment but development), with an active certificate.",
         "operationId": "update_user",
         "security": [
           {
@@ -1776,7 +1776,7 @@
             }
           },
           "409": {
-            "description": "`assignment_exists`: The user already holds this role at this scope; `cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no active administrator; `post_archived`: Post is archived; `user_type_ceiling_exceeded`: Assignments of the user exceed the ceiling of the new type",
+            "description": "`assignment_exists`: The user already holds this role at this scope; `cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no effective administrator; `post_archived`: Post is archived; `user_type_ceiling_exceeded`: Assignments of the user exceed the ceiling of the new type",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1830,7 +1830,7 @@
           "USERS"
         ],
         "summary": "Archive User",
-        "description": "Archive a user (is_deleted=true): deactivates the account and invalidates its sessions.\n\nNothing is removed: observations, media and role assignments of the user stay. The user is hidden from\nlists unless include_deleted=true. Undo with POST /{user_id}/restore. Already archived or unknown: 404.\nNeeds user.view covering the user (403 user_self_only, as GET /users/{user_id}), user.archive covering the user\nand every assignment of the user grantable by the caller (403 target_user_more_privileged), answered before the archived state of the user, so an outsider gets the same 403\nfor an archived and a live user; the last administrator: 409.",
+        "description": "Archive a user (is_deleted=true): deactivates the account and invalidates its sessions.\n\nNothing is removed: observations, media and role assignments of the user stay. The user is hidden from\nlists unless include_deleted=true. Undo with POST /{user_id}/restore. Already archived or unknown: 404.\nNeeds user.view covering the user (403 user_self_only, as GET /users/{user_id}), user.archive covering the user\nand every assignment of the user grantable by the caller (403 target_user_more_privileged), answered before the archived state of the user, so an outsider gets the same 403\nfor an archived and a live user.\n\n409 last_admin_required for the last effective administrator: an active, not archived user holding the built-in\nsystem_administrator system role and administrator at the root, whose user type puts both in effect and, where\nlogin requires a client certificate (every environment but development), with an active certificate.",
         "operationId": "archive_user",
         "security": [
           {
@@ -1972,7 +1972,7 @@
             }
           },
           "409": {
-            "description": "`last_admin_required`: This change would leave no active administrator",
+            "description": "`last_admin_required`: This change would leave no effective administrator",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2967,7 +2967,7 @@
           "USERS"
         ],
         "summary": "Delete User Assignment",
-        "description": "Remove one role assignment of the user (the link row; the role stays). The audit log keeps a full copy of the\nremoved row.\n\nChecked in this order: user.view covering the user (403 user_self_only, as GET /users/{user_id}); user.update\ncovering the user and every assignment of the user grantable by the caller (403 target_user_more_privileged); an archived user 404 user_not_found; an assignment that is not this user's\n404 assignment_not_found; user.update and every permission of its role held by the caller at its node (403\ngrant_exceeds_own_permissions); the user's last assignment of either kind 409 last_assignment_required (an\nassignment of a live role needs another one of a live role to remain: an assignment of an archived role grants\nnothing; one of an archived role needs any other assignment to remain); the built-in administrator role at the\nroot is half of the administrator: an administrator (system_administrator and administrator at the root, active)\nmust remain (409 last_admin_required) and it cannot be taken from oneself while one (409 cannot_remove_own_admin).",
+        "description": "Remove one role assignment of the user (the link row; the role stays). The audit log keeps a full copy of the\nremoved row.\n\nChecked in this order: user.view covering the user (403 user_self_only, as GET /users/{user_id}); user.update\ncovering the user and every assignment of the user grantable by the caller (403 target_user_more_privileged); an archived user 404 user_not_found; an assignment that is not this user's\n404 assignment_not_found; user.update and every permission of its role held by the caller at its node (403\ngrant_exceeds_own_permissions); the user's last assignment of either kind 409 last_assignment_required (an\nassignment of a live role needs another one of a live role to remain: an assignment of an archived role grants\nnothing; one of an archived role needs any other assignment to remain); the built-in administrator role at the\nroot is half of the administrator: removing it from the last effective administrator answers 409\nlast_admin_required, and an effective administrator cannot take it from themselves (409 cannot_remove_own_admin).\nAn effective administrator is an active, not archived user holding the built-in system_administrator system role\nand administrator at the root, whose user type puts both in effect and, where login requires a client certificate\n(every environment but development), with an active certificate.",
         "operationId": "delete_user_assignment",
         "security": [
           {
@@ -3121,7 +3121,7 @@
             }
           },
           "409": {
-            "description": "`cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no active administrator; `last_assignment_required`: The last role assignment of a user cannot be removed",
+            "description": "`cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no effective administrator; `last_assignment_required`: The last role assignment of a user cannot be removed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3493,7 +3493,7 @@
           "USERS"
         ],
         "summary": "Delete User System Assignment",
-        "description": "Remove one system role assignment of the user (the role stays). The audit log keeps a full copy of the\nremoved row.\n\nChecked in this order: user.view covering the user (403 user_self_only, as GET /users/{user_id}); user.update\ncovering the user and every assignment of the user grantable by the caller (403 target_user_more_privileged); an archived user 404 user_not_found; a system assignment that is not this\nuser's 404 assignment_not_found; user.update and every permission of its role held by the caller at the root\n(403 grant_exceeds_own_permissions); the user's last assignment of either kind 409 last_assignment_required; the\nbuilt-in system_administrator role must stay with an active user (409 last_admin_required) and cannot be taken\nfrom oneself (409 cannot_remove_own_admin).",
+        "description": "Remove one system role assignment of the user (the role stays). The audit log keeps a full copy of the\nremoved row.\n\nChecked in this order: user.view covering the user (403 user_self_only, as GET /users/{user_id}); user.update\ncovering the user and every assignment of the user grantable by the caller (403 target_user_more_privileged); an archived user 404 user_not_found; a system assignment that is not this\nuser's 404 assignment_not_found; user.update and every permission of its role held by the caller at the root\n(403 grant_exceeds_own_permissions); the user's last assignment of either kind 409 last_assignment_required; the\nbuilt-in system_administrator role cannot be taken from the last effective administrator (409\nlast_admin_required) nor by an effective administrator from themselves (409 cannot_remove_own_admin). An effective\nadministrator is an active, not archived user holding the built-in system_administrator system role and\nadministrator at the root, whose user type puts both in effect and, where login requires a client certificate\n(every environment but development), with an active certificate.",
         "operationId": "delete_user_system_assignment",
         "security": [
           {
@@ -3647,7 +3647,7 @@
             }
           },
           "409": {
-            "description": "`cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no active administrator; `last_assignment_required`: The last role assignment of a user cannot be removed",
+            "description": "`cannot_remove_own_admin`: You cannot remove administrator access from yourself; `last_admin_required`: This change would leave no effective administrator; `last_assignment_required`: The last role assignment of a user cannot be removed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4590,7 +4590,7 @@
           "USERS"
         ],
         "summary": "Revoke User Certificate",
-        "description": "Revoke a certificate for good: the login with it is refused (401 certificate_revoked) and the live sessions\nbound to it end in the same transaction (the user's other devices keep working). A certificate this server issued\ngoes on the CRL, published after the commit; when that publication fails (the signing service does not answer,\nfor example) the revocation stands, the answer is still 200 and the next publication (daily, at start-up) lists\nit (GET /health shows a stale CRL).\n\nNeeds certificate.revoke covering the user and every assignment of the user grantable by the caller (403\ntarget_user_more_privileged). 409 certificate_already_revoked for a revoked one. The body may be left out\n(reason unspecified).",
+        "description": "Revoke a certificate for good: the login with it is refused (401 certificate_revoked) and the live sessions\nbound to it end in the same transaction (the user's other devices keep working). A certificate this server issued\ngoes on the CRL, published after the commit; when that publication fails (the signing service does not answer,\nfor example) the revocation stands, the answer is still 200 and the next publication (daily, at start-up) lists\nit (GET /health shows a stale CRL).\n\nNeeds certificate.revoke covering the user and every assignment of the user grantable by the caller (403\ntarget_user_more_privileged). 409 certificate_already_revoked for a revoked one. The body may be left out\n(reason unspecified).\n\n409 last_admin_required: where login requires a client certificate (every environment but development) one\neffective administrator must remain: an active, not archived user holding the built-in system_administrator\nsystem role and administrator at the root, whose user type puts both in effect, with an active certificate. The\nlast active certificate of the last one cannot be revoked.",
         "operationId": "revoke_user_certificate",
         "security": [
           {
@@ -4764,11 +4764,25 @@
             }
           },
           "409": {
-            "description": "`certificate_already_revoked`: Certificate already revoked",
+            "description": "`certificate_already_revoked`: Certificate already revoked; `last_admin_required`: This change would leave no effective administrator",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CertificateAlreadyRevokedProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CertificateAlreadyRevokedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LastAdminRequiredProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "certificate_already_revoked": "#/components/schemas/CertificateAlreadyRevokedProblem",
+                      "last_admin_required": "#/components/schemas/LastAdminRequiredProblem"
+                    }
+                  }
                 }
               }
             }
@@ -34344,7 +34358,7 @@
           "status": {
             "type": "string",
             "title": "Status",
-            "description": "healthy, or degraded: a grant puts less in effect than its role holds, or no active system administrator"
+            "description": "healthy, or degraded: a grant puts less in effect than its role holds, or no effective administrator"
           },
           "violations": {
             "type": "integer",
@@ -34354,7 +34368,7 @@
           "system_administrators": {
             "type": "integer",
             "title": "System Administrators",
-            "description": "Active users holding the built-in system_administrator"
+            "description": "Effective administrators: active, not archived users holding the built-in system_administrator system role and administrator at the root, whose user type puts both in effect and, where login requires a client certificate (every environment but development), with an active certificate"
           }
         },
         "type": "object",
@@ -40881,7 +40895,7 @@
           },
           "title": {
             "type": "string",
-            "const": "This change would leave no active administrator",
+            "const": "This change would leave no effective administrator",
             "title": "Title",
             "description": "Summary of the problem type"
           },
@@ -40896,7 +40910,7 @@
             "title": "Detail",
             "description": "Explanation of this occurrence",
             "examples": [
-              "This change would leave no active administrator"
+              "This change would leave no effective administrator"
             ]
           },
           "instance": {
@@ -40922,14 +40936,14 @@
           "code"
         ],
         "title": "LastAdminRequiredProblem",
-        "description": "This change would leave no active administrator (HTTP 409). Problem type last_admin_required.",
+        "description": "This change would leave no effective administrator (HTTP 409). Problem type last_admin_required.",
         "examples": [
           {
             "code": "last_admin_required",
-            "detail": "This change would leave no active administrator",
+            "detail": "This change would leave no effective administrator",
             "instance": "/api/v1/...",
             "status": 409,
-            "title": "This change would leave no active administrator",
+            "title": "This change would leave no effective administrator",
             "type": "https://example.org/problems/last_admin_required"
           }
         ]

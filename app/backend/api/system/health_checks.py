@@ -77,9 +77,13 @@ class BackupsHealthModel(BaseModel):
 class AuthorizationHealthModel(BaseModel):
     """Authorization (auth/integrity.py), counts only"""
     status: str = Field(..., description="healthy, or degraded: a grant puts less in effect than its role holds, or "
-                                         "no active system administrator")
+                                         "no effective administrator")
     violations: int = Field(..., description="Grants that leave permissions out (level or type boundary)")
-    system_administrators: int = Field(..., description="Active users holding the built-in system_administrator")
+    system_administrators: int = Field(
+        ..., description="Effective administrators: active, not archived users holding the built-in "
+                         "system_administrator system role and administrator at the root, whose user type puts both "
+                         "in effect and, where login requires a client certificate (every environment but "
+                         "development), with an active certificate")
 
 
 class HealthResponse(BaseModel):

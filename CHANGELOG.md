@@ -50,6 +50,23 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   patterns; newly refused in single-line fields that went through the old rule: line breaks, other control
   characters, U+2028 / U+2029 and the bidi controls. `username`, certificate labels, Content-Types, extensions and
   the login certificate values keep their own rules. API.md "Free text".
+- The last-administrator guard (409 `last_admin_required`, `cannot_remove_own_admin`) counts effective administrators
+  (`auth/integrity.administrators_query`): active, not archived users holding the built-in `system_administrator`
+  system role and `administrator` at the root, whose user type puts every permission of both in effect (only the
+  type `system_administrator`), and, where login requires a client certificate (every environment but development,
+  `settings.app.environment`, the rule of `POST /auth/login`), holding an active certificate. Before, it counted the
+  rows, whatever the type and the certificates. The same count is `/health` `authorization.system_administrators`
+  and its `degraded` state, and the ERROR line at start. API.md "The last administrator".
+- The guard runs for a change that takes an effective administrator away (the changed user was one before the change):
+  it no longer refuses a deactivation, an archive or a type change of another user while no effective administrator
+  exists (the certificate of the last one expired).
+- `POST /users/{user_id}/certificates/{certificate_id}/revoke` answers 409 `last_admin_required` for the last active
+  certificate of the last effective administrator, where login requires a client certificate; nothing changes. It
+  takes `lock_administrators` first, then the user lock (`lock_certificate_owner(administrators=True)`), as every
+  write that may take an administrator away. Deactivating, archiving and a type change were guarded already.
+- Contract: `last_admin_required` is declared on `revoke_user_certificate`, its title reads "This change would leave
+  no effective administrator"; the descriptions of `update_user`, `archive_user`, `delete_user_assignment`,
+  `delete_user_system_assignment` and `revoke_user_certificate` and of `AuthorizationHealthModel` state the rule.
 
 ### Removed
 

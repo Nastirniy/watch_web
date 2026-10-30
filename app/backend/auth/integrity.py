@@ -6,8 +6,14 @@ boundary for system grants). This holds whatever wrote the rows: the API refuses
 evaluation (auth/context.py) keeps what a bug, a migration or seeding could still write from ever acting.
 
 authorization_report reads every assignment of both tables and lists the grants that put less in effect than their
-roles hold, with the number of live system administrators: the start logs it (bootstrap/authorization.py), /health
+roles hold, with the number of effective administrators: the start logs it (bootstrap/authorization.py), /health
 shows the counts. Nothing here reaches FastAPI.
+
+The effective administrator (administrators_query, the one definition): an active, not archived user holding the
+built-in system_administrator system role and the built-in administrator role at the root, whose user type puts every
+permission of both in effect, and, where login requires a client certificate (login_requires_client_certificate),
+holding an active certificate: someone who can log in and act as the administrator. The last-administrator guard
+(auth/privileges.py, services/certificates.revoke_certificate) and /health count these.
 """
 from dataclasses import dataclass
 from typing import Dict, FrozenSet, Iterable, List, Set, Tuple, Union
@@ -17,13 +23,18 @@ from sqlalchemy.orm import aliased
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.backend.auth.user_types import boundary
+from app.backend.auth.builtin_roles import BUILTIN_ROLES
+from app.backend.auth.user_types import USER_TYPES, boundary
 from app.backend.bootstrap.permissions import PERMISSION_LEVELS
-from app.backend.enums.general import BuiltinRole, RoleKind, UserType
+from app.backend.config import settings
+from app.backend.enums.general import AppEnvironment, BuiltinRole, CertificateState, RoleKind, UserType
 from app.backend.models.role import Permission, Role, RolePermission
 from app.backend.models.role_assignment import RoleAssignment
 from app.backend.models.system_role_assignment import SystemRoleAssignment
 from app.backend.models.user import User
+from app.backend.models.user_certificate import UserCertificate
+from app.backend.services.certificates import state_clause
+from app.backend.utils.row_locks import lock_first
 
 ROOT_KEY = "root"
 
@@ -42,7 +53,7 @@ class Violation:
 @dataclass(frozen=True)
 class AuthorizationReport:
     violations: Tuple[Violation, ...]
-    system_administrators: int  # active users holding system_administrator and administrator at the root
+    system_administrators: int  # the effective administrators (administrators_query)
 
 
 def other_level(kind: Union[RoleKind, str], names: Iterable[str]) -> List[str]:
@@ -76,10 +87,26 @@ def effective_permissions(user_type: Union[UserType, str], kind: Union[RoleKind,
     return kept, names - kept
 
 
+def administrator_types() -> Tuple[str, ...]:
+    """The user types that put every permission of both built-in administrator roles in effect (effective_permissions
+    leaves nothing out). The permissions are those of auth/builtin_roles.py: the start refuses a stored built-in role
+    out of step with them (bootstrap/authorization.py)."""
+    specs = (BUILTIN_ROLES[BuiltinRole.SYSTEM_ADMINISTRATOR], BUILTIN_ROLES[BuiltinRole.ADMINISTRATOR])
+    return tuple(user_type.value for user_type in USER_TYPES
+                 if not any(effective_permissions(user_type, spec.kind, spec.permissions, spec.kind)[1]
+                            for spec in specs))
+
+
+def login_requires_client_certificate() -> bool:
+    """The rule of POST /auth/login: every environment but development takes the client certificate nginx verified
+    (development takes the certificate values from the body, without a TLS client certificate)"""
+    return settings.app.environment != AppEnvironment.DEVELOPMENT.value
+
+
 def administrators_query():
-    """User ids holding the built-in system_administrator system role (live) AND the built-in administrator tree role
-    at the root (live): the one definition of the administrator, who can manage everything (privileges.py,
-    the report)"""
+    """User ids of the effective administrators (the module docstring), the one definition: privileges.py, the revoke
+    of a certificate and the report read it. An administrator whose only certificate expires stops counting by
+    itself: nothing is written, the state of a certificate is computed when read."""
     tree_role = aliased(Role)
     at_root = (
         select(RoleAssignment.id).join(tree_role, tree_role.id == RoleAssignment.role_id)
@@ -87,17 +114,44 @@ def administrators_query():
                tree_role.builtin_key == BuiltinRole.ADMINISTRATOR.value, tree_role.is_deleted == False,  # noqa: E712
                RoleAssignment.scope_key == ROOT_KEY)
     )
+    conditions = [
+        Role.builtin_key == BuiltinRole.SYSTEM_ADMINISTRATOR.value, Role.is_deleted == False,  # noqa: E712
+        exists(at_root),
+        User.is_active == True, User.is_deleted == False,  # noqa: E712
+        User.user_type.in_(administrator_types()),
+    ]
+    if login_requires_client_certificate():
+        conditions.append(exists(select(UserCertificate.id).where(
+            UserCertificate.user_id == SystemRoleAssignment.user_id, state_clause(CertificateState.ACTIVE))))
     return (
         select(SystemRoleAssignment.user_id)
         .join(Role, Role.id == SystemRoleAssignment.role_id)
-        .where(Role.builtin_key == BuiltinRole.SYSTEM_ADMINISTRATOR.value, Role.is_deleted == False,  # noqa: E712
-               exists(at_root))
+        .join(User, User.id == SystemRoleAssignment.user_id)
+        .where(*conditions)
     )
+
+
+async def lock_administrators(session: AsyncSession) -> None:
+    """The first statement of a write that may take an effective administrator away: the row of the built-in
+    system_administrator role locked (utils/row_locks.py), so such writes run one after another and each counts what
+    the one before left. Later locks of the write (the user) use row_locks.lock."""
+    await lock_first(session, select(Role).where(Role.builtin_key == BuiltinRole.SYSTEM_ADMINISTRATOR.value))
+
+
+async def is_administrator(session: AsyncSession, user_id: int) -> bool:
+    """The user is an effective administrator (as written to the session: flush first when it changed)"""
+    return (await session.exec(
+        administrators_query().where(SystemRoleAssignment.user_id == user_id).limit(1))).first() is not None
+
+
+async def an_administrator_exists(session: AsyncSession) -> bool:
+    """Some user is an effective administrator (as written to the session: flush first when it changed)"""
+    return (await session.exec(administrators_query().limit(1))).first() is not None
 
 
 async def authorization_report(session: AsyncSession) -> AuthorizationReport:
     """Every grant of both tables (archived roles and users included: they apply again after a restore) that leaves
-    permissions out, and the number of live system administrators. Three reads."""
+    permissions out, and the number of effective administrators. Three reads."""
     tree = (await session.exec(
         select(RoleAssignment.id, RoleAssignment.user_id, RoleAssignment.role_id, RoleAssignment.scope_key,
                User.user_type, Permission.name, Role.kind)
@@ -129,8 +183,5 @@ async def authorization_report(session: AsyncSession) -> AuthorizationReport:
         if left_out:
             violations.append(Violation(key[0], key[1], user_id, role_id, scope_key, left_out))
     holders = administrators_query().subquery()
-    administrators = (await session.exec(
-        select(func.count(func.distinct(User.id))).where(
-            User.id.in_(select(holders.c.user_id)), User.is_active == True, User.is_deleted == False)  # noqa: E712
-    )).one()
+    administrators = (await session.exec(select(func.count(func.distinct(holders.c.user_id))))).one()
     return AuthorizationReport(tuple(violations), int(administrators))
