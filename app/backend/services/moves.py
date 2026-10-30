@@ -386,9 +386,9 @@ async def _cancel_stale(session: AsyncSession, move: PendingMove, upload_ids: It
     """End the sessions that no longer hold the move, as an archive ends them: locked, checked again, aborted with an
     audit row in one transaction, the part files removed after the commit"""
     await start_write(session)
-    rows = await lock_all(session, select(UploadSession).where(
-        UploadSession.id.in_(sorted(upload_ids)), UploadSession.status.in_(uploads.PENDING_STATUSES),
-    ).order_by(UploadSession.id))
+    # By the primary key alone: never through the status index (uploads.lock_pending says why)
+    rows = await lock_all(session, select(UploadSession).where(UploadSession.id.in_(sorted(upload_ids)))
+                          .order_by(UploadSession.id))
     now = _now()
 
     async def audit(row: UploadSession) -> None:

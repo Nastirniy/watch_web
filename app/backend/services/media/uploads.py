@@ -168,18 +168,25 @@ async def lock_observation(session: AsyncSession, observation_id: int):
 async def lock_pending(session: AsyncSession, observation_id: Optional[int] = None,
                        post_ids: Iterable[int] = ()) -> List[UploadSession]:
     """The sessions not final yet of the observation, or of the posts, locked (FOR UPDATE, id order): a later lock
-    of an archive, right after its own row and before its first plain read (the snapshot on MariaDB), so that a chunk
-    writer renewing its claim meanwhile waits for the archive instead of meeting it (error 1020). A create and a
-    complete take the parent row first and wait for the archive the same way."""
+    of an archive or a move, right after its own row and before its first plain read (the snapshot on MariaDB), so that
+    a chunk writer renewing its claim meanwhile waits instead of meeting it (error 1020). A create and a complete take
+    the parent row first and wait the same way.
+
+    The scan goes through the index of the parent, never the one on status: a locking read holds the index records it
+    scans, and an abort or a claim holding the session row changes its status, which rewrites that index: on the
+    status index the two deadlock (found live, MariaDB 11.8, error 1213). The parent columns never change."""
     query = select(UploadSession).where(UploadSession.status.in_(PENDING_STATUSES))
     if observation_id is not None:
         query = query.where(UploadSession.observation_id == observation_id)
+        index = "ix_upload_sessions_observation_id"
     else:
         ids = sorted(set(post_ids))
         if not ids:
             return []
         query = query.where(UploadSession.post_id.in_(ids))
-    return await lock_all(session, query.order_by(UploadSession.id))
+        index = "ix_upload_sessions_post_id"
+    return await lock_all(session, query.with_hint(UploadSession, f"FORCE INDEX ({index})", "mysql")
+                          .order_by(UploadSession.id))
 
 
 def _cancellable(row: UploadSession, now: datetime) -> bool:

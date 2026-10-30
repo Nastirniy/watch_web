@@ -3,8 +3,7 @@ it answer 409 move_pending, other writes go on; an upload silent for moves.uploa
 move waits; force runs it at once; the requester, or anyone who could make the same move, cancels it; the permission
 checks run again when it runs, and a mover who lost the right ends it failed with nothing moved.
 
-The SQLite tests cannot race: the concurrent cases run against MariaDB (tests/live/moves_races.py is not part of the
-suite)."""
+The SQLite tests cannot race: the concurrent cases were run against MariaDB 11.8 with the real routes."""
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -851,6 +850,27 @@ async def test_a_cascade_archive_cancels_the_waiting_move_of_a_post_inside(clien
     assert archived.status_code == 200, archived.text
     assert (await _move(db, answer.json()["id"])).status == "cancelled"
     assert await _group_of(db, post) == brigade.id
+
+
+# ---------------------------------------------------------------- locks
+
+async def test_the_pending_sessions_are_locked_through_the_parent_index_never_status(monkeypatch, db):
+    """A locking read over the status index deadlocks with an abort holding the row (MariaDB 1213, found live)"""
+    from sqlalchemy.dialects import mysql
+
+    from app.backend.services.media import uploads
+
+    seen = []
+
+    async def recording(session, query, shared=False):
+        seen.append(str(query.compile(dialect=mysql.dialect())))
+        return []
+
+    monkeypatch.setattr(uploads, "lock_all", recording)
+    await uploads.lock_pending(db, post_ids=[1])
+    await uploads.lock_pending(db, observation_id=1)
+    assert "FORCE INDEX (ix_upload_sessions_post_id)" in seen[0]
+    assert "FORCE INDEX (ix_upload_sessions_observation_id)" in seen[1]
 
 
 # ---------------------------------------------------------------- documented
