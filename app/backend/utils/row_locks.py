@@ -13,12 +13,17 @@ first: the plain reads that check it then start after the previous writer commit
 
 MySQL takes the same path (it never raises 1020, the locks serialise the writes there as well).
 """
-from typing import List, Optional, TypeVar
+from typing import Iterable, List, Optional, Type, TypeVar
 
+from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel.sql.expression import SelectOfScalar
 
 T = TypeVar("T")
+
+# Ids of one locking read by primary key. A long list is another query: MariaDB scans the whole index for it, and
+# rewrites one of 1000 values into a join (in_predicate_conversion_threshold), and a locking read holds what it scans.
+LOCK_BATCH = 100
 
 
 async def start_write(session: AsyncSession) -> None:
@@ -46,6 +51,15 @@ async def lock_all(session: AsyncSession, query: SelectOfScalar[T], shared: bool
     """Every row of query, locked (FOR UPDATE, or shared) and as committed; give the query an ORDER BY id so that
     every writer locks the rows in the same order. Inside a write that began with lock_first."""
     return list((await session.exec(locking(query, shared))).all())
+
+
+async def lock_ids(session: AsyncSession, table: Type[SQLModel], ids: Iterable[int]) -> None:
+    """These rows locked by primary key, really in id order (point lookups, no gap locks): the order several writers
+    can agree on. Inside a write that began with lock_first."""
+    ordered = sorted(set(ids))
+    for start in range(0, len(ordered), LOCK_BATCH):
+        await lock_all(session, select(table.id).with_hint(table, "FORCE INDEX (PRIMARY)", "mysql")
+                       .where(table.id.in_(ordered[start:start + LOCK_BATCH])).order_by(table.id))
 
 
 async def lock_first(session: AsyncSession, query: SelectOfScalar[T], shared: bool = False) -> Optional[T]:

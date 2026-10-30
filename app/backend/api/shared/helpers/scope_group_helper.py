@@ -156,7 +156,7 @@ async def archive_unit(request: Request, session: AsyncSession, auth: AuthContex
     if not unchecked:
         check_posts(auth, unit, action)
     try:
-        changes = await groups_service.archive_unit(session, unit, cascade)
+        changes = await groups_service.archive_unit(session, auth.tree, unit, cascade)
     except CodedError as exc:
         raise ApiError.from_coded(exc)
     if unchecked and (changes.archived_post_ids or changes.moved_post_ids):

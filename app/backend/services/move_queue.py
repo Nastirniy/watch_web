@@ -9,7 +9,9 @@ below its node (services/moves.py lock_for_move): whichever comes second sees th
 
 An archive locks the waiting moves of what it archives (lock_waiting) after its own rows and before its first plain
 read: a cancel or a run that changes such a row meanwhile waits for the archive instead of meeting it (MariaDB error
-1020). The order of every writer: groups, posts, upload sessions, then the pending_moves rows.
+1020). The order of every writer: groups, posts, upload sessions, then the pending_moves rows. The rows are reached by
+the index on the node, whose columns never change, never the one on status: a locking read holds the index records it
+scans, and a cancel holding the row by its primary key rewrites that index (507 deadlocks in 2500 rounds at SQL level).
 """
 from dataclasses import dataclass
 from datetime import datetime
@@ -92,7 +94,8 @@ async def lock_waiting(session: AsyncSession, nodes: Iterable[Node]) -> List[Pen
     found: List[PendingMove] = []
     for kind, ids in ((MoveNodeKind.POST, post_ids), (MoveNodeKind.GROUP, group_ids)):
         if ids:
-            found += await lock_all(session, select(PendingMove).where(
+            found += await lock_all(session, select(PendingMove).with_hint(
+                PendingMove, "FORCE INDEX (ix_pending_moves_node)", "mysql").where(
                 PendingMove.status == MoveStatus.WAITING.value, PendingMove.node_kind == kind.value,
                 PendingMove.node_id.in_(ids)).order_by(PendingMove.id))
     return found

@@ -18,8 +18,11 @@ class PendingMove(SQLModel, table=True):
     """
     __tablename__ = "pending_moves"
     __table_args__ = (
-        # the waiting moves (every new upload reads them) and the waiting move of a node
+        # the waiting moves (every new upload reads them)
         Index("ix_pending_moves_waiting", "status", "node_kind", "node_id"),
+        # the locking read of the waiting moves of a node: no status here, a cancel rewrites that index
+        # (services/move_queue.py lock_waiting)
+        Index("ix_pending_moves_node", "node_kind", "node_id"),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)

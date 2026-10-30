@@ -9,7 +9,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.auth.scope import Node, ScopeTree
-from app.backend.utils.row_locks import lock, lock_all, lock_first
+from app.backend.utils.row_locks import lock, lock_all, lock_first, lock_ids
 
 from app.backend.enums.errors import ErrorCode
 from app.backend.enums.general import ScopeGroupKind
@@ -72,6 +72,44 @@ async def lock_groups(session: AsyncSession, tree: ScopeTree, group_ids: Iterabl
     for position, group_id in enumerate(ordered):
         await (lock if position or started else lock_first)(session, select(ScopeGroup).where(ScopeGroup.id == group_id))
     return started or bool(ordered)
+
+
+def groups_of_parent(query, parent_id: int):
+    """A locking read of the groups of one parent: one statement per parent, through its index. A locking read holds
+    what it scans; over a list of parents MariaDB scans the whole index or the table when the list is long against the
+    table (FORCE INDEX does not stop that), and a scan of every group deadlocks with any create or rename (1213, the
+    review of queued moves). The caller holds the parent, and a create holds its parent too (POST /scope-groups), so
+    this never meets a row on its way in."""
+    return query.with_hint(ScopeGroup, "FORCE INDEX (ix_scope_groups_parent_id)", "mysql").where(
+        ScopeGroup.parent_id == parent_id)
+
+
+def _posts_of_group(query, group_id: int):
+    """The same for the posts of one group"""
+    return query.with_hint(Post, "FORCE INDEX (ix_posts_group_id)", "mysql").where(Post.group_id == group_id)
+
+
+async def lock_posts_of(session: AsyncSession, tree: ScopeTree, group_ids: Iterable[int],
+                        live_only: bool = False) -> List[int]:
+    """The posts in these groups, locked (a later lock of a write that locked the groups first), their ids; live_only
+    leaves the archived ones out of the answer. Every write that locks several posts goes through here, so all take
+    one order: by id.
+
+    ORDER BY id does not give that order: the rows are locked as they are scanned, ix_posts_group_id gives (group_id,
+    id) and the filesort comes after, and two writers with two plans deadlock (MariaDB 1213, a unit archive scanning
+    the primary key against a group move). So the posts the tree knows are locked first by point lookups in id order,
+    and then the index locks what the tree did not know yet: a post created since, or moved in. Everything is
+    held by then but those, and the gaps of the index that keep the groups as they are."""
+    wanted = sorted(set(group_ids))
+    known = set(wanted)
+    await lock_ids(session, Post, [post_id for post_id, group_id in tree.post_group.items() if group_id in known])
+    found: List[int] = []
+    for group_id in wanted:
+        query = _posts_of_group(select(Post.id), group_id)
+        if live_only:
+            query = query.where(Post.is_deleted == False)  # noqa: E712
+        found += await lock_all(session, query.order_by(Post.id))
+    return sorted(found)
 
 
 async def _live_parents(session: AsyncSession) -> Dict[int, Optional[int]]:
@@ -168,34 +206,36 @@ class ArchiveChanges:
     waiting_moves: List[PendingMove] = field(default_factory=list)
 
 
-async def archive_unit(session: AsyncSession, unit: ScopeGroup, cascade: bool) -> ArchiveChanges:
+async def archive_unit(session: AsyncSession, tree: ScopeTree, unit: ScopeGroup, cascade: bool) -> ArchiveChanges:
     """Archive a unit (corps, brigade) that the caller already locked (lock_first) and checked the permissions for.
 
-    Locks the active units inside it, then the active posts it holds directly or through them, each in id order
-    (groups before posts, as every writer does). cascade=True archives all of them; otherwise the posts move one level
-    up (a brigade's into its corps, a corps' under the root), and a corps with an active brigade raises
-    corps_has_brigades before anything changes. Posts archived before stay as they are. With cascade the posts are
-    locked by id first, then their pending upload sessions (pending_uploads) and the waiting moves of what is archived
-    (waiting_moves), then the Post entities, whose presence subqueries take the snapshot: a chunk writer renewing its
-    claim, a cancel or a run of a move meanwhile wait for the archive. The caller cancels pending_uploads and
-    waiting_moves, writes the audit rows (rows) and commits.
+    Locks the active units inside it, then the active posts it holds directly or through them (lock_posts_of: by id,
+    the order of a move; tree is the request's and only names them), groups before posts, as every writer does.
+    cascade=True archives all of them; otherwise the posts move one level up (a brigade's into its corps, a corps' under
+    the root), and a corps with an active brigade raises corps_has_brigades before anything changes. Posts archived
+    before stay as they are. The posts are locked by id first; with cascade then their pending upload sessions
+    (pending_uploads) and the waiting moves of what is archived (waiting_moves), then the Post entities, whose presence
+    subqueries take the snapshot: a chunk writer renewing its claim, a cancel or a run of a move meanwhile wait for the
+    archive. The caller cancels pending_uploads and waiting_moves, writes the audit rows (rows) and commits.
     """
     changes = ArchiveChanges()
     now = datetime.now(timezone.utc)
-    children = await lock_all(session, select(ScopeGroup).where(
-        ScopeGroup.parent_id == unit.id, ScopeGroup.is_deleted == False).order_by(ScopeGroup.id))  # noqa: E712
+    children = await lock_all(session, groups_of_parent(select(ScopeGroup), unit.id).where(
+        ScopeGroup.is_deleted == False).order_by(ScopeGroup.id))  # noqa: E712
     if children and not cascade:
         raise CodedError(ErrorCode.CORPS_HAS_BRIGADES)
     holders = [unit.id, *(child.id for child in children)]
     archived_nodes = [Node.group(group_id) for group_id in holders]
+    post_ids = await lock_posts_of(session, tree, holders, live_only=True)
     if cascade:
-        post_ids = await lock_all(session, select(Post.id).where(
-            Post.group_id.in_(holders), Post.is_deleted == False).order_by(Post.id))  # noqa: E712
         changes.pending_uploads = await uploads.lock_pending(session, post_ids=post_ids)
         archived_nodes += [Node.post(post_id) for post_id in post_ids]
     changes.waiting_moves = await move_queue.lock_waiting(session, archived_nodes)
-    posts = await lock_all(session, select(Post).where(
-        Post.group_id.in_(holders), Post.is_deleted == False).order_by(Post.id))  # noqa: E712
+    posts: List[Post] = []
+    for group_id in holders:
+        posts += await lock_all(session, _posts_of_group(select(Post), group_id).where(
+            Post.is_deleted == False).order_by(Post.id))  # noqa: E712
+    posts.sort(key=lambda post: post.id)
 
     for post in posts:
         old_values = post.model_dump()

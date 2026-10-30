@@ -42,7 +42,8 @@ def test_fresh_install_down_and_up_again(tmp_path):
     assert {"pending_moves", "move_locks"} <= tables(db_file) and "last_chunk_at" in upload_columns(db_file)
     conn = sqlite3.connect(db_file)
     assert conn.execute("select id from move_locks").fetchall() == [(1,)]
-    assert "ix_pending_moves_waiting" in {row[1] for row in conn.execute("pragma index_list(pending_moves)")}
+    assert {"ix_pending_moves_waiting", "ix_pending_moves_node"} <= {
+        row[1] for row in conn.execute("pragma index_list(pending_moves)")}
     conn.close()
 
     down = _run_downgrade(db_file, PREVIOUS)

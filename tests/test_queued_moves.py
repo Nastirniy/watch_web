@@ -1460,6 +1460,127 @@ async def test_the_pending_sessions_are_locked_through_the_parent_index_never_st
     assert "FORCE INDEX (ix_upload_sessions_observation_id)" in seen[1]
 
 
+class _Locks:
+    """Every locking read of the module functions lock_all, as MariaDB gets it, in order"""
+
+    def __init__(self, monkeypatch):
+        from sqlalchemy.dialects import mysql
+
+        from app.backend.services import move_queue, scope_groups
+        from app.backend.utils import row_locks
+
+        self.seen = []
+        real = row_locks.lock_all
+
+        async def recording(session, query, shared=False):
+            self.seen.append(str(query.compile(dialect=mysql.dialect())))
+            return await real(session, query, shared)
+
+        for module in (moves_service, scope_groups, move_queue, row_locks):
+            monkeypatch.setattr(module, "lock_all", recording)
+
+
+async def test_the_posts_of_a_group_move_are_locked_by_id_first(client, db, headers, storage, monkeypatch):
+    """Locks taken through ix_posts_group_id follow (group_id, id), whatever ORDER BY says (the filesort comes after):
+    against a scan by the primary key that deadlocks (the review's 1213 on a brigade archive). Point lookups by id come
+    first, then the index, for what the tree of the request did not know"""
+    admin = await make_admin(db)
+    top, inner, there = await make_group(db), await make_group(db), await make_group(db)
+    await db.execute(update(ScopeGroup).where(ScopeGroup.id == inner.id).values(parent_id=top.id, parent_key=top.id))
+    await db.commit()
+    await make_post(db, group_id=inner.id)
+    await make_post(db, group_id=top.id)
+    locks = _Locks(monkeypatch)
+    moved = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=top.id),
+                               json={"parent_id": there.id, "expected_parent_id": None}, headers=headers(admin))
+    assert moved.status_code == 200, moved.text
+    posts = [statement for statement in locks.seen if "FROM posts" in statement]
+    assert "FORCE INDEX (PRIMARY)" in posts[0] and "posts.id IN" in posts[0], posts
+    assert all("FORCE INDEX (ix_posts_group_id)" in statement and "group_id = " in statement for statement in posts[1:])
+    assert len(posts) == 3, "one statement per group"
+
+
+async def test_the_groups_below_a_move_are_locked_through_the_parent_index(client, db, headers, storage, monkeypatch):
+    """D2: with a long IN list the query scanned the primary key and locked every group: 1213 on a create and a rename"""
+    admin = await make_admin(db)
+    top, there = await make_group(db), await make_group(db)
+    locks = _Locks(monkeypatch)
+    moved = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=top.id),
+                               json={"parent_id": there.id, "expected_parent_id": None}, headers=headers(admin))
+    assert moved.status_code == 200, moved.text
+    below = [statement for statement in locks.seen if "FROM scope_groups" in statement]
+    assert below and all("FORCE INDEX (ix_scope_groups_parent_id)" in statement or "FORCE INDEX (PRIMARY)" in statement
+                         for statement in below), below
+
+
+async def test_a_long_list_is_locked_in_short_statements(db, monkeypatch):
+    """A long IN list is another query: a scan of the whole index, or a join (MariaDB, in_predicate_conversion_threshold)"""
+    from app.backend.utils import row_locks
+
+    seen = []
+
+    async def recording(session, query, shared=False):
+        seen.append(len(query.whereclause.right.value))
+        return []
+
+    monkeypatch.setattr(row_locks, "lock_all", recording)
+    await row_locks.lock_ids(db, Post, range(1, row_locks.LOCK_BATCH * 2 + 2))
+    assert seen == [row_locks.LOCK_BATCH, row_locks.LOCK_BATCH, 1]
+
+
+@pytest.mark.parametrize("cascade", [True, False])
+async def test_a_unit_archive_locks_posts_like_a_move(client, db, headers, storage, monkeypatch, cascade):
+    """Both orders must be the one order: the query of an archive scanned the primary key where the table allows"""
+    admin = await make_admin(db)
+    corps = await make_group(db, kind="corps")
+    brigade = await make_group(db, parent_id=corps.id, kind="brigade")
+    await make_post(db, group_id=brigade.id)
+    await make_post(db, group_id=brigade.id)
+    locks = _Locks(monkeypatch)
+    archived = await client.post(V1.path(BrigadeRoutes.BRIGADE_ARCHIVE, brigade_id=brigade.id), params={"cascade": cascade},
+                                 headers=headers(admin))
+    assert archived.status_code == 200, archived.text
+    posts = [statement for statement in locks.seen if "FROM posts" in statement]
+    assert "FORCE INDEX (PRIMARY)" in posts[0] and "posts.id IN" in posts[0], posts
+    assert all("FORCE INDEX (ix_posts_group_id)" in statement for statement in posts[1:]) and posts[1:], posts
+    groups = [statement for statement in locks.seen if "FROM scope_groups" in statement]
+    assert all("FORCE INDEX (ix_scope_groups_parent_id)" in statement for statement in groups) and groups, groups
+
+
+async def test_waiting_moves_are_locked_through_an_index_without_status(client, db, headers, storage, monkeypatch):
+    """D5: a cancel's UPDATE by primary key rewrites the status index; a locking read over it deadlocks with that"""
+    scene = await _scene(client, db, headers)
+    await _waiting_move(client, headers, scene)
+    locks = _Locks(monkeypatch)
+    archived = await client.post(V1.path(PostRoutes.POST_ARCHIVE, post_id=scene.post.id), headers=headers(scene.admin))
+    assert archived.status_code == 200, archived.text
+    waiting = [statement for statement in locks.seen if "FROM pending_moves" in statement]
+    assert waiting and all("FORCE INDEX (ix_pending_moves_node)" in statement for statement in waiting), waiting
+
+
+async def test_a_group_create_locks_its_parent_first(client, db, headers, storage, monkeypatch):
+    """Without the lock the insert waits for the parent holding its new row: 1213 with a move, 1020 with a rename"""
+    from app.backend.utils import row_locks
+
+    admin = await make_admin(db)
+    parent = await make_group(db)
+    h = headers(admin)
+    await db.commit()
+    seen = []
+    real = row_locks.lock_first
+
+    async def recording(session, query, shared=False):
+        seen.append(str(query))
+        return await real(session, query, shared)
+
+    from app.backend.services import scope_groups
+
+    monkeypatch.setattr(scope_groups, "lock_first", recording)
+    created = await client.post(V1.path(ScopeGroupRoutes.ROOT), json={"name": "Below", "parent_id": parent.id}, headers=h)
+    assert created.status_code == 200, created.text
+    assert len(seen) == 1 and "scope_groups" in seen[0]
+
+
 # ---------------------------------------------------------------- documented
 
 def test_the_contract_declares_the_answers_of_a_move():

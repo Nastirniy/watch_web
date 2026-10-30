@@ -13,9 +13,11 @@ The locks, in the order every writer takes them (lock_for_move):
 
 1. the one row of move_locks: moves run one after another, so two moves can never deadlock on the group rows of two
    nodes going below each other, and "no waiting move overlaps" holds up to the insert of the row;
-2. the groups, top down: the old and the new parent and the moved group, then every group below it (locking reads, so
-   no snapshot yet);
-3. every post below the node, by id (select(Post.id): the Post entity's presence subqueries would take the snapshot);
+2. the groups, top down: the old and the new parent and the moved group by id, then every group below it, level by
+   level, by id and then through the parent's index (locking reads, so no snapshot yet; groups_service.groups_of_parent
+   says why one statement per parent);
+3. every post below the node, really by id (groups_service.lock_posts_of; select(Post.id): the Post entity's presence
+   subqueries would take the snapshot);
 4. the pending upload sessions of those posts (uploads.lock_pending, through the post_id index, never the one on
    status: an abort holding the row rewrites that one);
 5. a run: the pending_moves row, by the conditional UPDATE that claims it. An archive locks that row after its own
@@ -64,7 +66,7 @@ from app.backend.services.move_queue import kind_of, lock_moves, node_of, waitin
 from app.backend.utils.datetime_utils import assume_utc
 from app.backend.utils.db_errors import is_unique_violation
 from app.backend.utils.logging_config import get_logger
-from app.backend.utils.row_locks import lock, lock_all, start_write
+from app.backend.utils.row_locks import lock, lock_all, lock_ids, start_write
 
 _logger = get_logger("moves")
 
@@ -155,16 +157,24 @@ def locations(tree: ScopeTree, move: PendingMove) -> Tuple[Node, Node]:
     return _location(parent), _location(move.target_group_id)
 
 
-async def _lock_groups_below(session: AsyncSession, group_id: int) -> List[int]:
-    """The group and every group below it, children locked level by level (locking reads: no snapshot), by id within
-    a level. The moved group itself is locked by the caller."""
-    found, level = [group_id], [group_id]
-    while level:
-        children = await lock_all(session, select(ScopeGroup.id).where(ScopeGroup.parent_id.in_(level))
-                                  .order_by(ScopeGroup.id))
-        level = [child for child in children if child not in found]
-        found += level
-    return found
+async def _lock_groups_below(session: AsyncSession, tree: ScopeTree, group_id: int) -> List[int]:
+    """The group and every group below it (locking reads: no snapshot). The groups the tree knows first, by point
+    lookups: top down, as every writer locks groups. Only then the parent's index, for those the tree does not know
+    yet (a group created since, or moved in while this request queued for the moves lock): that read leaves gap locks,
+    and a create waiting in such a gap holds its parent, which must be locked by now. The moved group itself is locked
+    by the caller."""
+    known = tree.groups_under(Node.group(group_id)) - {group_id}
+    for depth in sorted({len(tree.ancestors(Node.group(group))) for group in known}):
+        await lock_ids(session, ScopeGroup, [group for group in known if len(tree.ancestors(Node.group(group))) == depth])
+    found, parents = {group_id, *known}, sorted({group_id, *known})
+    while parents:
+        children: List[int] = []
+        for parent in parents:
+            children += await lock_all(session, groups_service.groups_of_parent(select(ScopeGroup.id), parent)
+                                       .order_by(ScopeGroup.id))
+        parents = sorted(set(children) - found)
+        found.update(parents)
+    return sorted(found)
 
 
 async def lock_for_move(session: AsyncSession, tree: ScopeTree, node: Node, new_parent: Optional[int]) -> MoveLocks:
@@ -178,8 +188,8 @@ async def lock_for_move(session: AsyncSession, tree: ScopeTree, node: Node, new_
     else:
         await groups_service.lock_groups(session, tree, [tree.group_parent.get(node.id), new_parent, node.id],
                                          started=True)
-        group_ids = await _lock_groups_below(session, node.id)
-        post_ids = await lock_all(session, select(Post.id).where(Post.group_id.in_(group_ids)).order_by(Post.id))
+        group_ids = await _lock_groups_below(session, tree, node.id)
+        post_ids = await groups_service.lock_posts_of(session, tree, group_ids)
     pending = await uploads.lock_pending(session, post_ids=post_ids)
     return MoveLocks(tuple(group_ids), tuple(post_ids), tuple(pending))
 

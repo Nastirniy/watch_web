@@ -9,7 +9,7 @@ from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.api.shared.helpers.db_errors import unique_violation_as
 from app.backend.api.shared.helpers.move_helper import admit_move, changed_fields, move_conflict, move_step
 from app.backend.api.shared.helpers.scope_group_helper import (
-    audit_group, check_visible, lock_unit, name_taken, parent_location, parent_node,
+    audit_group, check_visible, lock_groups, lock_unit, name_taken, parent_location, parent_node,
 )
 from app.backend.api.v1.models.query.scope_groups import ScopeGroupFilterParams
 from app.backend.api.v1.models.request.scope_groups import ScopeGroupCreate, ScopeGroupUpdate
@@ -65,9 +65,8 @@ async def _check_parent(session: AsyncSession, group_id: Optional[int], parent_i
         raise ApiError.from_coded(exc)
 
 
-async def _check_chosen_parent(session: AsyncSession, auth: AuthContext, group_id: Optional[int],
-                               parent_id: Optional[int], kind: ScopeGroupKind,
-                               old_parent_id: Optional[int] = None) -> None:
+def _check_parent_rights(auth: AuthContext, group_id: Optional[int], parent_id: Optional[int],
+                         old_parent_id: Optional[int] = None) -> None:
     """A parent the caller names (create, move): outside the caller's scope_group.view it answers 404 like an
     unknown one; the root (None) is no id to hide: without scope_group.view there it answers 403
     permission_required_for_action (create_scope_group / move_scope_group). A create needs scope_group.create covering
@@ -88,7 +87,6 @@ async def _check_chosen_parent(session: AsyncSession, auth: AuthContext, group_i
         for permission, location in move_requirements(MoveNodeKind.GROUP, parent_location(old_parent_id),
                                                       parent_location(parent_id)):
             AccessControlService.check_covers(auth, permission, location, action)
-    await _check_parent(session, group_id, parent_id, kind)
 
 
 @router.get(
@@ -129,7 +127,12 @@ async def create_scope_group(
     scope_group.create must cover the parent (the root for null, where scope_group.view is needed too), otherwise 403
     permission_required_for_action (action create_scope_group), before the tree rules and the name check. Creates a plain group: it sits under the root or a plain group, never in a corps or brigade (409
     scope_group_parent_not_allowed)."""
-    await _check_chosen_parent(session, auth, None, data.parent_id, ScopeGroupKind.GROUP)
+    _check_parent_rights(auth, None, data.parent_id)
+    # The parent is locked first, as a post and a brigade do: an archive or a move of it waits, and the insert never
+    # meets a parent changed after the snapshot (MariaDB error 1020), nor holds its new row while it waits for the parent
+    # (error 1213 with a move that locks what lies below that parent)
+    await lock_groups(session, auth.tree, [data.parent_id])
+    await _check_parent(session, None, data.parent_id, ScopeGroupKind.GROUP)
     if await name_taken(session, data.name, data.parent_id):
         raise ApiError(ErrorCode.SCOPE_GROUP_NAME_TAKEN)
 
@@ -278,8 +281,8 @@ async def update_scope_group(
     step = move_step(data, "parent_id", "expected_parent_id", group.parent_id)
     is_move = step is moves.MoveStep.MOVE
     if is_move:
-        await _check_chosen_parent(session, auth, group.id, new_parent, ScopeGroupKind(group.kind),
-                                   old_parent_id=group.parent_id)
+        _check_parent_rights(auth, group.id, new_parent, old_parent_id=group.parent_id)
+        await _check_parent(session, group.id, new_parent, ScopeGroupKind(group.kind))
         # What the new parent puts in effect at the subtree, read after lock_unit's locks (auth/privileges.py)
         await check_move(session, auth, Node.group(group.id), parent_location(new_parent))
     else:

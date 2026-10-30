@@ -4,8 +4,9 @@ pending_moves: a move of a post or a group that waits for the uploads below it. 
 node_id INT, target_group_id INT NULL (null: directly under the root), requested_by INT, requested_at DATETIME,
 status VARCHAR(12) (waiting, done, cancelled, failed), force BOOL, finished_at DATETIME NULL, error VARCHAR(64) NULL
 (the problem code of a failed move). Index ix_pending_moves_waiting (status, node_kind, node_id): every new upload
-reads the waiting moves. No foreign keys: node_id names a post or a group, requested_by is an actor column (migration
-028) and a move outlives what it names. No CHECK constraints.
+reads the waiting moves. Index ix_pending_moves_node (node_kind, node_id): the locking read of an archive, which must
+stay off the status index a cancel rewrites. No foreign keys: node_id names a post or a group, requested_by is an actor
+column (migration 028) and a move outlives what it names. No CHECK constraints.
 
 move_locks: one row, id 1. It is locked first by every write that moves a node, so moves run one after another
 whatever nodes they touch (services/move_queue.py lock_moves). No other row is ever written.
@@ -37,7 +38,7 @@ MOVES = "pending_moves"
 LOCKS = "move_locks"
 UPLOADS = "upload_sessions"
 COLUMN = "last_chunk_at"
-INDEX = "ix_pending_moves_waiting"
+INDEXES = {"ix_pending_moves_waiting": ["status", "node_kind", "node_id"], "ix_pending_moves_node": ["node_kind", "node_id"]}
 
 
 def _log(message: str) -> None:
@@ -71,8 +72,10 @@ def upgrade() -> None:
     else:
         _log(f"creating {MOVES}")
         _create_moves()
-    if INDEX not in {index["name"] for index in _inspector().get_indexes(MOVES)}:
-        op.create_index(INDEX, MOVES, ["status", "node_kind", "node_id"])
+    present = {index["name"] for index in _inspector().get_indexes(MOVES)}
+    for name, columns in INDEXES.items():
+        if name not in present:
+            op.create_index(name, MOVES, columns)
     if LOCKS not in tables:
         _log(f"creating {LOCKS}")
         op.create_table(LOCKS, sa.Column("id", sa.Integer(), primary_key=True, autoincrement=False))
