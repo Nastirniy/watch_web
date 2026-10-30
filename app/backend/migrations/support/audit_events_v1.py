@@ -83,6 +83,7 @@ LEGACY_EVENTS: Dict[Tuple[str, str], Tuple[str, str]] = {
     **_events("user_guide", "dictionaries", *_CRUD),
     **_events("user_guide_file", "dictionaries", "upload", "archive", "restore"),
     ("session", "certificate_mismatch"): ("session.certificate_mismatch", "authentication"),
+    **_events("move", "structure", "requested", "completed", "cancelled", "failed"),
 }
 
 _RESTORE_COUNTS = {

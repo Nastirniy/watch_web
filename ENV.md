@@ -138,6 +138,13 @@ Thumbnails and previews are rendered on demand by [imgproxy](https://imgproxy.ne
 | `MYSETTINGS_STORAGE__UPLOAD__RECOMMENDED_CHUNK_BYTES` | `8388608` | Chunk size suggested to clients |
 | `MYSETTINGS_STORAGE__UPLOAD__SWEEP_INTERVAL_SECONDS` | `600` | How often the media worker expires stale sessions |
 
+### Queued moves
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MYSETTINGS_MOVES__UPLOAD_STALE_SECONDS` | `300` | While a move waits, an upload that received no bytes for this long is cancelled (minimum 60) |
+| `MYSETTINGS_MOVES__CHECK_INTERVAL_SECONDS` | `15` | How often the media worker looks at the waiting moves; also the `Retry-After` of the answers 202 and 409 `move_pending` |
+
 ### Video posters (media worker)
 
 Run the worker as its own process: `python -m app.backend.workers.media_worker` (compose service `media-worker`, or `deploy/systemd/watch-web-media-worker.service`).

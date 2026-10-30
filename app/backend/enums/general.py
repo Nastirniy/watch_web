@@ -169,6 +169,26 @@ class ScopeGroupKind(str, Enum):
     BRIGADE = "brigade"
 
 
+class MoveNodeKind(str, Enum):
+    """What a queued move moves: a post, or a scope group of any kind with everything below it"""
+    POST = "post"
+    GROUP = "group"
+
+
+class MoveStatus(str, Enum):
+    """Lifecycle of a queued move (rows of pending_moves)"""
+    WAITING = "waiting"       # uploads below the node hold it; new uploads there answer 409 move_pending
+    DONE = "done"
+    CANCELLED = "cancelled"   # POST /moves/{id}/cancel, an archive of the node, a database restore
+    FAILED = "failed"         # refused when it ran: error is the problem code; nothing moved
+
+
+class MoveCancelCause(str, Enum):
+    """Why a waiting move was cancelled (audit param cause of move.cancelled)"""
+    REQUESTED = "requested"           # POST /moves/{id}/cancel
+    NODE_ARCHIVED = "node_archived"   # the node, or a unit with it, was archived
+
+
 class UnitPlacement(str, Enum):
     """Which unit an observation belongs to for a corps or brigade filter: the one recorded when it was created, or
     the one its post is in now. Not a time filter: both read today's data; the period is its own filter."""

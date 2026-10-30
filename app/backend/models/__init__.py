@@ -17,6 +17,7 @@ from .upload_session import UploadSession
 from .storyboard import VideoStoryboard
 from .observation_unit import ObservationUnit
 from .user_guide import UserGuide, UserGuideFile
+from .pending_move import MoveLock, PendingMove
 
 __all__ = [
     'User', 'UserSession', 'UserCertificate', 'CertificateAuthorityState',

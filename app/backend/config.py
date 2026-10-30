@@ -379,6 +379,15 @@ class HealthConfig(BaseModel):
         return max(10, min(3600, v))
 
 
+class MovesConfig(BaseModel):
+    """Moves that wait for the uploads below them: MYSETTINGS_MOVES__*"""
+    # While a move waits, an upload that received no bytes for this long is cancelled. A chunk writer renews its claim
+    # every 30 seconds while bytes flow (services/media/uploads.py): stay well above that
+    upload_stale_seconds: int = Field(default=300, ge=60)
+    # How often the media worker looks at the waiting moves; also the Retry-After of the 202 and 409 move_pending
+    check_interval_seconds: int = Field(default=15, ge=1)
+
+
 class ReportConfig(BaseModel):
     """Configuration of the Excel reports"""
     # Band rows of one observations report; more answer 422 report_too_large (the workbook is built in memory)
@@ -438,6 +447,7 @@ class Settings(BaseSettings):
     pki: PkiConfig = Field(default_factory=PkiConfig)
     reports: ReportConfig = Field(default_factory=ReportConfig)
     backup: BackupConfig = Field(default_factory=BackupConfig)
+    moves: MovesConfig = Field(default_factory=MovesConfig)
 
     def __init__(self, **kwargs):
         # Load from TOML first

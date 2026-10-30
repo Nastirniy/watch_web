@@ -18,6 +18,9 @@ that hold it into legacy.unknown. Their values (the web localises them; API.md, 
 - frequency_kind (observation_frequency.*): FrequencyKind: rc, video
 - user_type (user.create): UserType: viewer, operator, senior_operator, analyst, administrator, system_administrator
 - media_type (media.create, upload_session.*): MediaType: image, video, audio, document
+- node_kind (move.*): MoveNodeKind: post, group
+- cause (move.cancelled): MoveCancelCause: requested, node_archived
+- failure_code (move.failed): the problem code that refused the move when it ran
 - via: how the change was made when it was not a request of the web client: cli (user.create, user_certificate.issue
   from the command line); for media.create the upload transport: multipart, nginx_offload, resumable
 
@@ -68,6 +71,9 @@ _ROLE = dict(role_name=str, role_kind=str, cloned_from=Optional[str], cloned_fro
 # cascade_group_id: the unit whose archiving changed this row (absent on the unit's own row)
 _POST = dict(post_name=str, post_code=str, cascade_group_id=Optional[int])
 _GROUP = dict(group_name=str, group_kind=str, cascade_group_id=Optional[int])
+# a queued move: target_group_id absent means directly under the root; a name may be gone when the row is written
+_MOVE = dict(move_id=int, node_kind=str, node_id=int, node_name=Optional[str], target_group_id=Optional[int],
+             target_name=Optional[str])
 _OBS = dict(post_name=str, observation_id=int, signal_type_code=str)
 _FREQ = dict(observation_id=int, frequency_kind=str)
 _MEDIA = dict(observation_id=Optional[int], ttl_seconds=Optional[int])   # media of old data may have no observation
@@ -78,7 +84,7 @@ _GUIDE_FILE = dict(guide_title=str, file_name=str, size_bytes=int, sha256=str)
 _SEARCH = dict(result_count=int)
 # what a restore or undo-restore carried over (services/backups/carry_over.py) and how many AUTO_INCREMENTs it raised
 _COUNTS = dict(kept_schema=str, revocation_count=int, added_certificate_count=int, added_user_count=int,
-               crl_number=int, ended_session_count=int, raised_id_count=int)
+               crl_number=int, ended_session_count=int, raised_id_count=int, cancelled_move_count=Optional[int])
 
 
 class AuditEvent(Enum):
@@ -159,6 +165,11 @@ class AuditEvent(Enum):
     SCOPE_GROUP_RESTORE = ("scope_group.restore", event(_S, "Scope group restored", **_GROUP))
     OBSERVATION_UNITS_FILL_HISTORY = ("observation_units.fill_history", event(
         _S, "Unit history filled", observation_count=int, row_count=int))
+    MOVE_REQUESTED = ("move.requested", event(_S, "Move queued until the uploads below it end", **_MOVE))
+    # forced: run at once over running uploads, which continue at the new place
+    MOVE_COMPLETED = ("move.completed", event(_S, "Queued move completed", forced=Optional[bool], **_MOVE))
+    MOVE_CANCELLED = ("move.cancelled", event(_S, "Queued move cancelled", cause=str, **_MOVE))
+    MOVE_FAILED = ("move.failed", event(_S, "Queued move refused when it ran", failure_code=str, **_MOVE))
 
     # data
     OBSERVATION_CREATE = ("observation.create", event(_D, "Observation created", **_OBS))

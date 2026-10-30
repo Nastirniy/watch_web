@@ -42,6 +42,8 @@ TABLES_OWNED_BY_LATER_REVISIONS = {
     "system_role_assignments",  # 029_authz_v3_schema
     "user_guides",  # 033_user_guides
     "user_guide_files",  # 033_user_guides
+    "pending_moves",  # 035_queued_moves
+    "move_locks",  # 035_queued_moves
 }
 down_revision = "001_relativize_media_paths"
 branch_labels = None

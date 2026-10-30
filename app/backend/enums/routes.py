@@ -117,6 +117,17 @@ class BrigadeRoutes(str, Enum):
         return "BRIGADES"
 
 
+class MoveRoutes(str, Enum):
+    """Queued moves: a move of a post, a group or a brigade that waits for the uploads below it"""
+    BASE = "/moves"
+    MOVE_BY_ID = "/{move_id}"
+    MOVE_CANCEL = "/{move_id}/cancel"
+
+    @staticmethod
+    def tag() -> str:
+        return "MOVES"
+
+
 class ObservationRoutes(str, Enum):
     """Observation management routes"""
     BASE = "/observations"
@@ -378,6 +389,7 @@ class Routes:
     SCOPE_GROUPS = ScopeGroupRoutes
     CORPS = CorpsRoutes
     BRIGADES = BrigadeRoutes
+    MOVES = MoveRoutes
     USER_TYPES = UserTypeRoutes
     STATISTICS = StatisticsRoutes
     OBSERVATIONS = ObservationRoutes

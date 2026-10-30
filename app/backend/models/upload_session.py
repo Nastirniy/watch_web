@@ -36,6 +36,9 @@ class UploadSession(SQLModel, table=True):
     # (status completing); writer_since is the time of the claim or of its last renewal
     writer_token: Optional[str] = Field(default=None, max_length=32)
     writer_since: Optional[datetime] = Field(default=None)
+    # The last time bytes of a chunk arrived (first byte of a chunk, every renewal while it streams, the stored chunk);
+    # a claim or a failed attempt without bytes does not move it. Null until the first chunk. A waiting move reads it
+    last_chunk_at: Optional[datetime] = Field(default=None)
 
     created_at: datetime = Field(default_factory=get_default_timezone_datetime)
     updated_at: datetime = Field(default_factory=get_default_timezone_datetime)

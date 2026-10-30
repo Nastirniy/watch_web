@@ -31,6 +31,12 @@ observation_not_found or post_archived); their part files go after the commit
 finish: the transaction that inserts its media row begins with the post and
 observation locks and refuses an archived one (MediaManager.store_file_from_path),
 so nothing lands in an archived observation either way.
+
+A waiting move (services/moves.py) holds on to the pending sessions below its node: holds_move says which still count.
+An open session counts while bytes arrive (last_chunk_at, moved by the first byte of a chunk, every renewal while it
+streams and the stored chunk, never by a claim or a retry without bytes); one silent for moves.upload_stale_seconds
+is ended like an archive ends one (cancel_pending, error upload_cancelled_by_move). A completion that runs counts
+until its claim goes stale.
 """
 from __future__ import annotations
 
@@ -133,7 +139,7 @@ def new_session(
         media_type=media_type, original_filename=original_filename,
         declared_content_type=declared_content_type, expected_size=int(expected_size),
         expected_sha256=expected_sha256.lower() if expected_sha256 else None,
-        part_path=part_path_for(upload_id),
+        part_path=part_path_for(upload_id), created_at=now,
         expires_at=now + timedelta(hours=settings.storage.upload.session_ttl_hours),
     )
 
@@ -203,11 +209,25 @@ async def cancel_pending(session: AsyncSession, rows: Iterable[UploadSession], c
                 updated_at=now, last_activity_at=now)
     )
     for row in cancelled:
-        _logger.info(f"upload session {row.id} cancelled: its observation {row.observation_id} is archived "
-                     f"({code.value})")
+        _logger.info(f"upload session {row.id} of observation {row.observation_id} cancelled ({code.value})")
         if record is not None:
             await record(row)
     return cancelled
+
+
+def last_bytes_at(row: UploadSession) -> datetime:
+    """When bytes of the session last arrived; its creation until the first chunk"""
+    return _aware(row.last_chunk_at or row.created_at)
+
+
+def holds_move(row: UploadSession, now: Optional[datetime] = None) -> bool:
+    """The session keeps a move waiting: open with bytes arriving within moves.upload_stale_seconds, or a completion
+    that runs. What no longer holds is ended by the waiting move (services/moves.py), or has ended already."""
+    now = now or utcnow()
+    if row.status == STATUS_COMPLETING:
+        return not _cancellable(row, now)
+    stale_since = now - timedelta(seconds=settings.moves.upload_stale_seconds)
+    return row.status == STATUS_OPEN and last_bytes_at(row) >= stale_since
 
 
 async def remove_parts(rows: Iterable[UploadSession], storage_root: Path) -> None:
@@ -294,11 +314,13 @@ async def claim_writer(session: AsyncSession, upload_id: str, offset: int) -> st
     raise WriterBusy()
 
 
-async def renew_writer(session: AsyncSession, upload_id: str, token: str) -> bool:
-    """Extend this writer's claim by WRITER_STALE_SECONDS; False when it no longer holds an open session"""
+async def renew_writer(session: AsyncSession, upload_id: str, token: str, bytes_arrived: bool = False) -> bool:
+    """Extend this writer's claim by WRITER_STALE_SECONDS; False when it no longer holds an open session.
+    bytes_arrived: called from the stream, the session is receiving bytes (last_chunk_at)."""
     now = utcnow()
+    arrival = {"last_chunk_at": now} if bytes_arrived else {}
     return await _update(session, upload_id, now, UploadSession.status == STATUS_OPEN, UploadSession.writer_token == token,
-                         writer_since=now)
+                         writer_since=now, **arrival)
 
 
 async def append_chunk(
@@ -309,8 +331,8 @@ async def append_chunk(
 
     The part file must hold exactly `offset` bytes first: the leftover of a chunk that broke off is cut away, a
     file that is shorter aborts the session (BytesMissing; a gap is never filled). While streaming, the claim is
-    renewed every WRITER_RENEW_SECONDS, checked before the next write; a writer that lost it raises WriterLost and
-    leaves the file and the row alone. On any other failure the session is rolled back (the failure may have come
+    renewed at the first byte and every WRITER_RENEW_SECONDS, checked before the next write (which also records that
+    bytes arrive: last_chunk_at); a writer that lost it raises WriterLost and leaves the file and the row alone. On any other failure the session is rolled back (the failure may have come
     from it; this expires its ORM objects, `row` included: callers read the row again), then the file is truncated
     back to offset and the token released, when this writer still holds it, so the session stays consistent with
     received_bytes.
@@ -330,7 +352,7 @@ async def append_chunk(
 
     remaining = expected_size - offset
     written = 0
-    renewed_at = utcnow()
+    renewed_at: Optional[datetime] = None
     try:
         async with aiofiles.open(part, "ab") as handle:
             if size > offset:
@@ -344,15 +366,15 @@ async def append_chunk(
                 if written > remaining:
                     raise ChunkTooLarge(ErrorCode.UPLOAD_CHUNK_OVERRUN, expected_size=expected_size)
                 now = utcnow()
-                if now - renewed_at >= timedelta(seconds=WRITER_RENEW_SECONDS):
-                    if not await renew_writer(session, upload_id, token):
+                if renewed_at is None or now - renewed_at >= timedelta(seconds=WRITER_RENEW_SECONDS):
+                    if not await renew_writer(session, upload_id, token, bytes_arrived=True):
                         raise WriterLost()
                     renewed_at = now
                 await handle.write(piece)
                 # Nothing may wait in a buffer: closing the file after a lost claim must not write it
                 await handle.flush()
         new_offset = offset + written
-        if not await release_writer(session, upload_id, token, new_offset):
+        if not await release_writer(session, upload_id, token, new_offset, stored=written > 0):
             raise WriterLost()
     except WriterLost:
         raise
@@ -371,11 +393,14 @@ async def append_chunk(
     return new_offset
 
 
-async def release_writer(session: AsyncSession, upload_id: str, token: str, received_bytes: int) -> bool:
-    """Record received_bytes and free the session, only while this writer holds it"""
+async def release_writer(session: AsyncSession, upload_id: str, token: str, received_bytes: int,
+                         stored: bool = False) -> bool:
+    """Record received_bytes and free the session, only while this writer holds it. stored: a chunk was stored
+    (last_chunk_at)."""
     now = utcnow()
+    arrival = {"last_chunk_at": now} if stored else {}
     return await _update(session, upload_id, now, UploadSession.status == STATUS_OPEN, UploadSession.writer_token == token,
-                         writer_token=None, writer_since=None, received_bytes=received_bytes)
+                         writer_token=None, writer_since=None, received_bytes=received_bytes, **arrival)
 
 
 # ---- completion, abort, expiry -----------------------------------------------

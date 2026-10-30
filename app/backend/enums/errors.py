@@ -340,6 +340,21 @@ class ErrorCode(ProblemType):
     CORPS_HAS_BRIGADES = ("corps_has_brigades", problem(
         409, "Corps has active brigades", "Move or archive its brigades first, or archive with cascade"))
 
+    # ---------------------------------------------------------------- queued moves
+    MOVE_NOT_FOUND = ("move_not_found", problem(404, "Move not found"))
+    MOVE_NOT_WAITING = ("move_not_waiting", problem(
+        409, "Move is no longer waiting", "The move is {move_status}: only a waiting move can be cancelled",
+        move_status=str))
+    # A new upload below a waiting move, or a move whose subtree overlaps a waiting one (Retry-After)
+    MOVE_PENDING = ("move_pending", problem(
+        409, "A move is waiting here", "Move {move_id} is waiting for the uploads below it; try again later",
+        move_id=int))
+    # A request that would have to wait may hold nothing but the move: a waiting operation never holds half an update
+    MOVE_NOT_ALONE = ("move_not_alone", problem(
+        422, "A move that has to wait must be its own request",
+        "Uploads hold this move, and the request also changes: {changed_fields}. Send the move on its own",
+        changed_fields=List[str]))
+
     # ---------------------------------------------------------------- dictionaries
     CATEGORY_NOT_FOUND = ("category_not_found", problem(404, "Category not found", category_id=Optional[int]))
     CATEGORY_NOT_ARCHIVED = ("category_not_archived", problem(409, "Category is not archived"))
@@ -489,6 +504,10 @@ class ErrorCode(ProblemType):
     UPLOAD_SESSION_CLOSED = ("upload_session_closed", problem(
         410, "Upload session is closed", "Upload session is {session_status}; open a new session",
         session_status=str, media_file_id=Optional[int]))
+    # Nothing arrived for moves.upload_stale_seconds while a move waited for the session: aborted, the bytes are gone
+    UPLOAD_CANCELLED_BY_MOVE = ("upload_cancelled_by_move", problem(
+        409, "Upload cancelled by a waiting move",
+        "No bytes arrived for too long while a move waited for this upload; open a new session", session_status=str))
     UPLOAD_SESSION_COMPLETED = ("upload_session_completed", problem(409, "Session is completed; archive the media file instead"))
     # Another complete is storing the file (status completing): no chunk, abort or second complete meanwhile
     UPLOAD_SESSION_COMPLETING = ("upload_session_completing", problem(409, "Session is being completed; ask GET for its status"))
