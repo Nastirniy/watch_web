@@ -443,7 +443,7 @@ async def run_move(session: AsyncSession, move_id: int) -> Optional[MoveStatus]:
         await _fail(session, move_id, exc.code)
         return MoveStatus.FAILED
     except IntegrityError as exc:
-        # The name index: a group created at the target after the check (a create takes no lock on its parent)
+        # The name index: another writer took the name at the target after the check
         if not is_unique_violation(exc):
             raise
         await _fail(session, move_id, ErrorCode.SCOPE_GROUP_NAME_TAKEN)
