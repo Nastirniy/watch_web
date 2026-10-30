@@ -73,7 +73,7 @@ What the caller holds is their AuthContext (context.load_grants: in effect, insi
 holds is every_assignment, the same rows with the archived roles and without the target's boundary.
 """
 from dataclasses import replace
-from typing import Dict, FrozenSet, Iterable, List, Optional, Set, Tuple, Union
+from typing import FrozenSet, Iterable, List, Optional, Set, Tuple, Union
 
 from loguru import logger
 from sqlmodel import select
@@ -81,12 +81,11 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.access_errors import access_denied
-from app.backend.auth.context import (
-    AuthContext, grant_rows, grants_of, load_scope_tree, permission_name, system_grant_rows,
-)
+from app.backend.auth.context import AuthContext, grant_rows, grants_of, permission_name, system_grant_rows
 from app.backend.auth.integrity import (
     an_administrator_exists, effective_permissions, is_administrator, lock_administrators, switchable_permissions,
 )
+from app.backend.auth.move_access import committed, live_nodes, newly_given, not_covered, ungrantable_by_move
 from app.backend.auth.scope import Grant, Node, ROOT
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.enums.general import Permissions, RoleKind, UserType
@@ -119,14 +118,10 @@ def check_grant(auth: AuthContext, permissions: Iterable[str]) -> None:
         raise access_denied(AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, missing=missing)
 
 
-def _not_covered(auth: AuthContext, permissions: Iterable[str], node: Node) -> Set[str]:
-    return {name for name in set(permissions) if not auth.covers(name, node)}
-
-
 def check_grant_at(auth: AuthContext, permissions: Iterable[str], node: Node) -> None:
     """The caller holds every permission at the node (inside a subtree where it is held): they may assign a role with
     these permissions there"""
-    missing = sorted(_not_covered(auth, permissions, node))
+    missing = sorted(not_covered(auth, permissions, node))
     if missing:
         logger.warning(f"User {auth.user.username} tried to grant at {node.key} permissions they lack there: {missing}")
         raise access_denied(AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, missing=missing)
@@ -151,7 +146,7 @@ def check_role_grant(auth: AuthContext, nodes: Iterable[Node], added: Iterable[s
     missing = set(removed) - auth.permissions
     if nodes:
         for node in nodes:
-            missing |= _not_covered(auth, added, node)
+            missing |= not_covered(auth, added, node)
     else:
         missing |= added - auth.permissions
     if missing:
@@ -205,7 +200,7 @@ async def check_target_user(session: AsyncSession, auth: AuthContext, target: Us
         grants = await every_assignment(session, target)
         lacking: Set[str] = set()
         for grant in grants:
-            lacking |= _not_covered(auth, grant.permissions, grant.node)
+            lacking |= not_covered(auth, grant.permissions, grant.node)
         missing = sorted(lacking)
     if missing:
         logger.warning(f"User {auth.user.username} tried to change user {target.id} beyond their reach: {missing}")
@@ -220,7 +215,7 @@ def check_boundary_change(auth: AuthContext, grants: Iterable[Grant], old_type: 
     for grant in grants:
         before, _ = effective_permissions(old_type, grant.kind, grant.permissions, grant.role_kind)
         after, _ = effective_permissions(new_type, grant.kind, grant.permissions, grant.role_kind)
-        missing |= _not_covered(auth, after - before, grant.node)
+        missing |= not_covered(auth, after - before, grant.node)
     if missing:
         logger.warning(f"User {auth.user.username} tried a type change switching on permissions they lack: "
                        f"{sorted(missing)}")
@@ -228,90 +223,34 @@ def check_boundary_change(auth: AuthContext, grants: Iterable[Grant], old_type: 
 
 
 # ------------------------------------------------------------------ the scope tree: moves and restores of nodes
-async def _assignments_at(session: AsyncSession, nodes: Iterable[Node]) -> List[Tuple[int, str, FrozenSet[str]]]:
-    """(user id, scope key, permissions) of every tree assignment at the nodes of a tree role that is not archived,
-    held by a user who is not archived; the permissions are what some type could put in effect
-    (switchable_permissions). System assignments act at the root, which a move never adds."""
-    keys = sorted({node.key for node in nodes})
-    if not keys:
-        return []
-    rows = (await session.exec(
-        select(RoleAssignment.id, RoleAssignment.user_id, RoleAssignment.scope_key, Permission.name)
-        .join(Role, Role.id == RoleAssignment.role_id)
-        .join(User, User.id == RoleAssignment.user_id)
-        .outerjoin(RolePermission, RolePermission.role_id == Role.id)
-        .outerjoin(Permission, Permission.id == RolePermission.permission_id)
-        .where(RoleAssignment.scope_key.in_(keys), Role.is_deleted == False,  # noqa: E712
-               Role.kind == RoleKind.TREE.value, User.is_deleted == False)  # noqa: E712
-    )).all()
-    heads: Dict[int, Tuple[int, str]] = {}
-    names: Dict[int, Set[str]] = {}
-    for assignment_id, user_id, scope_key, name in rows:
-        heads[assignment_id] = (user_id, scope_key)
-        held = names.setdefault(assignment_id, set())
-        if name:
-            held.add(name)
-    return [(*heads[assignment_id], switchable_permissions(RoleKind.TREE, names[assignment_id]))
-            for assignment_id in sorted(heads)]
-
-
-async def _newly_given(session: AsyncSession, added: Iterable[Node], already: Iterable[Node]) -> FrozenSet[str]:
-    """Every permission the assignments at the added nodes give their user that the user does not hold already
-    through an assignment at the already nodes (where the target node gets its grants from now)"""
-    added_keys = {node.key for node in added}
-    if not added_keys:
-        return frozenset()
-    held: Dict[int, Set[str]] = {}
-    new: List[Tuple[int, FrozenSet[str]]] = []
-    for user_id, scope_key, permissions in await _assignments_at(session, [*added, *already]):
-        if scope_key in added_keys:
-            new.append((user_id, permissions))
-        else:
-            held.setdefault(user_id, set()).update(permissions)
-    return frozenset().union(*(permissions - held.get(user_id, set()) for user_id, permissions in new))
-
-
 def _check_could_grant(auth: AuthContext, permissions: FrozenSet[str], node: Node, change: str) -> None:
     """check_grant_at of what the change newly gives at the node, one 403 grant_exceeds_own_permissions listing
     everything lacking"""
-    missing = sorted(_not_covered(auth, permissions, node))
+    missing = sorted(not_covered(auth, permissions, node))
     if missing:
         logger.warning(f"User {auth.user.username} tried a {change} of {node.key} putting in effect permissions they "
                        f"lack there: {missing}")
         raise access_denied(AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, missing=missing)
 
 
-async def _committed(session: AsyncSession, auth: AuthContext) -> AuthContext:
-    """The caller with the scope tree read inside the write (after the route's locks)"""
-    return replace(auth, tree=await load_scope_tree(session))
-
-
-def _live(tree, nodes: Iterable[Node]) -> List[Node]:
-    return [node for node in nodes if not tree.is_archived(node)]
-
-
 async def check_move(session: AsyncSession, auth: AuthContext, moved: Node, new_parent: Node) -> None:
-    """A move of the post or group moved under new_parent (a group, the root): every assignment at the new
-    parent's ancestors (itself included) that is not already above the moved node, nor inside it, nor at an
-    archived node, applies at the moved subtree after the move; the caller could grant at the moved node, as it
-    stands before the move, what each of them newly gives its user there (_newly_given: less what the user already
-    holds at the moved node)"""
-    current = await _committed(session, auth)
-    tree = current.tree
-    above = set(tree.ancestors(moved)[1:])
-    added = [node for node in _live(tree, tree.ancestors(new_parent))
-             if node not in above and not tree.contains(moved, node)]
-    given = await _newly_given(session, added, _live(tree, tree.ancestors(moved)))
-    _check_could_grant(current, given, moved, "move")
+    """A move of the post or group moved under new_parent: what the destination newly puts in effect at the moved
+    subtree, the caller could grant at the moved node (auth/move_access.py ungrantable_by_move, also what a queued
+    move runs through); one 403 grant_exceeds_own_permissions listing everything lacking"""
+    missing = await ungrantable_by_move(session, auth, moved, new_parent)
+    if missing:
+        logger.warning(f"User {auth.user.username} tried a move of {moved.key} putting in effect permissions they "
+                       f"lack there: {missing}")
+        raise access_denied(AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, missing=missing)
 
 
 async def check_node_restore(session: AsyncSession, auth: AuthContext, node: Node) -> None:
     """A restore of the archived post or group: every assignment at it applies again; the caller could grant there
     what each of them newly gives its user (less what the user holds at the node through its live ancestors). A grant
     at the archived node itself, the caller's own included, covers nothing."""
-    current = await _committed(session, auth)
+    current = await committed(session, auth)
     tree = current.tree
-    given = await _newly_given(session, [node], _live(tree, tree.ancestors(node)[1:]))
+    given = await newly_given(session, [node], live_nodes(tree, tree.ancestors(node)[1:]))
     _check_could_grant(current, given, node, "restore")
 
 
