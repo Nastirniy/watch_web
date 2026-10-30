@@ -191,7 +191,8 @@ async def refresh_token(
       newest included, answers `session_expired` from then on: log in again.
     - a used token presented with another client certificate than the session's: `token_certificate_mismatch`,
       and the session ends as well (`refresh_token_reused`), whatever the window. The current token presented with
-      another certificate answers `token_certificate_mismatch` and changes nothing.
+      another certificate answers `token_certificate_mismatch`: the session and the token stay as they were, and an
+      audit row `session.certificate_mismatch` records the attempt.
     - a session from before this rule that has not refreshed since (it records no previous token): a used token is
       `invalid_refresh_token` and the session stays.
 
@@ -265,7 +266,9 @@ async def refresh_token(
     if not await certificate_matches(refresh_session, x_ssl_client_fingerprint):
         _logger.warning(f"Refresh token presented with another client certificate: session_id={session_id}, user_id={user_id}")
         if next_jti is not None:
-            raise ApiError(AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH)    # the current token: the claim rolls back
+            # The current token: the claim rolls back, the session stays, and the attempt is on record
+            await AuthService.record_certificate_mismatch(session, refresh_session, user, **client)
+            raise ApiError(AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH)
         # A used token with another certificate is a stolen copy, whatever the grace window: the session ends
         await AuthService.revoke_session(session, refresh_session, user, SessionRevokeCause.REFRESH_TOKEN_REUSED,
                                          begin=False, **client)

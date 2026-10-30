@@ -116,6 +116,9 @@ class AuditEvent(Enum):
         _A, "Certificate login attempt", certificate_cn=str, certificate_serial=str, matched=bool,
         certificate_id=Optional[int], certificate_fingerprint_prefix=Optional[str]))
     SESSION_LOGOUT = ("session.logout", event(_A, "User logged out", **_USER))
+    # The current refresh token of a session came with another client certificate: refused, the session stays
+    SESSION_CERTIFICATE_MISMATCH = ("session.certificate_mismatch", event(
+        _A, "Refresh token presented with another client certificate", **_USER))
 
     # access
     SESSION_END = ("session.end", event(

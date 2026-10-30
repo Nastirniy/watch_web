@@ -173,7 +173,7 @@
           "AUTHENTICATION"
         ],
         "summary": "Refresh Token",
-        "description": "Refresh the access token with the refresh token. A refresh token works once: the answer carries a new access\ntoken and the next refresh token, and the token presented is used from then on.\n\nA used refresh token presented again (RFC 9700 section 4.14, refresh token reuse):\n\n- the token the last refresh of the session replaced, less than `security.refresh_reuse_grace_seconds` (30)\n  after that refresh: `invalid_refresh_token`, the session stays. Two tabs that refreshed at the same moment with\n  the same token: one got the new tokens, the other keeps using them (exactly one 200, one 401).\n- any other used token of the session (that one later, or an older one): `refresh_token_reused`, the session\n  ends (`revoke_cause` `refresh_token_reused`, an audit row `session.end`). Every token of the session, the\n  newest included, answers `session_expired` from then on: log in again.\n- a used token presented with another client certificate than the session's: `token_certificate_mismatch`,\n  and the session ends as well (`refresh_token_reused`), whatever the window. The current token presented with\n  another certificate answers `token_certificate_mismatch` and changes nothing.\n- a session from before this rule that has not refreshed since (it records no previous token): a used token is\n  `invalid_refresh_token` and the session stays.\n\nKeep only the newest refresh token; a client that lost the answer of a refresh logs in again.",
+        "description": "Refresh the access token with the refresh token. A refresh token works once: the answer carries a new access\ntoken and the next refresh token, and the token presented is used from then on.\n\nA used refresh token presented again (RFC 9700 section 4.14, refresh token reuse):\n\n- the token the last refresh of the session replaced, less than `security.refresh_reuse_grace_seconds` (30)\n  after that refresh: `invalid_refresh_token`, the session stays. Two tabs that refreshed at the same moment with\n  the same token: one got the new tokens, the other keeps using them (exactly one 200, one 401).\n- any other used token of the session (that one later, or an older one): `refresh_token_reused`, the session\n  ends (`revoke_cause` `refresh_token_reused`, an audit row `session.end`). Every token of the session, the\n  newest included, answers `session_expired` from then on: log in again.\n- a used token presented with another client certificate than the session's: `token_certificate_mismatch`,\n  and the session ends as well (`refresh_token_reused`), whatever the window. The current token presented with\n  another certificate answers `token_certificate_mismatch`: the session and the token stay as they were, and an\n  audit row `session.certificate_mismatch` records the attempt.\n- a session from before this rule that has not refreshed since (it records no previous token): a used token is\n  `invalid_refresh_token` and the session stays.\n\nKeep only the newest refresh token; a client that lost the answer of a refresh logs in again.",
         "operationId": "refresh_token",
         "requestBody": {
           "content": {
@@ -30324,6 +30324,7 @@
                       "user.login",
                       "auth.certificate_login",
                       "session.logout",
+                      "session.certificate_mismatch",
                       "session.end",
                       "user.create",
                       "user.update",
@@ -30701,6 +30702,9 @@
                         "$ref": "#/components/schemas/SessionLogoutAuditEntry"
                       },
                       {
+                        "$ref": "#/components/schemas/SessionCertificateMismatchAuditEntry"
+                      },
+                      {
                         "$ref": "#/components/schemas/SessionEndAuditEntry"
                       },
                       {
@@ -30956,6 +30960,7 @@
                         "user.login": "#/components/schemas/UserLoginAuditEntry",
                         "auth.certificate_login": "#/components/schemas/AuthCertificateLoginAuditEntry",
                         "session.logout": "#/components/schemas/SessionLogoutAuditEntry",
+                        "session.certificate_mismatch": "#/components/schemas/SessionCertificateMismatchAuditEntry",
                         "session.end": "#/components/schemas/SessionEndAuditEntry",
                         "user.create": "#/components/schemas/UserCreateAuditEntry",
                         "user.update": "#/components/schemas/UserUpdateAuditEntry",
@@ -31293,6 +31298,9 @@
                       "$ref": "#/components/schemas/SessionLogoutAuditEntry"
                     },
                     {
+                      "$ref": "#/components/schemas/SessionCertificateMismatchAuditEntry"
+                    },
+                    {
                       "$ref": "#/components/schemas/SessionEndAuditEntry"
                     },
                     {
@@ -31548,6 +31556,7 @@
                       "user.login": "#/components/schemas/UserLoginAuditEntry",
                       "auth.certificate_login": "#/components/schemas/AuthCertificateLoginAuditEntry",
                       "session.logout": "#/components/schemas/SessionLogoutAuditEntry",
+                      "session.certificate_mismatch": "#/components/schemas/SessionCertificateMismatchAuditEntry",
                       "session.end": "#/components/schemas/SessionEndAuditEntry",
                       "user.create": "#/components/schemas/UserCreateAuditEntry",
                       "user.update": "#/components/schemas/UserUpdateAuditEntry",
@@ -33990,6 +33999,7 @@
               "user.login",
               "auth.certificate_login",
               "session.logout",
+              "session.certificate_mismatch",
               "session.end",
               "user.create",
               "user.update",
@@ -59098,6 +59108,193 @@
         ],
         "title": "SessionCertificate",
         "description": "The certificate the current session was opened with (GET /auth/me)"
+      },
+      "SessionCertificateMismatchAuditEntry": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "category": {
+            "$ref": "#/components/schemas/AuditCategory"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditActorResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who acted; null for the system or an anonymous caller"
+          },
+          "resource_type": {
+            "type": "string",
+            "title": "Resource Type"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Id"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditScopeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the event happened; null for a system-wide event"
+          },
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "old_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Values"
+          },
+          "new_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Values"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id",
+            "description": "X-Request-ID of the request that wrote the row"
+          },
+          "ip_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip Address",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "user_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Agent",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "request_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Url",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "event": {
+            "type": "string",
+            "const": "session.certificate_mismatch",
+            "title": "Event",
+            "description": "Key of exactly this message in the localization package"
+          },
+          "params": {
+            "$ref": "#/components/schemas/SessionCertificateMismatchAuditParams"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "category",
+          "actor",
+          "resource_type",
+          "resource_id",
+          "scope",
+          "success",
+          "old_values",
+          "new_values",
+          "request_id",
+          "ip_address",
+          "user_agent",
+          "session_id",
+          "request_url",
+          "event",
+          "params"
+        ],
+        "title": "SessionCertificateMismatchAuditEntry",
+        "description": "Refresh token presented with another client certificate (event session.certificate_mismatch, category authentication)"
+      },
+      "SessionCertificateMismatchAuditParams": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username"
+        ],
+        "title": "SessionCertificateMismatchAuditParams",
+        "description": "Params of session.certificate_mismatch (Refresh token presented with another client certificate)"
       },
       "SessionEndAuditEntry": {
         "properties": {

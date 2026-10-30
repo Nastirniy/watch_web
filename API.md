@@ -158,7 +158,7 @@ Session lifetime: a session lives while it is used. It ends after `security.sess
 
 - the token the last refresh replaced, within `security.refresh_reuse_grace_seconds` (30) of that refresh: `invalid_refresh_token`, and the session goes on with the newest token (two tabs refreshed at the same moment: exactly one gets 200, the other a 401, and the winner's tokens work);
 - that token later, or any older token of the session: `refresh_token_reused`, and the session ends (`revoke_cause` `refresh_token_reused`, audit `session.end`); every token of it answers `session_expired` from then on;
-- a used token with another client certificate than the session's: `token_certificate_mismatch`, and the session ends as well (`refresh_token_reused`), whatever the window;
+- a used token with another client certificate than the session's: `token_certificate_mismatch`, and the session ends as well (`refresh_token_reused`), whatever the window; the current token with another certificate answers the same code, the session and the token stay as they were, and an audit row `session.certificate_mismatch` records the attempt;
 - a session opened before this rule that has not refreshed since records no previous token: a used token answers `invalid_refresh_token` and the session stays.
 
 Keep only the latest refresh token and never refresh twice in parallel with the same one (two tabs: share the refresh through one place, the grace window only forgives the race); a client that lost the answer of a refresh logs in again.

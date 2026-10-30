@@ -82,6 +82,7 @@ LEGACY_EVENTS: Dict[Tuple[str, str], Tuple[str, str]] = {
     # rows is unchanged; rows written by them map back after a downgrade of 031 and an upgrade again)
     **_events("user_guide", "dictionaries", *_CRUD),
     **_events("user_guide_file", "dictionaries", "upload", "archive", "restore"),
+    ("session", "certificate_mismatch"): ("session.certificate_mismatch", "authentication"),
 }
 
 _RESTORE_COUNTS = {

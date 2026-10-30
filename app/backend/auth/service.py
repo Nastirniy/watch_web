@@ -529,6 +529,29 @@ class AuthService:
         return True
 
     @staticmethod
+    async def record_certificate_mismatch(session: AsyncSession, user_session: UserSession, user: User,
+                                          ip_address: Optional[str] = None, user_agent: Optional[str] = None,
+                                          request_url: Optional[str] = None) -> None:
+        """The audit row of a refresh with the session's current token and another client certificate, the strongest
+        sign of a stolen token (the attempt is refused and the session stays: the owner still holds the token).
+        Rolls the caller's claim back first, so the token stays usable, and commits the row as a write of its own."""
+        session_id, user_id, username, scope = user_session.id, user.id, user.username, home_scope(user)
+        await session.rollback()
+        await create_audit_log(
+            session,
+            AuditEvent.SESSION_CERTIFICATE_MISMATCH,
+            params={"username": username},
+            scope=scope,
+            resource_id=user_id,
+            user_id=user_id,
+            session_id=session_id,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            request_url=request_url,
+        )
+        await session.commit()
+
+    @staticmethod
     async def expire_sessions_of_inactive_user(session: AsyncSession, user_id: int) -> int:
         """End every live session of a user whose account is deactivated or archived.
 

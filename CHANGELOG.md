@@ -9,6 +9,10 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ### Changed
 
+- `POST /auth/refresh`: the current refresh token presented with another client certificate than the session's now
+  writes an audit row, the new event `session.certificate_mismatch` (who: the session's user; the presenter's address
+  and user agent, as on every audit row). The answer stays `token_certificate_mismatch`, the session and the token
+  stay as they were. The web needs a translation of the new event code.
 - `POST /auth/refresh`: a used refresh token presented again ends its session (RFC 9700 section 4.14). The token
   the last refresh of the session replaced, presented within `security.refresh_reuse_grace_seconds` (new setting,
   default 30, `MYSETTINGS_SECURITY__REFRESH_REUSE_GRACE_SECONDS`) of that refresh, still answers 401

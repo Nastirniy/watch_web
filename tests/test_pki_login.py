@@ -9,7 +9,9 @@ from sqlmodel import select
 
 from app.backend.api.v1 import V1
 from app.backend.auth.certificates import hash_data, parse_cn
+from app.backend.enums.audit import AuditEvent
 from app.backend.enums.routes import AuthRoutes, UserRoutes
+from app.backend.models.audit import AuditLog
 from app.backend.models.user import User, UserSession
 from app.backend.models.user_certificate import UserCertificate
 from tests.helpers import make_admin, make_certificate, make_certificate_row, nginx_headers, openssl_rfc2253  # noqa: F401
@@ -218,3 +220,29 @@ async def test_a_session_of_a_revoked_certificate_ends_on_its_next_request(clien
     again = await client.get(ME, headers={**nginx_headers(old), "Authorization": f"Bearer {on_request['access_token']}"})
     assert again.status_code == 401 and again.json()["code"] == "session_expired"
 
+
+
+@pytest.mark.asyncio
+async def test_the_current_refresh_token_with_another_certificate_is_audited(client, db, headers, production, session_maker):
+    """The strongest theft signal: refused and the session stays, as before, and now one audit row says so, with the
+    presenter's address. The refused attempt retires nothing: the token still works with its own certificate"""
+    own = make_certificate("cn-audit-own", 0x6666)
+    other = make_certificate("cn-audit-other", 0x7777)
+    await _create_user(client, db, headers, "auditowner", own)
+    await _create_user(client, db, headers, "auditother", other)
+    tokens = await _tokens(client, own)
+
+    refused = await client.post(REFRESH, json={"refresh_token": tokens["refresh_token"]}, headers=nginx_headers(other))
+    assert refused.status_code == 401 and refused.json()["code"] == "token_certificate_mismatch", refused.text
+
+    async with session_maker() as fresh:
+        owner = (await fresh.exec(select(User).where(User.username == "auditowner"))).one()
+        rows = (await fresh.exec(select(AuditLog).where(
+            AuditLog.event == AuditEvent.SESSION_CERTIFICATE_MISMATCH.code))).all()
+        live = (await fresh.exec(select(UserSession).where(UserSession.user_id == owner.id))).one()
+    assert [(row.user_id, row.resource_id, row.session_id) for row in rows] == [(owner.id, owner.id, live.id)]
+    assert rows[0].params["username"] == "auditowner"
+    assert live.ended_at is None and live.revoke_cause is None
+
+    again = await client.post(REFRESH, json={"refresh_token": tokens["refresh_token"]}, headers=nginx_headers(own))
+    assert again.status_code == 200, again.text
