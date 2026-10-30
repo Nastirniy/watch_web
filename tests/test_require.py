@@ -34,17 +34,17 @@ def test_any_requires_one_permission():
 
 
 def test_there_is_no_admin_gate():
-    """Require has only all / any: the admin flag, its parameter and admin_missing are gone, and admin.true (gone from
+    """Require has only permissions: the admin flag, its parameter and admin_missing are gone, and admin.true (gone from
     the permission catalog; a name no grant satisfies) satisfies nothing"""
     with pytest.raises(TypeError):
         require(all=[Permissions.TAG_ARCHIVE], admin=True)
     with pytest.raises(TypeError):
         Require.of(all=[Permissions.TAG_ARCHIVE], admin=True)
     assert set(PermissionCheckResult.__dataclass_fields__) == {"allowed", "missing"}
-    assert set(Require.__dataclass_fields__) == {"all", "any"}
+    assert set(Require.__dataclass_fields__) == {"all", "any", "at_root"}
     assert "admin_required" not in {code.value for code in AccessErrorCode}
     assert not hasattr(openapi, "ADMIN") and openapi.GUARDED == (AccessErrorCode.PERMISSION_DENIED,)
-    assert set(RequiredPermissions.model_fields) == {"all", "any"}
+    assert set(RequiredPermissions.model_fields) == {"all", "any", "at_root"}
 
     spec = Require.of(all=[Permissions.TAG_ARCHIVE])
     admin_only = spec.evaluate(ctx())
@@ -80,7 +80,7 @@ def test_empty_require_only_needs_authentication():
 
 
 def test_as_dict_shape():
-    assert Require.of(all=["a"], any=["b"]).as_dict() == {"all": ["a"], "any": ["b"]}
+    assert Require.of(all=["a"], any=["b"]).as_dict() == {"all": ["a"], "any": ["b"], "at_root": []}
 
 
 def test_evaluation_reads_the_grants():

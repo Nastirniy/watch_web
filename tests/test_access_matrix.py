@@ -26,7 +26,7 @@ PERSONAS = ["no_perms", "granular", "granular_admin", "admin_only"]
 
 
 def persona_permissions(entry, persona) -> list:
-    granular = list(entry.require.all) + list(entry.require.any[:1])
+    granular = list(entry.require.all) + list(entry.require.any[:1]) + list(entry.require.at_root)
     return {
         "no_perms": [],
         "granular": granular,

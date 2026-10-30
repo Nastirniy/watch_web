@@ -3296,7 +3296,7 @@
           "USERS"
         ],
         "summary": "Create User System Assignment",
-        "description": "Give the user a system role: it acts on the whole system, without a node.\n\nChecked in this order: user.view covering the user (403 user_self_only, as GET /users/{user_id}); user.update\ncovering the user and every assignment of the user grantable by the caller (403 target_user_more_privileged); an archived user 404 user_not_found; an unknown or archived role 404\nrole_not_found; a tree role 409 role_is_tree (POST /{user_id}/assignments gives those); user.update and every\npermission of the role held by the caller at the root (403 grant_exceeds_own_permissions); a role above the\nsystem boundary of the user's type 409 role_exceeds_user_type; the same role 409 assignment_exists.",
+        "description": "Give the user a system role: it acts on the whole system, without a node.\n\nA grant at the root: the route requires user.view, and user.update in effect at the root (403 permission_denied,\nthe `at_root` of required), so a brigade administrator neither sees it in GET /auth/route-access nor reaches it.\n\nThen checked in this order: user.view covering the user (403 user_self_only, as GET /users/{user_id}); user.update\ncovering the user and every assignment of the user grantable by the caller (403 target_user_more_privileged); an archived user 404 user_not_found; an unknown or archived role 404\nrole_not_found; a tree role 409 role_is_tree (POST /{user_id}/assignments gives those); every permission of the\nrole held by the caller at the root (403 grant_exceeds_own_permissions); a role above the system boundary of the\nuser's type 409 role_exceeds_user_type; the same role 409 assignment_exists.",
         "operationId": "create_user_system_assignment",
         "security": [
           {
@@ -3493,7 +3493,7 @@
           "USERS"
         ],
         "summary": "Delete User System Assignment",
-        "description": "Remove one system role assignment of the user (the role stays). The audit log keeps a full copy of the\nremoved row.\n\nChecked in this order: user.view covering the user (403 user_self_only, as GET /users/{user_id}); user.update\ncovering the user and every assignment of the user grantable by the caller (403 target_user_more_privileged); an archived user 404 user_not_found; a system assignment that is not this\nuser's 404 assignment_not_found; user.update and every permission of its role held by the caller at the root\n(403 grant_exceeds_own_permissions); the user's last assignment of either kind 409 last_assignment_required; the\nbuilt-in system_administrator role cannot be taken from the last effective administrator (409\nlast_admin_required) nor by an effective administrator from themselves (409 cannot_remove_own_admin). An effective\nadministrator is an active, not archived user holding the built-in system_administrator system role and\nadministrator at the root, whose user type puts both in effect and, where login requires a client certificate\n(every environment but development), with an active certificate.",
+        "description": "Remove one system role assignment of the user (the role stays). The audit log keeps a full copy of the\nremoved row.\n\nA grant at the root: the route requires user.view, and user.update in effect at the root (403 permission_denied,\nthe `at_root` of required), so a brigade administrator neither sees it in GET /auth/route-access nor reaches it.\n\nThen checked in this order: user.view covering the user (403 user_self_only, as GET /users/{user_id}); user.update\ncovering the user and every assignment of the user grantable by the caller (403 target_user_more_privileged); an archived user 404 user_not_found; a system assignment that is not this\nuser's 404 assignment_not_found; every permission of its role held by the caller at the root\n(403 grant_exceeds_own_permissions); the user's last assignment of either kind 409 last_assignment_required; the\nbuilt-in system_administrator role cannot be taken from the last effective administrator (409\nlast_admin_required) nor by an effective administrator from themselves (409 cannot_remove_own_admin). An effective\nadministrator is an active, not archived user holding the built-in system_administrator system role and\nadministrator at the root, whose user type puts both in effect and, where login requires a client certificate\n(every environment but development), with an active certificate.",
         "operationId": "delete_user_system_assignment",
         "security": [
           {
@@ -14256,7 +14256,7 @@
           "POSTS"
         ],
         "summary": "Get Post Observation Stats",
-        "description": "Observation counters of a post by created_at: all time, last 24 hours, and the period\nper hour or per day with every bucket included. not_archived and archived never overlap.\n\nNote:\n    - observation.view must be in effect at the post (counters are observation data)",
+        "description": "Observation counters of a post by created_at: all time, last 24 hours, and the period\nper hour or per day with every bucket included. not_archived and archived never overlap.\n\nNote:\n    - post.view and observation.view must be in effect at the post (403 post_access_denied), answered before the\n      post's existence",
         "operationId": "get_post_observation_stats",
         "security": [
           {
@@ -14347,11 +14347,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
-              "description": "Count archived observations separately; counts only, so observation.view is enough",
+              "description": "Count archived observations separately; counts only, so observation.archive is not needed",
               "default": false,
               "title": "Include Archived"
             },
-            "description": "Count archived observations separately; counts only, so observation.view is enough"
+            "description": "Count archived observations separately; counts only, so observation.archive is not needed"
           }
         ],
         "responses": {
@@ -20672,7 +20672,7 @@
           "MEDIA"
         ],
         "summary": "Reconcile Posters",
-        "description": "Re-queue videos whose poster is missing on disk or untracked; optionally retry failed ones. Acts on every post:\nmedia.view and media.update plus media.monitor (system level, held at the root).",
+        "description": "Re-queue videos whose poster is missing on disk or untracked; optionally retry failed ones. Acts on every post,\nso media.view, media.update and media.monitor must all be in effect at the root (403 permission_denied, the\n`at_root` of required): the same permissions held at a post or a group do not count.",
         "operationId": "reconcile_posters",
         "requestBody": {
           "content": {
@@ -52155,6 +52155,14 @@
             "type": "array",
             "title": "Any",
             "description": "At least one permission in this list is required"
+          },
+          "at_root": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "At Root",
+            "description": "Every permission in this list is required in effect at the root: a tree permission held at the root, a system permission through a system role. A grant further down the tree does not count"
           }
         },
         "type": "object",

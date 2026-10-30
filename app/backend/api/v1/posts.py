@@ -196,7 +196,7 @@ async def get_post_observation_stats(
         date_to: Optional[UtcDatetime] = Query(None, description="Period end, created_at (default: now)"),
         group_by: StatsGroupBy = Query(StatsGroupBy.DAY, description="Bucket size: hour (period up to 31 days) or day (up to 366 days)"),
         tz: Optional[str] = Query(None, max_length=64, description="IANA time zone of the buckets (default: server time zone setting)"),
-        include_archived: bool = Query(False, description="Count archived observations separately; counts only, so observation.view is enough"),
+        include_archived: bool = Query(False, description="Count archived observations separately; counts only, so observation.archive is not needed"),
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW, Permissions.OBSERVATION_VIEW]))
 ):
@@ -204,8 +204,10 @@ async def get_post_observation_stats(
     per hour or per day with every bucket included. not_archived and archived never overlap.
 
     Note:
-        - observation.view must be in effect at the post (counters are observation data)
+        - post.view and observation.view must be in effect at the post (403 post_access_denied), answered before the
+          post's existence
     """
+    AccessControlService.check_post(auth, Permissions.POST_VIEW, post_id)
     AccessControlService.check_post(auth, Permissions.OBSERVATION_VIEW, post_id)
     if (await session.exec(select(Post.id).where(Post.id == post_id))).first() is None:
         raise ApiError(ErrorCode.POST_NOT_FOUND)

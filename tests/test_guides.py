@@ -383,7 +383,7 @@ async def test_writes_need_the_system_permissions(client, db, headers, method, p
     assert response.status_code == 403, response.text
     problem = response.json()
     assert problem["code"] == "permission_denied"
-    assert problem["required"] == {"all": [permission], "any": []} and problem["missing"] == [permission]
+    assert problem["required"] == {"all": [permission], "any": [], "at_root": []} and problem["missing"] == [permission]
 
 
 async def test_list_order_and_title_filter(client, db, headers):

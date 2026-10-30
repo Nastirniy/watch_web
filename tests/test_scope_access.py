@@ -109,7 +109,7 @@ async def test_post_records_follow_post_view(client, db, headers):
     user = await make_user(db, perms=[P.POST_VIEW, P.OBSERVATION_VIEW], post_id=a.id)
 
     body = _denied(await client.get(_post_url(b.id), headers=headers(user)), "post_access_denied", ["post.view"])
-    assert body["required"] == {"all": ["post.view"], "any": []}
+    assert body["required"] == {"all": ["post.view"], "any": [], "at_root": []}
     assert body["post_id"] == b.id and body["resource_type"] == "post"
     assert (await client.get(_post_url(a.id), headers=headers(user))).status_code == 200
     assert _ids(await client.get(POSTS, headers=headers(user))) == {a.id}
@@ -121,11 +121,11 @@ async def test_post_records_follow_post_view(client, db, headers):
     assert {a.id, b.id} <= _ids(await client.get(POSTS, headers=headers(manager)))
 
 
-async def test_observation_stats_follow_observation_view(client, db, headers):
+async def test_observation_stats_follow_post_view_and_observation_view(client, db, headers):
     a, b = await make_post(db), await make_post(db)
     user = await make_user(db, perms=[P.POST_VIEW, P.OBSERVATION_VIEW], post_id=a.id)
     assert (await client.get(_stats_url(a.id), headers=headers(user))).status_code == 200
-    _denied(await client.get(_stats_url(b.id), headers=headers(user)), "post_access_denied", ["observation.view"])
+    _denied(await client.get(_stats_url(b.id), headers=headers(user)), "post_access_denied", ["post.view"])
 
     # admin.true sees every post record, but counters are observation data: the home post only
     manager = await make_user(db, perms=[ADMIN_TRUE, P.POST_VIEW, P.OBSERVATION_VIEW], post_id=a.id)
@@ -171,7 +171,7 @@ async def test_a_grant_only_at_an_archived_node_is_held_nowhere(client, db, head
     me = (await client.get(V1.path(AuthRoutes.ME), headers=headers(user))).json()
     assert me["permissions"] == ["tag.view"] and me["post_permissions"] == {str(other.id): ["tag.view"]}
     body = _denied(await client.get(_post_url(other.id), headers=headers(user)), "permission_denied", ["post.view"])
-    assert body["required"] == {"all": ["post.view"], "any": []}
+    assert body["required"] == {"all": ["post.view"], "any": [], "at_root": []}
     _denied(await client.get(V1.path(ObservationRoutes.LIST_ALL), headers=headers(user)), "permission_denied",
             ["observation.view"])
 
@@ -197,7 +197,7 @@ async def test_removed_gate_does_not_widen(client, db, headers):
     creator = await make_user(db, perms=[P.POST_VIEW, P.POST_CREATE], post_id=post.id)
     body = _denied(await client.post(POSTS, json={"name": "New", "code": "NEW-1"}, headers=headers(creator)),
                    "permission_denied", ["post.create"])
-    assert body["required"] == {"all": ["post.view", "post.create"], "any": []}
+    assert body["required"] == {"all": ["post.view", "post.create"], "any": [], "at_root": []}
 
     editor = await make_user(db, perms=[P.POST_VIEW, P.POST_UPDATE], post_id=post.id)
     _denied(await client.put(_post_url(post.id), json={"name": "x"}, headers=headers(editor)),
@@ -457,7 +457,7 @@ async def test_export_without_gate(client, db, headers):
     exporter = await make_user(db, perms=[P.OBSERVATION_VIEW, P.EXPORT_CREATE], post_id=post.id)
     # export.create did nothing without admin.true: still refused, now as a missing permission
     body = _denied(await client.post(REPORT, json=ALL_FIELDS, headers=headers(exporter)), "permission_denied", ["export.create"])
-    assert body["required"] == {"all": ["observation.view", "export.create"], "any": []}
+    assert body["required"] == {"all": ["observation.view", "export.create"], "any": [], "at_root": []}
     admin = await make_admin(db)
     assert (await client.post(REPORT, json=ALL_FIELDS, headers=headers(admin))).status_code == 200
     # admin.true with both permissions keeps the export (the conversion puts export.create where observation.view is)
@@ -507,13 +507,14 @@ async def test_media_monitor_route(client, db, headers):
     manager = await make_user(db, perms=[ADMIN_TRUE, P.MEDIA_VIEW], post_id=post.id)
     for path in MONITOR_ROUTES:
         body = _denied(await client.get(path, headers=headers(viewer)), "permission_denied", ["media.monitor"])
-        assert body["required"] == {"all": ["media.monitor"], "any": []}
+        assert body["required"] == {"all": ["media.monitor"], "any": [], "at_root": []}
         assert (await client.get(path, headers=headers(admin))).status_code == 200, path
         assert (await client.get(path, headers=headers(manager))).status_code == 200, path
 
 
-async def test_poster_reconcile_needs_media_monitor(client, db, headers, with_grants, tmp_path, monkeypatch):
-    """R16: reconcile acts on every post, so media.view + media.update (scoped) are not enough without media.monitor"""
+async def test_poster_reconcile_needs_every_permission_at_the_root(client, db, headers, with_grants, tmp_path, monkeypatch):
+    """R16: reconcile acts on every post, so media.view + media.update (scoped) are not enough, with or without
+    media.monitor (finding L8): all three in effect at the root"""
     monkeypatch.setattr(settings.storage, "upload_path", str(tmp_path))
     reconcile = V1.path(MediaRoutes.POSTERS_RECONCILE)
     east = await _group(db, "East")
@@ -521,13 +522,15 @@ async def test_poster_reconcile_needs_media_monitor(client, db, headers, with_gr
     perms = [P.MEDIA_VIEW, P.MEDIA_UPDATE]
     post_admin = await make_user(db, perms=[ADMIN_TRUE, *perms], post_id=post.id)
     await with_grants(post_admin, grant(Node.group(east.id), *perms))
-    body = _denied(await client.post(reconcile, json={}, headers=headers(post_admin)), "permission_denied", ["media.monitor"])
-    assert body["required"] == {"all": ["media.view", "media.update", "media.monitor"], "any": []}
+    body = _denied(await client.post(reconcile, json={}, headers=headers(post_admin)), "permission_denied",
+                   ["media.view", "media.update", "media.monitor"])
+    assert body["required"] == {"all": [], "any": [], "at_root": ["media.view", "media.update", "media.monitor"]}
 
     assert (await client.post(reconcile, json={}, headers=headers(await make_admin(db)))).status_code == 200
-    # a converted administrator with media.view holds media.monitor at the root (R10) and keeps the route
+    # a converted administrator with media.view holds media.monitor at the root (R10) but the rest at the post only
     manager = await make_user(db, perms=[ADMIN_TRUE, *perms], post_id=post.id)
-    assert (await client.post(reconcile, json={}, headers=headers(manager))).status_code == 200
+    _denied(await client.post(reconcile, json={}, headers=headers(manager)), "permission_denied",
+            ["media.view", "media.update"])
 
 
 async def test_manage_any_applies_at_its_posts_only(client, db, headers, with_grants):

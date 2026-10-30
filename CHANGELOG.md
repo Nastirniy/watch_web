@@ -67,6 +67,19 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - Contract: `last_admin_required` is declared on `revoke_user_certificate`, its title reads "This change would leave
   no effective administrator"; the descriptions of `update_user`, `archive_user`, `delete_user_assignment`,
   `delete_user_system_assignment` and `revoke_user_certificate` and of `AuthorizationHealthModel` state the rule.
+- Three route declarations match their handlers (finding L8). `GET /posts/{id}/observation-stats` checks `post.view`
+  as well as `observation.view` at the post (403 `post_access_denied`; it was declared but checked only somewhere).
+  `POST /media/posters/reconcile` requires `media.view`, `media.update` and `media.monitor` in effect at the root:
+  it acts on every post, a holder of `media.view` and `media.update` at a post or group used to reach it. The writes
+  of `/users/{user_id}/system-assignments` require `user.view`, and `user.update` in effect at the root: a brigade
+  administrator always got a 403 from the handler, now the 403 `permission_denied` of the route, and
+  `GET /auth/route-access` no longer lists them for such a caller. `GET /users/{user_id}/system-assignments` stays
+  (`user.view` covering the user: no grant at the root is involved).
+- New `at_root` in a requirement (`require(at_root=[...])`, `auth/require.py`): the permissions a route needs in effect
+  at the root. It is on every `required` object, of `GET /auth/route-access` and of the 403 bodies (empty on every
+  other route); `missing` of `permission_denied` lists what the caller lacks of it. Contract: the new field of
+  `RequiredPermissions` and the descriptions of `get_post_observation_stats`, `reconcile_posters`,
+  `create_user_system_assignment` and `delete_user_system_assignment`.
 
 ### Removed
 

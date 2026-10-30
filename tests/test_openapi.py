@@ -88,7 +88,7 @@ def test_authentication_and_permissions_follow_require(schema):
             responses = schema["paths"][route.path_format][method.lower()]["responses"]
             assert _names(AuthErrorCode.CREDENTIALS_REQUIRED, AuthErrorCode.INVALID_TOKEN) <= _codes(responses["401"]), route.path
             forbidden = _codes(responses["403"]) if "403" in responses else set()
-            if spec.all or spec.any:
+            if spec.all or spec.any or spec.at_root:
                 assert schema_name(AccessErrorCode.PERMISSION_DENIED) in forbidden, route.path
 
 

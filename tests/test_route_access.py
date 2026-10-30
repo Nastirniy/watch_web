@@ -32,7 +32,7 @@ def test_route_access_has_no_admin_flag():
     entries = route_access_map(fastapi_app)
     assert entries
     for entry in entries:
-        assert set(entry.require.as_dict()) == {"all", "any"}, (entry.method, entry.path)
+        assert set(entry.require.as_dict()) == {"all", "any", "at_root"}, (entry.method, entry.path)
 
 
 @pytest.mark.asyncio
@@ -44,7 +44,7 @@ async def test_admin_sees_every_guarded_route(client, db, headers):
     assert len(routes) == len(route_access_map(fastapi_app))
     sample = routes[0]
     assert set(sample) == {"method", "path", "name", "tags", "required"}
-    assert set(sample["required"]) == {"all", "any"}
+    assert set(sample["required"]) == {"all", "any", "at_root"}
 
 
 @pytest.mark.asyncio
@@ -53,7 +53,7 @@ async def test_user_without_permissions_sees_only_authenticated_routes(client, d
     routes = (await client.get(ROUTE_ACCESS, headers=headers(user))).json()["routes"]
     assert routes, "authenticated-only routes must be listed"
     for route in routes:
-        assert route["required"] == {"all": [], "any": []}, route
+        assert route["required"] == {"all": [], "any": [], "at_root": []}, route
     paths = {r["path"] for r in routes}
     assert V1.path(AuthRoutes.ME) in paths
     assert ROUTE_ACCESS in paths

@@ -167,11 +167,11 @@ A session opened through nginx with a client certificate is bound to it: every r
 
 ### Not allowed (403)
 
-The body adds `required` (`{all, any}`) and `missing` (permissions the user lacks). `GET /api/v1/auth/route-access` tells in advance which routes the user may call.
+The body adds `required` (`{all, any, at_root}`) and `missing` (permissions the user lacks). `all` and `any` count permissions held anywhere; `at_root` lists those a route needs in effect at the root, because it acts on the whole system: `POST /media/posters/reconcile` (`media.view`, `media.update`, `media.monitor`) and the writes of `/users/{user_id}/system-assignments` (`user.update`). A grant further down the tree does not count for them, and `GET /api/v1/auth/route-access`, which tells in advance which routes the user may call, leaves them out for such a caller.
 
 | Code | When |
 |------|------|
-| `permission_denied` | The route's permissions are held nowhere (no assignment gives them; an assignment on an archived post or at an archived group gives nothing) |
+| `permission_denied` | The route's permissions are held nowhere (no assignment gives them; an assignment on an archived post or at an archived group gives nothing), or those of `at_root` are not held at the root |
 | `post_access_denied` / `post_write_denied` | The permission is held, but not in effect at this post (`post_id`; `*.view` / any other permission) |
 | `no_post_assigned` | The permission is held, but in effect at no post at all (for example only at a scope group without posts) |
 | `permission_required_for_action` | A permission a part or a target of the request needs (`permission`, `action`): `include_deleted`, the group a post is created in or moved to and the one it leaves (`post.create` / `post.update`, `post.view`), the old and the new parent of a moved scope group or brigade (`post.update`, `post.view`), the parent of a group created, renamed, moved, archived or restored (`scope_group.create` / `.update` / `.archive`), a corps or brigade archived with or without cascade (`post.archive` / `post.update`, `post.view`), the home post of a new or moved user, a media file without an observation (`media.update` at the root) |
@@ -233,7 +233,8 @@ the user (`session_expired`, `revoke_cause` `user_type_changed`): the new pages 
   routes above; `system` roles hold system permissions and are assigned without a node:
   `GET /api/v1/users/{user_id}/system-assignments` (`[{id, role, created_at}]`),
   `POST /api/v1/users/{user_id}/system-assignments` (201) with `{"role_id": 5}`,
-  `DELETE /api/v1/users/{user_id}/system-assignments/{assignment_id}` (204). Each route refuses the other kind (409
+  `DELETE /api/v1/users/{user_id}/system-assignments/{assignment_id}` (204). The two writes need `user.update` at
+  the root (`required.at_root`), the read `user.view` covering the user. Each route refuses the other kind (409
   `role_is_system` / `role_is_tree`). `POST /api/v1/roles/` takes `kind` (required, never changed); a role holds
   permissions of its kind's level only (409 `permission_level_mismatch`). `GET /api/v1/roles/?kind=system` lists one
   kind.

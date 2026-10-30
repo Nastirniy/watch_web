@@ -236,6 +236,6 @@ async def test_403_body_is_structured(client, db, headers):
     assert response.status_code == 403
     detail = response.json()
     assert detail["code"] == "permission_denied"
-    assert detail["required"] == {"all": ["tag.view", "tag.create"], "any": []}
+    assert detail["required"] == {"all": ["tag.view", "tag.create"], "any": [], "at_root": []}
     assert detail["missing"] == ["tag.create"]
     assert detail["title"] == "Insufficient permissions" and detail["status"] == 403

@@ -939,15 +939,18 @@ async def create_user_system_assignment(
         user_id: Annotated[int, Path(ge=1)],
         data: SystemAssignmentCreate,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE]))
+        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW], at_root=[Permissions.USER_UPDATE]))
 ):
     """Give the user a system role: it acts on the whole system, without a node.
 
-    Checked in this order: user.view covering the user (403 user_self_only, as GET /users/{user_id}); user.update
+    A grant at the root: the route requires user.view, and user.update in effect at the root (403 permission_denied,
+    the `at_root` of required), so a brigade administrator neither sees it in GET /auth/route-access nor reaches it.
+
+    Then checked in this order: user.view covering the user (403 user_self_only, as GET /users/{user_id}); user.update
     covering the user and every assignment of the user grantable by the caller (403 target_user_more_privileged); an archived user 404 user_not_found; an unknown or archived role 404
-    role_not_found; a tree role 409 role_is_tree (POST /{user_id}/assignments gives those); user.update and every
-    permission of the role held by the caller at the root (403 grant_exceeds_own_permissions); a role above the
-    system boundary of the user's type 409 role_exceeds_user_type; the same role 409 assignment_exists.
+    role_not_found; a tree role 409 role_is_tree (POST /{user_id}/assignments gives those); every permission of the
+    role held by the caller at the root (403 grant_exceeds_own_permissions); a role above the system boundary of the
+    user's type 409 role_exceeds_user_type; the same role 409 assignment_exists.
     """
     # The administrators' lock first, as every route that may touch the system_administrator role (one lock order)
     target = await _lock_role_then_user(session, user_id, data.role_id, administrators=True)
@@ -982,14 +985,17 @@ async def delete_user_system_assignment(
         user_id: Annotated[int, Path(ge=1)],
         assignment_id: Annotated[int, Path(ge=1)],
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW, Permissions.USER_UPDATE]))
+        auth: AuthContext = Depends(require(all=[Permissions.USER_VIEW], at_root=[Permissions.USER_UPDATE]))
 ):
     """Remove one system role assignment of the user (the role stays). The audit log keeps a full copy of the
     removed row.
 
-    Checked in this order: user.view covering the user (403 user_self_only, as GET /users/{user_id}); user.update
+    A grant at the root: the route requires user.view, and user.update in effect at the root (403 permission_denied,
+    the `at_root` of required), so a brigade administrator neither sees it in GET /auth/route-access nor reaches it.
+
+    Then checked in this order: user.view covering the user (403 user_self_only, as GET /users/{user_id}); user.update
     covering the user and every assignment of the user grantable by the caller (403 target_user_more_privileged); an archived user 404 user_not_found; a system assignment that is not this
-    user's 404 assignment_not_found; user.update and every permission of its role held by the caller at the root
+    user's 404 assignment_not_found; every permission of its role held by the caller at the root
     (403 grant_exceeds_own_permissions); the user's last assignment of either kind 409 last_assignment_required; the
     built-in system_administrator role cannot be taken from the last effective administrator (409
     last_admin_required) nor by an effective administrator from themselves (409 cannot_remove_own_admin). An effective

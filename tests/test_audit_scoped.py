@@ -120,7 +120,7 @@ async def test_entry_outside_scope_is_403(client, db, headers):
         assert response.status_code == 403, (name, response.text)
         body = response.json()
         assert body["code"] == "audit_entry_access_denied" and body["audit_id"] == audit_id
-        assert body["required"] == {"all": [], "any": ["audit.view", "audit.view_scope"]}
+        assert body["required"] == {"all": [], "any": ["audit.view", "audit.view_scope"], "at_root": []}
         assert body["missing"] == ["audit.view", "audit.view_scope"]
     # a row that does not exist stays 404
     missing = await client.get(_entry(max(row.id for row in data["rows"].values()) + 1000), headers=h)

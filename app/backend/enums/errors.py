@@ -30,6 +30,10 @@ class RequiredPermissions(BaseModel):
     """Permission requirement of a route, mirrors auth.require.Require"""
     all: List[str] = Field(default_factory=list, description="Every permission in this list is required")
     any: List[str] = Field(default_factory=list, description="At least one permission in this list is required")
+    at_root: List[str] = Field(
+        default_factory=list,
+        description="Every permission in this list is required in effect at the root: a tree permission held at the "
+                    "root, a system permission through a system role. A grant further down the tree does not count")
 
 
 class UserRef(BaseModel):

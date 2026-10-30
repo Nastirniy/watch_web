@@ -368,10 +368,22 @@ async def test_user_writes_without_user_view_at_the_target_answer_like_get(clien
                                       "scope": {"kind": "post", "id": seen.id}}))
     self_only(await client.delete(V1.path(UserRoutes.USER_ASSIGNMENT_BY_ID, user_id=target.id,
                                           assignment_id=target_assignment.id), headers=headers(caller)))
-    self_only(await client.post(V1.path(UserRoutes.USER_SYSTEM_ASSIGNMENTS, user_id=target.id),
-                                headers=headers(caller), json={"role_id": tag_editor.id}))
-    self_only(await client.delete(V1.path(UserRoutes.USER_SYSTEM_ASSIGNMENT_BY_ID, user_id=target.id,
-                                          assignment_id=1), headers=headers(caller)))
+    # The system-assignment writes need user.update at the root (L8): below it the gate answers first, and with it
+    # user.view at the target still decides
+    system_writes = (
+        lambda caller_headers: client.post(V1.path(UserRoutes.USER_SYSTEM_ASSIGNMENTS, user_id=target.id),
+                                           headers=caller_headers, json={"role_id": tag_editor.id}),
+        lambda caller_headers: client.delete(V1.path(UserRoutes.USER_SYSTEM_ASSIGNMENT_BY_ID, user_id=target.id,
+                                                     assignment_id=1), headers=caller_headers),
+    )
+    for write in system_writes:
+        denied = await write(headers(caller))
+        assert denied.status_code == 403 and denied.json()["code"] == "permission_denied", denied.text
+    at_root = await _user(db, UserType.ADMINISTRATOR)
+    await _raw_assign(db, at_root, await make_role(db, [P.USER_UPDATE]), ROOT)
+    await _raw_assign(db, at_root, await make_role(db, [P.USER_VIEW]), Node.post(seen.id))
+    for write in system_writes:
+        self_only(await write(headers(at_root)))
     await db.commit()   # a fresh read of what the request committed
     assert (await db.exec(select(User.username_alias).where(User.id == target.id))).one() == "x"
 
