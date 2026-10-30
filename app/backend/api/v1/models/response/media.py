@@ -11,7 +11,7 @@ from app.backend.config import settings
 from app.backend.services.media.storyboards import client_status
 from app.backend.services.media.urls import thumbnail_urls
 from app.backend.api.shared.openapi_docs import header
-from app.backend.enums.media_types import ContentType, Disposition
+from app.backend.enums.media_types import Disposition
 
 
 class ThumbnailUrls(BaseModel):
@@ -20,14 +20,6 @@ class ThumbnailUrls(BaseModel):
     medium: str
     large: str
     preview: str
-
-
-def playback_supported(media: MediaFile) -> Optional[bool]:
-    """Whether the web shows a player: Matroska never (a row stores the canonical name), null for what is not played.
-    Derived, never stored; advice to the UI, the stream route serves every file."""
-    if media.media_type not in TIMED_MEDIA_TYPES:
-        return None
-    return media.mime_type != ContentType.VIDEO_MATROSKA.value
 
 
 def media_info_payload(media: MediaFile) -> Dict[str, Any]:
@@ -55,7 +47,6 @@ def media_info_payload(media: MediaFile) -> Dict[str, Any]:
         "video_codec": media.video_codec,
         "audio_codec": media.audio_codec,
         "playback_type": media.playback_type or (media.mime_type if media.media_type in TIMED_MEDIA_TYPES else None),
-        "playback_supported": playback_supported(media),
         "user": user,
     }
 
@@ -89,16 +80,12 @@ class MediaFileInfo(PlainTextModel):
     duration_seconds: Optional[float] = None
     video_codec: Optional[str] = None
     audio_codec: Optional[str] = None
-    # Hand this to HTMLMediaElement.canPlayType() before building a player;
-    # falls back to the bare mime_type until the file has been probed
-    playback_type: Optional[str] = None
-    playback_supported: Optional[bool] = Field(
+    playback_type: Optional[str] = Field(
         default=None,
-        description="Whether the web shows a player: true for video and audio, false for Matroska (video/matroska), "
-                    "null for media that is not played (images, documents). false: offer the download only and show "
-                    "no player, in every browser, even though Chromium can play some Matroska files (it answers \"\" "
-                    "to canPlayType) and Firefox plays none. Derived from mime_type. It is advice to the UI, not a "
-                    "refusal: GET /media/{media_id}/stream keeps serving the file")
+        description="The format with its codecs (RFC 6381), for HTMLMediaElement.canPlayType(); the bare mime_type until "
+                    "the file has been probed. The API states the format and takes no view on what a browser plays: "
+                    "whether to show a player is the web's decision (Chromium answers \"\" for Matroska and plays it, "
+                    "Firefox plays no Matroska)")
 
     # Nested projection named after the ORM relationship (uploader)
     user: Optional[UserPublicResponse] = None

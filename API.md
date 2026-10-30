@@ -635,10 +635,12 @@ format's canonical `content_type` and its `aliases`.
   finds `video/matroska` and `video/x-matroska` rows).
 - **Charset:** text types are served with `charset=utf-8` (`text/markdown` with `charset=UTF-8`, which RFC 7763
   requires); `text/vtt` (storyboards) carries no parameter: WebVTT is always UTF-8.
-- **Names to use in the web client:** `application/pkcs12` for a `.p12` blob (not `application/x-pkcs12`);
-  resumable chunks are `application/offset+octet-stream` (the tus protocol's name, not an IANA registration;
-  `UPLOADS.md`). `playback_type` is never used to decide about Matroska: `playback_supported` is (see "Video and audio
-  in a player").
+- **Names to use in the web client:** `application/pkcs12` for a `.p12` blob (not `application/x-pkcs12`),
+  `video/matroska; codecs="..."` from `playback_type` for `canPlayType()`; resumable chunks are
+  `application/offset+octet-stream` (the tus protocol's name, not an IANA registration; `UPLOADS.md`).
+- **Playback:** the API states the format (`mime_type`, `playback_type`) and takes no view on what a browser plays.
+  Whether to show a player is the web's decision: ask `canPlayType()`, then try, and offer the download on an error.
+  Seen on 2026-10-29: Firefox plays no Matroska at all; Chromium answers `""` for Matroska and plays it anyway.
 
 | Canonical | Also accepted |
 |-----------|---------------|
@@ -681,19 +683,6 @@ Resumable uploads step by step: `UPLOADS.md`.
   `ETag` yourself.
 
 ### Video and audio in a player (`/stream`)
-
-Every media response carries `playback_supported`, derived from `mime_type`, never stored:
-
-| Value | Media | What the web does |
-|-------|-------|-------------------|
-| `true` | Video and audio, except Matroska | Shows a player; `playback_type` is the string for `canPlayType()` |
-| `false` | Matroska (`video/matroska`) | Offers the download only and shows no player, in every browser |
-| `null` | Images, documents | Not played |
-
-Do not try a player for `false`, whatever the browser says: Chromium can play some Matroska files (and answers `""`
-to `canPlayType()` for them), Firefox plays none, so the same file would work for one operator and fail for the next.
-`playback_type` stays filled in for these files. The flag is advice to the UI, not a refusal: `/stream` and
-`/download` keep serving the file to any API client.
 
 A player seeks with many `Range` requests. nginx asks the API about the first request of a token, client certificate
 and media, keeps the API's yes for 30 seconds and serves the bytes itself until then; a refusal is always the API's

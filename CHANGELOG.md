@@ -106,12 +106,6 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   descriptions of `list_users`, `search_users`, `list_user_assignments`, `create_user_assignment`, `update_user` and of
   the `corps_id` and `brigade_id` query parameters of both lists state the rule. No code is new: the 403 was declared
   on both lists already.
-- Media answers (`MediaFileInfo`: info, lists, search, the media of an observation) carry `playback_supported`, derived
-  from `mime_type`, never stored (no migration): false for Matroska (`video/matroska`), true for every other video and
-  audio, null for media that is not played. For false the web offers the download only and shows no player, in every
-  browser. It is advice to the UI: `playback_type` is unchanged and `/stream` and `/download` keep serving the file. No
-  copy, no remux, no job. API.md no longer points the web at `canPlayType()` for Matroska. Contract: the new field and
-  its description.
 
 ### Removed
 

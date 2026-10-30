@@ -42751,19 +42751,8 @@
                 "type": "null"
               }
             ],
-            "title": "Playback Type"
-          },
-          "playback_supported": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Playback Supported",
-            "description": "Whether the web shows a player: true for video and audio, false for Matroska (video/matroska), null for media that is not played (images, documents). false: offer the download only and show no player, in every browser, even though Chromium can play some Matroska files (it answers \"\" to canPlayType) and Firefox plays none. Derived from mime_type. It is advice to the UI, not a refusal: GET /media/{media_id}/stream keeps serving the file"
+            "title": "Playback Type",
+            "description": "The format with its codecs (RFC 6381), for HTMLMediaElement.canPlayType(); the bare mime_type until the file has been probed. The API states the format and takes no view on what a browser plays: whether to show a player is the web's decision (Chromium answers \"\" for Matroska and plays it, Firefox plays no Matroska)"
           },
           "user": {
             "anyOf": [
