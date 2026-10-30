@@ -2,15 +2,17 @@
 from typing import Any, Dict, Iterable, List, Optional, Set
 
 from fastapi import Request
+from pydantic import BaseModel
 from sqlalchemy.exc import OperationalError, TimeoutError as PoolTimeout
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.api.shared.helpers.audit_helper import client_info
+from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.context import AuthContext
 from app.backend.auth.scope import Node
 from app.backend.config import settings
 from app.backend.enums.errors import ErrorCode
-from app.backend.enums.general import MoveStatus
+from app.backend.enums.general import MovePlace, MoveStatus
 from app.backend.errors.coded import CodedError
 from app.backend.errors.problems import ApiError
 from app.backend.models.pending_move import PendingMove
@@ -34,17 +36,39 @@ def move_pending(move_id: int) -> ApiError:
     return ApiError(ErrorCode.MOVE_PENDING, headers=retry_after(), move_id=move_id)
 
 
+def move_step(data: BaseModel, target_field: str, expected_field: str, current: Optional[int]) -> moves.MoveStep:
+    """services/moves.py step_of for a request model. Presence counts: null is a place, an unset field is none"""
+    if target_field not in data.model_fields_set:
+        return moves.MoveStep.EDIT
+    return moves.step_of(current, getattr(data, target_field), expected_field in data.model_fields_set,
+                         getattr(data, expected_field))
+
+
+def move_conflict(auth: AuthContext, current: Optional[int]) -> ApiError:
+    """409 move_conflict with the current place: the id only of a group the caller sees, a group outside its
+    scope_group.view is hidden (the caller reads the record, whose route decides what it shows)"""
+    if current is None:
+        return ApiError(ErrorCode.MOVE_CONFLICT, current_place=MovePlace.ROOT.value)
+    if AccessControlService.node_visible(auth, Node.group(current)):
+        return ApiError(ErrorCode.MOVE_CONFLICT, current_place=MovePlace.GROUP.value, current_group_id=current)
+    return ApiError(ErrorCode.MOVE_CONFLICT, current_place=MovePlace.HIDDEN.value)
+
+
 def changed_fields(row: Any, update_data: Dict[str, Any], move_field: str) -> List[str]:
     """The fields of the request, besides the move, that would change the row: a field sent with its current value
     (a client that sends the whole record) changes nothing"""
     return [name for name, value in update_data.items() if name != move_field and getattr(row, name) != value]
 
 
-async def admit_move(request: Request, session: AsyncSession, auth: AuthContext, node: Node,
-                     target_group_id: Optional[int], locks: moves.MoveLocks, force: bool,
+async def admit_move(request: Request, session: AsyncSession, auth: AuthContext, node: Node, current: Optional[int],
+                     target_group_id: Optional[int], locks: Optional[moves.MoveLocks], force: bool,
                      changed: List[str]) -> Optional[PendingMove]:
     """moves.admit for the route: None when the move runs now in the route's transaction, the row when it waits. A
-    waiting move in the way gets its look first: it runs when it is due, and the request tries again."""
+    waiting move in the way gets its look first: it runs when it is due, and the request tries again. No locks: the
+    request's tree saw no move and the row shows one (moves.takes_move_locks); the locks of a move come first or not
+    at all, so it answers as the stale request it is."""
+    if locks is None:
+        raise move_conflict(auth, current)
     try:
         return await moves.admit(session, node, target_group_id, auth.user.id, locks, force, changed,
                                  client_info(request, auth))

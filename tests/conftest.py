@@ -4,6 +4,7 @@ The application lifespan (migrations + seed against MySQL) never runs under
 httpx ASGITransport, so tests need no external database.
 """
 import os
+import re
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -17,10 +18,11 @@ import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel
+from sqlmodel import SQLModel, select
 
 import app.backend.models  # noqa: F401  registers every table on the metadata
 from app.main import fastapi_app
+from app.backend.api.v1 import V1
 from app.backend.api.versioning import PublishedVersion
 from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.database import get_session
@@ -28,9 +30,12 @@ from app.backend.bootstrap.permissions import seed_roles_and_permissions
 from app.backend.services.files.formats import seed_media_formats, invalidate_registry_cache
 from app.backend.auth import sessions as session_lifetimes
 from app.backend.auth.service import AuthService
+from app.backend.models.post import Post
+from app.backend.models.scope_group import ScopeGroup
 from app.backend.models.user import UserSession
 from app.backend.config import settings
 from app.backend.enums.general import AppEnvironment
+from app.backend.enums.routes import BrigadeRoutes, PostRoutes, ScopeGroupRoutes
 from app.backend.services.signer_client import use_signer_transport
 from app.backend.signer.app import create_app as create_signer_app
 from app.backend.signer.settings import SignerSettings
@@ -100,16 +105,50 @@ async def db(session_maker):
     invalidate_registry_cache()
 
 
+class _FormClient(AsyncClient):
+    """The test client: a PUT or PATCH that names a parent states the place the node holds now (expected_group_id and
+    so on, API.md "A move during work"), as a form that has just read the record, unless the test wrote its own. The
+    tests of permissions and tree rules are about what comes after that check. The marker raw_moves turns this off:
+    tests/test_queued_moves.py sends every request as written."""
+
+    def __init__(self, session_maker, **kwargs):
+        super().__init__(**kwargs)
+        self._session_maker = session_maker
+
+    async def request(self, method, url, *, json=None, **kwargs):
+        if method in ("PUT", "PATCH") and isinstance(json, dict):
+            for pattern, field, expected, column, table in _MOVE_FORMS:
+                found = pattern.fullmatch(str(url))
+                if found and field in json and expected not in json:
+                    async with self._session_maker() as session:
+                        place = (await session.exec(select(column).where(table.id == int(found[1])))).all()
+                    json = {**json, expected: place[0]} if place else json
+        return await super().request(method, url, json=json, **kwargs)
+
+
+def _move_form(route, field: str, expected: str, column, table) -> tuple:
+    template = re.escape(V1.path(route))
+    return re.compile(re.sub(r"\\\{\w+\\\}", r"(\\d+)", template)), field, expected, column, table
+
+
+_MOVE_FORMS = (
+    _move_form(PostRoutes.POST_BY_ID, "group_id", "expected_group_id", Post.group_id, Post),
+    _move_form(ScopeGroupRoutes.GROUP_BY_ID, "parent_id", "expected_parent_id", ScopeGroup.parent_id, ScopeGroup),
+    _move_form(BrigadeRoutes.BRIGADE_BY_ID, "corps_id", "expected_corps_id", ScopeGroup.parent_id, ScopeGroup),
+)
+
+
 @pytest_asyncio.fixture
-async def client(session_maker, db):
+async def client(session_maker, db, request):
     async def _override_get_session():
         async with session_maker() as session:
             yield session
 
     fastapi_app.dependency_overrides[get_session] = _override_get_session
     transport = ASGITransport(app=fastapi_app, raise_app_exceptions=False)
-    async with AsyncClient(transport=transport, base_url="http://test",
-                           event_hooks={"response": [errors_are_problems]}) as async_client:
+    settings_of_client = dict(transport=transport, base_url="http://test", event_hooks={"response": [errors_are_problems]})
+    raw = request.node.get_closest_marker("raw_moves") is not None
+    async with (AsyncClient(**settings_of_client) if raw else _FormClient(session_maker, **settings_of_client)) as async_client:
         yield async_client
     fastapi_app.dependency_overrides.clear()
 

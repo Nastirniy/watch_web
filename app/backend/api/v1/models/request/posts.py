@@ -58,6 +58,7 @@ class PostUpdate(BaseModel):
     city: Optional[str] = Field(None, max_length=255, description="Post city")
     is_active: Optional[bool] = None
     group_id: Optional[int] = Field(default=None, gt=0, description="Scope group the post sits in; null: directly under the root")
+    expected_group_id: Optional[int] = Field(default=None, gt=0, description="With group_id: the group the post sits in as the client read it; null: directly under the root. Presence counts. Required for a move: missing or out of date answers 409 move_conflict. Without group_id it is not read")
     force: bool = Field(default=False, description="With a move: run it at once even with uploads running below the node; they continue at the new place. Without uploads, and without a move, it changes nothing")
 
     # Validators do not run on the default, so None here is an explicit null for a NOT NULL column

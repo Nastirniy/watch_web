@@ -16,6 +16,11 @@ class ScopeGroupResponse(SecureBaseModel):
     updated_at: ResponseDatetime
 
 
+class ScopeGroupUpdateResponse(ScopeGroupResponse):
+    """The group after PATCH /scope-groups/{group_id}"""
+    already_there: bool = Field(default=False, description="true: the move this request asked for has already happened: nothing was written, the other fields sent included, and this is the record as it stands")
+
+
 class ScopeTreePost(SecureBaseModel):
     id: int
     name: str

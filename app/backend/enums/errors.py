@@ -349,6 +349,11 @@ class ErrorCode(ProblemType):
     MOVE_PENDING = ("move_pending", problem(
         409, "A move is waiting here", "Move {move_id} is waiting for the uploads below it; try again later",
         move_id=int))
+    # The request that moves says where it thinks the node is: missing or not where it is. Stale forms and two
+    # administrators at once never overwrite each other. current_place: MovePlace; the id only of a group the caller sees
+    MOVE_CONFLICT = ("move_conflict", problem(
+        409, "The node is not where this request expected", "Read the record again and decide; nothing moved",
+        current_place=str, current_group_id=Optional[int]))
     # A request that would have to wait may hold nothing but the move: a waiting operation never holds half an update
     MOVE_NOT_ALONE = ("move_not_alone", problem(
         422, "A move that has to wait must be its own request",

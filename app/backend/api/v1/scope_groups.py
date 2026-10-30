@@ -7,7 +7,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.api.shared.helpers.db_errors import unique_violation_as
-from app.backend.api.shared.helpers.move_helper import admit_move, changed_fields
+from app.backend.api.shared.helpers.move_helper import admit_move, changed_fields, move_conflict, move_step
 from app.backend.api.shared.helpers.scope_group_helper import (
     audit_group, check_visible, lock_unit, name_taken, parent_location, parent_node,
 )
@@ -15,7 +15,7 @@ from app.backend.api.v1.models.query.scope_groups import ScopeGroupFilterParams
 from app.backend.api.v1.models.request.scope_groups import ScopeGroupCreate, ScopeGroupUpdate
 from app.backend.api.v1.models.response.moves import MOVE_ACCEPTED, move_accepted
 from app.backend.api.v1.models.response.scope_groups import (
-    ScopeGroupResponse, ScopeTreeGroup, ScopeTreePost, ScopeTreeResponse,
+    ScopeGroupResponse, ScopeGroupUpdateResponse, ScopeTreeGroup, ScopeTreePost, ScopeTreeResponse,
 )
 from app.backend.auth.access_control import AccessControlService
 from app.backend.api.versioning import PublishedVersion, request_version
@@ -206,10 +206,10 @@ async def get_scope_group(
 
 @router.patch(
     ScopeGroupRoutes.GROUP_BY_ID.value,
-    response_model=ScopeGroupResponse,
+    response_model=ScopeGroupUpdateResponse,
     responses={**MOVE_ACCEPTED, **problems(
         *TREE_PROBLEMS, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS,
-        ErrorCode.MOVE_PENDING, ErrorCode.MOVE_NOT_ALONE, *GUARDED,
+        ErrorCode.MOVE_PENDING, ErrorCode.MOVE_CONFLICT, ErrorCode.MOVE_NOT_ALONE, *GUARDED,
     )},
 )
 async def update_scope_group(
@@ -237,32 +237,46 @@ async def update_scope_group(
     the parent must suit it (a plain group never moves into a corps or brigade, a corps stays under the root, a
     brigade in a corps): 409 scope_group_parent_not_allowed.
 
-    A move during work: with uploads running below the node (upload sessions open or completing) the move waits. The
-    answer is 202 with the move operation, Location and Retry-After; nothing moves yet, and new uploads below the node
-    answer 409 move_pending; chunks, completes and every other write go on. The move runs when the last upload ended
-    (finished, aborted, archived, expired, or cancelled because no bytes arrived for moves.upload_stale_seconds, 300 by
-    default: its next chunk or complete answers 409 upload_cancelled_by_move). The permission checks run again then: a
-    move the caller may no longer make ends failed and nothing moves. Follow it at GET /moves/{move_id}; POST
-    /moves/{move_id}/cancel cancels it. force true runs it at once and the uploads continue at the new place. A move
-    whose subtree overlaps a waiting one answers 409 move_pending (force too; cancel that one first). A request that
-    would have to wait and changes anything besides the move answers 422 move_not_alone with changed_fields and nothing
+    A move states where it thinks the node is: with parent_id send expected_parent_id, the value the client read (null: directly under the root; presence counts).
+    Checked under the move lock, force or not, in this order. The group already at parent_id: 200 with already_there true,
+    nothing written, the other fields sent included, no audit row. expected_parent_id missing or other than where
+    the group sits: 409 move_conflict with the current place (current_place root; group with current_group_id; hidden for a
+    group outside the caller's scope_group.view) and nothing moves: read the record and decide again. So a client that
+    sends the whole record from an old form is refused, not obeyed. parent_id sent with the current value is no move: an
+    ordinary edit, with no expected_parent_id or with the same value there.
+
+    A move during work: with uploads receiving bytes below the node (upload sessions open or completing) the move
+    waits. The answer is 202 with the move operation, Location and Retry-After; nothing moves yet, and new uploads
+    below the node answer 409 move_pending; chunks, completes and every other write go on. The move runs when nothing
+    holds it any more: an upload that ended (finished, aborted, archived, expired) holds nothing, nor does one with no
+    bytes for moves.upload_stale_seconds, 300 by default, which is left alone and may go on at the new place after the
+    move. The first request that meets the move then runs it, or the worker. The permission checks run again at that
+    moment: a move the caller may no longer make ends failed and nothing moves. Follow it at GET /moves/{move_id}; POST
+    /moves/{move_id}/cancel cancels it. force true runs it at once and the uploads continue at the new place. The same
+    move repeated while it waits answers 202 with that move, from anyone allowed to make it. A node on the way is busy:
+    moving a waiting node, anything below it or above it, moving anything into it, or moving its target (or a group
+    holding the target) answers 409 move_pending with move_id, force too; cancel that move first. A request that would
+    have to wait and changes anything besides the move answers 422 move_not_alone with changed_fields and nothing
     happens: send a move as its own request. Sessions and tokens stay valid; rights at the new place apply from the
     next request (API.md, "A move during work").
     """
-    update_data = data.model_dump(exclude_unset=True, exclude={"force"})
-    # A request that sends a parent takes the locks of a move, everything below the group included (services/moves.py)
+    update_data = data.model_dump(exclude_unset=True, exclude={"force", "expected_parent_id"})
+    # A request that changes the parent takes the locks of a move, everything below the group included
+    # (services/moves.py). The current value sent back, or a target inside the group, takes none: the row decides
     move_locks = None
-    if "parent_id" in update_data:
+    if "parent_id" in update_data and moves.takes_move_locks(auth.tree, Node.group(group_id), update_data["parent_id"]):
         check_visible(auth, group_id)
         move_locks = await moves.lock_for_move(session, auth.tree, Node.group(group_id), update_data["parent_id"])
-    # Groups top down: the old and the new parent, then the group (a unit archive takes the same order)
-    group = await lock_unit(session, auth, None, group_id, also=[update_data.get("parent_id")],
+    # Groups top down: the old and the new parent, then the group (a unit archive takes the same order); a target
+    # without the locks of a move may lie below the group, and is left alone
+    group = await lock_unit(session, auth, None, group_id, also=[update_data.get("parent_id") if move_locks else None],
                             started=move_locks is not None)
     old_values = group.model_dump()
 
     new_parent = update_data.get("parent_id", group.parent_id)
     new_name = update_data.get("name", group.name)
-    is_move = "parent_id" in update_data and new_parent != group.parent_id
+    step = move_step(data, "parent_id", "expected_parent_id", group.parent_id)
+    is_move = step is moves.MoveStep.MOVE
     if is_move:
         await _check_chosen_parent(session, auth, group.id, new_parent, ScopeGroupKind(group.kind),
                                    old_parent_id=group.parent_id)
@@ -270,6 +284,10 @@ async def update_scope_group(
         await check_move(session, auth, Node.group(group.id), parent_location(new_parent))
     else:
         AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_UPDATE, parent_node(group), "update_scope_group")
+        if step is moves.MoveStep.CONFLICT:
+            raise move_conflict(auth, group.parent_id)
+        if step is moves.MoveStep.ALREADY_THERE:
+            return ScopeGroupUpdateResponse.model_validate(group).model_copy(update={"already_there": True})
         if "name" in update_data:
             # The name is checked against the names beside the group (409): view at that parent as well
             AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_VIEW, parent_node(group),
@@ -279,8 +297,8 @@ async def update_scope_group(
         raise ApiError(ErrorCode.SCOPE_GROUP_NAME_TAKEN)
     if is_move:
         # Last of the checks: a move that has to wait commits its row here, nothing else changed
-        waiting = await admit_move(request, session, auth, Node.group(group.id), new_parent, move_locks, data.force,
-                                   changed_fields(group, update_data, "parent_id"))
+        waiting = await admit_move(request, session, auth, Node.group(group.id), group.parent_id, new_parent, move_locks,
+                                   data.force, changed_fields(group, update_data, "parent_id"))
         if waiting is not None:
             return move_accepted(await moves.view_of(session, waiting, auth.tree), version)
 

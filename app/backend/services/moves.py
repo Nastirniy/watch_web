@@ -37,6 +37,7 @@ the plain reads of a run (the mover's grants, the tree, the names) come after th
 """
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from sqlalchemy import update
@@ -66,6 +67,14 @@ from app.backend.utils.logging_config import get_logger
 from app.backend.utils.row_locks import lock, lock_all, start_write
 
 _logger = get_logger("moves")
+
+
+class MoveStep(Enum):
+    """What a request that may name a parent asks for, decided on the locked row (step_of)"""
+    EDIT = "edit"                       # no move: it sends no parent, or the place it found and left alone
+    ALREADY_THERE = "already_there"     # a move that has happened: nothing to write
+    CONFLICT = "conflict"               # it does not say where the node is, or thinks it is elsewhere
+    MOVE = "move"
 
 
 @dataclass(frozen=True)
@@ -110,6 +119,27 @@ def _now() -> datetime:
 
 def _location(group_id: Optional[int]) -> Node:
     return Node.group(group_id) if group_id is not None else ROOT
+
+
+def step_of(current: Optional[int], target: Optional[int], expected_sent: bool, expected: Optional[int]) -> MoveStep:
+    """A request sent the parent target; current is the parent on the locked row, expected what the request says it
+    is. Force changes nothing here. The node at the target: a move that has happened when the request expected another
+    place; with no expected place, or the place it found, nothing asks for a move, it is an ordinary edit."""
+    if target == current:
+        return MoveStep.ALREADY_THERE if expected_sent and expected != current else MoveStep.EDIT
+    return MoveStep.MOVE if expected_sent and expected == current else MoveStep.CONFLICT
+
+
+def takes_move_locks(tree: ScopeTree, node: Node, target: Optional[int]) -> bool:
+    """A request sent the parent target: does it take the locks of a move? tree is the request's, read before any
+    lock, so this only spares the global lock: a request with the current value, one for a target inside the node (a
+    cycle, refused by the route's rules in their order). Nothing is decided here: step_of decides on the row, under
+    its lock, and a request that turns out to be a move without these locks answers as a stale form (the tree said
+    the node sat there and the row says it no longer does: it moved after the request began)."""
+    current = tree.post_group.get(node.id) if node.kind == "post" else tree.group_parent.get(node.id)
+    if target == current:
+        return False
+    return target is None or not tree.contains(node, Node.group(target))
 
 
 def _held(locks: MoveLocks) -> bool:

@@ -44,6 +44,11 @@ def _unit(units: Dict[str, int], kind: ScopeGroupKind, names: Mapping[int, str])
     return UnitRefResponse(id=unit_id, name=names[unit_id])
 
 
+class PostUpdateResponse(PostResponse):
+    """The post after PUT /posts/{post_id}"""
+    already_there: bool = Field(default=False, description="true: the move this request asked for has already happened: nothing was written, the other fields sent included, and this is the record as it stands")
+
+
 def post_to_response(post: Post, tree: ScopeTree, names: Mapping[int, str]) -> PostResponse:
     """tree: the request's scope tree; names: the unit names of the page (services/units.py post_unit_names)"""
     units = post_units(tree, post.group_id)

@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from app.backend.api.shared.helpers.db_errors import is_unique_violation
 from app.backend.database import get_session
 from app.backend.utils.row_locks import lock, lock_first
-from app.backend.api.shared.helpers.move_helper import admit_move, changed_fields
+from app.backend.api.shared.helpers.move_helper import admit_move, changed_fields, move_conflict, move_step
 from app.backend.api.shared.helpers.scope_group_helper import lock_groups
 from app.backend.api.shared.helpers.upload_helper import cancel_pending_uploads, remove_cancelled_parts
 from app.backend.api.versioning import PublishedVersion, request_version
@@ -32,7 +32,9 @@ from app.backend.services.audit import create_audit_log
 from app.backend.api.v1.models.query.posts import PostFilterParams
 from app.backend.filters.post_filter import PostFilterService
 from app.backend.api.v1.models.response.moves import MOVE_ACCEPTED, move_accepted
-from app.backend.api.v1.models.response.posts import PostResponse, PostObservationStatsResponse, posts_to_response
+from app.backend.api.v1.models.response.posts import (
+    PostResponse, PostObservationStatsResponse, PostUpdateResponse, posts_to_response,
+)
 from app.backend.services.observation_counts import post_observation_stats
 from app.backend.services.scope_groups import get_group
 from app.backend.services.units import unit_filter_of
@@ -227,12 +229,12 @@ async def get_post_observation_stats(
 
 @router.put(
     PostRoutes.POST_BY_ID.value,
-    response_model=PostResponse,
+    response_model=PostUpdateResponse,
     responses={**MOVE_ACCEPTED, **problems(
         AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED,
         AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS,
         ErrorCode.POST_CODE_TAKEN, ErrorCode.POST_NOT_FOUND, ErrorCode.SCOPE_GROUP_NOT_FOUND,
-        ErrorCode.MOVE_PENDING, ErrorCode.MOVE_NOT_ALONE, *GUARDED,
+        ErrorCode.MOVE_PENDING, ErrorCode.MOVE_CONFLICT, ErrorCode.MOVE_NOT_ALONE, *GUARDED,
     )},
 )
 async def update_post(
@@ -254,33 +256,51 @@ async def update_post(
     Only the fields sent are changed; null is refused for name, code and is_active (omit them instead).
     Archived posts answer 404 until restored (POST /{post_id}/restore); is_deleted is never read from the body.
 
-    A move during work: with uploads running below the node (upload sessions open or completing) the move waits. The
-    answer is 202 with the move operation, Location and Retry-After; nothing moves yet, and new uploads below the node
-    answer 409 move_pending; chunks, completes and every other write go on. The move runs when the last upload ended
-    (finished, aborted, archived, expired, or cancelled because no bytes arrived for moves.upload_stale_seconds, 300 by
-    default: its next chunk or complete answers 409 upload_cancelled_by_move). The permission checks run again then: a
-    move the caller may no longer make ends failed and nothing moves. Follow it at GET /moves/{move_id}; POST
-    /moves/{move_id}/cancel cancels it. force true runs it at once and the uploads continue at the new place. A move
-    whose subtree overlaps a waiting one answers 409 move_pending (force too; cancel that one first). A request that
-    would have to wait and changes anything besides the move answers 422 move_not_alone with changed_fields and nothing
+    A move states where it thinks the node is: with group_id send expected_group_id, the value the client read (null: directly under the root; presence counts).
+    Checked under the move lock, force or not, in this order. The post already at group_id: 200 with already_there true,
+    nothing written, the other fields sent included, no audit row. expected_group_id missing or other than where
+    the post sits: 409 move_conflict with the current place (current_place root; group with current_group_id; hidden for a
+    group outside the caller's scope_group.view) and nothing moves: read the record and decide again. So a client that
+    sends the whole record from an old form is refused, not obeyed. group_id sent with the current value is no move: an
+    ordinary edit, with no expected_group_id or with the same value there.
+
+    A move during work: with uploads receiving bytes below the node (upload sessions open or completing) the move
+    waits. The answer is 202 with the move operation, Location and Retry-After; nothing moves yet, and new uploads
+    below the node answer 409 move_pending; chunks, completes and every other write go on. The move runs when nothing
+    holds it any more: an upload that ended (finished, aborted, archived, expired) holds nothing, nor does one with no
+    bytes for moves.upload_stale_seconds, 300 by default, which is left alone and may go on at the new place after the
+    move. The first request that meets the move then runs it, or the worker. The permission checks run again at that
+    moment: a move the caller may no longer make ends failed and nothing moves. Follow it at GET /moves/{move_id}; POST
+    /moves/{move_id}/cancel cancels it. force true runs it at once and the uploads continue at the new place. The same
+    move repeated while it waits answers 202 with that move, from anyone allowed to make it. A node on the way is busy:
+    moving a waiting node, anything below it or above it, moving anything into it, or moving its target (or a group
+    holding the target) answers 409 move_pending with move_id, force too; cancel that move first. A request that would
+    have to wait and changes anything besides the move answers 422 move_not_alone with changed_fields and nothing
     happens: send a move as its own request. Sessions and tokens stay valid; rights at the new place apply from the
     next request (API.md, "A move during work").
     """
     current_user = auth.user
     AccessControlService.check_post(auth, Permissions.POST_VIEW, post_id)
     AccessControlService.check_post(auth, Permissions.POST_UPDATE, post_id)
-    # A request that sends a group takes the locks of a move: the moves lock, the old and the new group, the post by
-    # id and its pending uploads (services/moves.py), all before the first plain read; the Post entity after them
+    # A request that changes the group takes the locks of a move: the moves lock, the old and the new group, the post by
+    # id and its pending uploads (services/moves.py), all before the first plain read; the Post entity after them. The
+    # current value sent back takes none: the row, under its lock, decides what the request is
     move_locks = None
-    if "group_id" in post_data.model_fields_set:
+    if "group_id" in post_data.model_fields_set and moves.takes_move_locks(auth.tree, Node.post(post_id), post_data.group_id):
         move_locks = await moves.lock_for_move(session, auth.tree, Node.post(post_id), post_data.group_id)
     post = await (lock if move_locks else lock_first)(session, select(Post).where(Post.id == post_id))
 
     if not post or post.is_deleted:
         raise ApiError(ErrorCode.POST_NOT_FOUND)
 
-    update_data = post_data.model_dump(exclude_unset=True, exclude={"force"})
-    is_move = "group_id" in update_data and update_data["group_id"] != post.group_id
+    step = move_step(post_data, "group_id", "expected_group_id", post.group_id)
+    if step is moves.MoveStep.CONFLICT:
+        raise move_conflict(auth, post.group_id)
+    if step is moves.MoveStep.ALREADY_THERE:
+        answer = await _post_response(session, auth, post)
+        return PostUpdateResponse(**answer.model_dump(), already_there=True)
+    update_data = post_data.model_dump(exclude_unset=True, exclude={"force", "expected_group_id"})
+    is_move = step is moves.MoveStep.MOVE
     if is_move:
         # A move needs post.update and post.view covering the old and the new location, as a group or brigade move
         # does (a grant on the post itself covers neither)
@@ -297,8 +317,8 @@ async def update_post(
             raise ApiError(ErrorCode.POST_CODE_TAKEN)
     if is_move:
         # Last of the checks: a move that has to wait commits its row here, nothing else changed
-        waiting = await admit_move(request, session, auth, Node.post(post.id), update_data["group_id"], move_locks,
-                                   post_data.force, changed_fields(post, update_data, "group_id"))
+        waiting = await admit_move(request, session, auth, Node.post(post.id), post.group_id, update_data["group_id"],
+                                   move_locks, post_data.force, changed_fields(post, update_data, "group_id"))
         if waiting is not None:
             return move_accepted(await moves.view_of(session, waiting, auth.tree), version)
 

@@ -183,6 +183,13 @@ class MoveStatus(str, Enum):
     FAILED = "failed"         # refused when it ran: error is the problem code; nothing moved
 
 
+class MovePlace(str, Enum):
+    """Where a node sits, as 409 move_conflict says it (param current_place): the id only of a group the caller sees"""
+    ROOT = "root"       # directly under the root
+    GROUP = "group"     # in the group of current_group_id
+    HIDDEN = "hidden"   # in a group the caller does not see
+
+
 class MoveCancelCause(str, Enum):
     """Why a waiting move was cancelled (audit param cause of move.cancelled)"""
     REQUESTED = "requested"           # POST /moves/{id}/cancel

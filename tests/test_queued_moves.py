@@ -31,6 +31,8 @@ from tests.helpers import builtin_role, give, make_admin, make_group, make_post,
 from tests.test_media_uploads import CHUNK, _create_body, make_png, storage  # noqa: F401
 from tests.test_upload_archive_cancel import CREATE, _observation, _open_session, _part, _stored
 
+pytestmark = pytest.mark.raw_moves      # every request here is sent as written (tests/conftest.py _FormClient)
+
 MOVER = [P.POST_VIEW, P.POST_UPDATE, P.SCOPE_GROUP_VIEW, P.SCOPE_GROUP_UPDATE]
 DATA = make_png(200, 150)
 
@@ -125,7 +127,7 @@ async def _scene(client, db, headers, sent: int = 10) -> _Scene:
 
 
 async def _waiting_move(client, headers, scene) -> int:
-    answer = await client.put(_post_url(scene.post), json={"group_id": scene.there.id}, headers=headers(scene.admin))
+    answer = await client.put(_post_url(scene.post), json=_move_body(scene), headers=headers(scene.admin))
     assert answer.status_code == 202, answer.text
     return answer.json()["id"]
 
@@ -136,7 +138,7 @@ async def test_a_move_without_uploads_runs_at_once_and_leaves_no_row(client, db,
     admin = await make_admin(db)
     home, there = await make_group(db), await make_group(db)
     post = await make_post(db, group_id=home.id)
-    moved = await client.put(_post_url(post), json={"group_id": there.id}, headers=headers(admin))
+    moved = await client.put(_post_url(post), json={"group_id": there.id, "expected_group_id": home.id}, headers=headers(admin))
     assert moved.status_code == 200 and moved.json()["id"] == post.id, moved.text
     assert await _group_of(db, post) == there.id
     assert (await db.exec(select(PendingMove))).all() == []
@@ -147,7 +149,7 @@ async def test_a_finished_or_aborted_upload_holds_nothing(client, db, headers, s
     aborted = await client.post(V1.path(MediaRoutes.UPLOAD_SESSION_ABORT, upload_id=scene.upload_id),
                                 headers=headers(scene.admin))
     assert aborted.status_code == 200, aborted.text
-    moved = await client.put(_post_url(scene.post), json={"group_id": scene.there.id}, headers=headers(scene.admin))
+    moved = await client.put(_post_url(scene.post), json=_move_body(scene), headers=headers(scene.admin))
     assert moved.status_code == 200, moved.text
 
 
@@ -155,7 +157,7 @@ async def test_a_finished_or_aborted_upload_holds_nothing(client, db, headers, s
 
 async def test_a_post_move_with_an_upload_waits(client, db, headers, storage):
     scene = await _scene(client, db, headers)
-    answer = await client.put(_post_url(scene.post), json={"group_id": scene.there.id}, headers=headers(scene.admin))
+    answer = await client.put(_post_url(scene.post), json=_move_body(scene), headers=headers(scene.admin))
     assert answer.status_code == 202, answer.text
     body = answer.json()
     assert answer.headers["Location"] == _move_url(body["id"])
@@ -186,7 +188,7 @@ async def test_a_group_move_waits_for_an_upload_of_any_post_below_it(client, db,
     observation = await _observation(db, admin, post)
     await _open_session(client, headers, admin, observation, DATA, 10)
 
-    answer = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=top.id), json={"parent_id": there.id},
+    answer = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=top.id), json={"parent_id": there.id, "expected_parent_id": None},
                                 headers=headers(admin))
     assert answer.status_code == 202 and answer.json()["node_kind"] == "group", answer.text
     assert await _parent_of(db, top) is None
@@ -204,7 +206,7 @@ async def test_a_brigade_move_waits_and_runs_when_the_upload_ends(client, db, he
     upload_id = await _open_session(client, headers, admin, await _observation(db, admin, post), DATA, 10)
 
     answer = await client.patch(V1.path(BrigadeRoutes.BRIGADE_BY_ID, brigade_id=brigade.id),
-                                json={"corps_id": other.id}, headers=headers(admin))
+                                json={"corps_id": other.id, "expected_corps_id": corps.id}, headers=headers(admin))
     assert answer.status_code == 202 and answer.json()["target_group_id"] == other.id, answer.text
     await client.post(V1.path(MediaRoutes.UPLOAD_SESSION_ABORT, upload_id=upload_id), headers=headers(admin))
     assert (await _move(db, answer.json()["id"])).status == "done"
@@ -713,7 +715,7 @@ async def test_force_runs_at_once_and_uploads_continue(client, db, headers, stor
     observation = await _observation(db, admin, post)
     upload_id = await _open_session(client, headers, admin, observation, DATA, 10)
     if kind == "post":
-        moved = await client.put(_post_url(post), json={"group_id": other.id, "force": True}, headers=headers(admin))
+        moved = await client.put(_post_url(post), json={"group_id": other.id, "expected_group_id": brigade.id, "force": True}, headers=headers(admin))
         assert await _group_of(db, post) == other.id
     elif kind == "group":
         target = await make_group(db)
@@ -721,11 +723,11 @@ async def test_force_runs_at_once_and_uploads_continue(client, db, headers, stor
         await db.execute(update(Post).where(Post.id == post.id).values(group_id=plain.id))
         await db.commit()
         moved = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=plain.id),
-                                   json={"parent_id": target.id, "force": True}, headers=headers(admin))
+                                   json={"parent_id": target.id, "expected_parent_id": None, "force": True}, headers=headers(admin))
         assert await _parent_of(db, plain) == target.id
     else:
         moved = await client.patch(V1.path(BrigadeRoutes.BRIGADE_BY_ID, brigade_id=brigade.id),
-                                   json={"corps_id": other.id, "force": True}, headers=headers(admin))
+                                   json={"corps_id": other.id, "expected_corps_id": corps.id, "force": True}, headers=headers(admin))
         assert await _parent_of(db, brigade) == other.id
     assert moved.status_code == 200 and "force" not in moved.json(), moved.text
 
@@ -744,7 +746,7 @@ async def test_force_without_uploads_is_a_plain_move(client, db, headers, storag
     admin = await make_admin(db)
     home, there = await make_group(db), await make_group(db)
     post = await make_post(db, group_id=home.id)
-    moved = await client.put(_post_url(post), json={"group_id": there.id, "force": True}, headers=headers(admin))
+    moved = await client.put(_post_url(post), json={"group_id": there.id, "expected_group_id": home.id, "force": True}, headers=headers(admin))
     assert moved.status_code == 200, moved.text
     assert (await db.exec(select(PendingMove))).all() == []
 
@@ -763,7 +765,7 @@ async def test_after_a_forced_move_complete_needs_the_right_at_the_new_place(cli
     await db.commit()
     await give(db, uploader, [P.MEDIA_VIEW, P.MEDIA_CREATE], Node.group(home.id))
 
-    moved = await client.put(_post_url(post), json={"group_id": there.id, "force": True}, headers=headers(admin))
+    moved = await client.put(_post_url(post), json={"group_id": there.id, "expected_group_id": home.id, "force": True}, headers=headers(admin))
     assert moved.status_code == 200, moved.text
     refused = await client.post(_complete_url(upload_id), headers=headers(uploader))
     assert refused.status_code == 403, refused.text
@@ -773,7 +775,7 @@ async def test_after_a_forced_move_complete_needs_the_right_at_the_new_place(cli
 
 async def test_a_waiting_move_refuses_other_fields(client, db, headers, storage):
     scene = await _scene(client, db, headers)
-    refused = await client.put(_post_url(scene.post), json={"group_id": scene.there.id, "name": "New name"},
+    refused = await client.put(_post_url(scene.post), json=_move_body(scene, name="New name"),
                                headers=headers(scene.admin))
     assert refused.status_code == 422 and refused.json()["code"] == "move_not_alone", refused.text
     assert refused.json()["changed_fields"] == ["name"]
@@ -782,7 +784,7 @@ async def test_a_waiting_move_refuses_other_fields(client, db, headers, storage)
 
 async def test_fields_sent_with_their_current_value_do_not_count(client, db, headers, storage):
     scene = await _scene(client, db, headers)
-    answer = await client.put(_post_url(scene.post), json={"group_id": scene.there.id, "name": scene.post.name},
+    answer = await client.put(_post_url(scene.post), json=_move_body(scene, name=scene.post.name),
                               headers=headers(scene.admin))
     assert answer.status_code == 202, answer.text
 
@@ -792,7 +794,7 @@ async def test_a_move_with_other_fields_runs_as_before_when_it_need_not_wait(cli
     scene = await _scene(client, db, headers, sent=0)
     if not body:
         await client.post(V1.path(MediaRoutes.UPLOAD_SESSION_ABORT, upload_id=scene.upload_id), headers=headers(scene.admin))
-    moved = await client.put(_post_url(scene.post), json={"group_id": scene.there.id, "name": "Moved", **body},
+    moved = await client.put(_post_url(scene.post), json=_move_body(scene, name="Moved", **body),
                              headers=headers(scene.admin))
     assert moved.status_code == 200 and moved.json()["name"] == "Moved", moved.text
 
@@ -804,8 +806,220 @@ async def test_a_group_rename_with_a_move_that_would_wait_is_refused(client, db,
     post = await make_post(db, group_id=brigade.id)
     await _open_session(client, headers, admin, await _observation(db, admin, post), DATA, 10)
     refused = await client.patch(V1.path(BrigadeRoutes.BRIGADE_BY_ID, brigade_id=brigade.id),
-                                 json={"corps_id": other.id, "name": "Other name"}, headers=headers(admin))
+                                 json={"corps_id": other.id, "expected_corps_id": corps.id, "name": "Other name"}, headers=headers(admin))
     assert refused.status_code == 422 and refused.json()["changed_fields"] == ["name"], refused.text
+
+
+# ---------------------------------------------------------------- a move states where it thinks the node is
+
+class _Node:
+    """A node of one of the three move routes in the group home, and a group there to go to"""
+
+    def __init__(self, kind, admin, row, home, there):
+        self.kind, self.admin, self.row, self.home, self.there = kind, admin, row, home, there
+        self.url = {"post": lambda: _post_url(row),
+                    "group": lambda: V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=row.id),
+                    "brigade": lambda: V1.path(BrigadeRoutes.BRIGADE_BY_ID, brigade_id=row.id)}[kind]()
+        self.target, self.expected = {"post": ("group_id", "expected_group_id"),
+                                      "group": ("parent_id", "expected_parent_id"),
+                                      "brigade": ("corps_id", "expected_corps_id")}[kind]
+
+    def body(self, target, **extra):
+        return {self.target: target, **extra}
+
+    def moving(self, target, expected, **extra):
+        return {self.target: target, self.expected: expected, **extra}
+
+    async def send(self, client, headers, body, user=None):
+        method = client.put if self.kind == "post" else client.patch
+        return await method(self.url, json=body, headers=headers(user or self.admin))
+
+    async def place(self, db):
+        return await (_group_of if self.kind == "post" else _parent_of)(db, self.row)
+
+
+async def _node(db, kind) -> _Node:
+    admin = await make_admin(db)
+    if kind == "post":
+        home, there = await make_group(db), await make_group(db)
+        return _Node(kind, admin, await make_post(db, group_id=home.id), home, there)
+    if kind == "group":
+        home, there = await make_group(db), await make_group(db)
+        return _Node(kind, admin, await make_group(db, parent_id=home.id), home, there)
+    home, there = await make_group(db, kind="corps"), await make_group(db, kind="corps")
+    return _Node(kind, admin, await make_group(db, parent_id=home.id, kind="brigade"), home, there)
+
+
+KINDS = ["post", "group", "brigade"]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+async def test_a_move_with_the_expected_place_runs(client, db, headers, storage, kind):
+    node = await _node(db, kind)
+    moved = await node.send(client, headers, node.moving(node.there.id, node.home.id))
+    assert moved.status_code == 200 and moved.json()["already_there"] is False, moved.text
+    assert await node.place(db) == node.there.id
+
+
+@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize("extra", [{}, {"force": True}])
+async def test_a_move_without_an_expected_place_is_a_conflict(client, db, headers, storage, kind, extra):
+    node = await _node(db, kind)
+    refused = await node.send(client, headers, node.body(node.there.id, **extra))
+    assert refused.status_code == 409 and refused.json()["code"] == "move_conflict", refused.text
+    assert refused.json()["current_place"] == "group" and refused.json()["current_group_id"] == node.home.id
+    assert await node.place(db) == node.home.id
+
+
+@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize("extra", [{}, {"force": True}])
+async def test_a_move_with_another_expected_place_is_a_conflict(client, db, headers, storage, kind, extra):
+    node = await _node(db, kind)
+    other = await make_group(db, kind="corps" if kind == "brigade" else "group")
+    refused = await node.send(client, headers, node.moving(node.there.id, other.id, **extra))
+    assert refused.status_code == 409 and refused.json()["code"] == "move_conflict", refused.text
+    assert refused.json()["current_group_id"] == node.home.id
+    assert await node.place(db) == node.home.id
+
+
+@pytest.mark.parametrize("kind", KINDS)
+async def test_the_node_already_at_the_target_answers_200_and_writes_nothing(client, db, headers, storage, kind):
+    node = await _node(db, kind)
+    assert (await node.send(client, headers, node.moving(node.there.id, node.home.id))).status_code == 200
+    before = await db.exec(select(AuditLog))
+    written = len(before.all())
+    stamp = (await client.get(node.url, headers=headers(node.admin))).json()["updated_at"]
+
+    # the same form from a second administrator, with a change of its own
+    again = await node.send(client, headers, node.moving(node.there.id, node.home.id, name="Not written", force=True))
+    assert again.status_code == 200, again.text
+    assert again.json()["already_there"] is True and again.json()["name"] == node.row.name
+    seen = (await client.get(node.url, headers=headers(node.admin))).json()
+    assert seen["updated_at"] == stamp and seen["name"] == node.row.name
+    assert len((await db.exec(select(AuditLog))).all()) == written, "no audit row"
+
+
+@pytest.mark.parametrize("kind", KINDS)
+async def test_the_current_value_without_an_expected_place_is_an_ordinary_edit(client, db, headers, storage, kind):
+    node = await _node(db, kind)
+    edited = await node.send(client, headers, node.body(node.home.id, name="Edited"))
+    assert edited.status_code == 200 and edited.json()["name"] == "Edited", edited.text
+    assert edited.json()["already_there"] is False
+
+
+@pytest.mark.parametrize("kind", KINDS)
+async def test_a_form_that_leaves_the_place_as_it_saw_it_is_an_ordinary_edit(client, db, headers, storage, kind):
+    """Target, expected place and the row all agree: nothing asks for a move, and the rename of the form must not be
+    lost to already_there"""
+    node = await _node(db, kind)
+    edited = await node.send(client, headers, node.moving(node.home.id, node.home.id, name="Edited"))
+    assert edited.status_code == 200 and edited.json()["name"] == "Edited", edited.text
+    assert edited.json()["already_there"] is False
+
+
+@pytest.mark.parametrize("kind", KINDS)
+async def test_a_stale_form_answers_409_and_moves_nothing(client, db, headers, storage, kind):
+    """The node moved after the form was read; the form sends its old value, as a client that sends the whole record"""
+    node = await _node(db, kind)
+    assert (await node.send(client, headers, node.moving(node.there.id, node.home.id))).status_code == 200
+    stale = await node.send(client, headers, node.body(node.home.id, name="From the old form"))
+    assert stale.status_code == 409 and stale.json()["code"] == "move_conflict", stale.text
+    assert stale.json()["current_group_id"] == node.there.id
+    assert await node.place(db) == node.there.id
+    assert (await client.get(node.url, headers=headers(node.admin))).json()["name"] == node.row.name
+
+
+async def test_presence_counts_null_is_a_place(client, db, headers, storage):
+    """A top-level node: null is the value it holds, an absent expected value is another thing"""
+    admin = await make_admin(db)
+    group, there = await make_group(db), await make_group(db)
+    url = V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=group.id)
+    missing = await client.patch(url, json={"parent_id": there.id}, headers=headers(admin))
+    assert missing.status_code == 409 and missing.json()["current_place"] == "root", missing.text
+    assert "current_group_id" not in missing.json()
+    moved = await client.patch(url, json={"parent_id": there.id, "expected_parent_id": None}, headers=headers(admin))
+    assert moved.status_code == 200, moved.text
+    back = await client.patch(url, json={"parent_id": None, "expected_parent_id": there.id}, headers=headers(admin))
+    assert back.status_code == 200 and back.json()["parent_id"] is None, back.text
+    done = await client.patch(url, json={"parent_id": None, "expected_parent_id": there.id}, headers=headers(admin))
+    assert done.status_code == 200 and done.json()["already_there"] is True, done.text
+
+
+async def test_a_post_at_the_root_states_null(client, db, headers, storage):
+    admin = await make_admin(db)
+    post, there = await make_post(db), await make_group(db)
+    moved = await client.put(_post_url(post), json={"group_id": there.id, "expected_group_id": None}, headers=headers(admin))
+    assert moved.status_code == 200, moved.text
+
+
+async def test_the_conflict_does_not_name_a_group_the_caller_cannot_see(client, db, headers, storage):
+    admin = await make_admin(db)
+    home, there = await make_group(db), await make_group(db)
+    post = await make_post(db, group_id=home.id)
+    local = await make_user(db, perms=[], user_type=UserType.ADMINISTRATOR)
+    await give(db, local, [P.POST_VIEW, P.POST_UPDATE], Node.post(post.id))
+    refused = await client.put(_post_url(post), json={"group_id": there.id}, headers=headers(local))
+    assert refused.status_code == 409 and refused.json()["code"] == "move_conflict", refused.text
+    assert refused.json()["current_place"] == "hidden" and "current_group_id" not in refused.json()
+    assert (await client.put(_post_url(post), json={"group_id": there.id}, headers=headers(admin))).status_code == 409
+
+
+async def test_a_conflict_on_a_group_needs_the_right_to_edit_it(client, db, headers, storage):
+    """Scope before state: a holder at the group who could not edit it learns nothing from a 409"""
+    node = await _node(db, "group")
+    local = await make_user(db, perms=[], user_type=UserType.ADMINISTRATOR)
+    await give(db, local, [P.SCOPE_GROUP_VIEW, P.SCOPE_GROUP_UPDATE], Node.group(node.row.id))
+    refused = await node.send(client, headers, node.body(node.there.id), user=local)
+    assert refused.status_code == 403 and refused.json()["code"] == "permission_required_for_action", refused.text
+
+
+async def test_a_request_with_the_same_value_takes_no_move_lock(client, db, headers, storage, monkeypatch):
+    """Item 7: only a value that really differs takes the global lock, whatever the kind of request"""
+    calls = []
+    real = moves_service.lock_for_move
+
+    async def counting(*args):
+        calls.append(args[2])
+        return await real(*args)
+
+    monkeypatch.setattr(moves_service, "lock_for_move", counting)
+    for kind in KINDS:
+        node = await _node(db, kind)
+        assert (await node.send(client, headers, node.body(node.home.id, name="Same place"))).status_code == 200
+        assert (await node.send(client, headers, node.moving(node.home.id, node.home.id))).status_code == 200
+    assert calls == []
+    node = await _node(db, "post")
+    assert (await node.send(client, headers, node.moving(node.there.id, node.home.id))).status_code == 200
+    assert len(calls) == 1
+    # the node already at the target: nothing to serialise
+    assert (await node.send(client, headers, node.moving(node.there.id, node.home.id))).json()["already_there"] is True
+    assert len(calls) == 1
+
+
+async def test_a_target_inside_the_node_is_refused_without_the_locks_of_a_move(client, db, headers, storage, monkeypatch):
+    calls = []
+    real = moves_service.lock_for_move
+
+    async def counting(*args):
+        calls.append(args[2])
+        return await real(*args)
+
+    monkeypatch.setattr(moves_service, "lock_for_move", counting)
+    node = await _node(db, "group")
+    inside = await make_group(db, parent_id=node.row.id)
+    refused = await node.send(client, headers, node.moving(inside.id, node.home.id))
+    assert refused.status_code == 409 and refused.json()["code"] == "scope_group_cycle", refused.text
+    assert calls == []
+
+
+async def test_a_move_the_tree_did_not_see_coming_is_a_conflict(client, db, headers, storage, monkeypatch):
+    """The tree of the request said no move, the locked row says one: it moved in between. The locks of a move come
+    first or not at all, and the answer is the one of a stale form"""
+    node = await _node(db, "post")
+    monkeypatch.setattr(moves_service, "takes_move_locks", lambda *args: False)
+    refused = await node.send(client, headers, node.moving(node.there.id, node.home.id))
+    assert refused.status_code == 409 and refused.json()["code"] == "move_conflict", refused.text
+    assert await node.place(db) == node.home.id
 
 
 # ---------------------------------------------------------------- overlapping moves
@@ -815,13 +1029,13 @@ async def test_moves_overlapping_a_waiting_one_answer_move_pending(client, db, h
     top, there = await make_group(db), await make_group(db)
     post, beside = await make_post(db, group_id=top.id), await make_post(db, group_id=top.id)
     await _open_session(client, headers, admin, await _observation(db, admin, post), DATA, 10)
-    answer = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=top.id), json={"parent_id": there.id},
-                                headers=headers(admin))
+    answer = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=top.id),
+                                json={"parent_id": there.id, "expected_parent_id": None}, headers=headers(admin))
     assert answer.status_code == 202, answer.text
     move_id = answer.json()["id"]
 
-    for body, url, method in (({"group_id": there.id}, _post_url(beside), client.put),
-                              ({"group_id": there.id, "force": True}, _post_url(post), client.put),
+    for body, url, method in (({"group_id": there.id, "expected_group_id": top.id}, _post_url(beside), client.put),
+                              ({"group_id": there.id, "expected_group_id": top.id, "force": True}, _post_url(post), client.put),
                               ({"parent_id": None}, V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=top.id), client.patch)):
         refused = await method(url, json=body, headers=headers(admin))
         if body == {"parent_id": None}:
@@ -832,7 +1046,7 @@ async def test_moves_overlapping_a_waiting_one_answer_move_pending(client, db, h
 
     second_there = await make_group(db)
     again = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=top.id),
-                               json={"parent_id": second_there.id}, headers=headers(admin))
+                               json={"parent_id": second_there.id, "expected_parent_id": None}, headers=headers(admin))
     assert again.status_code == 409 and again.json()["move_id"] == move_id, again.text
 
 
@@ -840,7 +1054,7 @@ async def test_a_move_of_a_group_above_a_waiting_post_move_answers_move_pending(
     scene = await _scene(client, db, headers)
     move_id = await _waiting_move(client, headers, scene)
     refused = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=scene.home.id),
-                                 json={"parent_id": scene.there.id}, headers=headers(scene.admin))
+                                 json={"parent_id": scene.there.id, "expected_parent_id": None}, headers=headers(scene.admin))
     assert refused.status_code == 409 and refused.json()["move_id"] == move_id, refused.text
 
 
@@ -848,7 +1062,7 @@ async def test_a_move_elsewhere_is_not_blocked_by_a_waiting_one(client, db, head
     scene = await _scene(client, db, headers)
     await _waiting_move(client, headers, scene)
     other = await make_post(db, group_id=scene.there.id)
-    moved = await client.put(_post_url(other), json={"group_id": scene.home.id}, headers=headers(scene.admin))
+    moved = await client.put(_post_url(other), json={"group_id": scene.home.id, "expected_group_id": scene.there.id}, headers=headers(scene.admin))
     assert moved.status_code == 200, moved.text
 
 
@@ -907,7 +1121,7 @@ async def test_an_outsider_gets_404_like_an_unknown_id(client, db, headers, stor
 async def test_a_requester_who_lost_the_right_reads_the_end_of_the_move(client, db, headers, storage, session_maker):
     scene = await _scene(client, db, headers)
     mover = await _mover_at_root(db)
-    answer = await client.put(_post_url(scene.post), json={"group_id": scene.there.id}, headers=headers(mover))
+    answer = await client.put(_post_url(scene.post), json=_move_body(scene), headers=headers(mover))
     assert answer.status_code == 202, answer.text
     move_id = answer.json()["id"]
     for grant in (await db.exec(select(RoleAssignment).where(RoleAssignment.user_id == mover.id))).all():
@@ -928,7 +1142,7 @@ async def test_a_requester_who_lost_the_right_reads_the_end_of_the_move(client, 
 async def _mover_scene(client, db, headers, storage):
     scene = await _scene(client, db, headers)
     mover = await _mover_at_root(db)
-    answer = await client.put(_post_url(scene.post), json={"group_id": scene.there.id}, headers=headers(mover))
+    answer = await client.put(_post_url(scene.post), json=_move_body(scene), headers=headers(mover))
     assert answer.status_code == 202, answer.text
     return scene, mover, answer.json()["id"]
 
@@ -998,8 +1212,8 @@ async def test_a_name_taken_at_the_target_fails_a_group_move(client, db, headers
     home, there = await make_group(db, name="Same name"), await make_group(db)
     post = await make_post(db, group_id=home.id)
     upload_id = await _open_session(client, headers, admin, await _observation(db, admin, post), DATA, 10)
-    answer = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=home.id), json={"parent_id": there.id},
-                                headers=headers(admin))
+    answer = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=home.id),
+                                json={"parent_id": there.id, "expected_parent_id": None}, headers=headers(admin))
     assert answer.status_code == 202, answer.text
     await make_group(db, name="Same name", parent_id=there.id)
     await client.post(V1.path(MediaRoutes.UPLOAD_SESSION_ABORT, upload_id=upload_id), headers=headers(admin))
@@ -1013,12 +1227,12 @@ async def test_a_cycle_made_while_waiting_fails_the_group_move(client, db, heade
     first, second = await make_group(db), await make_group(db)
     post = await make_post(db, group_id=first.id)
     upload_id = await _open_session(client, headers, admin, await _observation(db, admin, post), DATA, 10)
-    answer = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=first.id), json={"parent_id": second.id},
-                                headers=headers(admin))
+    answer = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=first.id),
+                                json={"parent_id": second.id, "expected_parent_id": None}, headers=headers(admin))
     assert answer.status_code == 202, answer.text
     # the destination moves below the waiting node: no upload there, and its subtree does not hold the waiting node
-    moved = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=second.id), json={"parent_id": first.id},
-                               headers=headers(admin))
+    moved = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=second.id),
+                               json={"parent_id": first.id, "expected_parent_id": None}, headers=headers(admin))
     assert moved.status_code == 200, moved.text
     await client.post(V1.path(MediaRoutes.UPLOAD_SESSION_ABORT, upload_id=upload_id), headers=headers(admin))
     row = await _move(db, answer.json()["id"])
@@ -1032,7 +1246,7 @@ async def test_the_move_goes_from_where_the_node_sits_when_it_runs(client, db, h
     brigade = await make_group(db, parent_id=corps.id, kind="brigade")
     post = await make_post(db, group_id=brigade.id)
     upload_id = await _open_session(client, headers, admin, await _observation(db, admin, post), DATA, 10)
-    answer = await client.put(_post_url(post), json={"group_id": there.id}, headers=headers(admin))
+    answer = await client.put(_post_url(post), json={"group_id": there.id, "expected_group_id": brigade.id}, headers=headers(admin))
     assert answer.status_code == 202, answer.text
     archived = await client.post(V1.path(BrigadeRoutes.BRIGADE_ARCHIVE, brigade_id=brigade.id), headers=headers(admin))
     assert archived.status_code == 200, archived.text
@@ -1063,8 +1277,8 @@ async def test_an_archive_of_a_group_cancels_its_waiting_move(client, db, header
     home, there = await make_group(db), await make_group(db)
     post = await make_post(db, group_id=home.id)
     upload_id = await _open_session(client, headers, admin, await _observation(db, admin, post), DATA, 10)
-    answer = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=home.id), json={"parent_id": there.id},
-                                headers=headers(admin))
+    answer = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=home.id),
+                                json={"parent_id": there.id, "expected_parent_id": None}, headers=headers(admin))
     assert answer.status_code == 202, answer.text
     await db.execute(update(UploadSession).where(UploadSession.id == upload_id).values(
         status="completing", writer_token="t" * 32, writer_since=datetime.now(timezone.utc)))
@@ -1087,7 +1301,7 @@ async def test_an_archive_of_a_unit_cancels_the_waiting_move_of_the_unit(client,
     post = await make_post(db, group_id=brigade.id)
     await _open_session(client, headers, admin, await _observation(db, admin, post), DATA, 10)
     answer = await client.patch(V1.path(BrigadeRoutes.BRIGADE_BY_ID, brigade_id=brigade.id),
-                                json={"corps_id": other.id}, headers=headers(admin))
+                                json={"corps_id": other.id, "expected_corps_id": corps.id}, headers=headers(admin))
     assert answer.status_code == 202, answer.text
     archived = await client.post(V1.path(BrigadeRoutes.BRIGADE_ARCHIVE, brigade_id=brigade.id),
                                  params={"cascade": cascade}, headers=headers(admin))
@@ -1103,7 +1317,7 @@ async def test_a_cascade_archive_cancels_the_waiting_move_of_a_post_inside(clien
     brigade = await make_group(db, parent_id=corps.id, kind="brigade")
     post = await make_post(db, group_id=brigade.id)
     await _open_session(client, headers, admin, await _observation(db, admin, post), DATA, 10)
-    answer = await client.put(_post_url(post), json={"group_id": there.id}, headers=headers(admin))
+    answer = await client.put(_post_url(post), json={"group_id": there.id, "expected_group_id": brigade.id}, headers=headers(admin))
     archived = await client.post(V1.path(BrigadeRoutes.BRIGADE_ARCHIVE, brigade_id=brigade.id),
                                  params={"cascade": True}, headers=headers(admin))
     assert archived.status_code == 200, archived.text

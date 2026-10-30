@@ -19,6 +19,11 @@ class BrigadeResponse(SecureBaseModel):
     post_count: int = Field(description="Active posts of the brigade where the caller has post.view")
 
 
+class BrigadeUpdateResponse(BrigadeResponse):
+    """The brigade after PATCH /brigades/{brigade_id}"""
+    already_there: bool = Field(default=False, description="true: the move this request asked for has already happened: nothing was written, the other fields sent included, and this is the record as it stands")
+
+
 def _brigade_response(brigade: ScopeGroup, auth: AuthContext, viewable: Optional[FrozenSet[int]]) -> BrigadeResponse:
     _, posts = unit_counts(auth, brigade.id, viewable)
     return BrigadeResponse(

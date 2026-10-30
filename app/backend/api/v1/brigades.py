@@ -13,7 +13,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.api.shared.helpers.db_errors import unique_violation_as
-from app.backend.api.shared.helpers.move_helper import admit_move, changed_fields
+from app.backend.api.shared.helpers.move_helper import admit_move, changed_fields, move_conflict, move_step
 from app.backend.api.shared.helpers.scope_group_helper import (
     unit_observation_stats, archive_unit, audit_group, check_visible, get_unit, lock_groups, lock_unit, name_taken,
     parent_location, restore_unit,
@@ -21,7 +21,9 @@ from app.backend.api.shared.helpers.scope_group_helper import (
 from app.backend.api.v1.models.query.brigades import BrigadeFilterParams
 from app.backend.api.v1.models.query.posts import PostFilterParams
 from app.backend.api.v1.models.request.brigades import BrigadeCreate, BrigadeUpdate
-from app.backend.api.v1.models.response.brigades import BrigadeResponse, brigade_list_to_response, brigade_to_response
+from app.backend.api.v1.models.response.brigades import (
+    BrigadeResponse, BrigadeUpdateResponse, brigade_list_to_response, brigade_to_response,
+)
 from app.backend.api.v1.models.response.corps import UnitObservationStatsResponse
 from app.backend.api.v1.models.response.moves import MOVE_ACCEPTED, move_accepted
 from app.backend.api.v1.models.response.posts import PostResponse, posts_to_response
@@ -147,10 +149,11 @@ async def get_brigade(
 
 @router.patch(
     BrigadeRoutes.BRIGADE_BY_ID.value,
-    response_model=BrigadeResponse,
+    response_model=BrigadeUpdateResponse,
     responses={**MOVE_ACCEPTED, **problems(
         *PLACEMENT_PROBLEMS, ErrorCode.SCOPE_GROUP_NAME_TAKEN, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION,
-        AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, ErrorCode.MOVE_PENDING, ErrorCode.MOVE_NOT_ALONE, *GUARDED,
+        AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, ErrorCode.MOVE_PENDING, ErrorCode.MOVE_CONFLICT,
+        ErrorCode.MOVE_NOT_ALONE, *GUARDED,
     )},
 )
 async def update_brigade(
@@ -174,34 +177,47 @@ async def update_brigade(
     every permission of its role there before the move, the grants of other users included (403
     grant_exceeds_own_permissions, after the corps checks). Nothing changes on a refusal.
 
-    A move during work: with uploads running below the node (upload sessions open or completing) the move waits. The
-    answer is 202 with the move operation, Location and Retry-After; nothing moves yet, and new uploads below the node
-    answer 409 move_pending; chunks, completes and every other write go on. The move runs when the last upload ended
-    (finished, aborted, archived, expired, or cancelled because no bytes arrived for moves.upload_stale_seconds, 300 by
-    default: its next chunk or complete answers 409 upload_cancelled_by_move). The permission checks run again then: a
-    move the caller may no longer make ends failed and nothing moves. Follow it at GET /moves/{move_id}; POST
-    /moves/{move_id}/cancel cancels it. force true runs it at once and the uploads continue at the new place. A move
-    whose subtree overlaps a waiting one answers 409 move_pending (force too; cancel that one first). A request that
-    would have to wait and changes anything besides the move answers 422 move_not_alone with changed_fields and nothing
+    A move states where it thinks the node is: with corps_id send expected_corps_id, the value the client read.
+    Checked under the move lock, force or not, in this order. The brigade already at corps_id: 200 with already_there true,
+    nothing written, the other fields sent included, no audit row. expected_corps_id missing or other than where
+    the brigade sits: 409 move_conflict with the current place (current_place root; group with current_group_id; hidden for a
+    group outside the caller's scope_group.view) and nothing moves: read the record and decide again. So a client that
+    sends the whole record from an old form is refused, not obeyed. corps_id sent with the current value is no move: an
+    ordinary edit, with no expected_corps_id or with the same value there.
+
+    A move during work: with uploads receiving bytes below the node (upload sessions open or completing) the move
+    waits. The answer is 202 with the move operation, Location and Retry-After; nothing moves yet, and new uploads
+    below the node answer 409 move_pending; chunks, completes and every other write go on. The move runs when nothing
+    holds it any more: an upload that ended (finished, aborted, archived, expired) holds nothing, nor does one with no
+    bytes for moves.upload_stale_seconds, 300 by default, which is left alone and may go on at the new place after the
+    move. The first request that meets the move then runs it, or the worker. The permission checks run again at that
+    moment: a move the caller may no longer make ends failed and nothing moves. Follow it at GET /moves/{move_id}; POST
+    /moves/{move_id}/cancel cancels it. force true runs it at once and the uploads continue at the new place. The same
+    move repeated while it waits answers 202 with that move, from anyone allowed to make it. A node on the way is busy:
+    moving a waiting node, anything below it or above it, moving anything into it, or moving its target (or a group
+    holding the target) answers 409 move_pending with move_id, force too; cancel that move first. A request that would
+    have to wait and changes anything besides the move answers 422 move_not_alone with changed_fields and nothing
     happens: send a move as its own request. Sessions and tokens stay valid; rights at the new place apply from the
     next request (API.md, "A move during work").
     """
-    update_data = data.model_dump(exclude_unset=True, exclude={"force"})
+    update_data = data.model_dump(exclude_unset=True, exclude={"force", "expected_corps_id"})
     # The current corps sent back is no move: only another corps must be visible (404 before any lock)
     if "corps_id" in update_data and update_data["corps_id"] != auth.tree.group_parent.get(brigade_id):
         check_visible(auth, update_data["corps_id"])
-    # A request that sends a corps takes the locks of a move, everything below the brigade included (services/moves.py)
+    # A request that changes the corps takes the locks of a move, everything below the brigade included
+    # (services/moves.py). The current corps sent back takes none: the row decides
     move_locks = None
-    if "corps_id" in update_data:
+    if "corps_id" in update_data and moves.takes_move_locks(auth.tree, Node.group(brigade_id), update_data["corps_id"]):
         check_visible(auth, brigade_id)
         move_locks = await moves.lock_for_move(session, auth.tree, Node.group(brigade_id), update_data["corps_id"])
     # Groups top down: the old and the new corps, then the brigade
-    brigade = await lock_unit(session, auth, BRIGADE, brigade_id, also=[update_data.get("corps_id")],
+    brigade = await lock_unit(session, auth, BRIGADE, brigade_id, also=[update_data.get("corps_id") if move_locks else None],
                               started=move_locks is not None)
     old_values = brigade.model_dump()
 
     new_corps = update_data.get("corps_id", brigade.parent_id)
-    moving = new_corps != brigade.parent_id
+    step = move_step(data, "corps_id", "expected_corps_id", brigade.parent_id)
+    moving = step is moves.MoveStep.MOVE
     if moving:
         check_visible(auth, new_corps)     # the brigade moved since the tree was read: decided by the locked row
         # X.view AND X.update at both ends: the new corps is seen by check_visible, the old one here
@@ -211,6 +227,10 @@ async def update_brigade(
     else:
         AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_UPDATE, parent_location(brigade.parent_id),
                                           "update_brigade")
+        if step is moves.MoveStep.CONFLICT:
+            raise move_conflict(auth, brigade.parent_id)
+        if step is moves.MoveStep.ALREADY_THERE:
+            return BrigadeUpdateResponse(**brigade_to_response(brigade, auth).model_dump(), already_there=True)
     if "name" in update_data and not moving:
         # The name is checked against the brigades of the corps (409): scope_group.view at the corps as well
         AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_VIEW, parent_location(brigade.parent_id),
@@ -224,8 +244,8 @@ async def update_brigade(
         raise ApiError(ErrorCode.SCOPE_GROUP_NAME_TAKEN)
     if moving:
         # Last of the checks: a move that has to wait commits its row here, nothing else changed
-        waiting = await admit_move(request, session, auth, Node.group(brigade.id), new_corps, move_locks, data.force,
-                                   changed_fields(brigade, update_data, "corps_id"))
+        waiting = await admit_move(request, session, auth, Node.group(brigade.id), brigade.parent_id, new_corps, move_locks,
+                                   data.force, changed_fields(brigade, update_data, "corps_id"))
         if waiting is not None:
             return move_accepted(await moves.view_of(session, waiting, auth.tree), version)
 
