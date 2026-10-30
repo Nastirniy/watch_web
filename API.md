@@ -419,6 +419,75 @@ mover's own rights only.
   datetime parameter or body time whose UTC instant leaves the calendar (`0001-01-01T00:00:00+01:00`) is a field error
   `time_out_of_range` (params `earliest`, `latest`), as for `observed_at` out of its bounds.
 
+## A move during work
+
+Three requests change where data sits in the scope tree: `PUT /posts/{id}` with a new `group_id`,
+`PATCH /scope-groups/{id}` with a new `parent_id`, `PATCH /brigades/{id}` with a new `corps_id`. The moved subtree is the
+node and everything below it; "uploads below it" are the resumable upload sessions (`open` or `completing`) of its posts.
+
+| Situation | The move answers | What happens |
+|-----------|------------------|--------------|
+| No upload below the node | 200, the usual body | It runs at once, as always |
+| Uploads below it | **202**, a move operation, `Location: /api/v1/moves/{id}`, `Retry-After` | Nothing moves yet; the move waits |
+| Uploads below it, `force: true` in the body | 200, the usual body | It runs at once; the uploads continue at the new place |
+| Its subtree overlaps a waiting move's (the node, a group above it, a post below it), `force` or not | 409 `move_pending` with `move_id`, `Retry-After` | Nothing happens; to force it, cancel the waiting move first |
+| It would have to wait and the request changes anything else | 422 `move_not_alone` with `changed_fields` | Nothing happens |
+
+**Send a move as its own request.** A waiting operation never holds half an update, so a rename in the same `PATCH` is
+refused when the move would wait. A field sent with its current value changes nothing and does not count (a client
+that sends the whole record is fine); when the move does not wait, a request with other fields works as before.
+
+While a move waits:
+
+- New uploads below the node, by all three routes (`POST /media/uploads`, `POST /media/upload`,
+  `POST /media/nginx-upload`), answer 409 `move_pending` with `move_id` and `Retry-After`. Say clearly that a move is
+  waiting; try again after `Retry-After` seconds.
+- Uploads already running continue: chunks and `complete` work as usual.
+- Everything else (observations, bands, users, reads, a rename of the post) is not blocked.
+- An upload holds the move while it receives bytes. One that received none for `moves.upload_stale_seconds` (300 by
+  default) is cancelled at the media worker's next look (every `moves.check_interval_seconds`, 15 by default): status
+  `aborted`, `error` `upload_cancelled_by_move`, the bytes are deleted, its next chunk or `complete` answers 409
+  `upload_cancelled_by_move`. This also ends a fully received upload whose `complete` never came. Open a new session
+  after the move.
+- When nothing holds it any more (uploads finished, aborted, archived, expired or cancelled as above) the move runs:
+  at once at the end of the last upload, otherwise at the worker's next look.
+- The permission checks run again at that moment, for the user who asked: `post.*` and `scope_group.*` at both ends,
+  the rule on what the destination adds (`grant_exceeds_own_permissions`), the target (archived or gone), the tree rules
+  and the name. A refused move ends `failed` with the problem code in `error`, and nothing moves.
+
+`GET /moves/{id}` follows it: `status` (`waiting`, `done`, `cancelled`, `failed`), `node_kind` (`post`, `group`),
+`node_id`, `target_group_id` (null: directly under the root), `requested_by`, `requested_at`, `finished_at`, `force`,
+`error`, `waiting_seconds`, and while it waits `uploads`: per upload `upload_id`, `post_id`, `received_bytes`,
+`total_bytes`, `last_chunk_at` (null: no chunk yet), `holding` (false: about to be cancelled). Enough for "waiting for
+3 uploads, 120 MB left, 2 min 10 s". It needs the permissions of a move in effect at the node (`post.view` and
+`post.update` for a post, plus `scope_group.view` and `scope_group.update` for a group). The user who asked may always
+read their own move, without `uploads` once they lost those. Anyone else, and an unknown id, gets 404 `move_not_found`:
+an operator refused with `move_pending` cannot poll the move and simply tries again after `Retry-After`.
+
+`POST /moves/{id}/cancel`: the user who asked, or anyone who could make the same move (else 403
+`permission_required_for_action`). The block lifts at once; running uploads are untouched. A move that has ended: 409
+`move_not_waiting` with `move_status`. An archive of the node (or of a unit with it) cancels its waiting move; an
+archive of the target fails the move when it runs (`scope_group_not_found`). A restore of the database cancels every
+move that was waiting in the backup.
+
+What a client working at the moved place should expect (a user is filling an observation and uploading when the post
+or the user is moved):
+
+- **The session and its tokens stay valid.** A move ends no session, and neither does a new home post. Rights at the
+  new place apply from the next request, because grants are read per request. Nothing needs a new login (a change of
+  user type is what ends sessions, not a move).
+- **An upload keeps its `upload_id`.** The client goes on sending chunks and completes; the session has no token of
+  its own to renew. Every chunk and `complete` asks for `media.view` and `media.create` at the post where it sits now.
+- **The API pushes nothing.** The client learns of a move from an answer: 202 and 409 `move_pending` carry the move id.
+  A move that ran, forced or after waiting, shows only in later answers: a 403 on a post or a 404 on a group the user no
+  longer reaches, or a different `group_id` and unit in the post.
+- **What to refresh then:** `GET /auth/me` (permissions per post and group), `GET /scope-groups/tree`, the post and its
+  unit shown on the form, and the lists the client holds.
+- **An upload refused at the new place cannot be saved by the client.** After a move that took the right away, chunks
+  and `complete` answer 403 (`post_access_denied`, `post_write_denied`), abort too. The session stays `open` until it
+  expires, or until the right comes back or someone with `media.manage_any` at the post finishes or aborts it; the
+  bytes go with it. Tell the user; the observation itself may already exist.
+
 ## Client certificates
 
 People log in with a client certificate the server issues (server side: `PKI.md`). A user may hold several, each
@@ -559,6 +628,9 @@ the built-in `administrator` role) reads the entries of the nodes where it is in
   | `media_type` | `media.create`, `upload_session.*` | `image`, `video`, `audio`, `document` |
   | `via` | `user.create`, `user_certificate.issue` | `cli` (made on the server's command line) |
   | `via` | `media.create` | `multipart`, `nginx_offload`, `resumable` (how the file came) |
+  | `node_kind` | `move.*` | `post`, `group` |
+  | `cause` | `move.cancelled` | `requested`, `node_archived` |
+  | `failure_code` | `move.failed` | a problem code (the codes of the move routes): show it as such an error |
 
 - Device fields: `ip_address`, `user_agent`, `session_id` and `request_url` identify a device and are null without
   `audit.view` (the `session_id` filter then matches nothing). The param `ended_session_id` of `session.end` is not

@@ -852,6 +852,27 @@ async def test_a_cascade_archive_cancels_the_waiting_move_of_a_post_inside(clien
     assert await _group_of(db, post) == brigade.id
 
 
+async def test_a_database_failure_after_the_commit_of_an_upload_leaves_the_move_to_the_worker(
+        client, db, headers, storage, monkeypatch, session_maker):
+    """The upload has ended: its answer does not depend on the move that waited for it"""
+    from sqlalchemy.exc import OperationalError
+
+    scene = await _scene(client, db, headers)
+    move_id = await _waiting_move(client, headers, scene)
+
+    async def refused(*args):
+        raise OperationalError("statement", {}, Exception(1213, "deadlock"))
+
+    with monkeypatch.context() as patch:
+        patch.setattr(moves_service, "after_uploads_ended", refused)
+        aborted = await client.post(V1.path(MediaRoutes.UPLOAD_SESSION_ABORT, upload_id=scene.upload_id),
+                                    headers=headers(scene.admin))
+    assert aborted.status_code == 200, aborted.text
+    assert (await _move(db, move_id)).status == "waiting"
+    await _worker(session_maker, storage).check_moves()
+    assert (await _move(db, move_id)).status == "done"
+
+
 # ---------------------------------------------------------------- locks
 
 async def test_the_pending_sessions_are_locked_through_the_parent_index_never_status(monkeypatch, db):

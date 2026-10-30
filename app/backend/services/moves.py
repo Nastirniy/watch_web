@@ -14,7 +14,8 @@ The locks, in the order every writer takes them (lock_for_move):
 2. the groups, top down: the old and the new parent and the moved group, then every group below it (locking reads, so
    no snapshot yet);
 3. every post below the node, by id (select(Post.id): the Post entity's presence subqueries would take the snapshot);
-4. the pending upload sessions of those posts (uploads.lock_pending);
+4. the pending upload sessions of those posts (uploads.lock_pending, through the post_id index, never the one on
+   status: an abort holding the row rewrites that one);
 5. a run: the pending_moves row, by the conditional UPDATE that claims it. An archive locks that row after its own
    rows and sessions too (move_queue.lock_waiting), and a cancel holds nothing else.
 

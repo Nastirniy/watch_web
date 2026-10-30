@@ -10,6 +10,8 @@ Three ways to get a file into the system. Pick by connection quality and file si
 
 All three need `media.view` + `media.create` and write access to the observation's post, apply the same format registry (`GET /media/formats`) and the same per-format size limit, and end with the same response (`media_file_id`, `thumbnail_status`, `thumbnail_urls`, metadata).
 
+While a move waits above the post (a move of the post, its group or its brigade, see "A move during work" in `API.md`), new uploads by any of the three routes answer 409 `move_pending` with `move_id` and `Retry-After`; uploads already running continue.
+
 The same bytes are stored once per observation: uploading a file whose content is already attached to that observation answers the existing `media_file_id`, and the file keeps its first `original_filename`. In another observation the same content is a new file.
 
 Every error is an RFC 9457 problem (`application/problem+json`, see `API.md`). Decide by `code` (it names exactly one message, use it as the translation key); `detail` is English fallback text; the other members are the values below (`offset`, `session_status`, `accepted_extensions`, ...), at the top level of the body. The tables list the codes.
@@ -65,6 +67,7 @@ Content-Length: 8388608
 |--------|---------|----------------------|
 | 204 | Stored. `Upload-Offset` header is the new offset. | Send the next chunk from that offset. |
 | 409 | `upload_offset_mismatch`: `Upload-Offset` does not match. The header `Upload-Offset` and `offset` carry the real offset (`sent_offset` is what you sent). `upload_writer_busy`: another chunk is still being written. `upload_session_completing`: a `complete` is storing the file. | Mismatch: continue from the offset in the header. Busy: wait one second and ask `GET` for the offset. Completing: ask `GET` until the status is `completed`. |
+| 409 | `upload_cancelled_by_move` (`session_status`): no bytes arrived for `moves.upload_stale_seconds` while a move waited for this session; it is `aborted` and the bytes are gone. A chunk streaming at that moment stores nothing more. | Tell the user; open a new session after the move. |
 | 413 | `upload_chunk_too_large` (`max_chunk_bytes`) or `upload_chunk_overrun` (`expected_size`). Nothing was written. | Fix the chunking. |
 | 410 | `upload_session_closed`: session is `completed`, `aborted` or `expired` (`session_status`); an archive of the observation, its post or a unit with its posts cancels the session (`aborted`, see "Archived observation or post"). `upload_bytes_missing`: the bytes the server had stored are gone; the session is aborted (`session_status`). | Completed: you are done, `media_file_id` is the file. Cancelled by an archive: tell the user, do not open a new session for that observation. Otherwise open a new session. |
 | 404 | `observation_not_found`: the observation of the session is archived (a session its archive did not cancel). Nothing was written. | Tell the user; abort the session. |
@@ -95,6 +98,7 @@ POST /api/v1/media/uploads/{id}/complete
 |--------|---------|----------------------|
 | 200 | File stored. Same body as the other uploads plus `upload_id`. A video starts with `thumbnail_status: pending` and gets its poster from the worker shortly. | Done. |
 | 409 | `upload_incomplete`: bytes still missing (`missing_bytes`, `offset`, `expected_size`). `upload_session_completing`: another `complete` is storing the file right now (status `completing`). `upload_writer_busy`: a chunk request still holds the session. `post_archived` (`post_id`): the post was archived after the session opened (only for an uploader whose `media.create` comes from a group or the root, see "Archived post" below); the session stays `open`. | Incomplete: send the rest, then complete again. Completing: ask `GET` until the status is `completed` (or `open` again after a server-side failure), or call `complete` again later. Busy: complete again after a second. Archived post: tell the user; complete again once the post is restored, or abort. |
+| 409 | `upload_cancelled_by_move` (`session_status`): the session went silent while a move waited (see the chunk table). A complete that has claimed the session is never cancelled. | Tell the user; open a new session after the move. |
 | 404 | `observation_not_found`: the observation of the session is archived. Before the file is stored the session stays as it is; when the archive came while the file was being stored, nothing is stored and the session is aborted (`error` `observation_not_found`; for an archived post 409 `post_archived`, `error` `post_archived`). | Tell the user; do not retry. |
 | 422 | `upload_checksum_mismatch` (`expected_sha256`, `actual_sha256`). The session is aborted and the bytes deleted. | Open a new session and send again. |
 | 415 / 413 | The content did not match the declared format (same 415 codes as on open, plus `media_extension_dangerous`) or `media_file_too_large`. Session aborted. | Tell the user. |
@@ -105,7 +109,19 @@ POST /api/v1/media/uploads/{id}/complete
 
 Only one `complete` runs per session: it moves the session to `completing` before it reads the file, and back to `open` when the failure is the server's (503, `internal_error`). Completing an already completed session returns 200 with the same `media_file_id` and stores nothing, so a lost response to the first `complete` is harmless. A `complete` whose request died (server restart) leaves the session `completing` for at most an hour; then `complete` works again.
 
-When a refused file or lost bytes abort the session, `error` of the session (`GET`, the list) is the code of the error that answered it, for example `upload_checksum_mismatch`; it is `null` when the client aborted the session or it expired. A session cancelled by an archive has `error` `observation_not_found` (the observation was archived) or `post_archived` (its post, or a unit with its posts).
+When a refused file or lost bytes abort the session, `error` of the session (`GET`, the list) is the code of the error that answered it, for example `upload_checksum_mismatch`; it is `null` when the client aborted the session or it expired. A session cancelled by an archive has `error` `observation_not_found` (the observation was archived) or `post_archived` (its post, or a unit with its posts); one cancelled for a waiting move `upload_cancelled_by_move`.
+
+### While a move waits
+
+A move of the post, its group or its brigade waits for the sessions below it (`API.md`, "A move during work"). Opening
+a session (and the one-shot uploads) answers 409 `move_pending` with `move_id` and `Retry-After` meanwhile; running
+sessions go on as usual, and the last one to end runs the move. A session holds the move while bytes arrive: the first
+byte of a chunk, every renewal of a chunk that streams and every stored chunk count, a request that sends nothing does
+not. One silent for `moves.upload_stale_seconds` (300 s by default) is cancelled by the media worker: status `aborted`,
+`error` `upload_cancelled_by_move`, its bytes deleted, 409 `upload_cancelled_by_move` on the next chunk or `complete`.
+That goes for a fully received session too, so complete right after the last chunk. Nothing is cancelled unless a move
+waits. A forced move leaves the sessions alone; after any move, chunks and `complete` need `media.view` and
+`media.create` at the post's new place.
 
 ### Archived observation or post
 
@@ -143,7 +159,7 @@ completes after a restore. A session that is already aborted or expired answers 
 | `open` | Takes chunks; `complete` once `received_bytes` equals `expected_size`. |
 | `completing` | A `complete` is storing the file: chunks, `abort` and another `complete` answer 409 `upload_session_completing`. Ends `completed`, `aborted` (file refused) or `open` (server-side failure). |
 | `completed` | Stored; `media_file_id` is the file. |
-| `aborted` | Given up by the client (`error` null), ended by a refused file or lost bytes (`error` is the code), or cancelled by an archive of its observation (`observation_not_found`), post or unit (`post_archived`). |
+| `aborted` | Given up by the client (`error` null), ended by a refused file or lost bytes (`error` is the code), cancelled by an archive of its observation (`observation_not_found`), post or unit (`post_archived`), or for a waiting move (`upload_cancelled_by_move`). |
 | `expired` | Not completed before `expires_at`; the bytes are gone. |
 
 ### After a page reload
@@ -168,6 +184,7 @@ completes after a restore. A session that is already aborted or expired answers 
 | Session lifetime | 24 h since creation | `storage.upload.session_ttl_hours` |
 | A chunk request's hold on the session lapses | 150 to 180 s after its last byte | `WRITER_STALE_SECONDS` (180 s), renewed every `WRITER_RENEW_SECONDS` (30 s) while bytes arrive, in `services/media/uploads.py` |
 | A `complete` whose request died holds the session for | 1 h | `COMPLETION_STALE_SECONDS` in `services/media/uploads.py` |
+| A silent session is cancelled while a move waits | 300 s after its last byte, at the worker's next look | `moves.upload_stale_seconds`, `moves.check_interval_seconds` (15 s) |
 | Per-format file limit | see `GET /media/formats` | `media_formats.max_file_size_bytes` |
 | nginx request timeout for a chunk | 300 s | `proxy_read_timeout` on the uploads location |
 

@@ -7,8 +7,41 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## Owner decisions 2026-10-30
 
+### Added
+
+- Queued moves. `PUT /posts/{id}` with a new `group_id`, `PATCH /scope-groups/{id}` with a new `parent_id` and
+  `PATCH /brigades/{id}` with a new `corps_id` no longer run over running uploads: with upload sessions (`open`,
+  `completing`) below the node the answer is 202 with a move operation, `Location` and `Retry-After`, and nothing moves
+  yet. Without uploads the answer is 200 as before. `force: true` (new body field of the three requests) runs the move
+  at once and the uploads continue. While a move waits, new uploads below the node (`POST /media/uploads`,
+  `POST /media/upload`, `POST /media/nginx-upload`) answer 409 `move_pending`; chunks, completes and other writes go
+  on. An upload with no new bytes for `moves.upload_stale_seconds` is cancelled while a move waits (409
+  `upload_cancelled_by_move` on its next chunk or complete). The move runs at the end of the last upload, or at the
+  media worker's next look (every `moves.check_interval_seconds`), with the permission checks of that moment: refused,
+  it ends `failed` and nothing moves. New routes `GET /moves/{id}`, `POST /moves/{id}/cancel`. An archive of the node
+  cancels its waiting move; a restore cancels the waiting moves of the backup. API.md, "A move during work"; UPLOADS.md,
+  "While a move waits".
+- New settings `moves.upload_stale_seconds` (300) and `moves.check_interval_seconds` (15):
+  `MYSETTINGS_MOVES__UPLOAD_STALE_SECONDS`, `MYSETTINGS_MOVES__CHECK_INTERVAL_SECONDS`.
+- Database: migration `035_queued_moves` creates `pending_moves` (the operations) and `move_locks` (one row, locked first
+  by every write that moves a node) and adds `upload_sessions.last_chunk_at` (DATETIME NULL, the last time bytes arrived;
+  sessions that have received bytes start from `last_activity_at`). The tables are in
+  `TABLES_OWNED_BY_LATER_REVISIONS`, every create is guarded, the downgrade drops all three.
+- Contract: new schemas `MoveResponse`, `MoveUploadResponse` and `force` in `PostUpdate`, `ScopeGroupUpdate`,
+  `BrigadeUpdate`; the three move operations declare the 202, `move_pending` and `move_not_alone`; the three upload
+  routes declare `move_pending`; the chunk and complete routes `upload_cancelled_by_move`. Web translations: new error
+  codes `move_not_found`, `move_not_waiting`, `move_pending`, `move_not_alone`, `upload_cancelled_by_move`; new audit
+  events `move.requested`, `move.completed`, `move.cancelled`, `move.failed` (params `node_kind`, `cause`,
+  `failure_code`, API.md "Audit log"); `database.restore` and `database.undo_restore` have the optional param
+  `cancelled_move_count`.
+
 ### Changed
 
+- A move of a group or brigade now locks every post below it and the moves lock (`services/moves.py`): a new upload and a
+  move at the same moment always end in a defined state.
+- `POST /posts/{id}/archive`, `/scope-groups/{id}/archive`, `/brigades/{id}/archive`, `/corps/{id}/archive`: the pending
+  upload sessions are locked through the parent's index, never the status index (a locking read there deadlocked with
+  an abort, error 1213).
 - `GET /audit-logs`: `post_id`, `group_id`, `corps_id` and `brigade_id` below 1 answer 422 `validation_error` (a scoped
   reader used to get 500 on `group_id=0`, `corps_id=0`, `brigade_id=0`; the system view an empty list).
 - A valid token presented with another client certificate than the session's, an access token on any request or the

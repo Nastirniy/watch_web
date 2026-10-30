@@ -189,6 +189,8 @@ What `restore` does:
      CRL still lists them.
    - **CRL number:** it never goes backwards.
    - **Sessions:** every session of the backup is ended (`database_restored`), so users log in again.
+   - **Waiting moves:** every move that was waiting in the backup is cancelled: the uploads it waited for are gone with
+     that moment, and it must not run behind the restore.
    - **Right before the swap** the connections are checked again (`connections` if a client connected during the
      load) and the carry-over runs a second time, so a revocation made during the load is not lost.
    - **Users created after the backup** who have a certificate come back archived (`is_deleted`, inactive, no
