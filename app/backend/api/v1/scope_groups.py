@@ -5,23 +5,28 @@ from fastapi import APIRouter, Depends, Path, Query, Request
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.api.shared.helpers.db_errors import unique_violation_as
+from app.backend.api.shared.helpers.move_helper import admit_move, changed_fields
 from app.backend.api.shared.helpers.scope_group_helper import (
     audit_group, check_visible, lock_unit, name_taken, parent_location, parent_node,
 )
 from app.backend.api.v1.models.query.scope_groups import ScopeGroupFilterParams
 from app.backend.api.v1.models.request.scope_groups import ScopeGroupCreate, ScopeGroupUpdate
+from app.backend.api.v1.models.response.moves import MOVE_ACCEPTED, move_accepted
 from app.backend.api.v1.models.response.scope_groups import (
     ScopeGroupResponse, ScopeTreeGroup, ScopeTreePost, ScopeTreeResponse,
 )
 from app.backend.auth.access_control import AccessControlService
+from app.backend.api.versioning import PublishedVersion, request_version
 from app.backend.auth.context import AuthContext
+from app.backend.auth.move_access import move_requirements
 from app.backend.auth.privileges import check_move, check_node_restore
 from app.backend.auth.require import require
 from app.backend.auth.scope import Node, ROOT
 from app.backend.database import get_session
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
-from app.backend.enums.general import Permissions, ScopeGroupKind
+from app.backend.enums.general import MoveCancelCause, MoveNodeKind, Permissions, ScopeGroupKind
 from app.backend.enums.routes import ScopeGroupRoutes
 from app.backend.errors.coded import CodedError
 from app.backend.errors.openapi import GUARDED, problems
@@ -29,6 +34,7 @@ from app.backend.errors.problems import ApiError
 from app.backend.filters.scope_group_filter import ScopeGroupFilterService
 from app.backend.models.post import Post
 from app.backend.models.scope_group import ScopeGroup
+from app.backend.services import move_queue, moves
 from app.backend.services import scope_groups as groups_service
 
 router = APIRouter(prefix=ScopeGroupRoutes.BASE.value, tags=[ScopeGroupRoutes.tag()])
@@ -78,14 +84,10 @@ async def _check_chosen_parent(session: AsyncSession, auth: AuthContext, group_i
     if group_id is None:
         AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_CREATE, parent_location(parent_id), action)
     else:
-        locations = (parent_location(old_parent_id), parent_location(parent_id))
         # X.view AND X.update at both ends: the new parent is seen by check_visible (the root above), the old one here
-        AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_VIEW, locations[0], action)
-        for location in locations:
-            AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_UPDATE, location, action)
-        for location in locations:
-            for permission in (Permissions.POST_UPDATE, Permissions.POST_VIEW):
-                AccessControlService.check_covers(auth, permission, location, action)
+        for permission, location in move_requirements(MoveNodeKind.GROUP, parent_location(old_parent_id),
+                                                      parent_location(parent_id)):
+            AccessControlService.check_covers(auth, permission, location, action)
     await _check_parent(session, group_id, parent_id, kind)
 
 
@@ -205,10 +207,10 @@ async def get_scope_group(
 @router.patch(
     ScopeGroupRoutes.GROUP_BY_ID.value,
     response_model=ScopeGroupResponse,
-    responses=problems(
+    responses={**MOVE_ACCEPTED, **problems(
         *TREE_PROBLEMS, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS,
-        *GUARDED,
-    ),
+        ErrorCode.MOVE_PENDING, ErrorCode.MOVE_NOT_ALONE, *GUARDED,
+    )},
 )
 async def update_scope_group(
         request: Request,
@@ -216,7 +218,8 @@ async def update_scope_group(
         data: ScopeGroupUpdate,
         session: AsyncSession = Depends(get_session),
         auth: AuthContext = Depends(require(
-            all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_UPDATE]))
+            all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_UPDATE])),
+        version: PublishedVersion = Depends(request_version),
 ):
     """Rename, describe or move a group (parent_id null: directly under the root). Only the fields sent change.
     A group cannot move into its own subtree, and the moved subtree must still fit 6 levels. Archived, or outside
@@ -232,15 +235,35 @@ async def update_scope_group(
     of them at the group, holding every permission of its role there before the move, the grants of other users
     included (403 grant_exceeds_own_permissions, after the tree rules). The group keeps its kind and
     the parent must suit it (a plain group never moves into a corps or brigade, a corps stays under the root, a
-    brigade in a corps): 409 scope_group_parent_not_allowed."""
-    update_data = data.model_dump(exclude_unset=True)
+    brigade in a corps): 409 scope_group_parent_not_allowed.
+
+    A move during work: with uploads running below the node (upload sessions open or completing) the move waits. The
+    answer is 202 with the move operation, Location and Retry-After; nothing moves yet, and new uploads below the node
+    answer 409 move_pending; chunks, completes and every other write go on. The move runs when the last upload ended
+    (finished, aborted, archived, expired, or cancelled because no bytes arrived for moves.upload_stale_seconds, 300 by
+    default: its next chunk or complete answers 409 upload_cancelled_by_move). The permission checks run again then: a
+    move the caller may no longer make ends failed and nothing moves. Follow it at GET /moves/{move_id}; POST
+    /moves/{move_id}/cancel cancels it. force true runs it at once and the uploads continue at the new place. A move
+    whose subtree overlaps a waiting one answers 409 move_pending (force too; cancel that one first). A request that
+    would have to wait and changes anything besides the move answers 422 move_not_alone with changed_fields and nothing
+    happens: send a move as its own request. Sessions and tokens stay valid; rights at the new place apply from the
+    next request (API.md, "A move during work").
+    """
+    update_data = data.model_dump(exclude_unset=True, exclude={"force"})
+    # A request that sends a parent takes the locks of a move, everything below the group included (services/moves.py)
+    move_locks = None
+    if "parent_id" in update_data:
+        check_visible(auth, group_id)
+        move_locks = await moves.lock_for_move(session, auth.tree, Node.group(group_id), update_data["parent_id"])
     # Groups top down: the old and the new parent, then the group (a unit archive takes the same order)
-    group = await lock_unit(session, auth, None, group_id, also=[update_data.get("parent_id")])
+    group = await lock_unit(session, auth, None, group_id, also=[update_data.get("parent_id")],
+                            started=move_locks is not None)
     old_values = group.model_dump()
 
     new_parent = update_data.get("parent_id", group.parent_id)
     new_name = update_data.get("name", group.name)
-    if "parent_id" in update_data and new_parent != group.parent_id:
+    is_move = "parent_id" in update_data and new_parent != group.parent_id
+    if is_move:
         await _check_chosen_parent(session, auth, group.id, new_parent, ScopeGroupKind(group.kind),
                                    old_parent_id=group.parent_id)
         # What the new parent puts in effect at the subtree, read after lock_unit's locks (auth/privileges.py)
@@ -254,6 +277,12 @@ async def update_scope_group(
     if ("parent_id" in update_data or "name" in update_data) and await name_taken(
             session, new_name, new_parent, exclude_id=group.id):
         raise ApiError(ErrorCode.SCOPE_GROUP_NAME_TAKEN)
+    if is_move:
+        # Last of the checks: a move that has to wait commits its row here, nothing else changed
+        waiting = await admit_move(request, session, auth, Node.group(group.id), new_parent, move_locks, data.force,
+                                   changed_fields(group, update_data, "parent_id"))
+        if waiting is not None:
+            return move_accepted(await moves.view_of(session, waiting, auth.tree), version)
 
     for key, value in update_data.items():
         setattr(group, key, value)
@@ -287,9 +316,11 @@ async def archive_scope_group(
     """Archive a group (is_deleted=true). Only an empty group: no active subgroup and no active post (409
     scope_group_not_empty). Already archived, unknown or outside the caller's scope_group.view: 404. scope_group.archive
     must cover its parent (the root for a group directly under it), otherwise 403 permission_required_for_action
-    (action archive_scope_group). Undo with POST /{group_id}/restore."""
+    (action archive_scope_group). A waiting move of the group is cancelled. Undo with POST /{group_id}/restore."""
     group = await _group_or_404(session, auth, group_id, lock=True)
     AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_ARCHIVE, parent_node(group), "archive_scope_group")
+    # Before the first plain read: a cancel or a run of the move waits for the archive
+    waiting_moves = await move_queue.lock_waiting(session, [Node.group(group.id)])
     try:
         await groups_service.check_empty(session, group.id)
     except CodedError as exc:
@@ -300,6 +331,8 @@ async def archive_scope_group(
     group.updated_at = datetime.now(timezone.utc)
     session.add(group)
     await audit_group(request, session, auth, "archive", group, old_values)
+    await moves.cancel_locked(session, waiting_moves, MoveCancelCause.NODE_ARCHIVED, auth.user.id,
+                              client_info(request, auth))
     await session.commit()
     await session.refresh(group)
     return ScopeGroupResponse.model_validate(group)

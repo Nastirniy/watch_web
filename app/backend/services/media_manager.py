@@ -24,6 +24,7 @@ from app.backend.enums.general import MediaType
 from app.backend.utils.logging_config import get_logger
 from app.backend.errors.coded import CodedError
 from app.backend.enums.errors import ErrorCode
+from app.backend.services.move_queue import waiting_at_post
 from app.backend.utils.row_locks import lock, lock_first
 
 _logger = get_logger("media_manager")
@@ -150,13 +151,15 @@ class MediaManager:
         return organized_path
 
     @staticmethod
-    async def _lock_parents(session: AsyncSession, observation_id: int) -> None:
+    async def _lock_parents(session: AsyncSession, observation_id: int, refuse_waiting_move: bool = False) -> None:
         """The first statements of the write that inserts the media row: the post of the observation, then the
         observation, both shared and by their columns only (the Post entity's presence subqueries would take the
         snapshot), as the observation create does (posts before observations). An archive of the observation, of
         its post or of a unit with its posts waits for the insert, or the insert sees it archived: CodedError
         observation_not_found, post_archived (nothing lands in an archived observation, owner decision
-        2026-10-29). The insert never meets a parent row changed after the snapshot (MariaDB error 1020)."""
+        2026-10-29). The insert never meets a parent row changed after the snapshot (MariaDB error 1020).
+        refuse_waiting_move: CodedError move_pending while a move waits above the post, read under the post lock (a
+        move locks the post: services/moves.py)."""
         # An observation never changes its post: read in the transaction lock_first ends
         post_id = (await session.exec(select(Observation.post_id).where(Observation.id == observation_id))).first()
         if post_id is None:
@@ -168,6 +171,10 @@ class MediaManager:
             raise CodedError(ErrorCode.OBSERVATION_NOT_FOUND)
         if post is not None and post.is_deleted:
             raise CodedError(ErrorCode.POST_ARCHIVED, post_id=post_id)
+        if refuse_waiting_move:
+            move_id = await waiting_at_post(session, post_id)
+            if move_id is not None:
+                raise CodedError(ErrorCode.MOVE_PENDING, move_id=move_id)
 
     async def _compute_file_hash(self, file_path: Path, chunk_size: int = 1024 * 1024) -> str:
         """Compute SHA256 hash by streaming the file in chunks (default 1MB), never loading entirely into memory"""
@@ -210,7 +217,8 @@ class MediaManager:
             original_filename: str,
             media_type: str,
             user_id: Optional[int] = None,
-            validation_config: Optional[FileValidationConfig] = None
+            validation_config: Optional[FileValidationConfig] = None,
+            refuse_waiting_move: bool = False,
     ) -> int:
         """
         Store a file from a filesystem path (Nginx upload offloading, or a multipart body spooled by spool_upload).
@@ -222,6 +230,8 @@ class MediaManager:
 
         The write of the row begins with the post and observation locks (_lock_parents): an archived observation
         is CodedError observation_not_found, an archived post post_archived, whatever the caller checked before.
+        refuse_waiting_move (a one-shot upload, a new upload by definition; never the complete of a running session):
+        CodedError move_pending while a move waits above the post.
         Commits the new row before the move (a file in storage always has its row) and deletes it again when the
         move fails. A new video row keeps its poster hold (enqueue_poster): the caller releases it once the file is
         in storage, in its last transaction with the audit row of the upload (record_upload).
@@ -282,7 +292,7 @@ class MediaManager:
                 dimensions = await self._extract_image_dimensions(source)
 
             # -- The parent rows, locked: the write that inserts the row begins here --
-            await self._lock_parents(session, observation_id)
+            await self._lock_parents(session, observation_id, refuse_waiting_move)
 
             # -- Deduplication --
             if self.enable_deduplication:

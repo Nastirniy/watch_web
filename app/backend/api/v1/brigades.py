@@ -13,6 +13,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.api.shared.helpers.db_errors import unique_violation_as
+from app.backend.api.shared.helpers.move_helper import admit_move, changed_fields
 from app.backend.api.shared.helpers.scope_group_helper import (
     unit_observation_stats, archive_unit, audit_group, check_visible, get_unit, lock_groups, lock_unit, name_taken,
     parent_location, restore_unit,
@@ -22,16 +23,19 @@ from app.backend.api.v1.models.query.posts import PostFilterParams
 from app.backend.api.v1.models.request.brigades import BrigadeCreate, BrigadeUpdate
 from app.backend.api.v1.models.response.brigades import BrigadeResponse, brigade_list_to_response, brigade_to_response
 from app.backend.api.v1.models.response.corps import UnitObservationStatsResponse
+from app.backend.api.v1.models.response.moves import MOVE_ACCEPTED, move_accepted
 from app.backend.api.v1.models.response.posts import PostResponse, posts_to_response
+from app.backend.api.versioning import PublishedVersion, request_version
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.context import AuthContext, load_scope_tree
+from app.backend.auth.move_access import move_requirements
 from app.backend.auth.privileges import check_move
 from app.backend.auth.require import require
 from app.backend.auth.scope import Node
 from app.backend.config import settings
 from app.backend.database import get_session
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
-from app.backend.enums.general import Permissions, ScopeGroupKind, StatsGroupBy, UnitPlacement
+from app.backend.enums.general import MoveNodeKind, Permissions, ScopeGroupKind, StatsGroupBy, UnitPlacement
 from app.backend.enums.routes import BrigadeRoutes
 from app.backend.errors.coded import CodedError
 from app.backend.errors.openapi import GUARDED, problems
@@ -40,6 +44,7 @@ from app.backend.filters.post_filter import PostFilterService
 from app.backend.filters.unit_filter import UnitFilterService
 from app.backend.models.post import Post
 from app.backend.models.scope_group import ScopeGroup
+from app.backend.services import moves
 from app.backend.services import scope_groups as groups_service
 from app.backend.services.units import posts_within
 from app.backend.utils.validators import UtcDatetime
@@ -143,17 +148,18 @@ async def get_brigade(
 @router.patch(
     BrigadeRoutes.BRIGADE_BY_ID.value,
     response_model=BrigadeResponse,
-    responses=problems(
+    responses={**MOVE_ACCEPTED, **problems(
         *PLACEMENT_PROBLEMS, ErrorCode.SCOPE_GROUP_NAME_TAKEN, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION,
-        AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, *GUARDED,
-    ),
+        AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS, ErrorCode.MOVE_PENDING, ErrorCode.MOVE_NOT_ALONE, *GUARDED,
+    )},
 )
 async def update_brigade(
         request: Request,
         brigade_id: Annotated[int, Path(ge=1)],
         data: BrigadeUpdate,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_UPDATE]))
+        auth: AuthContext = Depends(require(all=[Permissions.SCOPE_GROUP_VIEW, Permissions.SCOPE_GROUP_UPDATE])),
+        version: PublishedVersion = Depends(request_version),
 ):
     """Rename, describe or move a brigade; only the fields sent change. Archived, another kind of group, or outside
     the caller's scope_group.view: 404. scope_group.update must cover its corps (403 permission_required_for_action,
@@ -166,13 +172,32 @@ async def update_brigade(
     scope_group_parent_not_allowed. Every role assignment at the new corps that does not already apply at the brigade
     comes into effect for it and its posts: the caller must be able to grant each of them at the brigade, holding
     every permission of its role there before the move, the grants of other users included (403
-    grant_exceeds_own_permissions, after the corps checks). Nothing changes on a refusal."""
-    update_data = data.model_dump(exclude_unset=True)
+    grant_exceeds_own_permissions, after the corps checks). Nothing changes on a refusal.
+
+    A move during work: with uploads running below the node (upload sessions open or completing) the move waits. The
+    answer is 202 with the move operation, Location and Retry-After; nothing moves yet, and new uploads below the node
+    answer 409 move_pending; chunks, completes and every other write go on. The move runs when the last upload ended
+    (finished, aborted, archived, expired, or cancelled because no bytes arrived for moves.upload_stale_seconds, 300 by
+    default: its next chunk or complete answers 409 upload_cancelled_by_move). The permission checks run again then: a
+    move the caller may no longer make ends failed and nothing moves. Follow it at GET /moves/{move_id}; POST
+    /moves/{move_id}/cancel cancels it. force true runs it at once and the uploads continue at the new place. A move
+    whose subtree overlaps a waiting one answers 409 move_pending (force too; cancel that one first). A request that
+    would have to wait and changes anything besides the move answers 422 move_not_alone with changed_fields and nothing
+    happens: send a move as its own request. Sessions and tokens stay valid; rights at the new place apply from the
+    next request (API.md, "A move during work").
+    """
+    update_data = data.model_dump(exclude_unset=True, exclude={"force"})
     # The current corps sent back is no move: only another corps must be visible (404 before any lock)
     if "corps_id" in update_data and update_data["corps_id"] != auth.tree.group_parent.get(brigade_id):
         check_visible(auth, update_data["corps_id"])
+    # A request that sends a corps takes the locks of a move, everything below the brigade included (services/moves.py)
+    move_locks = None
+    if "corps_id" in update_data:
+        check_visible(auth, brigade_id)
+        move_locks = await moves.lock_for_move(session, auth.tree, Node.group(brigade_id), update_data["corps_id"])
     # Groups top down: the old and the new corps, then the brigade
-    brigade = await lock_unit(session, auth, BRIGADE, brigade_id, also=[update_data.get("corps_id")])
+    brigade = await lock_unit(session, auth, BRIGADE, brigade_id, also=[update_data.get("corps_id")],
+                              started=move_locks is not None)
     old_values = brigade.model_dump()
 
     new_corps = update_data.get("corps_id", brigade.parent_id)
@@ -180,25 +205,29 @@ async def update_brigade(
     if moving:
         check_visible(auth, new_corps)     # the brigade moved since the tree was read: decided by the locked row
         # X.view AND X.update at both ends: the new corps is seen by check_visible, the old one here
-        AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_VIEW, parent_location(brigade.parent_id),
-                                          "move_brigade")
-    for corps_id in ((brigade.parent_id, new_corps) if moving else (brigade.parent_id,)):
-        AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_UPDATE, parent_location(corps_id),
-                                          "move_brigade" if moving else "update_brigade")
+        for permission, location in move_requirements(MoveNodeKind.GROUP, parent_location(brigade.parent_id),
+                                                      parent_location(new_corps)):
+            AccessControlService.check_covers(auth, permission, location, "move_brigade")
+    else:
+        AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_UPDATE, parent_location(brigade.parent_id),
+                                          "update_brigade")
     if "name" in update_data and not moving:
         # The name is checked against the brigades of the corps (409): scope_group.view at the corps as well
         AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_VIEW, parent_location(brigade.parent_id),
                                           "update_brigade")
     if moving:
-        for corps_id in (brigade.parent_id, new_corps):
-            for permission in (Permissions.POST_UPDATE, Permissions.POST_VIEW):
-                AccessControlService.check_covers(auth, permission, parent_location(corps_id), "move_brigade")
         await _check_corps(session, brigade.id, new_corps)
         # What the new corps puts in effect at the brigade, read after lock_unit's locks (auth/privileges.py)
         await check_move(session, auth, Node.group(brigade.id), Node.group(new_corps))
     if ("corps_id" in update_data or "name" in update_data) and await name_taken(
             session, update_data.get("name", brigade.name), new_corps, exclude_id=brigade.id):
         raise ApiError(ErrorCode.SCOPE_GROUP_NAME_TAKEN)
+    if moving:
+        # Last of the checks: a move that has to wait commits its row here, nothing else changed
+        waiting = await admit_move(request, session, auth, Node.group(brigade.id), new_corps, move_locks, data.force,
+                                   changed_fields(brigade, update_data, "corps_id"))
+        if waiting is not None:
+            return move_accepted(await moves.view_of(session, waiting, auth.tree), version)
 
     for key, value in update_data.items():
         if key != "corps_id":
@@ -234,7 +263,8 @@ async def archive_brigade(
     Without cascade its active posts move into its corps, which needs post.update and post.view covering the brigade
     and the corps; with cascade=true they are archived, which needs post.archive and post.view covering the brigade,
     and every pending resumable upload of their observations is cancelled (status aborted, error post_archived).
-    No post permission is asked when the brigade has no active post.
+    A waiting move of the brigade, and with cascade of its posts, is cancelled. No post permission is asked when the
+    brigade has no active post.
     Missing permissions: 403 permission_required_for_action, nothing changes. Holders of a role at the brigade lose its posts. Archived,
     unknown, another kind or outside scope_group.view: 404. Undo with POST /{brigade_id}/restore (the brigade only)"""
     brigade = await archive_unit(request, session, auth, BRIGADE, brigade_id, cascade)

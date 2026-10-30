@@ -2,20 +2,23 @@
 the route answers."""
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, FrozenSet, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
 from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.backend.utils.row_locks import lock_all, lock_first
+from app.backend.auth.scope import Node, ScopeTree
+from app.backend.utils.row_locks import lock, lock_all, lock_first
 
 from app.backend.enums.errors import ErrorCode
 from app.backend.enums.general import ScopeGroupKind
 from app.backend.errors.coded import CodedError
+from app.backend.models.pending_move import PendingMove
 from app.backend.models.post import Post
 from app.backend.models.scope_group import ScopeGroup
 from app.backend.models.upload_session import UploadSession
+from app.backend.services import move_queue
 from app.backend.services.media import uploads
 
 # Levels of nested groups between the root and a post: a root group is level 1
@@ -42,6 +45,33 @@ async def get_group(session: AsyncSession, group_id: int, include_deleted: bool 
     if group is None:
         raise CodedError(ErrorCode.SCOPE_GROUP_NOT_FOUND)
     return group
+
+
+async def name_taken(session: AsyncSession, name: str, parent_id: Optional[int], exclude_id: Optional[int] = None) -> bool:
+    """Case-insensitive, archived groups included: the name is unique within its parent (parent_key 0 is the root)"""
+    query = select(ScopeGroup.id).where(
+        ScopeGroup.parent_key == (parent_id or 0), func.lower(ScopeGroup.name) == name.lower(),
+    )
+    if exclude_id is not None:
+        query = query.where(ScopeGroup.id != exclude_id)
+    return (await session.exec(query)).first() is not None
+
+
+def _top_down(tree: ScopeTree, group_id: int) -> tuple:
+    """Sort key of the lock order: depth in the tree, then id"""
+    return len(tree.ancestors(Node.group(group_id))), group_id
+
+
+async def lock_groups(session: AsyncSession, tree: ScopeTree, group_ids: Iterable[Optional[int]],
+                      started: bool = False) -> bool:
+    """Lock these groups top down (the first with lock_first unless the write has started); False when there is none
+    and the write had not begun. Only groups the tree knows: a lock on a row that may not exist would take a gap lock
+    that holds up concurrent creates (the caller's own existence check answers 404 for an unknown id)."""
+    ordered = sorted({group_id for group_id in group_ids if group_id in tree.group_parent},
+                     key=lambda g: _top_down(tree, g))
+    for position, group_id in enumerate(ordered):
+        await (lock if position or started else lock_first)(session, select(ScopeGroup).where(ScopeGroup.id == group_id))
+    return started or bool(ordered)
 
 
 async def _live_parents(session: AsyncSession) -> Dict[int, Optional[int]]:
@@ -133,6 +163,9 @@ class ArchiveChanges:
     # cascade: the pending upload sessions of the archived posts, locked (services/media/uploads.py lock_pending);
     # the caller cancels them in its transaction
     pending_uploads: List[UploadSession] = field(default_factory=list)
+    # the waiting moves of the archived groups and posts, locked (services/move_queue.py lock_waiting); the caller
+    # cancels them in its transaction
+    waiting_moves: List[PendingMove] = field(default_factory=list)
 
 
 async def archive_unit(session: AsyncSession, unit: ScopeGroup, cascade: bool) -> ArchiveChanges:
@@ -142,9 +175,10 @@ async def archive_unit(session: AsyncSession, unit: ScopeGroup, cascade: bool) -
     (groups before posts, as every writer does). cascade=True archives all of them; otherwise the posts move one level
     up (a brigade's into its corps, a corps' under the root), and a corps with an active brigade raises
     corps_has_brigades before anything changes. Posts archived before stay as they are. With cascade the posts are
-    locked by id first, then their pending upload sessions (pending_uploads), then the Post entities, whose presence
-    subqueries take the snapshot: a chunk writer renewing its claim meanwhile waits for the archive. The caller
-    cancels pending_uploads, writes the audit rows (rows) and commits.
+    locked by id first, then their pending upload sessions (pending_uploads) and the waiting moves of what is archived
+    (waiting_moves), then the Post entities, whose presence subqueries take the snapshot: a chunk writer renewing its
+    claim, a cancel or a run of a move meanwhile wait for the archive. The caller cancels pending_uploads and
+    waiting_moves, writes the audit rows (rows) and commits.
     """
     changes = ArchiveChanges()
     now = datetime.now(timezone.utc)
@@ -153,10 +187,13 @@ async def archive_unit(session: AsyncSession, unit: ScopeGroup, cascade: bool) -
     if children and not cascade:
         raise CodedError(ErrorCode.CORPS_HAS_BRIGADES)
     holders = [unit.id, *(child.id for child in children)]
+    archived_nodes = [Node.group(group_id) for group_id in holders]
     if cascade:
         post_ids = await lock_all(session, select(Post.id).where(
             Post.group_id.in_(holders), Post.is_deleted == False).order_by(Post.id))  # noqa: E712
         changes.pending_uploads = await uploads.lock_pending(session, post_ids=post_ids)
+        archived_nodes += [Node.post(post_id) for post_id in post_ids]
+    changes.waiting_moves = await move_queue.lock_waiting(session, archived_nodes)
     posts = await lock_all(session, select(Post).where(
         Post.group_id.in_(holders), Post.is_deleted == False).order_by(Post.id))  # noqa: E712
 

@@ -28,6 +28,7 @@ from app.backend.services.audit import create_audit_log
 from app.backend.models.observation import Observation
 from app.backend.models.upload_session import UploadSession
 from app.backend.api.shared.helpers.media_helper import storage_root
+from app.backend.api.shared.helpers.move_helper import run_released_moves
 from app.backend.api.shared.helpers.post_helper import ensure_post_not_archived
 from app.backend.api.versioning import PublishedVersion, request_version
 from app.backend.api.shared.helpers.upload_helper import (
@@ -125,7 +126,11 @@ def _completing(row: UploadSession) -> ApiError:
 
 
 def _closed(row: UploadSession) -> ApiError:
+    """The answer of a session that ended: 410 with its status; 409 upload_cancelled_by_move when a waiting move ended
+    it, which the client tells the user apart from any other end"""
     _logger.info(f"upload session {row.id} is {row.status} ({row.error})")
+    if row.error == ErrorCode.UPLOAD_CANCELLED_BY_MOVE.value:
+        return ApiError(ErrorCode.UPLOAD_CANCELLED_BY_MOVE, headers=_session_headers(row), session_status=row.status)
     return ApiError(
         ErrorCode.UPLOAD_SESSION_CLOSED,
         headers=_session_headers(row),
@@ -197,7 +202,7 @@ async def list_upload_sessions(
             AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED,
             ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.POST_ARCHIVED, ErrorCode.MEDIA_FILE_TOO_LARGE,
             ErrorCode.MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED,
-            ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, ErrorCode.MEDIA_TYPE_UNKNOWN, *GUARDED,
+            ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, ErrorCode.MEDIA_TYPE_UNKNOWN, ErrorCode.MOVE_PENDING, *GUARDED,
         ),
     },
 )
@@ -211,8 +216,9 @@ async def create_upload_session(
 ):
     """Open a resumable upload. Format, declared Content-Type and size are checked here, before any byte is sent.
     An unknown or archived observation: 404 observation_not_found; an observation of an archived post: 409
-    post_archived. Archiving the observation, its post or a unit with its posts later cancels the session (status
-    aborted, see UPLOADS.md)."""
+    post_archived; a move waiting above the post: 409 move_pending with move_id and Retry-After (it says clearly that
+    a move is waiting; try again after it). Archiving the observation, its post or a unit with its posts later cancels
+    the session (status aborted, see UPLOADS.md)."""
     # The write begins with the post and the observation (shared): an archive waits for it or is seen
     observation = await load_observation_for_upload(session, auth, body.observation_id, lock_parents=True)
     registry = await formats.observation_registry(session)
@@ -294,7 +300,7 @@ async def head_upload_session(
             ErrorCode.UPLOAD_OFFSET_MISMATCH, ErrorCode.UPLOAD_WRITER_BUSY, ErrorCode.UPLOAD_SESSION_CLOSED,
             ErrorCode.UPLOAD_SESSION_COMPLETING, ErrorCode.UPLOAD_BYTES_MISSING,
             ErrorCode.UPLOAD_CHUNK_OVERRUN, ErrorCode.UPLOAD_CHUNK_TOO_LARGE, ErrorCode.UPLOAD_CHUNK_CONTENT_TYPE,
-            ErrorCode.OBSERVATION_NOT_FOUND, *GUARDED,
+            ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.UPLOAD_CANCELLED_BY_MOVE, *GUARDED,
         ),
     },
 )
@@ -311,7 +317,9 @@ async def append_upload_chunk(
     204 with the new Upload-Offset; 409 with the real Upload-Offset when they disagree;
     413 when the chunk is larger than max_chunk_bytes or overruns the declared size; 410 when the session is not open
     (or the stored bytes are gone: the session is aborted; an archive of its observation, post or unit cancels it);
-    409 while a complete stores the file; 404 observation_not_found when its observation is archived.
+    409 while a complete stores the file; 404 observation_not_found when its observation is archived. A waiting move
+    does not stop a chunk; 409 upload_cancelled_by_move when the session went silent while one waited and was
+    cancelled for it (open a new session after the move).
     """
     row = await _require_open(session, await _owned_session(session, auth, upload_id, lock=True))
     await _refuse_archived_observation(session, row)
@@ -389,7 +397,7 @@ async def append_upload_chunk(
         ErrorCode.MEDIA_EXTENSION_DANGEROUS, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, ErrorCode.MEDIA_TYPE_UNKNOWN,
         ErrorCode.UPLOAD_CHECKSUM_MISMATCH, ErrorCode.MEDIA_STORE_FAILED, ErrorCode.POST_ARCHIVED,
         ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_UPLOADS_BUSY, ErrorCode.UPLOAD_SESSION_COMPLETING,
-        ErrorCode.UPLOAD_WRITER_BUSY, *GUARDED,
+        ErrorCode.UPLOAD_WRITER_BUSY, ErrorCode.UPLOAD_CANCELLED_BY_MOVE, *GUARDED,
     ),
 )
 async def complete_upload_session(
@@ -407,7 +415,10 @@ async def complete_upload_session(
     observation, its post or a unit with its posts cancels the session: 410 upload_session_closed (aborted). An
     archived observation: 404 observation_not_found; the post archived: 409 post_archived (the session stays open
     when nothing cancelled it). When the archive comes while the file is being stored, the store refuses it (404
-    observation_not_found or 409 post_archived) and the session ends aborted.
+    observation_not_found or 409 post_archived) and the session ends aborted. A waiting move does not stop a complete:
+    the last upload to end runs the move. 409 upload_cancelled_by_move: the session went silent while a move waited.
+    After a forced move media.view and media.create are asked at the post's new place (403 when the uploader lost
+    them; the bytes cannot be saved by the client).
     """
     # Ownership and scope on the session as read, then the write begins with the observation row (shared): an archive
     # of the observation waits for the claim or is seen; then the session row
@@ -441,6 +452,7 @@ async def complete_upload_session(
         raise
 
     media_file = await record_upload(request, session, auth, media_file_id, row.observation_id, row.post_id, row.original_filename, background_tasks, UploadTransport.RESUMABLE, upload_id=row.id)
+    await run_released_moves(session, {row.post_id})
     return upload_result(media_file, UploadTransport.RESUMABLE, upload_id=row.id)
 
 
@@ -556,6 +568,7 @@ async def abort_upload_session(
         # The abort and its audit row in one transaction; the part file is removed after it committed
         await uploads.abort_session(session, row, storage_root(), record=audit)
         row = await uploads.get_session_row(session, upload_id)
+        await run_released_moves(session, {row.post_id})
     if row.status == uploads.STATUS_COMPLETING:
         raise _completing(row)
     if row.status == uploads.STATUS_COMPLETED:

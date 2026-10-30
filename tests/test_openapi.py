@@ -96,7 +96,7 @@ def test_route_problems_come_from_its_declaration(schema):
     update_post = schema["paths"][V1.path(PostRoutes.POST_BY_ID)]["put"]["responses"]
     assert _codes(update_post["404"]) == _names(ErrorCode.POST_NOT_FOUND, ErrorCode.SCOPE_GROUP_NOT_FOUND)
     assert _codes(update_post["400"]) == _names(ErrorCode.POST_CODE_TAKEN)
-    assert _codes(update_post["422"]) == _names(ErrorCode.VALIDATION_ERROR)
+    assert _codes(update_post["422"]) == _names(ErrorCode.VALIDATION_ERROR, ErrorCode.MOVE_NOT_ALONE)
     assert "415" not in update_post
 
 

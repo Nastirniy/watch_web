@@ -591,7 +591,7 @@ async def _set_observation_archived(
     )
     cancelled = await cancel_pending_uploads(request, session, auth, pending, ErrorCode.OBSERVATION_NOT_FOUND)
     await session.commit()
-    await remove_cancelled_parts(cancelled)
+    await remove_cancelled_parts(session, cancelled)
     logger.info(f"User {current_user.username} {action}d observation {observation.id}"
                 + (f", {len(cancelled)} pending uploads cancelled" if cancelled else ""))
     return await _load_observation_response(session, observation.id)

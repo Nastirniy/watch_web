@@ -58,6 +58,7 @@ class PostUpdate(BaseModel):
     city: Optional[str] = Field(None, max_length=255, description="Post city")
     is_active: Optional[bool] = None
     group_id: Optional[int] = Field(default=None, gt=0, description="Scope group the post sits in; null: directly under the root")
+    force: bool = Field(default=False, description="With a move: run it at once even with uploads running below the node; they continue at the new place. Without uploads, and without a move, it changes nothing")
 
     # Validators do not run on the default, so None here is an explicit null for a NOT NULL column
     @field_validator('name', 'code')

@@ -363,7 +363,7 @@ async def restore_media_file(
         ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.POST_ARCHIVED, ErrorCode.MEDIA_FILE_TOO_LARGE,
         ErrorCode.MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED,
         ErrorCode.MEDIA_EXTENSION_DANGEROUS, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, ErrorCode.MEDIA_TYPE_UNKNOWN,
-        ErrorCode.MEDIA_STORE_FAILED, ErrorCode.MEDIA_UPLOADS_BUSY, *GUARDED,
+        ErrorCode.MEDIA_STORE_FAILED, ErrorCode.MEDIA_UPLOADS_BUSY, ErrorCode.MOVE_PENDING, *GUARDED,
     ),
 )
 async def upload_complete_file(
@@ -378,7 +378,7 @@ async def upload_complete_file(
     """
     Multipart upload. The body is spooled to a temp file in 1 MB chunks and hashed
     while streaming; it is never held in memory. Users can only upload for observations of their post; an archived
-    post: 409 post_archived.
+    post: 409 post_archived; a move waiting above the post: 409 move_pending with Retry-After.
     """
     post_id = (await load_observation_for_upload(session, auth, observation_id)).post_id
 
@@ -406,6 +406,7 @@ async def upload_complete_file(
             media_type=media_type,
             user_id=auth.user.id,
             validation_config=validation_config_for(spec),
+            refuse_waiting_move=True,
         )
     except FileTooLarge as e:
         raise too_large(spec, e.actual_bytes)
@@ -432,7 +433,7 @@ async def upload_complete_file(
         ErrorCode.MEDIA_CONTENT_TYPE_EXTENSION_MISMATCH, ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED,
         ErrorCode.MEDIA_EXTENSION_DANGEROUS, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, ErrorCode.MEDIA_TYPE_UNKNOWN,
         ErrorCode.MEDIA_STORE_FAILED, ErrorCode.NGINX_UPLOAD_DISABLED,
-        ErrorCode.MEDIA_UPLOADS_BUSY, *GUARDED,
+        ErrorCode.MEDIA_UPLOADS_BUSY, ErrorCode.MOVE_PENDING, *GUARDED,
     ),
 )
 async def nginx_upload_file(
@@ -447,7 +448,8 @@ async def nginx_upload_file(
 ):
     """
     Upload via nginx offloading (client_body_in_file_only): nginx writes the raw body to a temp
-    file and forwards its path in X-File-Name; the original filename comes in X-Original-Filename.
+    file and forwards its path in X-File-Name; the original filename comes in X-Original-Filename. A move waiting
+    above the post: 409 move_pending with Retry-After.
     """
     if not settings.storage.enable_nginx:
         raise ApiError(ErrorCode.NGINX_UPLOAD_DISABLED)
@@ -477,6 +479,7 @@ async def nginx_upload_file(
                 media_type=media_type,
                 user_id=auth.user.id,
                 validation_config=validation_config_for(spec),
+                refuse_waiting_move=True,
             )
         except FileTooLarge as e:
             raise too_large(spec, e.actual_bytes)

@@ -9,24 +9,29 @@ from sqlalchemy.exc import IntegrityError
 from app.backend.api.shared.helpers.db_errors import is_unique_violation
 from app.backend.database import get_session
 from app.backend.utils.row_locks import lock, lock_first
+from app.backend.api.shared.helpers.move_helper import admit_move, changed_fields
 from app.backend.api.shared.helpers.scope_group_helper import lock_groups
 from app.backend.api.shared.helpers.upload_helper import cancel_pending_uploads, remove_cancelled_parts
+from app.backend.api.versioning import PublishedVersion, request_version
+from app.backend.services import move_queue, moves
 from app.backend.services.media import uploads
 from app.backend.models.post import Post
 from app.backend.auth.context import AuthContext
 from app.backend.api.v1.models.request.posts import PostCreate, PostUpdate
 from app.backend.auth.access_control import AccessControlService
+from app.backend.auth.move_access import move_requirements
 from app.backend.auth.privileges import check_move, check_node_restore
 from app.backend.auth.require import require
 from app.backend.auth.scope import Node, ROOT
 from app.backend.enums.audit import AuditEvent
-from app.backend.enums.general import Permissions, StatsGroupBy
+from app.backend.enums.general import MoveCancelCause, MoveNodeKind, Permissions, StatsGroupBy
 from app.backend.config import settings
 from app.backend.enums.routes import PostRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.services.audit import create_audit_log
 from app.backend.api.v1.models.query.posts import PostFilterParams
 from app.backend.filters.post_filter import PostFilterService
+from app.backend.api.v1.models.response.moves import MOVE_ACCEPTED, move_accepted
 from app.backend.api.v1.models.response.posts import PostResponse, PostObservationStatsResponse, posts_to_response
 from app.backend.services.observation_counts import post_observation_stats
 from app.backend.services.scope_groups import get_group
@@ -223,18 +228,20 @@ async def get_post_observation_stats(
 @router.put(
     PostRoutes.POST_BY_ID.value,
     response_model=PostResponse,
-    responses=problems(
+    responses={**MOVE_ACCEPTED, **problems(
         AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, AccessErrorCode.POST_WRITE_DENIED,
         AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION, AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS,
-        ErrorCode.POST_CODE_TAKEN, ErrorCode.POST_NOT_FOUND, ErrorCode.SCOPE_GROUP_NOT_FOUND, *GUARDED,
-    ),
+        ErrorCode.POST_CODE_TAKEN, ErrorCode.POST_NOT_FOUND, ErrorCode.SCOPE_GROUP_NOT_FOUND,
+        ErrorCode.MOVE_PENDING, ErrorCode.MOVE_NOT_ALONE, *GUARDED,
+    )},
 )
 async def update_post(
         request: Request,
         post_id: int,
         post_data: PostUpdate,
         session: AsyncSession = Depends(get_session),
-        auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW, Permissions.POST_UPDATE]))
+        auth: AuthContext = Depends(require(all=[Permissions.POST_VIEW, Permissions.POST_UPDATE])),
+        version: PublishedVersion = Depends(request_version),
 ):
     """Update post by ID. post.view (403 post_access_denied) and post.update (403 post_write_denied) must be in effect
     at the post; a move (group_id) also needs post.update and post.view covering both the old and the new location
@@ -246,25 +253,40 @@ async def update_post(
 
     Only the fields sent are changed; null is refused for name, code and is_active (omit them instead).
     Archived posts answer 404 until restored (POST /{post_id}/restore); is_deleted is never read from the body.
+
+    A move during work: with uploads running below the node (upload sessions open or completing) the move waits. The
+    answer is 202 with the move operation, Location and Retry-After; nothing moves yet, and new uploads below the node
+    answer 409 move_pending; chunks, completes and every other write go on. The move runs when the last upload ended
+    (finished, aborted, archived, expired, or cancelled because no bytes arrived for moves.upload_stale_seconds, 300 by
+    default: its next chunk or complete answers 409 upload_cancelled_by_move). The permission checks run again then: a
+    move the caller may no longer make ends failed and nothing moves. Follow it at GET /moves/{move_id}; POST
+    /moves/{move_id}/cancel cancels it. force true runs it at once and the uploads continue at the new place. A move
+    whose subtree overlaps a waiting one answers 409 move_pending (force too; cancel that one first). A request that
+    would have to wait and changes anything besides the move answers 422 move_not_alone with changed_fields and nothing
+    happens: send a move as its own request. Sessions and tokens stay valid; rights at the new place apply from the
+    next request (API.md, "A move during work").
     """
     current_user = auth.user
     AccessControlService.check_post(auth, Permissions.POST_VIEW, post_id)
     AccessControlService.check_post(auth, Permissions.POST_UPDATE, post_id)
-    # A move locks the old and the new group first (groups top down, then the post), like an archive of either
-    groups = [auth.tree.post_group.get(post_id), post_data.group_id] if "group_id" in post_data.model_fields_set else []
-    started = await lock_groups(session, auth.tree, groups)
-    post = await (lock if started else lock_first)(session, select(Post).where(Post.id == post_id))
+    # A request that sends a group takes the locks of a move: the moves lock, the old and the new group, the post by
+    # id and its pending uploads (services/moves.py), all before the first plain read; the Post entity after them
+    move_locks = None
+    if "group_id" in post_data.model_fields_set:
+        move_locks = await moves.lock_for_move(session, auth.tree, Node.post(post_id), post_data.group_id)
+    post = await (lock if move_locks else lock_first)(session, select(Post).where(Post.id == post_id))
 
     if not post or post.is_deleted:
         raise ApiError(ErrorCode.POST_NOT_FOUND)
 
-    update_data = post_data.model_dump(exclude_unset=True)
-    if "group_id" in update_data and update_data["group_id"] != post.group_id:
+    update_data = post_data.model_dump(exclude_unset=True, exclude={"force"})
+    is_move = "group_id" in update_data and update_data["group_id"] != post.group_id
+    if is_move:
         # A move needs post.update and post.view covering the old and the new location, as a group or brigade move
         # does (a grant on the post itself covers neither)
-        for location in (_location(post.group_id), _location(update_data["group_id"])):
-            for permission in (Permissions.POST_UPDATE, Permissions.POST_VIEW):
-                AccessControlService.check_covers(auth, permission, location, "move_post")
+        for permission, location in move_requirements(MoveNodeKind.POST, _location(post.group_id),
+                                                       _location(update_data["group_id"])):
+            AccessControlService.check_covers(auth, permission, location, "move_post")
         await _check_group(session, update_data["group_id"])
         # What the new location puts in effect at the post, read after the locks above (auth/privileges.py)
         await check_move(session, auth, Node.post(post.id), _location(update_data["group_id"]))
@@ -273,6 +295,12 @@ async def update_post(
         existing = await session.exec(_code_taken(update_data["code"], exclude_post_id=post_id))
         if existing.first():
             raise ApiError(ErrorCode.POST_CODE_TAKEN)
+    if is_move:
+        # Last of the checks: a move that has to wait commits its row here, nothing else changed
+        waiting = await admit_move(request, session, auth, Node.post(post.id), update_data["group_id"], move_locks,
+                                   post_data.force, changed_fields(post, update_data, "group_id"))
+        if waiting is not None:
+            return move_accepted(await moves.view_of(session, waiting, auth.tree), version)
 
     # Store old values for auditing
     old_values = post.model_dump()
@@ -310,12 +338,14 @@ async def _set_post_archived(
     AccessControlService.check_post(auth, Permissions.POST_ARCHIVE, post_id)
     # A restore locks the group first (groups before posts): an archive of the group cannot slip in between
     started = await lock_groups(session, auth.tree, [] if archived else [auth.tree.post_group.get(post_id)])
-    pending = []
+    pending, waiting_moves = [], []
     if archived:
         # The post row by its id (the entity's presence subqueries are a plain read: the snapshot), then its pending
-        # upload sessions, before that snapshot: a chunk writer renewing its claim waits for the archive
+        # upload sessions and its waiting move, before that snapshot: a chunk writer renewing its claim, a cancel or
+        # a run of the move wait for the archive
         await (lock if started else lock_first)(session, select(Post.id).where(Post.id == post_id))
         pending = await uploads.lock_pending(session, post_ids=[post_id])
+        waiting_moves = await move_queue.lock_waiting(session, [Node.post(post_id)])
         started = True
     post = await (lock if started else lock_first)(session, select(Post).where(Post.id == post_id))
     if not post or (archived and post.is_deleted):
@@ -342,8 +372,10 @@ async def _set_post_archived(
         **client_info(request, auth)
     )
     cancelled = await cancel_pending_uploads(request, session, auth, pending, ErrorCode.POST_ARCHIVED)
+    await moves.cancel_locked(session, waiting_moves, MoveCancelCause.NODE_ARCHIVED, current_user.id,
+                              client_info(request, auth))
     await session.commit()
-    await remove_cancelled_parts(cancelled)
+    await remove_cancelled_parts(session, cancelled)
     await session.refresh(post)
     return await _post_response(session, auth, post)
 
@@ -370,8 +402,8 @@ async def archive_post(
     post (plus observation.view, observation.archive and ownership or observation.manage_any) still archive and
     restore its observations. It cannot become a home post. Hidden from lists unless include_deleted=true. Every
     pending resumable upload of its observations is cancelled at once (status aborted, error post_archived; the
-    received bytes are deleted); a restore does not reopen it. Undo with POST /{post_id}/restore. Already archived or
-    unknown: 404.
+    received bytes are deleted); a restore does not reopen it. A waiting move of the post is cancelled too. Undo with
+    POST /{post_id}/restore. Already archived or unknown: 404.
     """
     return await _set_post_archived(request, session, auth, post_id, archived=True)
 

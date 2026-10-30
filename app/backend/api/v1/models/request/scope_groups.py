@@ -37,6 +37,7 @@ class ScopeGroupUpdate(SecureBaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     parent_id: Optional[int] = Field(default=None, gt=0, description="Move to this group; null: directly under the root")
     description: Optional[str] = Field(default=None, max_length=1000)
+    force: bool = Field(default=False, description="With a move: run it at once even with uploads running below the node; they continue at the new place. Without uploads, and without a move, it changes nothing")
 
     refuse_null = not_null('name')
 

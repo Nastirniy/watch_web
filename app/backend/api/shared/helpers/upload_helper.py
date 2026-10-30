@@ -19,6 +19,7 @@ from app.backend.services.files import formats
 from app.backend.services.files.names import DANGEROUS_EXTENSIONS, extension_of
 from app.backend.services.media import jobs, renderer, uploads, urls as thumb_urls
 from app.backend.services.media.probe import has_no_video_stream, metadata_for, resolve_tools
+from app.backend.services.move_queue import waiting_at_post
 from app.backend.enums.general import TIMED_MEDIA_TYPES, MediaType, Permissions, UploadPurpose, UploadTransport, ThumbnailFormat, ThumbnailSize
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.auth.scope import Node
@@ -27,6 +28,7 @@ from app.backend.services.audit import create_audit_log
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.config import settings
 from app.backend.api.shared.helpers.media_helper import storage_root
+from app.backend.api.shared.helpers.move_helper import move_pending, retry_after, run_released_moves
 from app.backend.api.shared.helpers.post_helper import ensure_post_not_archived
 from app.backend.enums.errors import ErrorCode
 from app.backend.errors.problems import ApiError
@@ -56,6 +58,8 @@ def format_rejected(registry: formats.FormatRegistry, exc: formats.UnsupportedMe
 def store_rejected(exc: CodedError, headers: dict = None) -> ApiError:
     """A file refused by MediaManager.store_file_from_path or services/files/store.store_guide_file; the status comes
     with its problem type"""
+    if exc.code is ErrorCode.MOVE_PENDING:
+        headers = {**(headers or {}), **retry_after()}
     return ApiError.from_coded(exc, headers=headers)
 
 
@@ -116,13 +120,16 @@ def _check_declared_content_type(registry: formats.FormatRegistry, spec: formats
 async def load_observation_for_upload(session: AsyncSession, auth: AuthContext, observation_id: int,
                                      lock_parents: bool = False) -> Observation:
     """The observation an upload goes to: 404 when missing or archived, 403 without media.view and media.create in
-    effect at its post, 409 post_archived when its post is archived.
+    effect at its post, 409 post_archived when its post is archived, 409 move_pending while a move waits above it.
 
     lock_parents for a write that inserts a row of the observation now (an upload session): its post (shared, the
     columns only: the Post entity's presence subqueries would take the snapshot) as the first statement of the
     write, then the observation (shared), as the observation create does (posts before observations). An archive of
     the observation, of the post or of a unit above it waits for the write, or the write sees it archived, and the
-    insert never meets a parent row changed after the snapshot (MariaDB error 1020)."""
+    insert never meets a parent row changed after the snapshot (MariaDB error 1020). A move locks the post too: the
+    waiting moves read after these locks decide, whichever came first (services/moves.py). Without lock_parents the
+    check is an early refusal only: the store transaction of a one-shot upload asks again under its locks
+    (MediaManager.store_file_from_path, refuse_waiting_move)."""
     if not lock_parents:
         observation = (await session.exec(
             select(Observation).where(Observation.id == observation_id, Observation.is_deleted == False)
@@ -132,6 +139,7 @@ async def load_observation_for_upload(session: AsyncSession, auth: AuthContext, 
         AccessControlService.check_post(auth, Permissions.MEDIA_VIEW, observation.post_id, "media")
         AccessControlService.check_post(auth, Permissions.MEDIA_CREATE, observation.post_id, "media")
         await ensure_post_not_archived(session, observation.post_id)
+        await _refuse_waiting_move(session, observation.post_id)
         return observation
 
     # An observation never changes its post: read in the request's read transaction, which lock_first ends
@@ -146,7 +154,14 @@ async def load_observation_for_upload(session: AsyncSession, auth: AuthContext, 
     AccessControlService.check_post(auth, Permissions.MEDIA_CREATE, observation.post_id, "media")
     if post is not None and post.is_deleted:
         raise ApiError(ErrorCode.POST_ARCHIVED, post_id=post_id)
+    await _refuse_waiting_move(session, post_id)
     return observation
+
+
+async def _refuse_waiting_move(session: AsyncSession, post_id: int) -> None:
+    move_id = await waiting_at_post(session, post_id)
+    if move_id is not None:
+        raise move_pending(move_id)
 
 
 async def cancel_pending_uploads(request: Request, session: AsyncSession, auth: AuthContext,
@@ -168,9 +183,12 @@ async def cancel_pending_uploads(request: Request, session: AsyncSession, auth: 
     return await uploads.cancel_pending(session, rows, code, record=audit)
 
 
-async def remove_cancelled_parts(rows: Iterable[UploadSession]) -> None:
-    """The part files of the sessions cancel_pending_uploads ended, after the archive's commit"""
+async def remove_cancelled_parts(session: AsyncSession, rows: Iterable[UploadSession]) -> None:
+    """After the archive's commit: the part files of the sessions cancel_pending_uploads ended, then the moves those
+    sessions held"""
+    rows = list(rows)
     await uploads.remove_parts(rows, storage_root())
+    await run_released_moves(session, {row.post_id for row in rows})
 
 
 async def record_upload(

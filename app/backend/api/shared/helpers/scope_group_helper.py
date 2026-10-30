@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Iterable, Optional
 
 from fastapi import Request
-from sqlalchemy import and_, func
+from sqlalchemy import and_
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -23,29 +23,21 @@ from app.backend.api.shared.helpers.upload_helper import cancel_pending_uploads,
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.context import AuthContext
 from app.backend.auth.privileges import check_node_restore
-from app.backend.auth.scope import Node, ROOT, ScopeTree
+from app.backend.auth.scope import Node, ROOT
 from app.backend.enums.audit import AuditEvent
 from app.backend.enums.errors import ErrorCode
-from app.backend.enums.general import Permissions, ScopeGroupKind, StatsGroupBy, UnitPlacement
+from app.backend.enums.general import MoveCancelCause, Permissions, ScopeGroupKind, StatsGroupBy, UnitPlacement
 from app.backend.errors.coded import CodedError
 from app.backend.errors.problems import ApiError
 from app.backend.models.observation import Observation
 from app.backend.models.scope_group import ScopeGroup
+from app.backend.services import moves
 from app.backend.services import scope_groups as groups_service
+from app.backend.services.scope_groups import lock_groups, name_taken  # noqa: F401  the routes import them from here
 from app.backend.services.audit import create_audit_log
 from app.backend.services.observation_counts import ObservationStats, observation_stats
 from app.backend.services.units import observation_unit_condition, recorded_in, unit_post_ids
 from app.backend.utils.row_locks import lock, lock_first
-
-
-async def name_taken(session: AsyncSession, name: str, parent_id: Optional[int], exclude_id: Optional[int] = None) -> bool:
-    """Case-insensitive, archived groups included: the name is unique within its parent (parent_key 0 is the root)"""
-    query = select(ScopeGroup.id).where(
-        ScopeGroup.parent_key == (parent_id or 0), func.lower(ScopeGroup.name) == name.lower(),
-    )
-    if exclude_id is not None:
-        query = query.where(ScopeGroup.id != exclude_id)
-    return (await session.exec(query)).first() is not None
 
 
 def parent_location(parent_id: Optional[int]) -> Node:
@@ -95,27 +87,13 @@ async def audit_group(request: Request, session: AsyncSession, auth: AuthContext
     )
 
 
-def _top_down(tree: ScopeTree, group_id: int) -> tuple:
-    """Sort key of the lock order: depth in the tree, then id"""
-    return len(tree.ancestors(Node.group(group_id))), group_id
-
-
-async def lock_groups(session: AsyncSession, tree: ScopeTree, group_ids: Iterable[Optional[int]]) -> bool:
-    """Lock these groups top down (the first with lock_first); False when there is none (the write has not begun).
-    Only groups the request's tree knows: a lock on a row that may not exist would take a gap lock that holds up
-    concurrent creates (the caller's own existence check answers 404 for an unknown id)."""
-    ordered = sorted({group_id for group_id in group_ids if group_id in tree.group_parent},
-                     key=lambda g: _top_down(tree, g))
-    for position, group_id in enumerate(ordered):
-        await (lock if position else lock_first)(session, select(ScopeGroup).where(ScopeGroup.id == group_id))
-    return bool(ordered)
-
-
 async def lock_unit(session: AsyncSession, auth: AuthContext, kind: Optional[ScopeGroupKind], unit_id: int,
-                    include_deleted: bool = False, also: Iterable[Optional[int]] = ()) -> ScopeGroup:
+                    include_deleted: bool = False, also: Iterable[Optional[int]] = (),
+                    started: bool = False) -> ScopeGroup:
     """get_unit for a write that may change what sits in the group or where it sits: its parent (from the request's
     tree) and the groups in also (the destination of a move) are locked first, then the group (groups top down). A
-    group moved since the tree was read gets its new parent locked too. kind None: a group of any kind."""
+    group moved since the tree was read gets its new parent locked too. kind None: a group of any kind. started: the
+    write has begun already (a move: services/moves.py lock_for_move)."""
     check_visible(auth, unit_id)
     parent_id = auth.tree.group_parent.get(unit_id)
     query = select(ScopeGroup).where(ScopeGroup.id == unit_id)
@@ -123,8 +101,8 @@ async def lock_unit(session: AsyncSession, auth: AuthContext, kind: Optional[Sco
         query = query.where(ScopeGroup.kind == ScopeGroupKind(kind).value)
     if not include_deleted:
         query = query.where(ScopeGroup.is_deleted == False)  # noqa: E712
-    started = await lock_groups(session, auth.tree, [parent_id, *also])
-    unit = await (lock if started else lock_first)(session, query)
+    began = await lock_groups(session, auth.tree, [parent_id, *also], started=started)
+    unit = await (lock if began else lock_first)(session, query)
     if unit is None:
         raise ApiError(ErrorCode.SCOPE_GROUP_NOT_FOUND)
     if unit.parent_id is not None and unit.parent_id != parent_id:
@@ -168,7 +146,8 @@ async def archive_unit(request: Request, session: AsyncSession, auth: AuthContex
     post the archive would change (_posts_changed: for a detach only the posts directly in the unit) and asked after
     all if the database held one and the service archived or moved it; then services/scope_groups.py archive_unit
     (409 corps_has_brigades). One audit row per changed row; with cascade the pending uploads of the archived posts
-    are cancelled in the same transaction (error post_archived, part files removed after the commit); committed."""
+    are cancelled in the same transaction (error post_archived, part files removed after the commit), and the waiting
+    moves of what is archived; committed."""
     unit = await lock_unit(session, auth, kind, unit_id)
     action = f"archive_{ScopeGroupKind(kind).value}"
     AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_ARCHIVE, parent_node(unit), action)
@@ -204,8 +183,10 @@ async def archive_unit(request: Request, session: AsyncSession, auth: AuthContex
             **client_info(request, auth)
         )
     cancelled = await cancel_pending_uploads(request, session, auth, changes.pending_uploads, ErrorCode.POST_ARCHIVED)
+    await moves.cancel_locked(session, changes.waiting_moves, MoveCancelCause.NODE_ARCHIVED, auth.user.id,
+                              client_info(request, auth))
     await session.commit()
-    await remove_cancelled_parts(cancelled)
+    await remove_cancelled_parts(session, cancelled)
     await session.refresh(unit)
     return unit
 
