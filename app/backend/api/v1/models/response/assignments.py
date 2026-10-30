@@ -29,10 +29,17 @@ class SystemAssignmentResponse(SecureBaseModel):
     created_at: ResponseDatetime
 
 
-# Built from auth/assignments.py AssignmentView: AssignmentResponse.model_validate(view, from_attributes=True)
+# Built from auth/assignments.py AssignmentView: AssignmentResponse.model_validate(view, from_attributes=True); a
+# view of another user's assignment goes through as_seen_by first
 class AssignmentResponse(SecureBaseModel):
     """A role a user holds at one node of the scope tree: it applies to the node and everything below it"""
     id: int
     role: AssignmentRole
-    scope: ScopeResponse
+    scope: Optional[ScopeResponse] = Field(
+        description="The node of the assignment; null when node_visible is false")
+    node_visible: bool = Field(
+        description="false: the node lies outside what the caller can see (a group outside every subtree where the "
+                    "caller holds scope_group.view, a post where post.view is not in effect), so scope is null and "
+                    "the entry keeps only id, role and created_at. The root is always visible, and so is every node "
+                    "of the caller's own assignments")
     created_at: ResponseDatetime

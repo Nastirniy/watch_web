@@ -60,7 +60,9 @@ class ExcessAssignment(BaseModel):
                                        "or system (/users/{user_id}/system-assignments); the id is of that table")
     id: int
     role: ExcessRole
-    scope: ExcessScope
+    scope: Optional[ExcessScope] = Field(description="The node of the assignment; null when node_visible is false")
+    node_visible: bool = Field(description="false: the node lies outside what the caller can see, as in "
+                                           "GET /users/{user_id}/assignments, so scope is null")
     excess_permissions: List[str]
 
 

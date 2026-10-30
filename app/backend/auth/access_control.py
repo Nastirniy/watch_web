@@ -7,7 +7,7 @@ from app.backend.models.user import User
 from app.backend.models.observation import Observation
 from app.backend.models.media import MediaFile
 from app.backend.auth.context import AuthContext, permission_name
-from app.backend.auth.scope import Node
+from app.backend.auth.scope import Node, ROOT
 from app.backend.auth.access_errors import access_denied
 from app.backend.auth.require import Require
 
@@ -22,6 +22,8 @@ class AccessControlService:
       a post checks X.view there first, then the permission of the change, so a caller who cannot see the post
       learns nothing more than post_access_denied
     - check_covers: where a post is created or moved to (403 permission_required_for_action)
+    - node_visible: a node of the scope tree the caller can see (the root, a group, a post), the one rule;
+      check_group_filters: the groups a list is filtered by are visible
     - check_user_view: one user record (the caller, or user.view covering the user's home post)
     - check_user_permission: what belongs to a user beyond the record (certificates): the permission covering the
       user's home post, for the user themselves too
@@ -97,6 +99,27 @@ class AccessControlService:
             permission=name,
             action=action,
         )
+
+    @staticmethod
+    def node_visible(auth: AuthContext, node: Node) -> bool:
+        """The caller sees this node of the scope tree, the rule of the reads of nodes: a group inside a subtree where
+        scope_group.view is held (GET /scope-groups/{id}), a post where post.view is in effect (GET /posts/{id}), the
+        root always (its name is the application's). Archived or not is a state of the node, not of its visibility."""
+        if node.kind == "group":
+            return auth.covers(Permissions.SCOPE_GROUP_VIEW, node)
+        if node.kind == "post":
+            return auth.has_at_post(Permissions.POST_VIEW, node.id)
+        return True
+
+    @staticmethod
+    def check_group_filters(auth: AuthContext, action: str, *group_ids: Optional[int]) -> None:
+        """The groups a list is filtered by are visible to the caller (node_visible), otherwise 403
+        permission_required_for_action, whether they exist or not (an id no group can have, 0 or negative, lies under
+        the root like an unknown one); None: not asked for"""
+        for group_id in group_ids:
+            if group_id is not None:
+                node = Node.group(group_id) if group_id >= 1 else ROOT
+                AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_VIEW, node, action)
 
     @staticmethod
     def check_user_view(auth: AuthContext, target: User) -> None:

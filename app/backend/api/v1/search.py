@@ -140,7 +140,8 @@ async def search_observations(
     SearchRoutes.USERS.value,
     response_model=SearchResponse[UserResponse],
     summary="Search users",
-    description="Search users with typed filters.",
+    description="Search users with typed filters. post_id, brigade_id and corps_id name nodes the caller can see, as "
+                "in GET /users: 403 post_access_denied, 403 permission_required_for_action (action search_users).",
     responses=problems(
         AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION,
         AccessErrorCode.POST_ACCESS_DENIED, *GUARDED,
@@ -155,6 +156,7 @@ async def search_users(
     # Scope of GET /users: user.view at the home post, the caller always, archived users where user.archive applies
     AccessControlService.resolve_scope(auth, Permissions.USER_VIEW, params.post_id)   # 403 for a post the caller cannot see
     access_post_ids = AccessControlService.resolve_scope(auth, Permissions.USER_VIEW, None)   # post_id is a membership filter
+    AccessControlService.check_group_filters(auth, "search_users", params.brigade_id, params.corps_id)
     archived = AccessControlService.archived_scope(auth, params, Permissions.USER_ARCHIVE)
     query = select(User)
     units = membership_nodes(auth.tree, params)

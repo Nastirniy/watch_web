@@ -243,6 +243,7 @@ async def test_downgrade_above_ceiling_refused(client, db, headers, tree):
         "id": extra.id,
         "role": {"id": media_editor.id, "name": media_editor.name, "display_name": media_editor.display_name},
         "scope": {"kind": "post", "id": tree.a.id, "name": "A"},
+        "node_visible": True,
         "excess_permissions": ["media.update"],
     }]
     # Nothing changed: type, assignments, sessions

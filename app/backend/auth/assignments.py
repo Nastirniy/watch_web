@@ -50,9 +50,13 @@ role's kind (409 role_holders_exceed_user_type). Archived users are holders too:
 it is. A permission of another level never reaches this: the route refuses it first (permission_level_mismatch).
 
 assignment_views reads the assignments of a user with the role and the scope named, as dataclasses (the route
-converts them into its response model).
+converts them into its response model). Every answer about another user's assignments goes through as_seen_by: an
+assignment at a node the caller cannot see (AccessControlService.node_visible) keeps its id, role and time, its node
+is hidden (scope None, node_visible False). The caller's own are always in full. The writes tell no more: create
+answers through as_seen_by, delete answers nothing, their refusals carry permission names and the ids the caller
+sent, and the items of user_type_ceiling_exceeded follow the same rule.
 """
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
@@ -61,6 +65,7 @@ from sqlalchemy import delete as sa_delete, func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.context import AuthContext
 from app.backend.auth.privileges import (
     check_admin_kept, check_assign_at, check_boundary_change, check_target_user, every_assignment, holds_admin_at_root,
@@ -102,8 +107,9 @@ class AssignmentScopeView:
 class AssignmentView:
     id: int
     role: AssignmentRoleView
-    scope: AssignmentScopeView
+    scope: Optional[AssignmentScopeView]    # None: hidden from the caller (as_seen_by)
     created_at: datetime
+    node_visible: bool = True
 
 
 # ------------------------------------------------------------------ checks
@@ -279,11 +285,11 @@ async def _permissions_by_role(session: AsyncSession, role_ids: Iterable[int]) -
     return by_role
 
 
-async def _check_type_ceiling(session: AsyncSession, target: User, user_type: UserType) -> None:
+async def _check_type_ceiling(session: AsyncSession, auth: AuthContext, target: User, user_type: UserType) -> None:
     """Every assignment of the user fits the boundary of the type for its kind (a tree assignment the tree boundary,
     a system one the system boundary: what a grant puts in effect), those of archived roles included (they apply again
-    when the role is restored)"""
-    views = await assignment_views(session, target.id)
+    when the role is restored). The refusal lists them as the caller may see them (as_seen_by)."""
+    views = as_seen_by(auth, target.id, await assignment_views(session, target.id))
     system_rows = (await session.exec(
         select(SystemRoleAssignment.id, Role.id, Role.name, Role.display_name)
         .join(Role, Role.id == SystemRoleAssignment.role_id)
@@ -300,6 +306,7 @@ async def _check_type_ceiling(session: AsyncSession, target: User, user_type: Us
                 "id": assignment_id,
                 "role": {"id": role_id, "name": name, "display_name": display_name},
                 "scope": {"kind": "root", "id": None, "name": settings.app.name},
+                "node_visible": True,
                 "excess_permissions": excess,
             })
     for view in views:
@@ -309,7 +316,8 @@ async def _check_type_ceiling(session: AsyncSession, target: User, user_type: Us
                 "kind": RoleKind.TREE.value,
                 "id": view.id,
                 "role": {"id": view.role.id, "name": view.role.name, "display_name": view.role.display_name},
-                "scope": {"kind": view.scope.kind, "id": view.scope.id, "name": view.scope.name},
+                "scope": asdict(view.scope) if view.scope is not None else None,
+                "node_visible": view.node_visible,
                 "excess_permissions": excess,
             })
     if exceeding:
@@ -402,7 +410,7 @@ async def change_user_type(session: AsyncSession, auth: AuthContext, target: Use
     target.user_type = new_type.value
     session.add(target)
     await session.flush()
-    await _check_type_ceiling(session, target, new_type)
+    await _check_type_ceiling(session, auth, target, new_type)
     logger.info(f"User {auth.user.username} changes the type of user {target.id} from {old_type.value} to "
                 f"{new_type.value} ({len(replaced)} assignments of {old_base.name} replaced, "
                 f"{len(system_removed)} system assignments removed, {len(system_added)} added)")
@@ -475,3 +483,12 @@ async def assignment_views(session: AsyncSession, user_id: int,
             created_at=assignment.created_at,
         ))
     return views
+
+
+def as_seen_by(auth: AuthContext, user_id: int, views: Iterable[AssignmentView]) -> List[AssignmentView]:
+    """The assignments of the user as the caller may read them: the node hidden where the caller cannot see it
+    (AccessControlService.node_visible), the caller's own in full"""
+    if user_id == auth.user.id:
+        return list(views)
+    return [view if AccessControlService.node_visible(auth, Node(view.scope.kind, view.scope.id))
+            else replace(view, scope=None, node_visible=False) for view in views]

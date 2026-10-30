@@ -18,7 +18,9 @@ from app.backend.models.post import Post
 from app.backend.auth.context import AuthContext
 from app.backend.auth.require import require
 from app.backend.auth.access_control import AccessControlService
-from app.backend.auth.assignments import assignment_views, change_user_type, create_assignment, delete_assignment
+from app.backend.auth.assignments import (
+    as_seen_by, assignment_views, change_user_type, create_assignment, delete_assignment,
+)
 from app.backend.auth.system_assignments import (
     create_system_assignment, delete_system_assignment, system_assignment_views,
 )
@@ -129,12 +131,16 @@ async def list_users(
     user.archive is in effect.
 
     post_id, brigade_id and corps_id match the home node or an assignment at the node or below, chosen by
-    membership (any, home, assigned).
+    membership (any, home, assigned). They name nodes the caller can see, whatever the membership: post_id a post
+    where user.view is in effect (403 post_access_denied), brigade_id and corps_id a group inside a subtree where
+    scope_group.view is held, as GET /brigades/{brigade_id} (403 permission_required_for_action, action list_users,
+    the same for an unknown id).
     """
     current_user = auth.user
     archived = AccessControlService.archived_scope(auth, filters, Permissions.USER_ARCHIVE)
     AccessControlService.resolve_scope(auth, Permissions.USER_VIEW, filters.post_id)   # 403 for a post the caller cannot see
     scope = AccessControlService.resolve_scope(auth, Permissions.USER_VIEW, None)      # the post_id filter is a membership
+    AccessControlService.check_group_filters(auth, "list_users", filters.brigade_id, filters.corps_id)
 
     query = select(User)
     query = UserFilterService.apply_filters(query, filters, scope, archived_post_ids=archived, caller_id=current_user.id,
@@ -392,7 +398,8 @@ async def update_user(
       a new user of the type would get it (the home post; the root without one or for a system role), also when
       nothing is replaced (403 grant_exceeds_own_permissions); every other assignment, those of archived roles
       included, must fit the ceiling of the new type (409 user_type_ceiling_exceeded with the assignments and their
-      excess_permissions). A concurrent assignment of the new built-in role at the same node answers 409
+      excess_permissions; a node the caller cannot see is hidden, as in GET /{user_id}/assignments). A concurrent
+      assignment of the new built-in role at the same node answers 409
       assignment_exists. The user's sessions end (revoke_cause user_type_changed), so the web never shows the pages
       of the old type. The same type again changes nothing.
 
@@ -792,14 +799,18 @@ async def list_user_assignments(
     """The role assignments of a user, by id: the role and the node it applies to (root, group or post, with its
     name; the application name at the root), assignments of archived roles included (role.is_deleted: they grant
     nothing until the role is restored). user.view must cover the user (403 user_self_only otherwise); an archived user, like
-    GET /{user_id}, only for callers with user.archive covering them (404 otherwise)."""
+    GET /{user_id}, only for callers with user.archive covering them (404 otherwise).
+
+    An assignment at a node the caller cannot see stays in the list with the node hidden: scope null, node_visible
+    false, id, role and created_at kept. A group is visible inside a subtree where the caller holds scope_group.view, a
+    post where post.view is in effect, the root always; the caller's own assignments are always in full."""
     target = await _get_user_or_404(session, user_id)
     # Visibility before the state: an outsider gets the same 403 for an archived and a live user
     AccessControlService.check_user_view(auth, target)
     if target.is_deleted and not auth.covers_user(Permissions.USER_ARCHIVE, target):
         raise ApiError(ErrorCode.USER_NOT_FOUND)
     return [AssignmentResponse.model_validate(view, from_attributes=True)
-            for view in await assignment_views(session, target.id)]
+            for view in as_seen_by(auth, target.id, await assignment_views(session, target.id))]
 
 
 @router.post(
@@ -832,6 +843,9 @@ async def create_user_assignment(
     user.update there); an unknown or archived group or post 404 scope_group_not_found / post_not_found; a role above
     the tree boundary of the user's type 409 role_exceeds_user_type; the same role at the same node 409
     assignment_exists.
+
+    The answer follows GET /{user_id}/assignments: a node the caller may assign at but cannot see (no scope_group.view
+    covering the group, no post.view at the post) comes back hidden, scope null and node_visible false.
     """
     target = await _lock_role_then_user(session, user_id, data.role_id, administrators=False)
     assignment = await create_assignment(session, auth, target, data.role_id, data.scope.node)
@@ -849,7 +863,7 @@ async def create_user_assignment(
         **client_info(request, auth)
     )
     await session.commit()
-    (view,) = await assignment_views(session, target.id, assignment_id=assignment.id)
+    (view,) = as_seen_by(auth, target.id, await assignment_views(session, target.id, assignment_id=assignment.id))
     return AssignmentResponse.model_validate(view, from_attributes=True)
 
 

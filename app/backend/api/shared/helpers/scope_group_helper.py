@@ -63,7 +63,7 @@ def parent_node(group: ScopeGroup) -> Node:
 def check_visible(auth: AuthContext, group_id: int) -> None:
     """Scope before existence: a group outside every subtree where the caller holds scope_group.view answers like an
     unknown id (an outsider learns nothing about ids)"""
-    if not auth.covers(Permissions.SCOPE_GROUP_VIEW, Node.group(group_id)):
+    if not AccessControlService.node_visible(auth, Node.group(group_id)):
         raise ApiError(ErrorCode.SCOPE_GROUP_NOT_FOUND)
 
 

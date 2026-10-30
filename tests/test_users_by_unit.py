@@ -201,6 +201,7 @@ async def test_unit_filter_never_widens_visibility(client, db, headers):
     corps, brigade, (p1, *_), home, (a1, *_rest) = await _membership(db)
     caller = await make_user(db, user_type=UserType.ADMINISTRATOR)
     await assign(db, caller, await builtin_role(db, BuiltinRole.ADMINISTRATOR), Node.post(p1.id))
+    await assign(db, caller, await make_role(db, [Permissions.SCOPE_GROUP_VIEW]), Node.group(brigade.id))   # names it
     listed = await _ids(client, headers(caller), brigade_id=brigade.id)
     assert sorted(listed) == sorted([home["p1"].id, caller.id])
     assert a1.id not in listed

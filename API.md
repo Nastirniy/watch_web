@@ -174,7 +174,7 @@ The body adds `required` (`{all, any, at_root}`) and `missing` (permissions the 
 | `permission_denied` | The route's permissions are held nowhere (no assignment gives them; an assignment on an archived post or at an archived group gives nothing), or those of `at_root` are not held at the root |
 | `post_access_denied` / `post_write_denied` | The permission is held, but not in effect at this post (`post_id`; `*.view` / any other permission) |
 | `no_post_assigned` | The permission is held, but in effect at no post at all (for example only at a scope group without posts) |
-| `permission_required_for_action` | A permission a part or a target of the request needs (`permission`, `action`): `include_deleted`, the group a post is created in or moved to and the one it leaves (`post.create` / `post.update`, `post.view`), the old and the new parent of a moved scope group or brigade (`post.update`, `post.view`), the parent of a group created, renamed, moved, archived or restored (`scope_group.create` / `.update` / `.archive`), a corps or brigade archived with or without cascade (`post.archive` / `post.update`, `post.view`), the home post of a new or moved user, a media file without an observation (`media.update` at the root) |
+| `permission_required_for_action` | A permission a part or a target of the request needs (`permission`, `action`): `include_deleted`, the group a post is created in or moved to and the one it leaves (`post.create` / `post.update`, `post.view`), the old and the new parent of a moved scope group or brigade (`post.update`, `post.view`), the parent of a group created, renamed, moved, archived or restored (`scope_group.create` / `.update` / `.archive`), a corps or brigade archived with or without cascade (`post.archive` / `post.update`, `post.view`), the home post of a new or moved user, a media file without an observation (`media.update` at the root), a `brigade_id` / `corps_id` filter of `GET /users/` and `/search/users` on a group the caller cannot see (`scope_group.view`) |
 | `user_self_only` | A user record outside the caller's `user.view` |
 | `target_user_more_privileged` | A change to a user the caller's `user.*` does not cover, or who holds an assignment the caller could not grant |
 | `grant_exceeds_own_permissions` | Granting or revoking permissions the caller does not hold (at the node, for an assignment; at every node the role is assigned at, for permissions added to a role and the restore of a role) |
@@ -225,10 +225,18 @@ the user (`session_expired`, `revoke_cause` `user_type_changed`): the new pages 
   `post.view` is in effect; archived groups and posts, and everything below an archived group, are left out. The
   root itself is not in the tree: offer it when the caller holds the permissions at the root (`root_permissions`).
 - `GET /api/v1/users/{user_id}/assignments`: `[{id, role: {id, name, display_name, is_builtin, is_deleted}, scope:
-  {kind: "root" | "group" | "post", id, name}, created_at}]` (`id` is null at the root; an assignment of an archived
-  role, `role.is_deleted`, grants nothing).
+  {kind: "root" | "group" | "post", id, name}, node_visible, created_at}]` (`id` is null at the root; an assignment of
+  an archived role, `role.is_deleted`, grants nothing).
+- Node names of other units do not show there. An assignment at a node the caller cannot see stays in the list with
+  the node hidden: `scope` is null, `node_visible` is false, `id`, `role` and `created_at` stay. A group is visible
+  inside a subtree where the caller holds `scope_group.view` (the rule of `GET /scope-groups/{id}`), a post where
+  `post.view` is in effect (the rule of `GET /posts/{id}`), the root always; an archived node follows the same rule.
+  The caller's own assignments, here and in `/auth/me` and the login answer, are always in full. Show a hidden entry
+  as "another unit" with its role; it can still be removed when the caller's permissions cover it.
 - `POST /api/v1/users/{user_id}/assignments` (201): `{"role_id": 5, "scope": {"kind": "post", "id": 7}}`; `id` is
-  left out for `{"kind": "root"}`. `DELETE /api/v1/users/{user_id}/assignments/{assignment_id}` (204).
+  left out for `{"kind": "root"}`. The answer follows the same rule: a node the caller may assign at but cannot see
+  comes back with `scope` null and `node_visible` false.
+  `DELETE /api/v1/users/{user_id}/assignments/{assignment_id}` (204).
 - Roles have a `kind` (`RoleResponse.kind`): `tree` roles hold tree permissions and are assigned at a node through the
   routes above; `system` roles hold system permissions and are assigned without a node:
   `GET /api/v1/users/{user_id}/system-assignments` (`[{id, role, created_at}]`),
@@ -262,7 +270,7 @@ the user (`session_expired`, `revoke_cause` `user_type_changed`): the new pages 
 | `permission_level_mismatch` | 409 | A role gets a permission of the other level (`role_kind`, `permissions`) |
 | `role_is_system`, `role_is_tree` | 409 | A system role on the tree assignment routes, a tree role on the system ones (`role_id`) |
 | `role_exceeds_user_type` | 409 | The role holds permissions the boundary of the user's type does not allow (`user_type`, `excess_permissions`) |
-| `user_type_ceiling_exceeded` | 409 | A type change while other assignments exceed the new type (`user_type`, `assignments`: `kind` (`tree` or `system`: the table of the `id`), `role`, `scope`, `excess_permissions`; each assignment against the boundary of its kind) |
+| `user_type_ceiling_exceeded` | 409 | A type change while other assignments exceed the new type (`user_type`, `assignments`: `kind` (`tree` or `system`: the table of the `id`), `role`, `scope`, `node_visible`, `excess_permissions`; each assignment against the boundary of its kind; `scope` is null and `node_visible` false for a node the caller cannot see, as in `GET /users/{user_id}/assignments`) |
 | `role_holders_exceed_user_type` | 409 | Permissions added to a role that the type of a holder does not allow (`users`) |
 | `builtin_role_not_renamable`, `builtin_role_permissions_fixed`, `builtin_role_not_archivable`, `builtin_role_not_deletable` | 409 | Built-in roles cannot change (clone one) |
 | `scope_group_not_found` | 404 | Unknown, archived or outside the caller's `scope_group.view` |
@@ -372,7 +380,13 @@ mover's own rights only.
   `any` (default), `home` or `assigned`. `post_id` therefore no longer means the home post only: for the home post
   alone (what `PostResponse.user_count` counts) pass `membership=home`. The base role of a user sits at its home post
   and stays there when the user is moved, so after a move `post_id=<old post>` still lists the user by default
-  (assigned), and not with `membership=home`; in production `assigned` usually includes the home users too.
+  (assigned), and not with `membership=home`; in production `assigned` usually includes the home users too. These
+  filters name nodes the caller can see, with every `membership`: `post_id` a post where `user.view` is in effect (403
+  `post_access_denied`), `brigade_id` and `corps_id` a group inside a subtree where the caller holds
+  `scope_group.view`, as `GET /brigades/{id}` (403 `permission_required_for_action`, `missing`
+  `["scope_group.view"]`, `action` `list_users` or `search_users`; the same answer for an unknown id, and also for a
+  brigade above a post where the caller only holds `user.view`). Offer a unit filter from `GET /scope-groups/tree`,
+  not from the `brigade` / `corps` of a user record.
 - `ObservationWithMedia.corps` and `.brigade` are where the post was when the observation was created, recorded at
   create and never changed (a later move of the post or the brigade does not change them); the names are today's.
   An observation created while its post moves may record the place from just before the move.

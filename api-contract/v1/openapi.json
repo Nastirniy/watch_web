@@ -744,7 +744,7 @@
           "USERS"
         ],
         "summary": "List Users",
-        "description": "List users with filters.\n\nThe users whose home post is where user.view is in effect, and the caller; users without a home post only\nwith user.view at the root. Archived users only with include_deleted (requires user.archive), and only where\nuser.archive is in effect.\n\npost_id, brigade_id and corps_id match the home node or an assignment at the node or below, chosen by\nmembership (any, home, assigned).",
+        "description": "List users with filters.\n\nThe users whose home post is where user.view is in effect, and the caller; users without a home post only\nwith user.view at the root. Archived users only with include_deleted (requires user.archive), and only where\nuser.archive is in effect.\n\npost_id, brigade_id and corps_id match the home node or an assignment at the node or below, chosen by\nmembership (any, home, assigned). They name nodes the caller can see, whatever the membership: post_id a post\nwhere user.view is in effect (403 post_access_denied), brigade_id and corps_id a group inside a subtree where\nscope_group.view is held, as GET /brigades/{brigade_id} (403 permission_required_for_action, action list_users,\nthe same for an unknown id).",
         "operationId": "list_users",
         "security": [
           {
@@ -942,10 +942,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Users attached to this corps: home node in it (its brigades included), or an assignment at it or below it (see membership); an id of another kind gives nothing",
+              "description": "Users attached to this corps: home node in it (its brigades included), or an assignment at it or below it (see membership); an id of another kind gives nothing. A group outside every subtree where the caller holds scope_group.view answers 403 permission_required_for_action, an unknown id too",
               "title": "Corps Id"
             },
-            "description": "Users attached to this corps: home node in it (its brigades included), or an assignment at it or below it (see membership); an id of another kind gives nothing"
+            "description": "Users attached to this corps: home node in it (its brigades included), or an assignment at it or below it (see membership); an id of another kind gives nothing. A group outside every subtree where the caller holds scope_group.view answers 403 permission_required_for_action, an unknown id too"
           },
           {
             "name": "brigade_id",
@@ -960,10 +960,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Users attached to this brigade: home node in it, or an assignment at it or below it (see membership); an id of another kind gives nothing",
+              "description": "Users attached to this brigade: home node in it, or an assignment at it or below it (see membership); an id of another kind gives nothing. A group outside every subtree where the caller holds scope_group.view answers 403 permission_required_for_action, an unknown id too",
               "title": "Brigade Id"
             },
-            "description": "Users attached to this brigade: home node in it, or an assignment at it or below it (see membership); an id of another kind gives nothing"
+            "description": "Users attached to this brigade: home node in it, or an assignment at it or below it (see membership); an id of another kind gives nothing. A group outside every subtree where the caller holds scope_group.view answers 403 permission_required_for_action, an unknown id too"
           },
           {
             "name": "membership",
@@ -1587,7 +1587,7 @@
           "USERS"
         ],
         "summary": "Update User",
-        "description": "Update user fields - all fields are optional\n\nSupports updating:\n- username: Unique username (3-50 characters)\n- username_alias: User's display name (1-255 characters)\n- post_id: Home post (membership: who manages the user; it grants nothing by itself). Moving the user needs\n  user.update covering the new post too (403 permission_required_for_action, the same for an unknown or\n  archived post outside the caller's scope); inside it an unknown post answers 404 post_not_found and an\n  archived one 409 post_archived (sending the current home post again changes nothing and is accepted)\n- is_active: User's active status (boolean)\n- user_type: Another type (GET /user-types). Every assignment of the old type's built-in role gets the new type's\n  built-in role at the same node (at the root when the new one holds system permissions, as for a new user; an\n  assignment of the new role the user already has at that node is kept and the old one merged into it). The\n  caller needs user.update and every permission of the new built-in role at each of these nodes and at the node\n  a new user of the type would get it (the home post; the root without one or for a system role), also when\n  nothing is replaced (403 grant_exceeds_own_permissions); every other assignment, those of archived roles\n  included, must fit the ceiling of the new type (409 user_type_ceiling_exceeded with the assignments and their\n  excess_permissions). A concurrent assignment of the new built-in role at the same node answers 409\n  assignment_exists. The user's sessions end (revoke_cause user_type_changed), so the web never shows the pages\n  of the old type. The same type again changes nothing.\n\nOnly provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).\nCertificates are not changed here: a new one is issued or uploaded and the old one revoked (a certificate form\nfield is ignored).\nThe fields are form fields: any other body (JSON included) answers 415 instead of being ignored.\n\nChanging a user needs the user visible to the caller (user.view covering them, as GET /users/{user_id}: 403\nuser_self_only), user.update covering them (their home post, the root for a user without one) and, for\nanother user, that the caller could grant every assignment they have, each with all of its role's permissions\nwhatever the user's type puts in effect (403 target_user_more_privileged); this\nanswers before the archived state of the user. A deactivation or a type change that takes the last effective\nadministrator away answers 409 last_admin_required, and a caller who is one cannot stop being one (409\ncannot_remove_own_admin). An effective administrator is an active, not archived user holding the built-in\nsystem_administrator system role and administrator at the root, whose user type puts both in effect and, where\nlogin requires a client certificate (every environment but development), with an active certificate.",
+        "description": "Update user fields - all fields are optional\n\nSupports updating:\n- username: Unique username (3-50 characters)\n- username_alias: User's display name (1-255 characters)\n- post_id: Home post (membership: who manages the user; it grants nothing by itself). Moving the user needs\n  user.update covering the new post too (403 permission_required_for_action, the same for an unknown or\n  archived post outside the caller's scope); inside it an unknown post answers 404 post_not_found and an\n  archived one 409 post_archived (sending the current home post again changes nothing and is accepted)\n- is_active: User's active status (boolean)\n- user_type: Another type (GET /user-types). Every assignment of the old type's built-in role gets the new type's\n  built-in role at the same node (at the root when the new one holds system permissions, as for a new user; an\n  assignment of the new role the user already has at that node is kept and the old one merged into it). The\n  caller needs user.update and every permission of the new built-in role at each of these nodes and at the node\n  a new user of the type would get it (the home post; the root without one or for a system role), also when\n  nothing is replaced (403 grant_exceeds_own_permissions); every other assignment, those of archived roles\n  included, must fit the ceiling of the new type (409 user_type_ceiling_exceeded with the assignments and their\n  excess_permissions; a node the caller cannot see is hidden, as in GET /{user_id}/assignments). A concurrent\n  assignment of the new built-in role at the same node answers 409\n  assignment_exists. The user's sessions end (revoke_cause user_type_changed), so the web never shows the pages\n  of the old type. The same type again changes nothing.\n\nOnly provided fields will be updated. Archived users answer 404 until restored (POST /{user_id}/restore).\nCertificates are not changed here: a new one is issued or uploaded and the old one revoked (a certificate form\nfield is ignored).\nThe fields are form fields: any other body (JSON included) answers 415 instead of being ignored.\n\nChanging a user needs the user visible to the caller (user.view covering them, as GET /users/{user_id}: 403\nuser_self_only), user.update covering them (their home post, the root for a user without one) and, for\nanother user, that the caller could grant every assignment they have, each with all of its role's permissions\nwhatever the user's type puts in effect (403 target_user_more_privileged); this\nanswers before the archived state of the user. A deactivation or a type change that takes the last effective\nadministrator away answers 409 last_admin_required, and a caller who is one cannot stop being one (409\ncannot_remove_own_admin). An effective administrator is an active, not archived user holding the built-in\nsystem_administrator system role and administrator at the root, whose user type puts both in effect and, where\nlogin requires a client certificate (every environment but development), with an active certificate.",
         "operationId": "update_user",
         "security": [
           {
@@ -2623,7 +2623,7 @@
           "USERS"
         ],
         "summary": "List User Assignments",
-        "description": "The role assignments of a user, by id: the role and the node it applies to (root, group or post, with its\nname; the application name at the root), assignments of archived roles included (role.is_deleted: they grant\nnothing until the role is restored). user.view must cover the user (403 user_self_only otherwise); an archived user, like\nGET /{user_id}, only for callers with user.archive covering them (404 otherwise).",
+        "description": "The role assignments of a user, by id: the role and the node it applies to (root, group or post, with its\nname; the application name at the root), assignments of archived roles included (role.is_deleted: they grant\nnothing until the role is restored). user.view must cover the user (403 user_self_only otherwise); an archived user, like\nGET /{user_id}, only for callers with user.archive covering them (404 otherwise).\n\nAn assignment at a node the caller cannot see stays in the list with the node hidden: scope null, node_visible\nfalse, id, role and created_at kept. A group is visible inside a subtree where the caller holds scope_group.view, a\npost where post.view is in effect, the root always; the caller's own assignments are always in full.",
         "operationId": "list_user_assignments",
         "security": [
           {
@@ -2762,7 +2762,7 @@
           "USERS"
         ],
         "summary": "Create User Assignment",
-        "description": "Give the user a tree role at a node of the scope tree: scope {kind: root} or {kind: group | post, id}. The\nrole applies to the node and everything below it, posts added later included. A system role is given through\nPOST /{user_id}/system-assignments (409 role_is_system here).\n\nChecked in this order, so that a node outside the caller's scope answers the same 403 whether it exists, is\narchived or not: user.view covering the user (403 user_self_only, as GET /users/{user_id}); user.update covering\nthe user and every assignment of the user grantable by the caller (403 target_user_more_privileged); an archived user 404 user_not_found; an unknown or archived role 404\nrole_not_found; a system role 409 role_is_system; user.update and every permission of the role held by the\ncaller at the node (403 grant_exceeds_own_permissions, missing lists both; a role without permissions still needs\nuser.update there); an unknown or archived group or post 404 scope_group_not_found / post_not_found; a role above\nthe tree boundary of the user's type 409 role_exceeds_user_type; the same role at the same node 409\nassignment_exists.",
+        "description": "Give the user a tree role at a node of the scope tree: scope {kind: root} or {kind: group | post, id}. The\nrole applies to the node and everything below it, posts added later included. A system role is given through\nPOST /{user_id}/system-assignments (409 role_is_system here).\n\nChecked in this order, so that a node outside the caller's scope answers the same 403 whether it exists, is\narchived or not: user.view covering the user (403 user_self_only, as GET /users/{user_id}); user.update covering\nthe user and every assignment of the user grantable by the caller (403 target_user_more_privileged); an archived user 404 user_not_found; an unknown or archived role 404\nrole_not_found; a system role 409 role_is_system; user.update and every permission of the role held by the\ncaller at the node (403 grant_exceeds_own_permissions, missing lists both; a role without permissions still needs\nuser.update there); an unknown or archived group or post 404 scope_group_not_found / post_not_found; a role above\nthe tree boundary of the user's type 409 role_exceeds_user_type; the same role at the same node 409\nassignment_exists.\n\nThe answer follows GET /{user_id}/assignments: a node the caller may assign at but cannot see (no scope_group.view\ncovering the group, no post.view at the post) comes back hidden, scope null and node_visible false.",
         "operationId": "create_user_assignment",
         "security": [
           {
@@ -26543,7 +26543,7 @@
           "SEARCH"
         ],
         "summary": "Search users",
-        "description": "Search users with typed filters.",
+        "description": "Search users with typed filters. post_id, brigade_id and corps_id name nodes the caller can see, as in GET /users: 403 post_access_denied, 403 permission_required_for_action (action search_users).",
         "operationId": "search_users",
         "security": [
           {
@@ -26741,10 +26741,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Users attached to this corps: home node in it (its brigades included), or an assignment at it or below it (see membership); an id of another kind gives nothing",
+              "description": "Users attached to this corps: home node in it (its brigades included), or an assignment at it or below it (see membership); an id of another kind gives nothing. A group outside every subtree where the caller holds scope_group.view answers 403 permission_required_for_action, an unknown id too",
               "title": "Corps Id"
             },
-            "description": "Users attached to this corps: home node in it (its brigades included), or an assignment at it or below it (see membership); an id of another kind gives nothing"
+            "description": "Users attached to this corps: home node in it (its brigades included), or an assignment at it or below it (see membership); an id of another kind gives nothing. A group outside every subtree where the caller holds scope_group.view answers 403 permission_required_for_action, an unknown id too"
           },
           {
             "name": "brigade_id",
@@ -26759,10 +26759,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Users attached to this brigade: home node in it, or an assignment at it or below it (see membership); an id of another kind gives nothing",
+              "description": "Users attached to this brigade: home node in it, or an assignment at it or below it (see membership); an id of another kind gives nothing. A group outside every subtree where the caller holds scope_group.view answers 403 permission_required_for_action, an unknown id too",
               "title": "Brigade Id"
             },
-            "description": "Users attached to this brigade: home node in it, or an assignment at it or below it (see membership); an id of another kind gives nothing"
+            "description": "Users attached to this brigade: home node in it, or an assignment at it or below it (see membership); an id of another kind gives nothing. A group outside every subtree where the caller holds scope_group.view answers 403 permission_required_for_action, an unknown id too"
           },
           {
             "name": "membership",
@@ -33746,7 +33746,20 @@
             "$ref": "#/components/schemas/AssignmentRole"
           },
           "scope": {
-            "$ref": "#/components/schemas/ScopeResponse"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScopeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The node of the assignment; null when node_visible is false"
+          },
+          "node_visible": {
+            "type": "boolean",
+            "title": "Node Visible",
+            "description": "false: the node lies outside what the caller can see (a group outside every subtree where the caller holds scope_group.view, a post where post.view is not in effect), so scope is null and the entry keeps only id, role and created_at. The root is always visible, and so is every node of the caller's own assignments"
           },
           "created_at": {
             "type": "string",
@@ -33760,6 +33773,7 @@
           "id",
           "role",
           "scope",
+          "node_visible",
           "created_at"
         ],
         "title": "AssignmentResponse",
@@ -39290,7 +39304,20 @@
             "$ref": "#/components/schemas/ExcessRole"
           },
           "scope": {
-            "$ref": "#/components/schemas/ExcessScope"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExcessScope"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The node of the assignment; null when node_visible is false"
+          },
+          "node_visible": {
+            "type": "boolean",
+            "title": "Node Visible",
+            "description": "false: the node lies outside what the caller can see, as in GET /users/{user_id}/assignments, so scope is null"
           },
           "excess_permissions": {
             "items": {
@@ -39306,6 +39333,7 @@
           "id",
           "role",
           "scope",
+          "node_visible",
           "excess_permissions"
         ],
         "title": "ExcessAssignment",
