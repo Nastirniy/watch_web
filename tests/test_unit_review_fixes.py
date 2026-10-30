@@ -33,8 +33,8 @@ async def test_scope_group_move_locks_both_parents_before_the_group(client, db, 
     c2 = await make_group(db, kind="corps")
     brigade = await make_group(db, parent_id=c1.id, kind="brigade")
     group_reads.clear()
-    r = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=brigade.id), json={"parent_id": c2.id},
-                           headers=h)
+    r = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=brigade.id),
+                           json={"parent_id": c2.id, "expected_parent_id": c1.id}, headers=h)
     assert r.status_code == 200, r.text
     assert group_reads[:3] == [c1.id, c2.id, brigade.id], group_reads
 

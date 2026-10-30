@@ -1022,6 +1022,137 @@ async def test_a_move_the_tree_did_not_see_coming_is_a_conflict(client, db, head
     assert await node.place(db) == node.home.id
 
 
+# ---------------------------------------------------------------- a repeat of a waiting move
+
+async def test_a_repeat_of_a_waiting_move_answers_that_move(client, db, headers, storage):
+    scene = await _scene(client, db, headers)
+    move_id = await _waiting_move(client, headers, scene)
+    colleague = await make_admin(db)
+    for user in (scene.admin, colleague):
+        again = await client.put(_post_url(scene.post), json=_move_body(scene), headers=headers(user))
+        assert again.status_code == 202 and again.json()["id"] == move_id, again.text
+        assert again.json()["status"] == "waiting" and again.json()["uploads"]
+        assert again.headers["Location"] == _move_url(move_id) and "Retry-After" in again.headers
+    assert len((await db.exec(select(PendingMove))).all()) == 1
+    assert len(await _events(db, AuditEvent.MOVE_REQUESTED)) == 1, "one operation, one audit row"
+    assert (await _move(db, move_id)).requested_by == scene.admin.id, "it stays the first requester's"
+
+
+async def test_a_repeat_needs_the_rights_of_the_move(client, db, headers, storage):
+    scene = await _scene(client, db, headers)
+    await _waiting_move(client, headers, scene)
+    local = await make_user(db, perms=[], user_type=UserType.ADMINISTRATOR)
+    await give(db, local, [P.POST_VIEW, P.POST_UPDATE], Node.post(scene.post.id))
+    refused = await client.put(_post_url(scene.post), json=_move_body(scene), headers=headers(local))
+    assert refused.status_code == 403 and refused.json()["code"] == "permission_required_for_action", refused.text
+
+
+async def test_a_repeat_states_the_place_like_any_move(client, db, headers, storage):
+    scene = await _scene(client, db, headers)
+    await _waiting_move(client, headers, scene)
+    refused = await client.put(_post_url(scene.post), json={"group_id": scene.there.id}, headers=headers(scene.admin))
+    assert refused.status_code == 409 and refused.json()["code"] == "move_conflict", refused.text
+
+
+async def test_a_repeat_with_other_fields_is_refused_like_a_move_that_waits(client, db, headers, storage):
+    scene = await _scene(client, db, headers)
+    await _waiting_move(client, headers, scene)
+    refused = await client.put(_post_url(scene.post), json=_move_body(scene, name="Renamed"), headers=headers(scene.admin))
+    assert refused.status_code == 422 and refused.json()["code"] == "move_not_alone", refused.text
+
+
+async def test_a_forced_repeat_is_no_repeat(client, db, headers, storage):
+    """force asks for something the waiting move is not: it is refused, not dropped in silence (cancel, then force)"""
+    scene = await _scene(client, db, headers)
+    move_id = await _waiting_move(client, headers, scene)
+    refused = await client.put(_post_url(scene.post), json=_move_body(scene, force=True), headers=headers(scene.admin))
+    assert refused.status_code == 409 and refused.json()["move_id"] == move_id, refused.text
+    assert await _group_of(db, scene.post) == scene.home.id
+
+
+# ---------------------------------------------------------------- a node on the way is busy
+
+class _Busy:
+    """A group that waits to go to a target. node: a group inside, with the post whose upload holds the move; target
+    sits inside holder; free and free_post are elsewhere"""
+
+
+async def _busy(client, db, headers) -> _Busy:
+    scene = _Busy()
+    scene.admin = await make_admin(db)
+    scene.waiting = await make_group(db)
+    scene.inner = await make_group(db, parent_id=scene.waiting.id)
+    scene.post = await make_post(db, group_id=scene.inner.id)
+    scene.holder = await make_group(db)
+    scene.target = await make_group(db, parent_id=scene.holder.id)
+    scene.free, scene.other = await make_group(db), await make_group(db)
+    scene.free_post = await make_post(db, group_id=scene.free.id)
+    scene.upload_id = await _open_session(client, headers, scene.admin, await _observation(db, scene.admin, scene.post), DATA, 10)
+    answer = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=scene.waiting.id),
+                                json={"parent_id": scene.target.id, "expected_parent_id": None}, headers=headers(scene.admin))
+    assert answer.status_code == 202, answer.text
+    scene.move_id = answer.json()["id"]
+    return scene
+
+
+def _group_move(group, target, expected, **extra):
+    return V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=group.id), {
+        "parent_id": target.id if target else None, "expected_parent_id": expected, **extra}
+
+
+BUSY_CASES = {
+    "the node, to another target": lambda s: _group_move(s.waiting, s.other, None),
+    "a group below the node": lambda s: _group_move(s.inner, s.other, s.waiting.id),
+    "a post below the node": lambda s: (_post_url(s.post), {"group_id": s.other.id, "expected_group_id": s.inner.id}),
+    "a group into the node": lambda s: _group_move(s.free, s.waiting, None),
+    "a group into a group below the node": lambda s: _group_move(s.free, s.inner, None),
+    "a post into the node": lambda s: (_post_url(s.free_post), {"group_id": s.waiting.id, "expected_group_id": s.free.id}),
+    "the target": lambda s: _group_move(s.target, s.other, s.holder.id),
+    "the target below the waiting node": lambda s: _group_move(s.target, s.inner, s.holder.id),
+    "a group holding the target": lambda s: _group_move(s.holder, s.other, None),
+}
+
+
+@pytest.mark.parametrize("force", [False, True])
+@pytest.mark.parametrize("case", list(BUSY_CASES))
+async def test_a_node_on_the_way_is_busy(client, db, headers, storage, case, force):
+    scene = await _busy(client, db, headers)
+    url, body = BUSY_CASES[case](scene)
+    method = client.put if "group_id" in body else client.patch
+    refused = await method(url, json={**body, **({"force": True} if force else {})}, headers=headers(scene.admin))
+    assert refused.status_code == 409 and refused.json()["code"] == "move_pending", refused.text
+    assert refused.json()["move_id"] == scene.move_id
+    assert refused.headers["Retry-After"] == str(settings.moves.check_interval_seconds)
+
+
+async def test_a_move_past_the_busy_nodes_goes_on(client, db, headers, storage):
+    scene = await _busy(client, db, headers)
+    url, body = _group_move(scene.free, scene.target, None)
+    moved = await client.patch(url, json=body, headers=headers(scene.admin))
+    assert moved.status_code == 200, "a second node may go to the same target"
+
+
+async def test_two_moves_going_below_each_other_cannot_wait_together(client, db, headers, storage):
+    """The review's late cycle failure: the second move is refused at once"""
+    admin = await make_admin(db)
+    first, second = await make_group(db), await make_group(db)
+    await _open_session(client, headers, admin, await _observation(db, admin, await make_post(db, group_id=first.id)), DATA, 10)
+    answer = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=first.id),
+                                json={"parent_id": second.id, "expected_parent_id": None}, headers=headers(admin))
+    assert answer.status_code == 202, answer.text
+    refused = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=second.id),
+                                 json={"parent_id": first.id, "expected_parent_id": None}, headers=headers(admin))
+    assert refused.status_code == 409 and refused.json()["move_id"] == answer.json()["id"], refused.text
+
+
+async def test_a_node_may_move_again_when_the_move_has_ended(client, db, headers, storage):
+    scene = await _busy(client, db, headers)
+    await client.post(_cancel_url(scene.move_id), headers=headers(scene.admin))
+    url, body = _group_move(scene.target, scene.other, scene.holder.id)
+    moved = await client.patch(url, json=body, headers=headers(scene.admin))
+    assert moved.status_code == 200, moved.text
+
+
 # ---------------------------------------------------------------- overlapping moves
 
 async def test_moves_overlapping_a_waiting_one_answer_move_pending(client, db, headers, storage):
@@ -1220,23 +1351,6 @@ async def test_a_name_taken_at_the_target_fails_a_group_move(client, db, headers
     row = await _move(db, answer.json()["id"])
     assert (row.status, row.error) == ("failed", "scope_group_name_taken")
     assert await _parent_of(db, home) is None
-
-
-async def test_a_cycle_made_while_waiting_fails_the_group_move(client, db, headers, storage):
-    admin = await make_admin(db)
-    first, second = await make_group(db), await make_group(db)
-    post = await make_post(db, group_id=first.id)
-    upload_id = await _open_session(client, headers, admin, await _observation(db, admin, post), DATA, 10)
-    answer = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=first.id),
-                                json={"parent_id": second.id, "expected_parent_id": None}, headers=headers(admin))
-    assert answer.status_code == 202, answer.text
-    # the destination moves below the waiting node: no upload there, and its subtree does not hold the waiting node
-    moved = await client.patch(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=second.id),
-                               json={"parent_id": first.id, "expected_parent_id": None}, headers=headers(admin))
-    assert moved.status_code == 200, moved.text
-    await client.post(V1.path(MediaRoutes.UPLOAD_SESSION_ABORT, upload_id=upload_id), headers=headers(admin))
-    row = await _move(db, answer.json()["id"])
-    assert (row.status, row.error) == ("failed", "scope_group_cycle")
 
 
 async def test_the_move_goes_from_where_the_node_sits_when_it_runs(client, db, headers, storage):

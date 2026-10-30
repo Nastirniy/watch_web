@@ -233,19 +233,38 @@ async def _audit(session: AsyncSession, event: AuditEvent, move: PendingMove, us
                            scope=node_of(move), resource_id=move.id, user_id=user_id, **(client or {}))
 
 
+def _in_the_way(tree: ScopeTree, waiting: PendingMove, moved: Node, target_group_id: Optional[int]) -> bool:
+    """A node on the way is busy (owner, fix round): a move of the waiting node, of anything in its subtree or above
+    it, a move of anything into its subtree, and a move of its target or of a group that holds the target. So nothing
+    joins a node that waits (its uploads would hold a move they never asked for), no two moves wait to go below each
+    other, and a target stays where the requester saw it."""
+    node = node_of(waiting)
+    if tree.contains(node, moved) or tree.contains(moved, node):
+        return True
+    if target_group_id is not None and tree.contains(node, Node.group(target_group_id)):
+        return True
+    return waiting.target_group_id is not None and tree.contains(moved, Node.group(waiting.target_group_id))
+
+
 async def admit(session: AsyncSession, node: Node, target_group_id: Optional[int], user_id: int, locks: MoveLocks,
                 force: bool, changed_fields: Sequence[str],
                 client: Optional[Dict[str, Optional[str]]] = None) -> Optional[PendingMove]:
     """The decision on a move request, under lock_for_move and after every check of the route, as its last step before
     any change. None: the move runs now in the route's transaction (nothing below the node holds it, or force; a
     forced move over running uploads leaves a done row and a move.completed row in that transaction). A row: the move
-    waits; the row and its audit row are committed.
+    waits; the row and its audit row are committed, or it is the waiting move this request repeats (same node, same
+    target), which stays as it is; a forced request is no repeat.
 
-    CodedError move_pending: the subtree overlaps a waiting move's, force or not (cancel that one first).
+    CodedError move_pending: a waiting move is in the way, force or not (_in_the_way; cancel that one first).
     CodedError move_not_alone: it would have to wait and the request changes other fields too."""
     tree = await load_scope_tree(session)
     for other in await waiting_moves(session):
-        if tree.contains(node_of(other), node) or tree.contains(node, node_of(other)):
+        if not force and node_of(other) == node and other.target_group_id == target_group_id:
+            if changed_fields:
+                raise CodedError(ErrorCode.MOVE_NOT_ALONE, changed_fields=sorted(changed_fields))
+            await session.commit()
+            return other
+        if _in_the_way(tree, other, node, target_group_id):
             raise CodedError(ErrorCode.MOVE_PENDING, move_id=other.id)
     if not _held(locks):
         return None

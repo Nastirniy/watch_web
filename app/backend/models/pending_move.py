@@ -13,8 +13,8 @@ class PendingMove(SQLModel, table=True):
 
     The row is the operation: node, destination, who asked. The state is `status` (MoveStatus); a forced move that ran
     over running uploads leaves a row too, done at once, with force true. Moves that run at once without uploads leave
-    none. At most one waiting move per node, and no two waiting moves whose subtrees overlap: decided under the
-    move_locks row.
+    none. At most one waiting move per node, no two waiting moves whose subtrees overlap, and nothing moves into a
+    waiting subtree or takes a target away: decided under the move_locks row (services/moves.py admit).
     """
     __tablename__ = "pending_moves"
     __table_args__ = (
