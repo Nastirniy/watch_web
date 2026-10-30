@@ -112,14 +112,27 @@ class AccessControlService:
         return True
 
     @staticmethod
+    def node_named(auth: AuthContext, node: Node) -> bool:
+        """The caller may be told the name of this node in a list about users: node_visible, or a group on one path
+        with a node where user.view is held. The user records the caller reads already name those units (brigade,
+        corps), so a unit of the caller's own stays named and filterable, and a foreign one stays hidden. Only for
+        lists about users: reading a group itself stays node_visible."""
+        if node.kind == "group" and auth.on_path(Permissions.USER_VIEW, node):
+            return True
+        return AccessControlService.node_visible(auth, node)
+
+    @staticmethod
     def check_group_filters(auth: AuthContext, action: str, *group_ids: Optional[int]) -> None:
-        """The groups a list is filtered by are visible to the caller (node_visible), otherwise 403
+        """The groups a list of users is filtered by may be named to the caller (node_named), otherwise 403
         permission_required_for_action, whether they exist or not (an id no group can have, 0 or negative, lies under
         the root like an unknown one); None: not asked for"""
         for group_id in group_ids:
-            if group_id is not None:
-                node = Node.group(group_id) if group_id >= 1 else ROOT
-                AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_VIEW, node, action)
+            if group_id is None:
+                continue
+            if group_id >= 1 and AccessControlService.node_named(auth, Node.group(group_id)):
+                continue
+            node = Node.group(group_id) if group_id >= 1 else ROOT
+            AccessControlService.check_covers(auth, Permissions.SCOPE_GROUP_VIEW, node, action)
 
     @staticmethod
     def check_user_view(auth: AuthContext, target: User) -> None:

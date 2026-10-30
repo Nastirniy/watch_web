@@ -229,8 +229,10 @@ the user (`session_expired`, `revoke_cause` `user_type_changed`): the new pages 
   an archived role, `role.is_deleted`, grants nothing).
 - Node names of other units do not show there. An assignment at a node the caller cannot see stays in the list with
   the node hidden: `scope` is null, `node_visible` is false, `id`, `role` and `created_at` stay. A group is visible
-  inside a subtree where the caller holds `scope_group.view` (the rule of `GET /scope-groups/{id}`), a post where
-  `post.view` is in effect (the rule of `GET /posts/{id}`), the root always; an archived node follows the same rule.
+  inside a subtree where the caller holds `scope_group.view`, or on one path with a node where the caller holds
+  `user.view` (the brigade and corps of a post it reads users at: the user records name them anyway), a post where
+  `post.view` is in effect, the root always; an archived node follows the same rule. `GET /scope-groups/{id}` and
+  `GET /posts/{id}` keep their own rule (`scope_group.view`, `post.view`).
   The caller's own assignments, here and in `/auth/me` and the login answer, are always in full. Show a hidden entry
   as "another unit" with its role; it can still be removed when the caller's permissions cover it.
 - `POST /api/v1/users/{user_id}/assignments` (201): `{"role_id": 5, "scope": {"kind": "post", "id": 7}}`; `id` is

@@ -802,8 +802,9 @@ async def list_user_assignments(
     GET /{user_id}, only for callers with user.archive covering them (404 otherwise).
 
     An assignment at a node the caller cannot see stays in the list with the node hidden: scope null, node_visible
-    false, id, role and created_at kept. A group is visible inside a subtree where the caller holds scope_group.view, a
-    post where post.view is in effect, the root always; the caller's own assignments are always in full."""
+    false, id, role and created_at kept. A group is visible inside a subtree where the caller holds scope_group.view or
+    on one path with a node where it holds user.view (the unit of a post it reads users at, the corps above it), a post
+    where post.view is in effect, the root always; the caller's own assignments are always in full."""
     target = await _get_user_or_404(session, user_id)
     # Visibility before the state: an outsider gets the same 403 for an archived and a live user
     AccessControlService.check_user_view(auth, target)
@@ -844,8 +845,8 @@ async def create_user_assignment(
     the tree boundary of the user's type 409 role_exceeds_user_type; the same role at the same node 409
     assignment_exists.
 
-    The answer follows GET /{user_id}/assignments: a node the caller may assign at but cannot see (no scope_group.view
-    covering the group, no post.view at the post) comes back hidden, scope null and node_visible false.
+    The answer follows GET /{user_id}/assignments: a node the caller may assign at but cannot see comes back hidden,
+    scope null and node_visible false.
     """
     target = await _lock_role_then_user(session, user_id, data.role_id, administrators=False)
     assignment = await create_assignment(session, auth, target, data.role_id, data.scope.node)

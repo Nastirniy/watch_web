@@ -942,10 +942,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Users attached to this corps: home node in it (its brigades included), or an assignment at it or below it (see membership); an id of another kind gives nothing. A group outside every subtree where the caller holds scope_group.view answers 403 permission_required_for_action, an unknown id too",
+              "description": "Users attached to this corps: home node in it (its brigades included), or an assignment at it or below it (see membership); an id of another kind gives nothing. A group neither inside a subtree where the caller holds scope_group.view nor on one path with a node where it holds user.view answers 403 permission_required_for_action, an unknown id too",
               "title": "Corps Id"
             },
-            "description": "Users attached to this corps: home node in it (its brigades included), or an assignment at it or below it (see membership); an id of another kind gives nothing. A group outside every subtree where the caller holds scope_group.view answers 403 permission_required_for_action, an unknown id too"
+            "description": "Users attached to this corps: home node in it (its brigades included), or an assignment at it or below it (see membership); an id of another kind gives nothing. A group neither inside a subtree where the caller holds scope_group.view nor on one path with a node where it holds user.view answers 403 permission_required_for_action, an unknown id too"
           },
           {
             "name": "brigade_id",
@@ -960,10 +960,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Users attached to this brigade: home node in it, or an assignment at it or below it (see membership); an id of another kind gives nothing. A group outside every subtree where the caller holds scope_group.view answers 403 permission_required_for_action, an unknown id too",
+              "description": "Users attached to this brigade: home node in it, or an assignment at it or below it (see membership); an id of another kind gives nothing. A group neither inside a subtree where the caller holds scope_group.view nor on one path with a node where it holds user.view answers 403 permission_required_for_action, an unknown id too",
               "title": "Brigade Id"
             },
-            "description": "Users attached to this brigade: home node in it, or an assignment at it or below it (see membership); an id of another kind gives nothing. A group outside every subtree where the caller holds scope_group.view answers 403 permission_required_for_action, an unknown id too"
+            "description": "Users attached to this brigade: home node in it, or an assignment at it or below it (see membership); an id of another kind gives nothing. A group neither inside a subtree where the caller holds scope_group.view nor on one path with a node where it holds user.view answers 403 permission_required_for_action, an unknown id too"
           },
           {
             "name": "membership",
@@ -2623,7 +2623,7 @@
           "USERS"
         ],
         "summary": "List User Assignments",
-        "description": "The role assignments of a user, by id: the role and the node it applies to (root, group or post, with its\nname; the application name at the root), assignments of archived roles included (role.is_deleted: they grant\nnothing until the role is restored). user.view must cover the user (403 user_self_only otherwise); an archived user, like\nGET /{user_id}, only for callers with user.archive covering them (404 otherwise).\n\nAn assignment at a node the caller cannot see stays in the list with the node hidden: scope null, node_visible\nfalse, id, role and created_at kept. A group is visible inside a subtree where the caller holds scope_group.view, a\npost where post.view is in effect, the root always; the caller's own assignments are always in full.",
+        "description": "The role assignments of a user, by id: the role and the node it applies to (root, group or post, with its\nname; the application name at the root), assignments of archived roles included (role.is_deleted: they grant\nnothing until the role is restored). user.view must cover the user (403 user_self_only otherwise); an archived user, like\nGET /{user_id}, only for callers with user.archive covering them (404 otherwise).\n\nAn assignment at a node the caller cannot see stays in the list with the node hidden: scope null, node_visible\nfalse, id, role and created_at kept. A group is visible inside a subtree where the caller holds scope_group.view or\non one path with a node where it holds user.view (the unit of a post it reads users at, the corps above it), a post\nwhere post.view is in effect, the root always; the caller's own assignments are always in full.",
         "operationId": "list_user_assignments",
         "security": [
           {
@@ -2762,7 +2762,7 @@
           "USERS"
         ],
         "summary": "Create User Assignment",
-        "description": "Give the user a tree role at a node of the scope tree: scope {kind: root} or {kind: group | post, id}. The\nrole applies to the node and everything below it, posts added later included. A system role is given through\nPOST /{user_id}/system-assignments (409 role_is_system here).\n\nChecked in this order, so that a node outside the caller's scope answers the same 403 whether it exists, is\narchived or not: user.view covering the user (403 user_self_only, as GET /users/{user_id}); user.update covering\nthe user and every assignment of the user grantable by the caller (403 target_user_more_privileged); an archived user 404 user_not_found; an unknown or archived role 404\nrole_not_found; a system role 409 role_is_system; user.update and every permission of the role held by the\ncaller at the node (403 grant_exceeds_own_permissions, missing lists both; a role without permissions still needs\nuser.update there); an unknown or archived group or post 404 scope_group_not_found / post_not_found; a role above\nthe tree boundary of the user's type 409 role_exceeds_user_type; the same role at the same node 409\nassignment_exists.\n\nThe answer follows GET /{user_id}/assignments: a node the caller may assign at but cannot see (no scope_group.view\ncovering the group, no post.view at the post) comes back hidden, scope null and node_visible false.",
+        "description": "Give the user a tree role at a node of the scope tree: scope {kind: root} or {kind: group | post, id}. The\nrole applies to the node and everything below it, posts added later included. A system role is given through\nPOST /{user_id}/system-assignments (409 role_is_system here).\n\nChecked in this order, so that a node outside the caller's scope answers the same 403 whether it exists, is\narchived or not: user.view covering the user (403 user_self_only, as GET /users/{user_id}); user.update covering\nthe user and every assignment of the user grantable by the caller (403 target_user_more_privileged); an archived user 404 user_not_found; an unknown or archived role 404\nrole_not_found; a system role 409 role_is_system; user.update and every permission of the role held by the\ncaller at the node (403 grant_exceeds_own_permissions, missing lists both; a role without permissions still needs\nuser.update there); an unknown or archived group or post 404 scope_group_not_found / post_not_found; a role above\nthe tree boundary of the user's type 409 role_exceeds_user_type; the same role at the same node 409\nassignment_exists.\n\nThe answer follows GET /{user_id}/assignments: a node the caller may assign at but cannot see comes back hidden,\nscope null and node_visible false.",
         "operationId": "create_user_assignment",
         "security": [
           {
@@ -26741,10 +26741,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Users attached to this corps: home node in it (its brigades included), or an assignment at it or below it (see membership); an id of another kind gives nothing. A group outside every subtree where the caller holds scope_group.view answers 403 permission_required_for_action, an unknown id too",
+              "description": "Users attached to this corps: home node in it (its brigades included), or an assignment at it or below it (see membership); an id of another kind gives nothing. A group neither inside a subtree where the caller holds scope_group.view nor on one path with a node where it holds user.view answers 403 permission_required_for_action, an unknown id too",
               "title": "Corps Id"
             },
-            "description": "Users attached to this corps: home node in it (its brigades included), or an assignment at it or below it (see membership); an id of another kind gives nothing. A group outside every subtree where the caller holds scope_group.view answers 403 permission_required_for_action, an unknown id too"
+            "description": "Users attached to this corps: home node in it (its brigades included), or an assignment at it or below it (see membership); an id of another kind gives nothing. A group neither inside a subtree where the caller holds scope_group.view nor on one path with a node where it holds user.view answers 403 permission_required_for_action, an unknown id too"
           },
           {
             "name": "brigade_id",
@@ -26759,10 +26759,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Users attached to this brigade: home node in it, or an assignment at it or below it (see membership); an id of another kind gives nothing. A group outside every subtree where the caller holds scope_group.view answers 403 permission_required_for_action, an unknown id too",
+              "description": "Users attached to this brigade: home node in it, or an assignment at it or below it (see membership); an id of another kind gives nothing. A group neither inside a subtree where the caller holds scope_group.view nor on one path with a node where it holds user.view answers 403 permission_required_for_action, an unknown id too",
               "title": "Brigade Id"
             },
-            "description": "Users attached to this brigade: home node in it, or an assignment at it or below it (see membership); an id of another kind gives nothing. A group outside every subtree where the caller holds scope_group.view answers 403 permission_required_for_action, an unknown id too"
+            "description": "Users attached to this brigade: home node in it, or an assignment at it or below it (see membership); an id of another kind gives nothing. A group neither inside a subtree where the caller holds scope_group.view nor on one path with a node where it holds user.view answers 403 permission_required_for_action, an unknown id too"
           },
           {
             "name": "membership",
@@ -33763,7 +33763,7 @@
           "node_visible": {
             "type": "boolean",
             "title": "Node Visible",
-            "description": "false: the node lies outside what the caller can see (a group outside every subtree where the caller holds scope_group.view, a post where post.view is not in effect), so scope is null and the entry keeps only id, role and created_at. The root is always visible, and so is every node of the caller's own assignments"
+            "description": "false: the node lies outside what the caller can see (a group neither inside a subtree where the caller holds scope_group.view nor on one path with a node where it holds user.view, a post where post.view is not in effect), so scope is null and the entry keeps only id, role and created_at. The root is always visible, and so is every node of the caller's own assignments"
           },
           "created_at": {
             "type": "string",

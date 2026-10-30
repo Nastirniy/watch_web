@@ -38,8 +38,9 @@ class AssignmentResponse(SecureBaseModel):
     scope: Optional[ScopeResponse] = Field(
         description="The node of the assignment; null when node_visible is false")
     node_visible: bool = Field(
-        description="false: the node lies outside what the caller can see (a group outside every subtree where the "
-                    "caller holds scope_group.view, a post where post.view is not in effect), so scope is null and "
+        description="false: the node lies outside what the caller can see (a group neither inside a subtree where "
+                    "the caller holds scope_group.view nor on one path with a node where it holds user.view, a post "
+                    "where post.view is not in effect), so scope is null and "
                     "the entry keeps only id, role and created_at. The root is always visible, and so is every node "
                     "of the caller's own assignments")
     created_at: ResponseDatetime

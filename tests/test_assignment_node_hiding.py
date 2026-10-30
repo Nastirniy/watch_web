@@ -1,8 +1,8 @@
 """Node names of other units never show in the answers about a user's assignments (owner decision L10, 2026-10-30).
 
 An assignment at a node the caller cannot see stays listed with its role, the node hidden: scope null, node_visible
-false. Can see (AccessControlService.node_visible): a group inside a subtree where scope_group.view is held, a post
-where post.view is in effect, the root always. The caller's own assignments are always in full. A user list filtered
+false. Can see (AccessControlService.node_named): a group inside a subtree where scope_group.view is held or on one
+path with a node where user.view is held, a post where post.view is in effect, the root always. The caller's own assignments are always in full. A user list filtered
 by a corps or a brigade the caller cannot see answers 403 permission_required_for_action, the same for an unknown id.
 
 Tree of every test: East > Kharkiv > post A, East > brigade Bravo > post C; corps West > post B.
@@ -17,7 +17,7 @@ from app.backend.auth.builtin_roles import SENIOR_OPERATOR
 from app.backend.auth.scope import Node, ROOT
 from app.backend.config import settings
 from app.backend.enums.general import Permissions, UserType
-from app.backend.enums.routes import AuthRoutes, SearchRoutes, UserRoutes
+from app.backend.enums.routes import AuthRoutes, ScopeGroupRoutes, SearchRoutes, UserRoutes
 from app.backend.models.post import Post
 from app.backend.models.role import Role
 from app.backend.models.scope_group import ScopeGroup
@@ -124,7 +124,7 @@ async def test_a_group_follows_scope_group_view_and_a_post_follows_post_view(cli
     target = await home_user(db, tree.b)
     role = await make_role(db, [P.OBSERVATION_VIEW])
     at_group = await assign(db, target, role, Node.group(tree.kharkiv.id))
-    at_post = await assign(db, target, role, Node.post(tree.a.id))
+    at_post = await assign(db, target, role, Node.post(tree.b.id))
 
     async def shown(reader):
         listed = (await client.get(assignments_url(target.id), headers=headers(reader))).json()
@@ -132,21 +132,25 @@ async def test_a_group_follows_scope_group_view_and_a_post_follows_post_view(cli
 
     groups_only = await shown(await caller_with(db, [P.USER_VIEW, P.SCOPE_GROUP_VIEW]))
     assert (groups_only[at_group.id], groups_only[at_post.id]) == (True, False)
-    posts_only = await shown(await caller_with(db, [P.USER_VIEW, P.POST_VIEW]))
+    posts_only = await shown(await caller_with(db, [P.USER_VIEW, P.POST_VIEW], Node.group(tree.west.id)))
     assert (posts_only[at_group.id], posts_only[at_post.id]) == (False, True)
 
 
-async def test_a_node_is_seen_below_the_grant_never_above_it(client, db, headers, tree):
-    """scope_group.view at a group covers the groups below it, not the corps above it"""
+async def test_user_view_names_the_units_on_its_path_never_a_sibling(client, db, headers, tree):
+    """user.view at a brigade names the corps above it (the records already do), not a group beside it"""
     target = await home_user(db, tree.c)
     role = await make_role(db, [P.OBSERVATION_VIEW])
     at_corps = await assign(db, target, role, Node.group(tree.east.id))
     at_brigade = await assign(db, target, role, Node.group(tree.bravo.id))
-    reader = await caller_with(db, [P.USER_VIEW, P.SCOPE_GROUP_VIEW], Node.group(tree.bravo.id))
+    at_sibling = await assign(db, target, role, Node.group(tree.kharkiv.id))
+    reader = await caller_with(db, [P.USER_VIEW], Node.group(tree.bravo.id))
 
     listed = {item["id"]: item for item in
               (await client.get(assignments_url(target.id), headers=headers(reader))).json()}
-    assert listed[at_corps.id]["scope"] is None and listed[at_brigade.id]["node_visible"] is True
+    assert listed[at_corps.id]["node_visible"] is True and listed[at_brigade.id]["node_visible"] is True
+    assert listed[at_sibling.id]["scope"] is None and listed[at_sibling.id]["node_visible"] is False
+    outsider = await client.get(V1.path(ScopeGroupRoutes.GROUP_BY_ID, group_id=tree.bravo.id), headers=headers(reader))
+    assert outsider.status_code in (403, 404), "reading the group itself stays with scope_group.view"
 
 
 async def test_an_archived_node_inside_the_scope_stays_named(client, db, headers, tree):
@@ -183,7 +187,8 @@ async def test_own_assignments_are_always_in_full(client, db, headers, tree):
 async def test_a_new_assignment_at_a_node_the_caller_cannot_see_answers_hidden(client, db, headers, tree):
     """The caller may place the role there (user.update and its permissions cover the node) and named only its id:
     the answer tells no more than the list"""
-    caller = await caller_with(db, [P.USER_VIEW, P.USER_UPDATE, P.OBSERVATION_VIEW, P.MEDIA_VIEW])
+    caller = await caller_with(db, [P.USER_VIEW], Node.group(tree.west.id))
+    await assign(db, caller, await make_role(db, [P.USER_UPDATE, P.OBSERVATION_VIEW, P.MEDIA_VIEW]), ROOT)
     target = await make_user(db, post_id=tree.b.id, user_type=UserType.VIEWER)
     await assign(db, target, await make_role(db, [P.MEDIA_VIEW]), ROOT)
     role = await make_role(db, [P.OBSERVATION_VIEW])
@@ -234,7 +239,9 @@ async def test_the_ceiling_refusal_hides_a_node_the_caller_cannot_see(client, db
     media_editor = await make_role(db, [P.MEDIA_UPDATE])
     at_group = await assign(db, target, media_editor, Node.group(tree.kharkiv.id))
     at_post = await assign(db, target, media_editor, Node.post(tree.b.id))
-    caller = await caller_with(db, {*SENIOR_OPERATOR, P.USER_VIEW.value, P.USER_UPDATE.value, P.MEDIA_UPDATE.value})
+    caller = await caller_with(db, [P.USER_VIEW], Node.group(tree.west.id))
+    await assign(db, caller, await make_role(db, {*SENIOR_OPERATOR, P.USER_UPDATE.value, P.MEDIA_UPDATE.value} - {
+        P.USER_VIEW.value}), ROOT)
 
     refused = await client.patch(V1.path(UserRoutes.USER_BY_ID, user_id=target.id), headers=headers(caller),
                                  data={"user_type": "operator"})
@@ -275,10 +282,13 @@ async def test_a_refused_filter_answers_alike_for_an_unknown_id(client, db, head
 
 
 @pytest.mark.parametrize("path", [USERS, SEARCH_USERS])
-async def test_a_user_view_holder_without_scope_group_view_names_no_unit(client, db, headers, tree, path):
-    """user.view at the post is no sight of the brigade above it: GET /brigades/{id} would not show it either"""
+async def test_a_user_view_holder_filters_by_the_units_above_its_post(client, db, headers, tree, path):
+    """The user records already name them; the rule of GET /brigades/{id} itself does not change"""
     caller = await caller_with(db, [P.USER_VIEW], Node.post(tree.c.id))
-    problem(await client.get(path, headers=headers(caller), params={"brigade_id": tree.bravo.id}), 403,
+    for field, unit in (("brigade_id", tree.bravo), ("corps_id", tree.east)):
+        response = await client.get(path, headers=headers(caller), params={field: unit.id})
+        assert response.status_code == 200, response.text
+    problem(await client.get(path, headers=headers(caller), params={"brigade_id": tree.kharkiv.id}), 403,
             "permission_required_for_action")
 
 

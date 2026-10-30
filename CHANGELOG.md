@@ -90,16 +90,17 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - Node names of other units no longer show in assignment answers (finding L10). `GET /users/{user_id}/assignments`:
   an assignment at a node the caller cannot see stays in the list with the node hidden, `scope` null and the new
   required boolean `node_visible` false; `id`, `role` and `created_at` stay. A group is visible inside a subtree where
-  the caller holds `scope_group.view`, a post where `post.view` is in effect, the root always
-  (`AccessControlService.node_visible`, also the rule of `check_visible`). The caller's own assignments are in full,
+  the caller holds `scope_group.view` or on one path with a node where it holds `user.view` (the user records name those
+  units anyway), a post where `post.view` is in effect, the root always (`AccessControlService.node_named`; reading a
+  group itself stays `node_visible`, `scope_group.view`). The caller's own assignments are in full,
   there and in the login, refresh and `/auth/me` answers. `POST /users/{user_id}/assignments` answers by the same rule
   (a caller may assign at a node it cannot see), and so do the items of 409 `user_type_ceiling_exceeded`. The web
   handles `scope: null` and needs a text for a hidden entry.
 - `GET /users/` and `/search/users`: `brigade_id` and `corps_id` name a group the caller can see, with every
   `membership`, else 403 `permission_required_for_action` (`permission` `scope_group.view`, `action` `list_users` /
   `search_users`), the same for an unknown id. Before, any id was accepted and told which visible users are attached
-  to that node. A caller with `user.view` at a post and no `scope_group.view` at the brigade above it gets this 403
-  too (`GET /brigades/{id}` shows it nothing either). With `scope_group.view` at the root an unknown id, 0 or a
+  to that node. A caller with `user.view` at a post keeps the filter on the brigade and corps above that post; a
+  brigade beside it answers this 403. With `scope_group.view` at the root an unknown id, 0 or a
   negative id still gives an empty list. `post_id` keeps its 403 `post_access_denied`.
 - Contract: `AssignmentResponse` has `node_visible`, its `scope` is nullable; the same in `ExcessAssignment`; the
   descriptions of `list_users`, `search_users`, `list_user_assignments`, `create_user_assignment`, `update_user` and of

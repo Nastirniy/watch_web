@@ -106,3 +106,12 @@ async def test_the_stream_route_keeps_serving_a_matroska_file(client, db, header
     else:
         assert response.content == b"matroska bytes"
         assert response.headers["content-type"].startswith(ContentType.VIDEO_MATROSKA.value)
+
+
+@pytest.mark.asyncio
+async def test_a_webm_file_that_kept_the_old_sniffed_name_stays_playable(client, db, headers):
+    """WebM is a subset of Matroska: an old row of a .webm file may hold video/x-matroska (migration 032 leaves it)"""
+    user, observation = await _setup(db)
+    media = await make_media(db, observation, user, media_type="video", file_extension=".webm",
+                             mime_type=ContentType.VIDEO_X_MATROSKA.value)
+    assert (await _info(client, media.id, headers(user)))["playback_supported"] is True

@@ -142,6 +142,16 @@ class AuthContext:
             for grant in self.grants
         )
 
+    def on_path(self, permission: Union[Permissions, str], node: Node) -> bool:
+        """The permission is held on one path with the node: at it, above it (covers) or below it. A grant at an
+        archived node counts nowhere."""
+        name = permission_name(permission)
+        return any(
+            name in grant.permissions and not self.tree.is_archived(grant.node)
+            and (self.tree.contains(grant.node, node) or self.tree.contains(node, grant.node))
+            for grant in self.grants
+        )
+
     def groups_with(self, permission: Union[Permissions, str]) -> Optional[FrozenSet[int]]:
         """Groups inside a subtree where the permission is held (covers), archived ones included. None means every
         group (held at the root)."""

@@ -487,8 +487,8 @@ async def assignment_views(session: AsyncSession, user_id: int,
 
 def as_seen_by(auth: AuthContext, user_id: int, views: Iterable[AssignmentView]) -> List[AssignmentView]:
     """The assignments of the user as the caller may read them: the node hidden where the caller cannot see it
-    (AccessControlService.node_visible), the caller's own in full"""
+    (AccessControlService.node_named), the caller's own in full"""
     if user_id == auth.user.id:
         return list(views)
-    return [view if AccessControlService.node_visible(auth, Node(view.scope.kind, view.scope.id))
+    return [view if AccessControlService.node_named(auth, Node(view.scope.kind, view.scope.id))
             else replace(view, scope=None, node_visible=False) for view in views]
