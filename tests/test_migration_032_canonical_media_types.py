@@ -35,8 +35,9 @@ MEDIA = {
     9: (("audio/mp3", "audio/mp3", ".mp3"), ("audio/mpeg", "audio/mpeg")),
     10: (("audio/x-wavpack", "audio/x-wavpack", ".wv"), ("audio/x-wavpack", "audio/x-wavpack")),   # not a prefix match
     11: (("audio/x-m4a", 'audio/x-m4a; codecs="mp4a.40.2"', ".m4a"), ("audio/mp4", 'audio/mp4; codecs="mp4a.40.2"')),
-    # an alias on a file of another format: the extension does not belong to the target format, the row stays
-    12: (("video/x-matroska", 'video/x-matroska; codecs="vp9"', ".webm"), ("video/x-matroska", 'video/x-matroska; codecs="vp9"')),
+    # an alias on a file of another format: the extension does not belong to the target format, 032 leaves the row and
+    # 036 makes it what it is (these tests migrate to the head)
+    12: (("video/x-matroska", 'video/x-matroska; codecs="vp9"', ".webm"), ("video/webm", 'video/webm; codecs="vp9"')),
     13: (("application/ogg", 'application/ogg; codecs="theora"', ".ogv"), ("application/ogg", 'application/ogg; codecs="theora"')),
     14: (("image/pjpeg", None, "jpeg"), ("image/jpeg", None)),             # an older row: extension without the dot
     FAR_ID: (("video/x-m4v", 'video/x-m4v; codecs="avc1"', ".m4v"), ("video/mp4", 'video/mp4; codecs="avc1"')),
