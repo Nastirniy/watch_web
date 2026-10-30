@@ -142,8 +142,8 @@ Thumbnails and previews are rendered on demand by [imgproxy](https://imgproxy.ne
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MYSETTINGS_MOVES__UPLOAD_STALE_SECONDS` | `300` | While a move waits, an upload that received no bytes for this long is cancelled (minimum 60) |
-| `MYSETTINGS_MOVES__CHECK_INTERVAL_SECONDS` | `15` | How often the media worker looks at the waiting moves; also the `Retry-After` of the answers 202 and 409 `move_pending` |
+| `MYSETTINGS_MOVES__UPLOAD_STALE_SECONDS` | `300` | An upload that received no bytes for this long no longer keeps a move waiting; it is left alone and may go on after the move (minimum 60) |
+| `MYSETTINGS_MOVES__CHECK_INTERVAL_SECONDS` | `15` | How often the media worker looks at the waiting moves (a backup: requests that meet a move look too); also the `Retry-After` of the answers 202 and 409 `move_pending` |
 
 ### Video posters (media worker)
 

@@ -421,21 +421,50 @@ mover's own rights only.
 
 ## A move during work
 
-Three requests change where data sits in the scope tree: `PUT /posts/{id}` with a new `group_id`,
-`PATCH /scope-groups/{id}` with a new `parent_id`, `PATCH /brigades/{id}` with a new `corps_id`. The moved subtree is the
-node and everything below it; "uploads below it" are the resumable upload sessions (`open` or `completing`) of its posts.
+Three requests change where data sits in the scope tree: `PUT /posts/{id}` with `group_id`,
+`PATCH /scope-groups/{id}` with `parent_id`, `PATCH /brigades/{id}` with `corps_id`. The moved subtree is the node and
+everything below it; "uploads below it" are the resumable upload sessions (`open` or `completing`) of its posts.
 
-| Situation | The move answers | What happens |
+**A move states where it thinks the node is.** Every move carries the value the client read: `expected_group_id`,
+`expected_parent_id`, `expected_corps_id`. Presence counts: `null` is a value (directly under the root), a field left
+out is none. So two administrators, or a form left open, never overwrite each other. Checked under the lock of the
+row, `force` or not, in this order:
+
+| The request | Answer | What happens |
+|-------------|--------|--------------|
+| The node already sits at the target and the expected value is another one | 200 with the record and `already_there: true` | The move has happened (another administrator, a retry). Nothing is written, no audit row, and the other fields sent are not applied either: show the record, ask the user again if they changed something |
+| The target differs and the expected value is missing or not the current one | 409 `move_conflict` with the current place | Nothing moves. Read the record, tell the user, let them decide again |
+| The target is the current value, with no expected value or with that same value | 200, `already_there: false` | No move was asked: an ordinary edit, the other fields apply |
+| The target differs and the expected value is the current one | One of the answers below | The move goes on |
+
+`already_there` is on the answer of these three routes only, and it is `false` on every ordinary answer.
+
+**A client that sends the whole record must send the expected value it read.** Sending the whole record without one
+works for as long as the place is unchanged, because the current value sent back is an ordinary edit. The moment the node
+has moved, an old form names the old place: that answers 409 `move_conflict`, and neither the place nor the other fields
+of the form are changed. Before this rule such a save silently moved the node back.
+
+`move_conflict` says where the node is in `current_place`: `root` (directly under the root), `group` with
+`current_group_id`, or `hidden`, a group outside the caller's `scope_group.view`, whose id stays out of the answer (read
+the record, its route decides what it shows). A value of `expected_*` sent without the field it belongs to is not read.
+
+| Situation, once the move goes on | The move answers | What happens |
 |-----------|------------------|--------------|
-| No upload below the node | 200, the usual body | It runs at once, as always |
-| Uploads below it | **202**, a move operation, `Location: /api/v1/moves/{id}`, `Retry-After` | Nothing moves yet; the move waits |
-| Uploads below it, `force: true` in the body | 200, the usual body | It runs at once; the uploads continue at the new place |
-| Its subtree overlaps a waiting move's (the node, a group above it, a post below it), `force` or not | 409 `move_pending` with `move_id`, `Retry-After` | Nothing happens; to force it, cancel the waiting move first |
+| No upload holding it below the node | 200, the usual body | It runs at once, as always; a quiet upload below it stays and goes on after the move |
+| Uploads holding it below the node | **202**, a move operation, `Location: /api/v1/moves/{id}`, `Retry-After` | Nothing moves yet; the move waits |
+| The same node to the same target while that move waits, from anyone allowed to make it | **202** with that same move | Nothing changes; it stays the first requester's move |
+| Uploads holding it, `force: true` in the body | 200, the usual body | It runs at once; the uploads continue at the new place |
+| A node on the way is busy (below), `force` or not | 409 `move_pending` with `move_id`, `Retry-After` | Nothing happens; a move forced over a waiting one needs that one cancelled first, a repeat with `force` included |
 | It would have to wait and the request changes anything else | 422 `move_not_alone` with `changed_fields` | Nothing happens |
 
+**A node on the way is busy.** While a move waits, these all answer 409 `move_pending`, `force` included: a move of its
+node, of anything below it or of a group above it; a move of anything into its subtree; a move of its target or of a
+group that holds the target. So nothing joins a node that waits, two moves never wait to go below each other, and the
+target stays where the requester saw it. Everything else moves as usual, another node to the same target included.
+
 **Send a move as its own request.** A waiting operation never holds half an update, so a rename in the same `PATCH` is
-refused when the move would wait. A field sent with its current value changes nothing and does not count (a client
-that sends the whole record is fine); when the move does not wait, a request with other fields works as before.
+refused when the move would wait. A field sent with its current value changes nothing and does not count; when the move
+does not wait, a request with other fields works as before.
 
 While a move waits:
 
@@ -444,25 +473,30 @@ While a move waits:
   waiting; try again after `Retry-After` seconds.
 - Uploads already running continue: chunks and `complete` work as usual.
 - Everything else (observations, bands, users, reads, a rename of the post) is not blocked.
-- An upload holds the move while it receives bytes. One that received none for `moves.upload_stale_seconds` (300 by
-  default) is cancelled at the media worker's next look (every `moves.check_interval_seconds`, 15 by default): status
-  `aborted`, `error` `upload_cancelled_by_move`, the bytes are deleted, its next chunk or `complete` answers 409
-  `upload_cancelled_by_move`. This also ends a fully received upload whose `complete` never came. Open a new session
-  after the move.
-- When nothing holds it any more (uploads finished, aborted, archived, expired or cancelled as above) the move runs:
-  at once at the end of the last upload, otherwise at the worker's next look.
+- An upload holds the move while it receives bytes, a `complete` for the same time after it began. One that received
+  none for `moves.upload_stale_seconds` (300 by default) no longer holds it, and that is all that happens to it: the
+  upload is **not cancelled**, its bytes stay, it may go on and complete at the post's new place, and
+  `storage.upload.session_ttl_hours` (24) removes one that was abandoned. Its next chunk simply goes on (and while the
+  move still waits, it holds the move again).
+- When nothing holds the move any more it runs: at once at the end of the last upload, otherwise when the first request
+  meets it (a refused upload, a refused move, `GET /moves/{id}`), otherwise at the media worker's next look (every
+  `moves.check_interval_seconds`, 15 by default). All of them go through one claim, so a move runs once. The upload that
+  met a due move goes on, asked again for its rights at the post's new place.
 - The permission checks run again at that moment, for the user who asked: `post.*` and `scope_group.*` at both ends,
   the rule on what the destination adds (`grant_exceeds_own_permissions`), the target (archived or gone), the tree rules
-  and the name. A refused move ends `failed` with the problem code in `error`, and nothing moves.
+  and the name. A refused move ends `failed` with the problem code in `error`, nothing moves, and no upload is touched.
 
 `GET /moves/{id}` follows it: `status` (`waiting`, `done`, `cancelled`, `failed`), `node_kind` (`post`, `group`),
-`node_id`, `target_group_id` (null: directly under the root), `requested_by`, `requested_at`, `finished_at`, `force`,
-`error`, `waiting_seconds`, and while it waits `uploads`: per upload `upload_id`, `post_id`, `received_bytes`,
-`total_bytes`, `last_chunk_at` (null: no chunk yet), `holding` (false: about to be cancelled). Enough for "waiting for
-3 uploads, 120 MB left, 2 min 10 s". It needs the permissions of a move in effect at the node (`post.view` and
+`node_id`, `target_group_id` (null: directly under the root, or hidden), `target_visible`, `requested_by`,
+`requested_at`, `finished_at`, `force`, `error`, `waiting_seconds`, and while it waits `uploads`: per upload `upload_id`,
+`post_id`, `received_bytes`, `total_bytes`, `last_chunk_at` (null: no chunk yet), `holding` (false: it no longer keeps
+the move waiting). Enough for "waiting for 3 uploads, 120 MB left, 2 min 10 s". A move nothing holds any more runs
+before this answers, so polling it is enough. It needs the permissions of a move in effect at the node (`post.view` and
 `post.update` for a post, plus `scope_group.view` and `scope_group.update` for a group). The user who asked may always
-read their own move, without `uploads` once they lost those. Anyone else, and an unknown id, gets 404 `move_not_found`:
-an operator refused with `move_pending` cannot poll the move and simply tries again after `Retry-After`.
+read their own move, without `uploads` once they lost those. The target is shown to the user who asked and to readers
+who see that group: for anyone else `target_group_id` is null and `target_visible` false, which is how to tell it from a
+move to the root. Anyone else, and an unknown id, gets 404 `move_not_found`: an operator refused with `move_pending`
+cannot poll the move and simply tries again after `Retry-After`, which runs the move too when it is due.
 
 `POST /moves/{id}/cancel`: the user who asked, or anyone who could make the same move (else 403
 `permission_required_for_action`). The block lifts at once; running uploads are untouched. A move that has ended: 409
@@ -476,13 +510,16 @@ or the user is moved):
 - **The session and its tokens stay valid.** A move ends no session, and neither does a new home post. Rights at the
   new place apply from the next request, because grants are read per request. Nothing needs a new login (a change of
   user type is what ends sessions, not a move).
-- **An upload keeps its `upload_id`.** The client goes on sending chunks and completes; the session has no token of
-  its own to renew. Every chunk and `complete` asks for `media.view` and `media.create` at the post where it sits now.
-- **The API pushes nothing.** The client learns of a move from an answer: 202 and 409 `move_pending` carry the move id.
-  A move that ran, forced or after waiting, shows only in later answers: a 403 on a post or a 404 on a group the user no
-  longer reaches, or a different `group_id` and unit in the post.
+- **An upload keeps its `upload_id`.** The client goes on sending chunks and completes, also after a pause long enough
+  for the move to run without it; the session has no token of its own to renew. Every chunk and `complete` asks for
+  `media.view` and `media.create` at the post where it sits now.
+- **The API pushes nothing.** The client learns of a move from an answer: 202 and 409 `move_pending` carry the move id,
+  409 `move_conflict` the place, 200 `already_there`. A move that ran, forced or after waiting, shows only in later
+  answers: a 403 on a post or a 404 on a group the user no longer reaches, or a different `group_id` and unit in the
+  post.
 - **What to refresh then:** `GET /auth/me` (permissions per post and group), `GET /scope-groups/tree`, the post and its
-  unit shown on the form, and the lists the client holds.
+  unit shown on the form, and the lists the client holds. A form open during a move holds the old place: after
+  `move_conflict` or `already_there` read the record and fill `expected_*` again.
 - **An upload refused at the new place cannot be saved by the client.** After a move that took the right away, chunks
   and `complete` answer 403 (`post_access_denied`, `post_write_denied`), abort too. The session stays `open` until it
   expires, or until the right comes back or someone with `media.manage_any` at the post finishes or aborts it; the

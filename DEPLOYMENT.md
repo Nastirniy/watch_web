@@ -441,9 +441,11 @@ the worker does (a long video can take minutes of one CPU core and reads the who
   never depend on storyboards. Every `upload.sweep_interval_seconds` the worker also queues videos that became
   eligible while it runs (e.g. a duration filled in by `media_tools probe-missing`).
 - `storyboard.enabled = false` stops claiming and the API answers `unsupported`; existing files stay.
-- Queued moves need the worker: every `moves.check_interval_seconds` it cancels uploads gone silent while a move waits
-  and runs a move nothing holds any more (API.md, "A move during work"). With the worker down a move still runs when
-  its last upload ends by itself, but a silent upload keeps it waiting and new uploads below it refused.
+- Queued moves do not depend on the worker. A move runs at the end of the last upload that held it, or when a request
+  meets it after nothing holds it any more (a refused upload, a refused move, `GET /moves/{id}`); every
+  `moves.check_interval_seconds` the worker does the same for a move nobody asks about (API.md, "A move during work"),
+  through the same claim. With the worker down a due move only waits for its next request; `/health` shows the count
+  and the age of the oldest (`moves.waiting`, `moves.oldest_waiting_seconds`).
 - Disk: a 10 x 10 sheet of 160 px tiles is roughly 100-200 KB; a two-hour recording (3 sheets) takes about 0.5 MB.
 - The sheets are served like thumbnails: signed URLs under `/media-images/` (imgproxy, nginx cache); no nginx change.
 

@@ -15,30 +15,56 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   yet. Without uploads the answer is 200 as before. `force: true` (new body field of the three requests) runs the move
   at once and the uploads continue. While a move waits, new uploads below the node (`POST /media/uploads`,
   `POST /media/upload`, `POST /media/nginx-upload`) answer 409 `move_pending`; chunks, completes and other writes go
-  on. An upload with no new bytes for `moves.upload_stale_seconds` is cancelled while a move waits (409
-  `upload_cancelled_by_move` on its next chunk or complete). The move runs at the end of the last upload, or at the
-  media worker's next look (every `moves.check_interval_seconds`), with the permission checks of that moment: refused,
-  it ends `failed` and nothing moves. New routes `GET /moves/{id}`, `POST /moves/{id}/cancel`. An archive of the node
-  cancels its waiting move; a restore cancels the waiting moves of the backup. API.md, "A move during work"; UPLOADS.md,
-  "While a move waits".
+  on. An upload with no new bytes for `moves.upload_stale_seconds`, or a `complete` silent for that time, stops holding
+  the move and is left alone: it is never cancelled, it goes on at the post's new place, and the session lifetime removes
+  an abandoned one. The move runs at the end of the last upload, when a request meets it after nothing holds it (a
+  refused upload, a refused move, `GET /moves/{id}`), or at the media worker's next look (every
+  `moves.check_interval_seconds`), with the permission checks of that moment: refused, it ends `failed` and nothing
+  moves. New routes `GET /moves/{id}`, `POST /moves/{id}/cancel`. An archive of the node cancels its waiting move; a
+  restore cancels the waiting moves of the backup. API.md, "A move during work"; UPLOADS.md, "While a move waits".
+- A move states where it thinks the node is: new body fields `expected_group_id` (`PUT /posts/{id}`),
+  `expected_parent_id` (`PATCH /scope-groups/{id}`), `expected_corps_id` (`PATCH /brigades/{id}`); presence counts, null
+  is a value. **Breaking for clients:** a request that changes the parent without the expected value, or with another
+  one, now answers 409 `move_conflict` (`current_place` `root`, `group` with `current_group_id`, or `hidden`), `force`
+  or not. A client that sends the whole record is refused once the node has moved, instead of moving it back. The node
+  already at the target with another expected value answers 200 with the record and `already_there: true`, nothing
+  written, no audit row. A target equal to the current value is an ordinary edit, with no expected value or with the
+  same one. The three routes now answer `PostUpdateResponse`, `ScopeGroupUpdateResponse`, `BrigadeUpdateResponse`: the
+  usual record plus `already_there`.
+- A repeat of a waiting move (same node, same target) answers 202 with that same move, from anyone allowed to make it. A
+  node on the way is busy: while a move waits, a move of its node, of anything below or above it, of anything into its
+  subtree, of its target or of a group holding the target answers 409 `move_pending`, `force` included.
+- `GET /moves/{id}`: `target_visible`; a reader who does not see the target group gets `target_group_id` null and
+  `target_visible` false. The user who asked always sees it.
+- `/health`: new part `moves` (`waiting`, `oldest_waiting_seconds`), counts only.
 - New settings `moves.upload_stale_seconds` (300) and `moves.check_interval_seconds` (15):
   `MYSETTINGS_MOVES__UPLOAD_STALE_SECONDS`, `MYSETTINGS_MOVES__CHECK_INTERVAL_SECONDS`.
-- Database: migration `035_queued_moves` creates `pending_moves` (the operations) and `move_locks` (one row, locked first
-  by every write that moves a node) and adds `upload_sessions.last_chunk_at` (DATETIME NULL, the last time bytes arrived;
-  sessions that have received bytes start from `last_activity_at`). The tables are in
-  `TABLES_OWNED_BY_LATER_REVISIONS`, every create is guarded, the downgrade drops all three.
-- Contract: new schemas `MoveResponse`, `MoveUploadResponse` and `force` in `PostUpdate`, `ScopeGroupUpdate`,
-  `BrigadeUpdate`; the three move operations declare the 202, `move_pending` and `move_not_alone`; the three upload
-  routes declare `move_pending`; the chunk and complete routes `upload_cancelled_by_move`. Web translations: new error
-  codes `move_not_found`, `move_not_waiting`, `move_pending`, `move_not_alone`, `upload_cancelled_by_move`; new audit
-  events `move.requested`, `move.completed`, `move.cancelled`, `move.failed` (params `node_kind`, `cause`,
-  `failure_code`, API.md "Audit log"); `database.restore` and `database.undo_restore` have the optional param
-  `cancelled_move_count`.
+- Database: migration `035_queued_moves` creates `pending_moves` (the operations; index `ix_pending_moves_waiting` for
+  the reads, `ix_pending_moves_node` for the locking read of an archive) and `move_locks` (one row, locked first by every
+  write that moves a node) and adds `upload_sessions.last_chunk_at` (DATETIME NULL, the last time bytes arrived; sessions
+  that have received bytes start from `last_activity_at`). The tables are in `TABLES_OWNED_BY_LATER_REVISIONS`, every
+  create is guarded, the downgrade drops all three.
+- Database: migration `036_webm_media_types`: `media_files` rows of `.webm` files holding `video/x-matroska` become
+  `video/webm`, with the base of `playback_type` (frozen map `migrations/support/media_types_v2.py`, batches of 10,000
+  ids; every other row keeps its data; downgrade is a no-op: `video/webm` stays valid and a row no longer tells what it
+  held).
+- Contract: new schemas `MoveResponse`, `MoveUploadResponse`, `PostUpdateResponse`, `ScopeGroupUpdateResponse`,
+  `BrigadeUpdateResponse`; `force` and `expected_*` in `PostUpdate`, `ScopeGroupUpdate`, `BrigadeUpdate`; the three move
+  operations declare the 202, `move_pending`, `move_conflict` and `move_not_alone`; the three upload routes declare
+  `move_pending`. Web translations: new error codes `move_not_found`, `move_not_waiting`, `move_pending`, `move_conflict`
+  (values of `current_place`: `root`, `group`, `hidden`), `move_not_alone`; new audit events `move.requested`,
+  `move.completed`, `move.cancelled`, `move.failed` (params `node_kind`, `cause`, `failure_code`, API.md "Audit log");
+  `database.restore` and `database.undo_restore` have the optional param `cancelled_move_count`.
 
 ### Changed
 
 - A move of a group or brigade now locks every post below it and the moves lock (`services/moves.py`): a new upload and a
-  move at the same moment always end in a defined state.
+  move at the same moment always end in a defined state. Only a value that differs from the current one takes the moves
+  lock: a request that sends the current `group_id`, `parent_id` or `corps_id` is an edit like any other.
+- `POST /scope-groups` locks the parent first, as `POST /posts` and `POST /brigades` do: a create under a parent being
+  renamed or moved used to answer 500 (error 1020, on main too; error 1213 with a move). A move and a unit archive lock
+  groups and posts by primary key in short statements, then one statement per parent through its index: over a list of
+  parents MariaDB scanned every row.
 - `POST /posts/{id}/archive`, `/scope-groups/{id}/archive`, `/brigades/{id}/archive`, `/corps/{id}/archive`: the pending
   upload sessions are locked through the parent's index, never the status index (a locking read there deadlocked with
   an abort, error 1213).
