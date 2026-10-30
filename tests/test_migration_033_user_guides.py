@@ -74,7 +74,7 @@ def _insert_guide_with_file(db_file: Path) -> None:
 def test_033_is_in_the_chain():
     scripts = ScriptDirectory(str(PROJECT_ROOT / "app" / "backend" / "migrations"))
     assert scripts.get_revision(REVISION).down_revision == PREVIOUS
-    assert HEAD == REVISION
+    assert scripts.get_revision(HEAD) is not None
 
 
 def test_002_leaves_the_tables_to_033():

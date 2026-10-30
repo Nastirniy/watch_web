@@ -301,6 +301,9 @@ class SessionRevokeCause(str, Enum):
     CERTIFICATE_REVOKED = "certificate_revoked"  # the certificate of the session is no active row of the user
     # The database was restored from a backup (cli/db_backup.py): the sessions of the backup do not come back
     DATABASE_RESTORED = "database_restored"
+    # A used refresh token was presented again (RFC 9700 section 4.14): after the grace window, an older one, or with
+    # another client certificate. Someone holds a copy of the session's tokens
+    REFRESH_TOKEN_REUSED = "refresh_token_reused"
 
 
 class ExportJobType(Enum):

@@ -13,7 +13,11 @@ that certificate must still be an active certificate of the user
 (AuthService.end_session_of_revoked_certificate).
 
 A refresh token works once: the session stores the jti of the current one (refresh_jti) and every refresh
-replaces it (claim_refresh), so a copy of an older token refreshes nothing.
+replaces it (claim_refresh), so a copy of an older token refreshes nothing. A used token presented again ends the
+session (RFC 9700 section 4.14, refresh_reuse): someone holds a copy of its tokens, and which of the two holders is
+the owner nobody can tell. The one exception is the immediately previous token within
+security.refresh_reuse_grace_seconds of its rotation (two tabs refreshing at the same moment): refused, the session
+stays.
 """
 import secrets
 from dataclasses import dataclass
@@ -229,9 +233,40 @@ def new_refresh_jti() -> str:
     return secrets.token_urlsafe(32)
 
 
+def refresh_reuse_grace() -> timedelta:
+    return timedelta(seconds=settings.security.refresh_reuse_grace_seconds)
+
+
+class RefreshReuse(Enum):
+    """What a refresh token that is not the session's current one is (refresh_reuse)"""
+    RACED = "raced"          # the previous token within the grace window: another tab refreshed first
+    REUSED = "reused"        # any other used token of the session: the session ends
+    UNKNOWN = "unknown"      # the session records no previous token (from before 034): answered as before
+
+
+def refresh_reuse(row: UserSession, presented_jti: str, now: Optional[datetime] = None) -> RefreshReuse:
+    """Tell a lost race from a reuse, for a refresh token of the session (signed by us, its sid) whose claim
+    failed.
+
+    RACED: the token the last refresh retired (previous_refresh_jti), presented less than
+    security.refresh_reuse_grace_seconds after that refresh (refresh_rotated_at). REUSED: that token later, or any
+    other token of the session (an older one). UNKNOWN: the session records no previous token, a session from
+    before migration 034 that has not refreshed since, or the first refresh of a session from before 025 (any of
+    its tokens refreshed it then, so an older one tells nothing): the refresh is refused and the session stays, as
+    before 034."""
+    if row.previous_refresh_jti is None or row.refresh_rotated_at is None or presented_jti == row.refresh_jti:
+        return RefreshReuse.UNKNOWN
+    now = now or _now()
+    if presented_jti == row.previous_refresh_jti and now - utc(row.refresh_rotated_at) < refresh_reuse_grace():
+        return RefreshReuse.RACED
+    return RefreshReuse.REUSED
+
+
 async def claim_refresh(session: AsyncSession, session_id: str, user_id: int, presented_jti: str) -> Optional[str]:
     """Retire the refresh token presented and record the id of the next one: that id, or None when the presented
-    token is not the session's current one (used already, or the session is not the user's).
+    token is not the session's current one (used already, or the session is not the user's). The retired id goes to
+    previous_refresh_jti and the time to refresh_rotated_at (refresh_reuse); a session from before 025 (no
+    refresh_jti) records no previous id, since any of its tokens refreshed it.
 
     One conditional UPDATE, the first change of the refresh transaction (after the shared user lock the caller
     takes first, begin_session_write; a locking read opens no snapshot): of two refreshes with the same token
@@ -249,7 +284,13 @@ async def claim_refresh(session: AsyncSession, session_id: str, user_id: int, pr
             UserSession.user_id == user_id,
             or_(UserSession.refresh_jti == presented_jti, UserSession.refresh_jti.is_(None)),
         )
-        .values(refresh_jti=next_jti)
+        # In this order: MySQL and MariaDB assign left to right, so previous_refresh_jti takes refresh_jti as it was
+        # (SQLite reads the old row whatever the order)
+        .ordered_values(
+            (UserSession.previous_refresh_jti, UserSession.refresh_jti),
+            (UserSession.refresh_jti, next_jti),
+            (UserSession.refresh_rotated_at, _now()),
+        )
     )
     return next_jti if result.rowcount == 1 else None
 

@@ -44,6 +44,9 @@ class SecurityConfig(BaseModel):
     jwt_leeway_seconds: int = 10
     online_threshold_seconds: int = 300  # user is online when a session was touched within this window
     activity_touch_interval_seconds: int = 60  # sessions are touched at most this often
+    # The previous refresh token presented again this soon after its rotation is refused without ending the session
+    # (two tabs refreshing at once); any other reuse of a used refresh token ends it (auth/sessions.py)
+    refresh_reuse_grace_seconds: int = Field(default=30, ge=0)
 
 
 class ServerConfig(BaseModel):

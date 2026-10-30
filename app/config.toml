@@ -24,6 +24,7 @@ session_max_hours = 0               # optional hard limit since the login; 0: an
 jwt_leeway_seconds = 10
 online_threshold_seconds = 300
 activity_touch_interval_seconds = 60
+refresh_reuse_grace_seconds = 30    # the previous refresh token again this soon after a refresh: refused, the session stays
 
 [server]
 host = "127.0.0.1"

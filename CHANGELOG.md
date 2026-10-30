@@ -5,6 +5,29 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Owner decisions 2026-10-30
+
+### Changed
+
+- `POST /auth/refresh`: a used refresh token presented again ends its session (RFC 9700 section 4.14). The token
+  the last refresh of the session replaced, presented within `security.refresh_reuse_grace_seconds` (new setting,
+  default 30, `MYSETTINGS_SECURITY__REFRESH_REUSE_GRACE_SECONDS`) of that refresh, still answers 401
+  `invalid_refresh_token` and the session stays (two tabs refreshing at once: one 200, one 401, the winner's tokens
+  work). Any other reuse (that token later, or an older token of the session) answers 401 with the new code
+  `refresh_token_reused` and ends the session in the same transaction: `end_reason` `revoked`, new `revoke_cause`
+  `refresh_token_reused` (`SessionRevokeCause`), an audit row `session.end` with that `cause`, `ended_session_id`
+  and the client's address. Every token of the session answers `session_expired` from then on. A used token
+  presented with another client certificate than the session's still answers `token_certificate_mismatch` and now
+  ends the session as well (`refresh_token_reused`), whatever the window; the current token with another
+  certificate changes nothing, as before. A session from before this change that has not refreshed since records
+  no previous token: a used token answers `invalid_refresh_token` and the session stays, as before.
+- Database: migration `034_session_refresh_reuse` adds `user_sessions.previous_refresh_jti` (VARCHAR(64) NULL) and
+  `user_sessions.refresh_rotated_at` (DATETIME NULL), written by every refresh in the claim's UPDATE
+  (`auth/sessions.py` `claim_refresh`); each is added only where it is missing, the downgrade drops both.
+- Contract: `refresh_token` declares `refresh_token_reused` (new schema `RefreshTokenReusedProblem`) and describes
+  the rule; `SessionRevokeCause` has the value `refresh_token_reused` (web translations: one new error code, one new
+  revoke cause).
+
 ## Owner decisions 2026-10-29
 
 ### Fixed

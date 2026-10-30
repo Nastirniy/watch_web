@@ -63,6 +63,11 @@ class UserSession(SQLModel, table=True):
     # jti of the one refresh token that may refresh the session; every refresh replaces it (auth/sessions.py,
     # claim_refresh). Empty only for sessions opened before migration 025: their first refresh sets it.
     refresh_jti: Optional[str] = Field(default=None, max_length=64)
+    # The token before it and when the last refresh replaced it (claim_refresh, migration 034): a used token presented
+    # again ends the session, except this one within security.refresh_reuse_grace_seconds of the rotation
+    # (auth/sessions.py refresh_reuse). Empty for a session that has not refreshed since 034.
+    previous_refresh_jti: Optional[str] = Field(default=None, max_length=64)
+    refresh_rotated_at: Optional[datetime] = Field(default=None)
     # Set when the server knows the session ended. The state (online / idle / ended) is computed when the row is
     # read (auth/sessions.py): a session past expires_at or its idle timeout is ended even before these are set.
     ended_at: Optional[datetime] = Field(default=None, index=True)

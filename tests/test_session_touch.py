@@ -225,9 +225,9 @@ async def test_refresh_takes_a_shared_lock_on_its_user_first(client, db, engine)
     finally:
         stop()
     assert response.status_code == 200, response.text
-    write = _write_of(seen, "UPDATE user_sessions SET refresh_jti")
+    write = _write_of(seen, "UPDATE user_sessions SET previous_refresh_jti=user_sessions.refresh_jti, refresh_jti")
     assert write[0].startswith("SELECT users.id FROM users WHERE users.id = ?"), write
-    assert write[1].startswith("UPDATE user_sessions SET refresh_jti"), write
+    assert write[1].startswith("UPDATE user_sessions SET previous_refresh_jti=user_sessions.refresh_jti, refresh_jti"), write
 
 
 async def test_a_refresh_after_an_admin_end_is_session_expired(client, db, headers):
@@ -586,7 +586,7 @@ async def test_a_refresh_of_an_inactive_user_ends_its_sessions_outside_its_claim
     finally:
         stop()
     assert response.status_code == 401 and response.json()["code"] == "account_deleted", response.text
-    claim = _transaction_of(seen, "UPDATE user_sessions SET refresh_jti")
+    claim = _transaction_of(seen, "UPDATE user_sessions SET previous_refresh_jti=user_sessions.refresh_jti, refresh_jti")
     assert claim[-1] == "ROLLBACK" and not any(s.startswith("UPDATE user_sessions SET ended_at") for s in claim), claim
     write = _transaction_of(seen, "UPDATE user_sessions SET ended_at")
     assert write[0].startswith("SELECT users.id, ") and "FROM users WHERE users.id = ?" in write[0], write

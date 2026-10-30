@@ -123,8 +123,33 @@ async def test_session_is_bound_to_its_certificate(client, db, headers, producti
     assert refresh.status_code == 200, refresh.text
     replay = await client.post(REFRESH, json={"refresh_token": tokens["refresh_token"]}, headers=nginx_headers(own))
     assert replay.status_code == 401 and replay.json()["code"] == "invalid_refresh_token"
-    # neither a refused attempt nor a replay ends the session: the owner keeps working
+    # neither a refused attempt nor a replay within the grace window ends the session: the owner keeps working
     assert (await client.get(ME, headers={**nginx_headers(own), **bearer})).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_a_used_refresh_token_with_another_certificate_ends_the_session(client, db, headers, production,
+                                                                              session_maker):
+    """A used refresh token presented with another client certificate is a stolen copy: the answer stays
+    token_certificate_mismatch and the session ends (refresh_token_reused), whatever the grace window"""
+    own = make_certificate("cn-reused", 0x6666)
+    other = make_certificate("cn-thief", 0x7777)
+    await _create_user(client, db, headers, "reused", own)
+    await _create_user(client, db, headers, "thief", other)
+    tokens = await _tokens(client, own)
+    refreshed = await client.post(REFRESH, json={"refresh_token": tokens["refresh_token"]}, headers=nginx_headers(own))
+    assert refreshed.status_code == 200, refreshed.text
+
+    stolen = await client.post(REFRESH, json={"refresh_token": tokens["refresh_token"]}, headers=nginx_headers(other))
+    assert stolen.status_code == 401 and stolen.json()["code"] == "token_certificate_mismatch", stolen.text
+    sid = refreshed.json()["access_token"]
+    from jose import jwt
+    async with session_maker() as fresh:
+        stored = (await fresh.exec(select(UserSession).where(
+            UserSession.id == jwt.get_unverified_claims(sid)["sid"]))).one()
+    assert (stored.end_reason, stored.revoke_cause) == ("revoked", "refresh_token_reused")
+    me = await client.get(ME, headers={**nginx_headers(own), "Authorization": f"Bearer {sid}"})
+    assert me.status_code == 401 and me.json()["code"] == "session_expired"
 
 
 # ------------------------------------------------------------------ the subject DN as nginx writes it

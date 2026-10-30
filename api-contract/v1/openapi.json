@@ -173,7 +173,7 @@
           "AUTHENTICATION"
         ],
         "summary": "Refresh Token",
-        "description": "Refresh access token using refresh token. A refresh token works once: the answer carries the next one, and\nthe one presented is refused from then on (invalid_refresh_token; the session goes on with the newest).",
+        "description": "Refresh the access token with the refresh token. A refresh token works once: the answer carries a new access\ntoken and the next refresh token, and the token presented is used from then on.\n\nA used refresh token presented again (RFC 9700 section 4.14, refresh token reuse):\n\n- the token the last refresh of the session replaced, less than `security.refresh_reuse_grace_seconds` (30)\n  after that refresh: `invalid_refresh_token`, the session stays. Two tabs that refreshed at the same moment with\n  the same token: one got the new tokens, the other keeps using them (exactly one 200, one 401).\n- any other used token of the session (that one later, or an older one): `refresh_token_reused`, the session\n  ends (`revoke_cause` `refresh_token_reused`, an audit row `session.end`). Every token of the session, the\n  newest included, answers `session_expired` from then on: log in again.\n- a used token presented with another client certificate than the session's: `token_certificate_mismatch`,\n  and the session ends as well (`refresh_token_reused`), whatever the window. The current token presented with\n  another certificate answers `token_certificate_mismatch` and changes nothing.\n- a session from before this rule that has not refreshed since (it records no previous token): a used token is\n  `invalid_refresh_token` and the session stays.\n\nKeep only the newest refresh token; a client that lost the answer of a refresh logs in again.",
         "operationId": "refresh_token",
         "requestBody": {
           "content": {
@@ -207,7 +207,7 @@
             }
           },
           "401": {
-            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `invalid_refresh_token`: Invalid refresh token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `invalid_refresh_token`: Invalid refresh token; `refresh_token_reused`: Refresh token used again; the session has ended; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -225,6 +225,9 @@
                       "$ref": "#/components/schemas/InvalidRefreshTokenProblem"
                     },
                     {
+                      "$ref": "#/components/schemas/RefreshTokenReusedProblem"
+                    },
+                    {
                       "$ref": "#/components/schemas/SessionExpiredProblem"
                     },
                     {
@@ -238,6 +241,7 @@
                       "account_deleted": "#/components/schemas/AccountDeletedProblem",
                       "account_not_found": "#/components/schemas/AccountNotFoundProblem",
                       "invalid_refresh_token": "#/components/schemas/InvalidRefreshTokenProblem",
+                      "refresh_token_reused": "#/components/schemas/RefreshTokenReusedProblem",
                       "session_expired": "#/components/schemas/SessionExpiredProblem",
                       "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
                     }
@@ -51857,6 +51861,69 @@
         ],
         "title": "RefreshRequest"
       },
+      "RefreshTokenReusedProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Refresh token used again; the session has ended",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 401,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Refresh token used again; the session has ended"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "refresh_token_reused",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "RefreshTokenReusedProblem",
+        "description": "Refresh token used again; the session has ended (HTTP 401). Problem type refresh_token_reused.",
+        "examples": [
+          {
+            "code": "refresh_token_reused",
+            "detail": "Refresh token used again; the session has ended",
+            "instance": "/api/v1/...",
+            "status": 401,
+            "title": "Refresh token used again; the session has ended",
+            "type": "https://example.org/problems/refresh_token_reused"
+          }
+        ]
+      },
       "ReportTooLargeProblem": {
         "properties": {
           "type": {
@@ -59505,7 +59572,8 @@
           "ended_by_admin",
           "user_type_changed",
           "certificate_revoked",
-          "database_restored"
+          "database_restored",
+          "refresh_token_reused"
         ],
         "title": "SessionRevokeCause",
         "description": "What made the server revoke a session; the account itself may stay as it is"

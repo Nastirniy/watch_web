@@ -10,7 +10,7 @@ Params named by an enum are typed str, never the enum: a value removed from the 
 that hold it into legacy.unknown. Their values (the web localises them; API.md, "Audit log", repeats this list):
 - cause (session.end): SessionRevokeCause (enums/general.py): account_deactivated, account_archived,
   certificate_changed (rows before 024 only), ended_by_admin, user_type_changed, certificate_revoked,
-  database_restored
+  database_restored, refresh_token_reused
 - reason (user_certificate.revoke): RevocationReason: unspecified, key_compromise, affiliation_changed, superseded,
   cessation_of_operation
 - role_kind (role.*): RoleKind: tree, system

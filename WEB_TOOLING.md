@@ -268,7 +268,9 @@ sendStreamToken(accessToken);
 
 Refresh tokens work once: `refreshAccessToken` must be single-flight across the app's tabs as well (one refresh at a
 time, the others wait for its tokens, e.g. with `navigator.locks.request`), or a second tab's refresh fails with
-`invalid_refresh_token`.
+`invalid_refresh_token`. Never retry with a refresh token that refreshed already: after
+`security.refresh_reuse_grace_seconds` (30) of that refresh, or with an older token, the API ends the whole session
+(`refresh_token_reused`, API.md "Authentication").
 
 On the first visit the worker controls the page only after a reload (`navigator.serviceWorker.controller` is
 `null` until then); where workers are unavailable (`registerStreamWorker` returns `null`), fetch the media with

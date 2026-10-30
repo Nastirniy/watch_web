@@ -66,6 +66,7 @@ Variables marked `[REQUIRED in prod]` have an insecure or wrong default and must
 | `MYSETTINGS_SECURITY__SESSION_IDLE_TIMEOUT_MINUTES` | `30` | A session ends after this long without a request; every request and refresh moves the end |
 | `MYSETTINGS_SECURITY__SESSION_MAX_HOURS` | `0` | Optional hard limit since the login, whatever the activity. `0`: an active session never ends by itself |
 | `MYSETTINGS_SECURITY__JWT_LEEWAY_SECONDS` | `10` | Clock skew tolerance for JWT validation |
+| `MYSETTINGS_SECURITY__REFRESH_REUSE_GRACE_SECONDS` | `30` | The refresh token a refresh replaced, presented again this soon after it, is refused without ending the session (two tabs refreshing at once); any other reuse of a used refresh token ends the session (`refresh_token_reused`). `0`: every reuse ends it |
 
 ---
 

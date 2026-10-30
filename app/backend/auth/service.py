@@ -482,33 +482,50 @@ class AuthService:
         bound_to = user_session.certificate_fingerprint_hash
         if not bound_to or await active_certificate(session, user.id, bound_to) is not None:
             return False
+        if await AuthService.revoke_session(session, user_session, user, SessionRevokeCause.CERTIFICATE_REVOKED,
+                                            begin=begin):
+            _logger.warning(f"Session bound to a certificate that is no longer active ended: user_id={user.id}")
+        return True
+
+    @staticmethod
+    async def revoke_session(session: AsyncSession, user_session: UserSession, user: User, cause: SessionRevokeCause,
+                             begin: bool = True, ip_address: Optional[str] = None,
+                             user_agent: Optional[str] = None, request_url: Optional[str] = None) -> bool:
+        """Revoke one live session of the user from its own request (a certificate no longer active, a refresh
+        token used again): True when this call ended it, False when another request of the session ended it first.
+
+        One conditional UPDATE (ended_at still empty), a write of its own beginning with the shared user lock
+        (sessions.begin_session_write: the user row before the session row, as for an administrator ending the
+        user's sessions) unless begin=False (the refresh began it with that lock and its claim): parallel requests
+        of the session end it once. The audit row (session.end with the cause) only when this call ended it; the
+        request's copy of the session shows the end. Committed here."""
         ended_at = datetime.now(timezone.utc)
         if begin:
             await session_lifetimes.begin_session_write(session, user.id)
         result = await session.exec(
             update(UserSession)
             .where(UserSession.id == user_session.id, UserSession.ended_at.is_(None))
-            .values(ended_at=ended_at, end_reason=SessionEndReason.REVOKED.value,
-                    revoke_cause=SessionRevokeCause.CERTIFICATE_REVOKED.value)
+            .values(ended_at=ended_at, end_reason=SessionEndReason.REVOKED.value, revoke_cause=cause.value)
             .execution_options(synchronize_session=False)
         )
         if not result.rowcount:          # another request of the session ended it first
             await session.commit()
-            return True
+            return False
         user_session.ended_at, user_session.end_reason = ended_at, SessionEndReason.REVOKED.value
-        user_session.revoke_cause = SessionRevokeCause.CERTIFICATE_REVOKED.value
+        user_session.revoke_cause = cause.value
         await create_audit_log(
             session,
             AuditEvent.SESSION_END,
-            params={"username": user.username, "cause": SessionRevokeCause.CERTIFICATE_REVOKED.value,
-                    "ended_session_id": user_session.id},
+            params={"username": user.username, "cause": cause.value, "ended_session_id": user_session.id},
             scope=home_scope(user),
             resource_id=user.id,
             user_id=user.id,
             session_id=user_session.id,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            request_url=request_url,
         )
         await session.commit()
-        _logger.warning(f"Session bound to a certificate that is no longer active ended: user_id={user.id}")
         return True
 
     @staticmethod

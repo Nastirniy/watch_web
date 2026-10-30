@@ -5,7 +5,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.database import get_session
 from app.backend.auth.service import AuthService
 from app.backend.auth.sessions import (
-    begin_session_write, certificate_matches, claim_refresh, live_clause, live_session, session_state, touch,
+    RefreshReuse, begin_session_write, certificate_matches, claim_refresh, live_clause, live_session, refresh_reuse,
+    session_state, touch,
 )
 from datetime import datetime, timezone
 from sqlmodel import select
@@ -17,9 +18,10 @@ from app.backend.auth.require import Require
 from app.backend.auth.route_access import route_access_map, routes_allowed_for
 from app.backend.enums.errors import AuthErrorCode, ErrorCode, RequiredPermissions
 from app.backend.models.user import User, UserSession
+from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.enums.routes import AuthRoutes
 from app.backend.api.versioning import PublishedVersion, request_version
-from app.backend.enums.general import AppEnvironment
+from app.backend.enums.general import AppEnvironment, SessionRevokeCause
 from app.backend.utils.logging_config import get_auth_logger
 from app.backend.config import settings
 from app.backend.auth.certificates import parse_cn
@@ -165,7 +167,8 @@ async def login(
     response_model=LoginResponse,
     responses=problems(
         AuthErrorCode.ACCOUNT_DEACTIVATED, AuthErrorCode.ACCOUNT_DELETED, AuthErrorCode.ACCOUNT_NOT_FOUND,
-        AuthErrorCode.INVALID_REFRESH_TOKEN, AuthErrorCode.SESSION_EXPIRED, AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH,
+        AuthErrorCode.INVALID_REFRESH_TOKEN, AuthErrorCode.REFRESH_TOKEN_REUSED, AuthErrorCode.SESSION_EXPIRED,
+        AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH,
     ),
 )
 async def refresh_token(
@@ -175,8 +178,24 @@ async def refresh_token(
         # Set by nginx from the verified client certificate (nginx-proxy.conf), never by the client
         x_ssl_client_fingerprint: Optional[str] = Header(None, include_in_schema=False),
 ):
-    """Refresh access token using refresh token. A refresh token works once: the answer carries the next one, and
-    the one presented is refused from then on (invalid_refresh_token; the session goes on with the newest)."""
+    """Refresh the access token with the refresh token. A refresh token works once: the answer carries a new access
+    token and the next refresh token, and the token presented is used from then on.
+
+    A used refresh token presented again (RFC 9700 section 4.14, refresh token reuse):
+
+    - the token the last refresh of the session replaced, less than `security.refresh_reuse_grace_seconds` (30)
+      after that refresh: `invalid_refresh_token`, the session stays. Two tabs that refreshed at the same moment with
+      the same token: one got the new tokens, the other keeps using them (exactly one 200, one 401).
+    - any other used token of the session (that one later, or an older one): `refresh_token_reused`, the session
+      ends (`revoke_cause` `refresh_token_reused`, an audit row `session.end`). Every token of the session, the
+      newest included, answers `session_expired` from then on: log in again.
+    - a used token presented with another client certificate than the session's: `token_certificate_mismatch`,
+      and the session ends as well (`refresh_token_reused`), whatever the window. The current token presented with
+      another certificate answers `token_certificate_mismatch` and changes nothing.
+    - a session from before this rule that has not refreshed since (it records no previous token): a used token is
+      `invalid_refresh_token` and the session stays.
+
+    Keep only the newest refresh token; a client that lost the answer of a refresh logs in again."""
     payload = AuthService.verify_token(refresh_request.refresh_token, "refresh")
     if not payload:
         raise ApiError(AuthErrorCode.INVALID_REFRESH_TOKEN)
@@ -236,12 +255,33 @@ async def refresh_token(
     # revocation, an expired certificate)
     if await AuthService.end_session_of_revoked_certificate(session, refresh_session, user, begin=False):
         raise ApiError(AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH)
+    # A used token presented again ends the session (RFC 9700 section 4.14) in this transaction: its claim changed
+    # nothing, and the write holds what every write to the user's sessions takes first, the shared user lock, and
+    # the session row (the claim's UPDATE locked it even though it matched nothing). A concurrent refresh of the
+    # session waits on that row and then finds the session ended; one of another session of the user locks only
+    # its own row (no deadlock, 1213), and nothing else changed the row after this transaction read it (no 1020)
+    reuse = refresh_reuse(refresh_session, presented_jti) if next_jti is None else None
+    client = {key: value for key, value in client_info(request).items() if key != "session_id"}
     if not await certificate_matches(refresh_session, x_ssl_client_fingerprint):
         _logger.warning(f"Refresh token presented with another client certificate: session_id={session_id}, user_id={user_id}")
+        if next_jti is not None:
+            raise ApiError(AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH)    # the current token: the claim rolls back
+        # A used token with another certificate is a stolen copy, whatever the grace window: the session ends
+        await AuthService.revoke_session(session, refresh_session, user, SessionRevokeCause.REFRESH_TOKEN_REUSED,
+                                         begin=False, **client)
+        _logger.warning(f"Session ended, a used refresh token came with another certificate: session_id={session_id}, "
+                        f"user_id={user_id}")
         raise ApiError(AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH)
+    if reuse is RefreshReuse.REUSED:
+        await AuthService.revoke_session(session, refresh_session, user, SessionRevokeCause.REFRESH_TOKEN_REUSED,
+                                         begin=False, **client)
+        _logger.warning(f"Session ended, a used refresh token was presented again: session_id={session_id}, "
+                        f"user_id={user_id}")
+        raise ApiError(AuthErrorCode.REFRESH_TOKEN_REUSED)
     if next_jti is None:
-        # A copy of a refresh token that refreshed already (or lost a concurrent refresh): the session stays live
-        _logger.warning(f"Refresh token used again: session_id={session_id}, user_id={user_id}")
+        # The previous token within the grace window (another tab refreshed first), or a session that records no
+        # previous token (from before migration 034): refused, the session stays live
+        _logger.warning(f"Refresh token used again ({reuse.value}): session_id={session_id}, user_id={user_id}")
         raise ApiError(AuthErrorCode.INVALID_REFRESH_TOKEN)
     # A refresh is activity: it moves the end of the session (never past the hard end, when one is set)
     touch(refresh_session)

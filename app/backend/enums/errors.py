@@ -141,6 +141,9 @@ class AuthErrorCode(ProblemType):
     # Also a refresh token sent as bearer: the client contract treats both as "get a new access token"
     INVALID_TOKEN = ("invalid_token", problem(401, "Invalid authentication token"))
     INVALID_REFRESH_TOKEN = ("invalid_refresh_token", problem(401, "Invalid refresh token"))
+    # A used refresh token presented again, outside the grace window of the previous one: the session ended
+    # (revoke_cause refresh_token_reused); the client logs in again
+    REFRESH_TOKEN_REUSED = ("refresh_token_reused", problem(401, "Refresh token used again; the session has ended"))
     CERTIFICATE_VERIFICATION_FAILED = ("certificate_verification_failed", problem(401, "Certificate verification failed"))
     CERTIFICATE_DATA_MISSING = ("certificate_data_missing", problem(401, "Invalid certificate data"))
     CERTIFICATE_NOT_RECOGNIZED = ("certificate_not_recognized", problem(401, "Certificate not recognized"))
