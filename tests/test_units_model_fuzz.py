@@ -24,7 +24,7 @@ from types import SimpleNamespace
 
 import openpyxl
 import pytest
-from httpx import ASGITransport, AsyncClient
+from httpx import ASGITransport
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
@@ -43,7 +43,7 @@ from app.backend.services.files.formats import invalidate_registry_cache, seed_m
 from app.main import fastapi_app
 from tests.conftest import _TestSession
 from app.backend.models.observation import Observation
-from tests.helpers import (assign, errors_are_problems, make_admin, make_dictionary, make_media, make_role, make_user,
+from tests.helpers import (FormClient, assign, errors_are_problems, make_admin, make_dictionary, make_media, make_role, make_user,
                            observation_payload)
 
 SEEDS = int(os.environ.get("FUZZ_SEEDS", "6"))
@@ -109,8 +109,8 @@ async def fresh_env():
         fastapi_app.dependency_overrides[get_session] = override
         transport = ASGITransport(app=fastapi_app, raise_app_exceptions=False)
         try:
-            async with AsyncClient(transport=transport, base_url="http://test",
-                                   event_hooks={"response": [errors_are_problems]}) as client:
+            async with FormClient(maker, transport=transport, base_url="http://test",
+                                  event_hooks={"response": [errors_are_problems]}) as client:
                 admin = await make_admin(db)
                 dictionary = await make_dictionary(db)
                 yield SimpleNamespace(db=db, client=client, headers=headers, admin=admin, dictionary=dictionary)

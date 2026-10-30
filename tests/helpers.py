@@ -1,6 +1,7 @@
 """Factories for test data. Every object is created directly in the database."""
 import hashlib
 import itertools
+import re
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Dict, Iterable, Optional
@@ -13,11 +14,13 @@ from cryptography.x509.oid import NameOID
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.backend.api.v1 import V1
 from app.backend.auth.certificates import CN_SCHEME_CURRENT, certificate_values, hash_certificate_data
 from app.backend.auth.scope import Node, ROOT
 from app.backend.auth.user_types import USER_TYPES, boundary
 from app.backend.bootstrap.permissions import role_kind_of
 from app.backend.enums.general import BuiltinRole, CertificateSource, Permissions, RoleKind, UserType
+from app.backend.enums.routes import BrigadeRoutes, PostRoutes, ScopeGroupRoutes
 from app.backend.errors.problems import PROBLEM_JSON
 from app.backend.migrations.support.authz_v2 import LegacyRole, LegacyUser, REMOVED, plan_conversion
 from app.backend.migrations.support.authz_v3 import V2Assignment, V2Role, V2User, plan_v3
@@ -41,6 +44,39 @@ FIT_TYPES = {"allowed": False}
 # conversion turns them into assignments exactly like the migration did
 ADMIN_TRUE = "admin.true"
 ACCESS_ALL = "post.access_all"
+
+
+class FormClient(httpx.AsyncClient):
+    """The test client: a PUT or PATCH that names a parent states the place the node holds now (expected_group_id and
+    so on, API.md "A move during work"), as a form that has just read the record, unless the test wrote its own. The
+    tests of permissions and tree rules are about what comes after that check. The marker raw_moves turns this off:
+    tests/test_queued_moves.py sends every request as written."""
+
+    def __init__(self, session_maker, **kwargs):
+        super().__init__(**kwargs)
+        self._session_maker = session_maker
+
+    async def request(self, method, url, *, json=None, **kwargs):
+        if method in ("PUT", "PATCH") and isinstance(json, dict):
+            for pattern, field, expected, column, table in _MOVE_FORMS:
+                found = pattern.fullmatch(str(url))
+                if found and field in json and expected not in json:
+                    async with self._session_maker() as session:
+                        place = (await session.exec(select(column).where(table.id == int(found[1])))).all()
+                    json = {**json, expected: place[0]} if place else json
+        return await super().request(method, url, json=json, **kwargs)
+
+
+def _move_form(route, field: str, expected: str, column, table) -> tuple:
+    template = re.escape(V1.path(route))
+    return re.compile(re.sub(r"\\\{\w+\\\}", r"(\\d+)", template)), field, expected, column, table
+
+
+_MOVE_FORMS = (
+    _move_form(PostRoutes.POST_BY_ID, "group_id", "expected_group_id", Post.group_id, Post),
+    _move_form(ScopeGroupRoutes.GROUP_BY_ID, "parent_id", "expected_parent_id", ScopeGroup.parent_id, ScopeGroup),
+    _move_form(BrigadeRoutes.BRIGADE_BY_ID, "corps_id", "expected_corps_id", ScopeGroup.parent_id, ScopeGroup),
+)
 
 
 async def errors_are_problems(response: httpx.Response) -> None:
