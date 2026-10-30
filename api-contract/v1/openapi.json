@@ -14070,7 +14070,7 @@
           "POSTS"
         ],
         "summary": "Update Post",
-        "description": "Update post by ID. post.view (403 post_access_denied) and post.update (403 post_write_denied) must be in effect\nat the post; a move (group_id) also needs post.update and post.view covering both the old and the new location\n(the group or above it; the root for a post directly under it; 403 permission_required_for_action, move_post).\nEvery role assignment at the new location and above it that does not already apply at the post comes into\neffect there with the move: the caller must be able to grant each of them at the post, holding every permission\nof its role there before the move, the grants of other users included (403 grant_exceeds_own_permissions with\nthe permissions missing; answered after the new group's existence).\n\nOnly the fields sent are changed; null is refused for name, code and is_active (omit them instead).\nArchived posts answer 404 until restored (POST /{post_id}/restore); is_deleted is never read from the body.",
+        "description": "Update post by ID. post.view (403 post_access_denied) and post.update (403 post_write_denied) must be in effect\nat the post; a move (group_id) also needs post.update and post.view covering both the old and the new location\n(the group or above it; the root for a post directly under it; 403 permission_required_for_action, move_post).\nEvery role assignment at the new location and above it that does not already apply at the post comes into\neffect there with the move: the caller must be able to grant each of them at the post, holding every permission\nof its role there before the move, the grants of other users included (403 grant_exceeds_own_permissions with\nthe permissions missing; answered after the new group's existence).\n\nOnly the fields sent are changed; null is refused for name, code and is_active (omit them instead).\nArchived posts answer 404 until restored (POST /{post_id}/restore); is_deleted is never read from the body.\n\nA move during work: with uploads running below the node (upload sessions open or completing) the move waits. The\nanswer is 202 with the move operation, Location and Retry-After; nothing moves yet, and new uploads below the node\nanswer 409 move_pending; chunks, completes and every other write go on. The move runs when the last upload ended\n(finished, aborted, archived, expired, or cancelled because no bytes arrived for moves.upload_stale_seconds, 300 by\ndefault: its next chunk or complete answers 409 upload_cancelled_by_move). The permission checks run again then: a\nmove the caller may no longer make ends failed and nothing moves. Follow it at GET /moves/{move_id}; POST\n/moves/{move_id}/cancel cancels it. force true runs it at once and the uploads continue at the new place. A move\nwhose subtree overlaps a waiting one answers 409 move_pending (force too; cancel that one first). A request that\nwould have to wait and changes anything besides the move answers 422 move_not_alone with changed_fields and nothing\nhappens: send a move as its own request. Sessions and tokens stay valid; rights at the new place apply from the\nnext request (API.md, \"A move during work\").",
         "operationId": "update_post",
         "security": [
           {
@@ -14164,11 +14164,49 @@
             }
           },
           "422": {
-            "description": "`validation_error`: Request validation failed",
+            "description": "`move_not_alone`: A move that has to wait must be its own request; `validation_error`: Request validation failed",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MoveNotAloneProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ValidationErrorProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "move_not_alone": "#/components/schemas/MoveNotAloneProblem",
+                      "validation_error": "#/components/schemas/ValidationErrorProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Uploads run below the node: nothing moved yet, the move waits. Follow it at Location",
+            "headers": {
+              "Location": {
+                "description": "URL of the move operation",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds before it is worth asking again",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoveResponse"
                 }
               }
             }
@@ -14243,6 +14281,16 @@
                       "scope_group_not_found": "#/components/schemas/ScopeGroupNotFoundProblem"
                     }
                   }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`move_pending`: A move is waiting here",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MovePendingProblem"
                 }
               }
             }
@@ -14518,7 +14566,7 @@
           "POSTS"
         ],
         "summary": "Archive Post",
-        "description": "Archive a post (is_deleted=true). post.view and post.archive must be in effect at the post.\n\nNothing is removed and no user row changes. Role assignments made on the post itself stop applying until it is\nrestored; assignments inherited from a group or the root keep read access to its data. Its observations and media\nbecome read-only history: writes answer 409 post_archived, except that callers with post.archive in effect at the\npost (plus observation.view, observation.archive and ownership or observation.manage_any) still archive and\nrestore its observations. It cannot become a home post. Hidden from lists unless include_deleted=true. Every\npending resumable upload of its observations is cancelled at once (status aborted, error post_archived; the\nreceived bytes are deleted); a restore does not reopen it. Undo with POST /{post_id}/restore. Already archived or\nunknown: 404.",
+        "description": "Archive a post (is_deleted=true). post.view and post.archive must be in effect at the post.\n\nNothing is removed and no user row changes. Role assignments made on the post itself stop applying until it is\nrestored; assignments inherited from a group or the root keep read access to its data. Its observations and media\nbecome read-only history: writes answer 409 post_archived, except that callers with post.archive in effect at the\npost (plus observation.view, observation.archive and ownership or observation.manage_any) still archive and\nrestore its observations. It cannot become a home post. Hidden from lists unless include_deleted=true. Every\npending resumable upload of its observations is cancelled at once (status aborted, error post_archived; the\nreceived bytes are deleted); a restore does not reopen it. A waiting move of the post is cancelled too. Undo with\nPOST /{post_id}/restore. Already archived or unknown: 404.",
         "operationId": "archive_post",
         "security": [
           {
@@ -15504,7 +15552,7 @@
           "SCOPE_GROUPS"
         ],
         "summary": "Update Scope Group",
-        "description": "Rename, describe or move a group (parent_id null: directly under the root). Only the fields sent change.\nA group cannot move into its own subtree, and the moved subtree must still fit 6 levels. Archived, or outside\nthe caller's scope_group.view (the group or the new parent): 404. scope_group.update must cover the parent of the\ngroup (the root for a group directly under it), otherwise 403 permission_required_for_action (action\nupdate_scope_group): a holder at a group manages the groups inside it, not the group itself. A new name without a\nmove also needs scope_group.view covering that parent (same answer), the name is checked against it. A move needs\nscope_group.view and scope_group.update covering the old and the new parent location (the root for a group\ndirectly under it) and, as it takes every post below the group along, post.update and post.view covering both (the group or above it; the root for a group directly under it),\notherwise 403 permission_required_for_action (action move_scope_group), answered before the existence of the new\nparent and the tree rules; nothing changes on a refusal. Every role assignment at the new parent and above it that\ndoes not already apply at the group comes into effect for the whole subtree: the caller must be able to grant each\nof them at the group, holding every permission of its role there before the move, the grants of other users\nincluded (403 grant_exceeds_own_permissions, after the tree rules). The group keeps its kind and\nthe parent must suit it (a plain group never moves into a corps or brigade, a corps stays under the root, a\nbrigade in a corps): 409 scope_group_parent_not_allowed.",
+        "description": "Rename, describe or move a group (parent_id null: directly under the root). Only the fields sent change.\nA group cannot move into its own subtree, and the moved subtree must still fit 6 levels. Archived, or outside\nthe caller's scope_group.view (the group or the new parent): 404. scope_group.update must cover the parent of the\ngroup (the root for a group directly under it), otherwise 403 permission_required_for_action (action\nupdate_scope_group): a holder at a group manages the groups inside it, not the group itself. A new name without a\nmove also needs scope_group.view covering that parent (same answer), the name is checked against it. A move needs\nscope_group.view and scope_group.update covering the old and the new parent location (the root for a group\ndirectly under it) and, as it takes every post below the group along, post.update and post.view covering both (the group or above it; the root for a group directly under it),\notherwise 403 permission_required_for_action (action move_scope_group), answered before the existence of the new\nparent and the tree rules; nothing changes on a refusal. Every role assignment at the new parent and above it that\ndoes not already apply at the group comes into effect for the whole subtree: the caller must be able to grant each\nof them at the group, holding every permission of its role there before the move, the grants of other users\nincluded (403 grant_exceeds_own_permissions, after the tree rules). The group keeps its kind and\nthe parent must suit it (a plain group never moves into a corps or brigade, a corps stays under the root, a\nbrigade in a corps): 409 scope_group_parent_not_allowed.\n\nA move during work: with uploads running below the node (upload sessions open or completing) the move waits. The\nanswer is 202 with the move operation, Location and Retry-After; nothing moves yet, and new uploads below the node\nanswer 409 move_pending; chunks, completes and every other write go on. The move runs when the last upload ended\n(finished, aborted, archived, expired, or cancelled because no bytes arrived for moves.upload_stale_seconds, 300 by\ndefault: its next chunk or complete answers 409 upload_cancelled_by_move). The permission checks run again then: a\nmove the caller may no longer make ends failed and nothing moves. Follow it at GET /moves/{move_id}; POST\n/moves/{move_id}/cancel cancels it. force true runs it at once and the uploads continue at the new place. A move\nwhose subtree overlaps a waiting one answers 409 move_pending (force too; cancel that one first). A request that\nwould have to wait and changes anything besides the move answers 422 move_not_alone with changed_fields and nothing\nhappens: send a move as its own request. Sessions and tokens stay valid; rights at the new place apply from the\nnext request (API.md, \"A move during work\").",
         "operationId": "update_scope_group",
         "security": [
           {
@@ -15599,11 +15647,49 @@
             }
           },
           "422": {
-            "description": "`validation_error`: Request validation failed",
+            "description": "`move_not_alone`: A move that has to wait must be its own request; `validation_error`: Request validation failed",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MoveNotAloneProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ValidationErrorProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "move_not_alone": "#/components/schemas/MoveNotAloneProblem",
+                      "validation_error": "#/components/schemas/ValidationErrorProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Uploads run below the node: nothing moved yet, the move waits. Follow it at Location",
+            "headers": {
+              "Location": {
+                "description": "URL of the move operation",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds before it is worth asking again",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoveResponse"
                 }
               }
             }
@@ -15647,11 +15733,14 @@
             }
           },
           "409": {
-            "description": "`scope_group_cycle`: Scope group cannot move into its own subtree; `scope_group_depth_exceeded`: Scope group tree is too deep; `scope_group_name_taken`: Scope group name already exists; `scope_group_parent_not_allowed`: Scope group cannot sit there",
+            "description": "`move_pending`: A move is waiting here; `scope_group_cycle`: Scope group cannot move into its own subtree; `scope_group_depth_exceeded`: Scope group tree is too deep; `scope_group_name_taken`: Scope group name already exists; `scope_group_parent_not_allowed`: Scope group cannot sit there",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MovePendingProblem"
+                    },
                     {
                       "$ref": "#/components/schemas/ScopeGroupCycleProblem"
                     },
@@ -15668,6 +15757,7 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
+                      "move_pending": "#/components/schemas/MovePendingProblem",
                       "scope_group_cycle": "#/components/schemas/ScopeGroupCycleProblem",
                       "scope_group_depth_exceeded": "#/components/schemas/ScopeGroupDepthExceededProblem",
                       "scope_group_name_taken": "#/components/schemas/ScopeGroupNameTakenProblem",
@@ -15687,7 +15777,7 @@
           "SCOPE_GROUPS"
         ],
         "summary": "Archive Scope Group",
-        "description": "Archive a group (is_deleted=true). Only an empty group: no active subgroup and no active post (409\nscope_group_not_empty). Already archived, unknown or outside the caller's scope_group.view: 404. scope_group.archive\nmust cover its parent (the root for a group directly under it), otherwise 403 permission_required_for_action\n(action archive_scope_group). Undo with POST /{group_id}/restore.",
+        "description": "Archive a group (is_deleted=true). Only an empty group: no active subgroup and no active post (409\nscope_group_not_empty). Already archived, unknown or outside the caller's scope_group.view: 404. scope_group.archive\nmust cover its parent (the root for a group directly under it), otherwise 403 permission_required_for_action\n(action archive_scope_group). A waiting move of the group is cancelled. Undo with POST /{group_id}/restore.",
         "operationId": "archive_scope_group",
         "security": [
           {
@@ -18558,7 +18648,7 @@
           "BRIGADES"
         ],
         "summary": "Update Brigade",
-        "description": "Rename, describe or move a brigade; only the fields sent change. Archived, another kind of group, or outside\nthe caller's scope_group.view: 404. scope_group.update must cover its corps (403 permission_required_for_action,\naction update_brigade): a holder at the brigade does not manage the brigade itself. A new name without a move also\nneeds scope_group.view covering the corps (same answer): the name is checked against its brigades. A move (corps_id other than\nits corps; its own corps sent back is no move and answers as without it) needs\nscope_group.view and scope_group.update covering the old and the new corps and, as it takes every post of the brigade along, post.view\nand post.update covering both (403 permission_required_for_action, action move_brigade), answered before the\nexistence of the new corps; the new corps unknown, archived or outside scope_group.view: 404, not a corps: 409\nscope_group_parent_not_allowed. Every role assignment at the new corps that does not already apply at the brigade\ncomes into effect for it and its posts: the caller must be able to grant each of them at the brigade, holding\nevery permission of its role there before the move, the grants of other users included (403\ngrant_exceeds_own_permissions, after the corps checks). Nothing changes on a refusal.",
+        "description": "Rename, describe or move a brigade; only the fields sent change. Archived, another kind of group, or outside\nthe caller's scope_group.view: 404. scope_group.update must cover its corps (403 permission_required_for_action,\naction update_brigade): a holder at the brigade does not manage the brigade itself. A new name without a move also\nneeds scope_group.view covering the corps (same answer): the name is checked against its brigades. A move (corps_id other than\nits corps; its own corps sent back is no move and answers as without it) needs\nscope_group.view and scope_group.update covering the old and the new corps and, as it takes every post of the brigade along, post.view\nand post.update covering both (403 permission_required_for_action, action move_brigade), answered before the\nexistence of the new corps; the new corps unknown, archived or outside scope_group.view: 404, not a corps: 409\nscope_group_parent_not_allowed. Every role assignment at the new corps that does not already apply at the brigade\ncomes into effect for it and its posts: the caller must be able to grant each of them at the brigade, holding\nevery permission of its role there before the move, the grants of other users included (403\ngrant_exceeds_own_permissions, after the corps checks). Nothing changes on a refusal.\n\nA move during work: with uploads running below the node (upload sessions open or completing) the move waits. The\nanswer is 202 with the move operation, Location and Retry-After; nothing moves yet, and new uploads below the node\nanswer 409 move_pending; chunks, completes and every other write go on. The move runs when the last upload ended\n(finished, aborted, archived, expired, or cancelled because no bytes arrived for moves.upload_stale_seconds, 300 by\ndefault: its next chunk or complete answers 409 upload_cancelled_by_move). The permission checks run again then: a\nmove the caller may no longer make ends failed and nothing moves. Follow it at GET /moves/{move_id}; POST\n/moves/{move_id}/cancel cancels it. force true runs it at once and the uploads continue at the new place. A move\nwhose subtree overlaps a waiting one answers 409 move_pending (force too; cancel that one first). A request that\nwould have to wait and changes anything besides the move answers 422 move_not_alone with changed_fields and nothing\nhappens: send a move as its own request. Sessions and tokens stay valid; rights at the new place apply from the\nnext request (API.md, \"A move during work\").",
         "operationId": "update_brigade",
         "security": [
           {
@@ -18653,11 +18743,49 @@
             }
           },
           "422": {
-            "description": "`validation_error`: Request validation failed",
+            "description": "`move_not_alone`: A move that has to wait must be its own request; `validation_error`: Request validation failed",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MoveNotAloneProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ValidationErrorProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "move_not_alone": "#/components/schemas/MoveNotAloneProblem",
+                      "validation_error": "#/components/schemas/ValidationErrorProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Uploads run below the node: nothing moved yet, the move waits. Follow it at Location",
+            "headers": {
+              "Location": {
+                "description": "URL of the move operation",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds before it is worth asking again",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoveResponse"
                 }
               }
             }
@@ -18701,11 +18829,14 @@
             }
           },
           "409": {
-            "description": "`scope_group_name_taken`: Scope group name already exists; `scope_group_parent_not_allowed`: Scope group cannot sit there",
+            "description": "`move_pending`: A move is waiting here; `scope_group_name_taken`: Scope group name already exists; `scope_group_parent_not_allowed`: Scope group cannot sit there",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MovePendingProblem"
+                    },
                     {
                       "$ref": "#/components/schemas/ScopeGroupNameTakenProblem"
                     },
@@ -18716,6 +18847,7 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
+                      "move_pending": "#/components/schemas/MovePendingProblem",
                       "scope_group_name_taken": "#/components/schemas/ScopeGroupNameTakenProblem",
                       "scope_group_parent_not_allowed": "#/components/schemas/ScopeGroupParentNotAllowedProblem"
                     }
@@ -18733,7 +18865,7 @@
           "BRIGADES"
         ],
         "summary": "Archive Brigade",
-        "description": "Archive a brigade (is_deleted=true); the answer is the brigade. scope_group.archive must cover its corps.\nWithout cascade its active posts move into its corps, which needs post.update and post.view covering the brigade\nand the corps; with cascade=true they are archived, which needs post.archive and post.view covering the brigade,\nand every pending resumable upload of their observations is cancelled (status aborted, error post_archived).\nNo post permission is asked when the brigade has no active post.\nMissing permissions: 403 permission_required_for_action, nothing changes. Holders of a role at the brigade lose its posts. Archived,\nunknown, another kind or outside scope_group.view: 404. Undo with POST /{brigade_id}/restore (the brigade only)",
+        "description": "Archive a brigade (is_deleted=true); the answer is the brigade. scope_group.archive must cover its corps.\nWithout cascade its active posts move into its corps, which needs post.update and post.view covering the brigade\nand the corps; with cascade=true they are archived, which needs post.archive and post.view covering the brigade,\nand every pending resumable upload of their observations is cancelled (status aborted, error post_archived).\nA waiting move of the brigade, and with cascade of its posts, is cancelled. No post permission is asked when the\nbrigade has no active post.\nMissing permissions: 403 permission_required_for_action, nothing changes. Holders of a role at the brigade lose its posts. Archived,\nunknown, another kind or outside scope_group.view: 404. Undo with POST /{brigade_id}/restore (the brigade only)",
         "operationId": "archive_brigade",
         "security": [
           {
@@ -21879,7 +22011,7 @@
           "MEDIA"
         ],
         "summary": "Upload Complete File",
-        "description": "Multipart upload. The body is spooled to a temp file in 1 MB chunks and hashed\nwhile streaming; it is never held in memory. Users can only upload for observations of their post; an archived\npost: 409 post_archived.",
+        "description": "Multipart upload. The body is spooled to a temp file in 1 MB chunks and hashed\nwhile streaming; it is never held in memory. Users can only upload for observations of their post; an archived\npost: 409 post_archived; a move waiting above the post: 409 move_pending with Retry-After.",
         "operationId": "upload_complete_file",
         "requestBody": {
           "content": {
@@ -22047,11 +22179,25 @@
             }
           },
           "409": {
-            "description": "`post_archived`: Post is archived",
+            "description": "`move_pending`: A move is waiting here; `post_archived`: Post is archived",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PostArchivedProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MovePendingProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PostArchivedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "move_pending": "#/components/schemas/MovePendingProblem",
+                      "post_archived": "#/components/schemas/PostArchivedProblem"
+                    }
+                  }
                 }
               }
             }
@@ -22126,7 +22272,7 @@
           "MEDIA"
         ],
         "summary": "Nginx Upload File",
-        "description": "Upload via nginx offloading (client_body_in_file_only): nginx writes the raw body to a temp\nfile and forwards its path in X-File-Name; the original filename comes in X-Original-Filename.",
+        "description": "Upload via nginx offloading (client_body_in_file_only): nginx writes the raw body to a temp\nfile and forwards its path in X-File-Name; the original filename comes in X-Original-Filename. A move waiting\nabove the post: 409 move_pending with Retry-After.",
         "operationId": "nginx_upload_file",
         "security": [
           {
@@ -22321,11 +22467,25 @@
             }
           },
           "409": {
-            "description": "`post_archived`: Post is archived",
+            "description": "`move_pending`: A move is waiting here; `post_archived`: Post is archived",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PostArchivedProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MovePendingProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PostArchivedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "move_pending": "#/components/schemas/MovePendingProblem",
+                      "post_archived": "#/components/schemas/PostArchivedProblem"
+                    }
+                  }
                 }
               }
             }
@@ -23588,7 +23748,7 @@
           "MEDIA"
         ],
         "summary": "Create Upload Session",
-        "description": "Open a resumable upload. Format, declared Content-Type and size are checked here, before any byte is sent.\nAn unknown or archived observation: 404 observation_not_found; an observation of an archived post: 409\npost_archived. Archiving the observation, its post or a unit with its posts later cancels the session (status\naborted, see UPLOADS.md).",
+        "description": "Open a resumable upload. Format, declared Content-Type and size are checked here, before any byte is sent.\nAn unknown or archived observation: 404 observation_not_found; an observation of an archived post: 409\npost_archived; a move waiting above the post: 409 move_pending with move_id and Retry-After (it says clearly that\na move is waiting; try again after it). Archiving the observation, its post or a unit with its posts later cancels\nthe session (status aborted, see UPLOADS.md).",
         "operationId": "create_upload_session",
         "security": [
           {
@@ -23762,11 +23922,25 @@
             }
           },
           "409": {
-            "description": "`post_archived`: Post is archived",
+            "description": "`move_pending`: A move is waiting here; `post_archived`: Post is archived",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PostArchivedProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MovePendingProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PostArchivedProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "move_pending": "#/components/schemas/MovePendingProblem",
+                      "post_archived": "#/components/schemas/PostArchivedProblem"
+                    }
+                  }
                 }
               }
             }
@@ -24001,7 +24175,7 @@
           "MEDIA"
         ],
         "summary": "Append Upload Chunk",
-        "description": "Append one chunk. Headers: Upload-Offset (must equal the session's received_bytes),\nContent-Type application/offset+octet-stream, Content-Length. Body: raw bytes.\n204 with the new Upload-Offset; 409 with the real Upload-Offset when they disagree;\n413 when the chunk is larger than max_chunk_bytes or overruns the declared size; 410 when the session is not open\n(or the stored bytes are gone: the session is aborted; an archive of its observation, post or unit cancels it);\n409 while a complete stores the file; 404 observation_not_found when its observation is archived.",
+        "description": "Append one chunk. Headers: Upload-Offset (must equal the session's received_bytes),\nContent-Type application/offset+octet-stream, Content-Length. Body: raw bytes.\n204 with the new Upload-Offset; 409 with the real Upload-Offset when they disagree;\n413 when the chunk is larger than max_chunk_bytes or overruns the declared size; 410 when the session is not open\n(or the stored bytes are gone: the session is aborted; an archive of its observation, post or unit cancels it);\n409 while a complete stores the file; 404 observation_not_found when its observation is archived. A waiting move\ndoes not stop a chunk; 409 upload_cancelled_by_move when the session went silent while one waited and was\ncancelled for it (open a new session after the move).",
         "operationId": "append_upload_chunk",
         "security": [
           {
@@ -24227,11 +24401,14 @@
             }
           },
           "409": {
-            "description": "`upload_offset_mismatch`: Upload-Offset does not match the session offset; `upload_session_completing`: Session is being completed; ask GET for its status; `upload_writer_busy`: Another chunk is being written to this session; retry after it finishes",
+            "description": "`upload_cancelled_by_move`: Upload cancelled by a waiting move; `upload_offset_mismatch`: Upload-Offset does not match the session offset; `upload_session_completing`: Session is being completed; ask GET for its status; `upload_writer_busy`: Another chunk is being written to this session; retry after it finishes",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/UploadCancelledByMoveProblem"
+                    },
                     {
                       "$ref": "#/components/schemas/UploadOffsetMismatchProblem"
                     },
@@ -24245,6 +24422,7 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
+                      "upload_cancelled_by_move": "#/components/schemas/UploadCancelledByMoveProblem",
                       "upload_offset_mismatch": "#/components/schemas/UploadOffsetMismatchProblem",
                       "upload_session_completing": "#/components/schemas/UploadSessionCompletingProblem",
                       "upload_writer_busy": "#/components/schemas/UploadWriterBusyProblem"
@@ -24321,7 +24499,7 @@
           "MEDIA"
         ],
         "summary": "Complete Upload Session",
-        "description": "Turn a fully received session into a media file: size, optional sha256, format and content checks,\nthen the same storage path as the other uploads. Calling it again on a completed session returns the same\nmedia file (200). 409 when bytes are missing (resend from Upload-Offset) or while another complete stores the\nfile; 422 on hash mismatch (session aborted); 415 / 413 as for other uploads (session aborted). An archive of the\nobservation, its post or a unit with its posts cancels the session: 410 upload_session_closed (aborted). An\narchived observation: 404 observation_not_found; the post archived: 409 post_archived (the session stays open\nwhen nothing cancelled it). When the archive comes while the file is being stored, the store refuses it (404\nobservation_not_found or 409 post_archived) and the session ends aborted.",
+        "description": "Turn a fully received session into a media file: size, optional sha256, format and content checks,\nthen the same storage path as the other uploads. Calling it again on a completed session returns the same\nmedia file (200). 409 when bytes are missing (resend from Upload-Offset) or while another complete stores the\nfile; 422 on hash mismatch (session aborted); 415 / 413 as for other uploads (session aborted). An archive of the\nobservation, its post or a unit with its posts cancels the session: 410 upload_session_closed (aborted). An\narchived observation: 404 observation_not_found; the post archived: 409 post_archived (the session stays open\nwhen nothing cancelled it). When the archive comes while the file is being stored, the store refuses it (404\nobservation_not_found or 409 post_archived) and the session ends aborted. A waiting move does not stop a complete:\nthe last upload to end runs the move. 409 upload_cancelled_by_move: the session went silent while a move waited.\nAfter a forced move media.view and media.create are asked at the post's new place (403 when the uploader lost\nthem; the bytes cannot be saved by the client).",
         "operationId": "complete_upload_session",
         "security": [
           {
@@ -24527,13 +24705,16 @@
             }
           },
           "409": {
-            "description": "`post_archived`: Post is archived; `upload_incomplete`: Upload incomplete; `upload_session_completing`: Session is being completed; ask GET for its status; `upload_writer_busy`: Another chunk is being written to this session; retry after it finishes",
+            "description": "`post_archived`: Post is archived; `upload_cancelled_by_move`: Upload cancelled by a waiting move; `upload_incomplete`: Upload incomplete; `upload_session_completing`: Session is being completed; ask GET for its status; `upload_writer_busy`: Another chunk is being written to this session; retry after it finishes",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
                     {
                       "$ref": "#/components/schemas/PostArchivedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UploadCancelledByMoveProblem"
                     },
                     {
                       "$ref": "#/components/schemas/UploadIncompleteProblem"
@@ -24549,6 +24730,7 @@
                     "propertyName": "code",
                     "mapping": {
                       "post_archived": "#/components/schemas/PostArchivedProblem",
+                      "upload_cancelled_by_move": "#/components/schemas/UploadCancelledByMoveProblem",
                       "upload_incomplete": "#/components/schemas/UploadIncompleteProblem",
                       "upload_session_completing": "#/components/schemas/UploadSessionCompletingProblem",
                       "upload_writer_busy": "#/components/schemas/UploadWriterBusyProblem"
@@ -30355,6 +30537,10 @@
                       "scope_group.archive",
                       "scope_group.restore",
                       "observation_units.fill_history",
+                      "move.requested",
+                      "move.completed",
+                      "move.cancelled",
+                      "move.failed",
                       "observation.create",
                       "observation.update",
                       "observation.disappear",
@@ -30799,6 +30985,18 @@
                         "$ref": "#/components/schemas/ObservationUnitsFillHistoryAuditEntry"
                       },
                       {
+                        "$ref": "#/components/schemas/MoveRequestedAuditEntry"
+                      },
+                      {
+                        "$ref": "#/components/schemas/MoveCompletedAuditEntry"
+                      },
+                      {
+                        "$ref": "#/components/schemas/MoveCancelledAuditEntry"
+                      },
+                      {
+                        "$ref": "#/components/schemas/MoveFailedAuditEntry"
+                      },
+                      {
                         "$ref": "#/components/schemas/ObservationCreateAuditEntry"
                       },
                       {
@@ -30995,6 +31193,10 @@
                         "scope_group.archive": "#/components/schemas/ScopeGroupArchiveAuditEntry",
                         "scope_group.restore": "#/components/schemas/ScopeGroupRestoreAuditEntry",
                         "observation_units.fill_history": "#/components/schemas/ObservationUnitsFillHistoryAuditEntry",
+                        "move.requested": "#/components/schemas/MoveRequestedAuditEntry",
+                        "move.completed": "#/components/schemas/MoveCompletedAuditEntry",
+                        "move.cancelled": "#/components/schemas/MoveCancelledAuditEntry",
+                        "move.failed": "#/components/schemas/MoveFailedAuditEntry",
                         "observation.create": "#/components/schemas/ObservationCreateAuditEntry",
                         "observation.update": "#/components/schemas/ObservationUpdateAuditEntry",
                         "observation.disappear": "#/components/schemas/ObservationDisappearAuditEntry",
@@ -31395,6 +31597,18 @@
                       "$ref": "#/components/schemas/ObservationUnitsFillHistoryAuditEntry"
                     },
                     {
+                      "$ref": "#/components/schemas/MoveRequestedAuditEntry"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MoveCompletedAuditEntry"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MoveCancelledAuditEntry"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MoveFailedAuditEntry"
+                    },
+                    {
                       "$ref": "#/components/schemas/ObservationCreateAuditEntry"
                     },
                     {
@@ -31591,6 +31805,10 @@
                       "scope_group.archive": "#/components/schemas/ScopeGroupArchiveAuditEntry",
                       "scope_group.restore": "#/components/schemas/ScopeGroupRestoreAuditEntry",
                       "observation_units.fill_history": "#/components/schemas/ObservationUnitsFillHistoryAuditEntry",
+                      "move.requested": "#/components/schemas/MoveRequestedAuditEntry",
+                      "move.completed": "#/components/schemas/MoveCompletedAuditEntry",
+                      "move.cancelled": "#/components/schemas/MoveCancelledAuditEntry",
+                      "move.failed": "#/components/schemas/MoveFailedAuditEntry",
                       "observation.create": "#/components/schemas/ObservationCreateAuditEntry",
                       "observation.update": "#/components/schemas/ObservationUpdateAuditEntry",
                       "observation.disappear": "#/components/schemas/ObservationDisappearAuditEntry",
@@ -33401,6 +33619,250 @@
           }
         }
       }
+    },
+    "/api/v1/moves/{move_id}": {
+      "get": {
+        "tags": [
+          "MOVES"
+        ],
+        "summary": "Get Move",
+        "description": "The state of a move: status (waiting, done, cancelled, failed), node, target, requested_at, waiting_seconds,\nand while it waits the uploads below the node: per upload upload_id, post_id, received_bytes, total_bytes,\nlast_chunk_at, holding (false: silent for moves.upload_stale_seconds, cancelled at the worker's next look). A\nfailed move carries the problem code that refused it in error (the permission checks run again when it runs);\nnothing moved then.\n\nNeeds the permissions a move of the node needs in effect at the node (post.view and post.update for a post; for a\ngroup also scope_group.view and scope_group.update). The user who asked may always read their move, without the\nuploads once they lost those. Anyone else, and an unknown id: 404 move_not_found.",
+        "operationId": "get_move",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "move_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Move Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoveResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`move_not_found`: Move not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoveNotFoundProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/moves/{move_id}/cancel": {
+      "post": {
+        "tags": [
+          "MOVES"
+        ],
+        "summary": "Cancel Move",
+        "description": "Cancel a waiting move: nothing moves, new uploads below the node are accepted at once, running uploads go on\nundisturbed. The user who asked, or anyone who could make the same move (the permissions of the move covering\nwhere the node sits and where it goes; otherwise 403 permission_required_for_action, action cancel_move, for a\ncaller who sees the move). A move that has ended: 409 move_not_waiting with move_status. Visibility as\nGET /moves/{move_id}: 404 move_not_found.",
+        "operationId": "cancel_move",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "move_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Move Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoveResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`permission_required_for_action`: Permission required for this action",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionRequiredForActionProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`move_not_found`: Move not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoveNotFoundProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`move_not_waiting`: Move is no longer waiting",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoveNotWaitingProblem"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -34048,6 +34510,10 @@
               "scope_group.archive",
               "scope_group.restore",
               "observation_units.fill_history",
+              "move.requested",
+              "move.completed",
+              "move.cancelled",
+              "move.failed",
               "observation.create",
               "observation.update",
               "observation.disappear",
@@ -35009,6 +35475,12 @@
               }
             ],
             "title": "Description"
+          },
+          "force": {
+            "type": "boolean",
+            "title": "Force",
+            "description": "With a move: run it at once even with uploads running below the node; they continue at the new place. Without uploads, and without a move, it changes nothing",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -38730,6 +39202,10 @@
           "raised_id_count": {
             "type": "integer",
             "title": "Raised Id Count"
+          },
+          "cancelled_move_count": {
+            "type": "integer",
+            "title": "Cancelled Move Count"
           }
         },
         "type": "object",
@@ -39179,6 +39655,10 @@
           "raised_id_count": {
             "type": "integer",
             "title": "Raised Id Count"
+          },
+          "cancelled_move_count": {
+            "type": "integer",
+            "title": "Cancelled Move Count"
           }
         },
         "type": "object",
@@ -45831,6 +46311,1296 @@
         "title": "MessageResponse",
         "description": "Generic message response"
       },
+      "MoveCancelledAuditEntry": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "category": {
+            "$ref": "#/components/schemas/AuditCategory"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditActorResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who acted; null for the system or an anonymous caller"
+          },
+          "resource_type": {
+            "type": "string",
+            "title": "Resource Type"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Id"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditScopeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the event happened; null for a system-wide event"
+          },
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "old_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Values"
+          },
+          "new_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Values"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id",
+            "description": "X-Request-ID of the request that wrote the row"
+          },
+          "ip_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip Address",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "user_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Agent",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "request_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Url",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "event": {
+            "type": "string",
+            "const": "move.cancelled",
+            "title": "Event",
+            "description": "Key of exactly this message in the localization package"
+          },
+          "params": {
+            "$ref": "#/components/schemas/MoveCancelledAuditParams"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "category",
+          "actor",
+          "resource_type",
+          "resource_id",
+          "scope",
+          "success",
+          "old_values",
+          "new_values",
+          "request_id",
+          "ip_address",
+          "user_agent",
+          "session_id",
+          "request_url",
+          "event",
+          "params"
+        ],
+        "title": "MoveCancelledAuditEntry",
+        "description": "Queued move cancelled (event move.cancelled, category structure)"
+      },
+      "MoveCancelledAuditParams": {
+        "properties": {
+          "cause": {
+            "type": "string",
+            "title": "Cause"
+          },
+          "move_id": {
+            "type": "integer",
+            "title": "Move Id"
+          },
+          "node_kind": {
+            "type": "string",
+            "title": "Node Kind"
+          },
+          "node_id": {
+            "type": "integer",
+            "title": "Node Id"
+          },
+          "node_name": {
+            "type": "string",
+            "title": "Node Name"
+          },
+          "target_group_id": {
+            "type": "integer",
+            "title": "Target Group Id"
+          },
+          "target_name": {
+            "type": "string",
+            "title": "Target Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "cause",
+          "move_id",
+          "node_kind",
+          "node_id"
+        ],
+        "title": "MoveCancelledAuditParams",
+        "description": "Params of move.cancelled (Queued move cancelled)"
+      },
+      "MoveCompletedAuditEntry": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "category": {
+            "$ref": "#/components/schemas/AuditCategory"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditActorResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who acted; null for the system or an anonymous caller"
+          },
+          "resource_type": {
+            "type": "string",
+            "title": "Resource Type"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Id"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditScopeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the event happened; null for a system-wide event"
+          },
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "old_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Values"
+          },
+          "new_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Values"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id",
+            "description": "X-Request-ID of the request that wrote the row"
+          },
+          "ip_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip Address",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "user_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Agent",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "request_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Url",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "event": {
+            "type": "string",
+            "const": "move.completed",
+            "title": "Event",
+            "description": "Key of exactly this message in the localization package"
+          },
+          "params": {
+            "$ref": "#/components/schemas/MoveCompletedAuditParams"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "category",
+          "actor",
+          "resource_type",
+          "resource_id",
+          "scope",
+          "success",
+          "old_values",
+          "new_values",
+          "request_id",
+          "ip_address",
+          "user_agent",
+          "session_id",
+          "request_url",
+          "event",
+          "params"
+        ],
+        "title": "MoveCompletedAuditEntry",
+        "description": "Queued move completed (event move.completed, category structure)"
+      },
+      "MoveCompletedAuditParams": {
+        "properties": {
+          "forced": {
+            "type": "boolean",
+            "title": "Forced"
+          },
+          "move_id": {
+            "type": "integer",
+            "title": "Move Id"
+          },
+          "node_kind": {
+            "type": "string",
+            "title": "Node Kind"
+          },
+          "node_id": {
+            "type": "integer",
+            "title": "Node Id"
+          },
+          "node_name": {
+            "type": "string",
+            "title": "Node Name"
+          },
+          "target_group_id": {
+            "type": "integer",
+            "title": "Target Group Id"
+          },
+          "target_name": {
+            "type": "string",
+            "title": "Target Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "move_id",
+          "node_kind",
+          "node_id"
+        ],
+        "title": "MoveCompletedAuditParams",
+        "description": "Params of move.completed (Queued move completed)"
+      },
+      "MoveFailedAuditEntry": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "category": {
+            "$ref": "#/components/schemas/AuditCategory"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditActorResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who acted; null for the system or an anonymous caller"
+          },
+          "resource_type": {
+            "type": "string",
+            "title": "Resource Type"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Id"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditScopeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the event happened; null for a system-wide event"
+          },
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "old_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Values"
+          },
+          "new_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Values"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id",
+            "description": "X-Request-ID of the request that wrote the row"
+          },
+          "ip_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip Address",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "user_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Agent",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "request_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Url",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "event": {
+            "type": "string",
+            "const": "move.failed",
+            "title": "Event",
+            "description": "Key of exactly this message in the localization package"
+          },
+          "params": {
+            "$ref": "#/components/schemas/MoveFailedAuditParams"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "category",
+          "actor",
+          "resource_type",
+          "resource_id",
+          "scope",
+          "success",
+          "old_values",
+          "new_values",
+          "request_id",
+          "ip_address",
+          "user_agent",
+          "session_id",
+          "request_url",
+          "event",
+          "params"
+        ],
+        "title": "MoveFailedAuditEntry",
+        "description": "Queued move refused when it ran (event move.failed, category structure)"
+      },
+      "MoveFailedAuditParams": {
+        "properties": {
+          "failure_code": {
+            "type": "string",
+            "title": "Failure Code"
+          },
+          "move_id": {
+            "type": "integer",
+            "title": "Move Id"
+          },
+          "node_kind": {
+            "type": "string",
+            "title": "Node Kind"
+          },
+          "node_id": {
+            "type": "integer",
+            "title": "Node Id"
+          },
+          "node_name": {
+            "type": "string",
+            "title": "Node Name"
+          },
+          "target_group_id": {
+            "type": "integer",
+            "title": "Target Group Id"
+          },
+          "target_name": {
+            "type": "string",
+            "title": "Target Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "failure_code",
+          "move_id",
+          "node_kind",
+          "node_id"
+        ],
+        "title": "MoveFailedAuditParams",
+        "description": "Params of move.failed (Queued move refused when it ran)"
+      },
+      "MoveNodeKind": {
+        "type": "string",
+        "enum": [
+          "post",
+          "group"
+        ],
+        "title": "MoveNodeKind",
+        "description": "What a queued move moves: a post, or a scope group of any kind with everything below it"
+      },
+      "MoveNotAloneProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "A move that has to wait must be its own request",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 422,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Uploads hold this move, and the request also changes: {changed_fields}. Send the move on its own"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "move_not_alone",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          },
+          "changed_fields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Changed Fields"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code",
+          "changed_fields"
+        ],
+        "title": "MoveNotAloneProblem",
+        "description": "A move that has to wait must be its own request (HTTP 422). Problem type move_not_alone.",
+        "examples": [
+          {
+            "changed_fields": "<changed_fields>",
+            "code": "move_not_alone",
+            "detail": "Uploads hold this move, and the request also changes: <changed_fields>. Send the move on its own",
+            "instance": "/api/v1/...",
+            "status": 422,
+            "title": "A move that has to wait must be its own request",
+            "type": "https://example.org/problems/move_not_alone"
+          }
+        ]
+      },
+      "MoveNotFoundProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Move not found",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 404,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Move not found"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "move_not_found",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "MoveNotFoundProblem",
+        "description": "Move not found (HTTP 404). Problem type move_not_found.",
+        "examples": [
+          {
+            "code": "move_not_found",
+            "detail": "Move not found",
+            "instance": "/api/v1/...",
+            "status": 404,
+            "title": "Move not found",
+            "type": "https://example.org/problems/move_not_found"
+          }
+        ]
+      },
+      "MoveNotWaitingProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Move is no longer waiting",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "The move is {move_status}: only a waiting move can be cancelled"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "move_not_waiting",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          },
+          "move_status": {
+            "type": "string",
+            "title": "Move Status"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code",
+          "move_status"
+        ],
+        "title": "MoveNotWaitingProblem",
+        "description": "Move is no longer waiting (HTTP 409). Problem type move_not_waiting.",
+        "examples": [
+          {
+            "code": "move_not_waiting",
+            "detail": "The move is <move_status>: only a waiting move can be cancelled",
+            "instance": "/api/v1/...",
+            "move_status": "<move_status>",
+            "status": 409,
+            "title": "Move is no longer waiting",
+            "type": "https://example.org/problems/move_not_waiting"
+          }
+        ]
+      },
+      "MovePendingProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "A move is waiting here",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Move {move_id} is waiting for the uploads below it; try again later"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "move_pending",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          },
+          "move_id": {
+            "type": "integer",
+            "title": "Move Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code",
+          "move_id"
+        ],
+        "title": "MovePendingProblem",
+        "description": "A move is waiting here (HTTP 409). Problem type move_pending.",
+        "examples": [
+          {
+            "code": "move_pending",
+            "detail": "Move <move_id> is waiting for the uploads below it; try again later",
+            "instance": "/api/v1/...",
+            "move_id": "<move_id>",
+            "status": 409,
+            "title": "A move is waiting here",
+            "type": "https://example.org/problems/move_pending"
+          }
+        ]
+      },
+      "MoveRequestedAuditEntry": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "category": {
+            "$ref": "#/components/schemas/AuditCategory"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditActorResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who acted; null for the system or an anonymous caller"
+          },
+          "resource_type": {
+            "type": "string",
+            "title": "Resource Type"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Id"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditScopeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the event happened; null for a system-wide event"
+          },
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "old_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Values"
+          },
+          "new_values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Values"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id",
+            "description": "X-Request-ID of the request that wrote the row"
+          },
+          "ip_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip Address",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "user_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Agent",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "request_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Url",
+            "description": "null without audit.view (it identifies a device)"
+          },
+          "event": {
+            "type": "string",
+            "const": "move.requested",
+            "title": "Event",
+            "description": "Key of exactly this message in the localization package"
+          },
+          "params": {
+            "$ref": "#/components/schemas/MoveRequestedAuditParams"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "category",
+          "actor",
+          "resource_type",
+          "resource_id",
+          "scope",
+          "success",
+          "old_values",
+          "new_values",
+          "request_id",
+          "ip_address",
+          "user_agent",
+          "session_id",
+          "request_url",
+          "event",
+          "params"
+        ],
+        "title": "MoveRequestedAuditEntry",
+        "description": "Move queued until the uploads below it end (event move.requested, category structure)"
+      },
+      "MoveRequestedAuditParams": {
+        "properties": {
+          "move_id": {
+            "type": "integer",
+            "title": "Move Id"
+          },
+          "node_kind": {
+            "type": "string",
+            "title": "Node Kind"
+          },
+          "node_id": {
+            "type": "integer",
+            "title": "Node Id"
+          },
+          "node_name": {
+            "type": "string",
+            "title": "Node Name"
+          },
+          "target_group_id": {
+            "type": "integer",
+            "title": "Target Group Id"
+          },
+          "target_name": {
+            "type": "string",
+            "title": "Target Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "move_id",
+          "node_kind",
+          "node_id"
+        ],
+        "title": "MoveRequestedAuditParams",
+        "description": "Params of move.requested (Move queued until the uploads below it end)"
+      },
+      "MoveResponse": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MoveStatus"
+          },
+          "node_kind": {
+            "$ref": "#/components/schemas/MoveNodeKind"
+          },
+          "node_id": {
+            "type": "integer",
+            "title": "Node Id"
+          },
+          "target_group_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Group Id",
+            "description": "The group it goes to; null: directly under the root"
+          },
+          "requested_by": {
+            "type": "integer",
+            "title": "Requested By"
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Requested At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "force": {
+            "type": "boolean",
+            "title": "Force",
+            "description": "true: run at once over running uploads, which went on"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "The problem code that refused it when it ran (status failed)"
+          },
+          "waiting_seconds": {
+            "type": "integer",
+            "title": "Waiting Seconds",
+            "description": "Seconds it has waited, or waited in all once it ended"
+          },
+          "uploads": {
+            "items": {
+              "$ref": "#/components/schemas/MoveUploadResponse"
+            },
+            "type": "array",
+            "title": "Uploads",
+            "description": "Uploads below the node while it waits; empty once it ended"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "node_kind",
+          "node_id",
+          "target_group_id",
+          "requested_by",
+          "requested_at",
+          "finished_at",
+          "force",
+          "error",
+          "waiting_seconds",
+          "uploads"
+        ],
+        "title": "MoveResponse",
+        "description": "A move that waits, or waited, for the uploads below its node"
+      },
+      "MoveStatus": {
+        "type": "string",
+        "enum": [
+          "waiting",
+          "done",
+          "cancelled",
+          "failed"
+        ],
+        "title": "MoveStatus",
+        "description": "Lifecycle of a queued move (rows of pending_moves)"
+      },
+      "MoveUploadResponse": {
+        "properties": {
+          "upload_id": {
+            "type": "string",
+            "title": "Upload Id"
+          },
+          "post_id": {
+            "type": "integer",
+            "title": "Post Id"
+          },
+          "received_bytes": {
+            "type": "integer",
+            "title": "Received Bytes"
+          },
+          "total_bytes": {
+            "type": "integer",
+            "title": "Total Bytes"
+          },
+          "last_chunk_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Chunk At",
+            "description": "When bytes last arrived; null: none yet"
+          },
+          "holding": {
+            "type": "boolean",
+            "title": "Holding",
+            "description": "false: silent too long, the upload is about to be cancelled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "upload_id",
+          "post_id",
+          "received_bytes",
+          "total_bytes",
+          "last_chunk_at",
+          "holding"
+        ],
+        "title": "MoveUploadResponse",
+        "description": "An upload the move waits for"
+      },
       "NginxFileNameInvalidProblem": {
         "properties": {
           "type": {
@@ -51482,6 +53252,12 @@
             ],
             "title": "Group Id",
             "description": "Scope group the post sits in; null: directly under the root"
+          },
+          "force": {
+            "type": "boolean",
+            "title": "Force",
+            "description": "With a move: run it at once even with uploads running below the node; they continue at the new place. Without uploads, and without a move, it changes nothing",
+            "default": false
           }
         },
         "type": "object",
@@ -56499,6 +58275,12 @@
               }
             ],
             "title": "Description"
+          },
+          "force": {
+            "type": "boolean",
+            "title": "Force",
+            "description": "With a move: run it at once even with uploads running below the node; they continue at the new place. Without uploads, and without a move, it changes nothing",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -64126,6 +65908,75 @@
             "status": 410,
             "title": "Stored bytes are missing; open a new session",
             "type": "https://example.org/problems/upload_bytes_missing"
+          }
+        ]
+      },
+      "UploadCancelledByMoveProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Upload cancelled by a waiting move",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "No bytes arrived for too long while a move waited for this upload; open a new session"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "upload_cancelled_by_move",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          },
+          "session_status": {
+            "type": "string",
+            "title": "Session Status"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code",
+          "session_status"
+        ],
+        "title": "UploadCancelledByMoveProblem",
+        "description": "Upload cancelled by a waiting move (HTTP 409). Problem type upload_cancelled_by_move.",
+        "examples": [
+          {
+            "code": "upload_cancelled_by_move",
+            "detail": "No bytes arrived for too long while a move waited for this upload; open a new session",
+            "instance": "/api/v1/...",
+            "session_status": "<session_status>",
+            "status": 409,
+            "title": "Upload cancelled by a waiting move",
+            "type": "https://example.org/problems/upload_cancelled_by_move"
           }
         ]
       },
