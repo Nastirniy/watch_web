@@ -449,7 +449,8 @@ def _merge(first: CarryOverResult, second: CarryOverResult) -> CarryOverResult:
                            certificates_added=first.certificates_added + second.certificates_added,
                            users_added=first.users_added + second.users_added,
                            crl_number=max(first.crl_number, second.crl_number),
-                           sessions_ended=first.sessions_ended + second.sessions_ended)
+                           sessions_ended=first.sessions_ended + second.sessions_ended,
+                           moves_cancelled=first.moves_cancelled + second.moves_cancelled)
 
 
 def _free_kept_name(backend: RestoreBackend, db: str, now: Callable[[], datetime]) -> str:
@@ -477,7 +478,8 @@ def _counts(carry: CarryOverResult, keep_as: str, ids_raised: int) -> dict:
     their own)"""
     return {"kept_schema": keep_as, "revocation_count": carry.revocations,
             "added_certificate_count": carry.certificates_added, "added_user_count": len(carry.users_added),
-            "crl_number": carry.crl_number, "ended_session_count": carry.sessions_ended, "raised_id_count": ids_raised}
+            "crl_number": carry.crl_number, "ended_session_count": carry.sessions_ended, "raised_id_count": ids_raised,
+            "cancelled_move_count": carry.moves_cancelled}
 
 
 def restore_params(manifest: Manifest, carry: CarryOverResult, keep_as: str, ids_raised: int) -> dict:

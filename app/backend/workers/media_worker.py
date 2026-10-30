@@ -34,6 +34,7 @@ from typing import Awaitable, Callable, Dict, Optional
 from app.backend.config import settings
 from app.backend.models.media import MediaFile
 from app.backend.models.storyboard import VideoStoryboard, storyboard_relative_dir
+from app.backend.services import move_queue, moves
 from app.backend.services.media import jobs, storyboard_jobs, uploads
 from app.backend.services.media.posters import PosterError, make_poster, resolve_binary
 from app.backend.services.media.probe import has_no_video_stream, metadata_for, resolve_tools
@@ -344,6 +345,31 @@ class MediaWorker:
             except asyncio.TimeoutError:
                 pass
 
+    async def check_moves(self) -> None:
+        """One look at every waiting move (services/moves.py advance): sessions past their expiry end, sessions gone
+        silent are cancelled, a move nothing holds runs, also one left waiting by a crash after its last upload"""
+        async with self.session_maker() as session:
+            move_ids = [move.id for move in await move_queue.waiting_moves(session)]
+        for move_id in move_ids:
+            try:
+                async with self.session_maker() as session:
+                    await moves.advance(session, move_id, self.storage_root)
+            except Exception as exc:  # worker loop: one move never stops the others, the next look tries again
+                _logger.warning(f"move {move_id}: check failed: {type(exc).__name__}: {exc}")
+
+    async def _moves_loop(self) -> None:
+        """Every moves.check_interval_seconds: check_moves"""
+        interval = settings.moves.check_interval_seconds
+        while not self._stop.is_set():
+            try:
+                await self.check_moves()
+            except Exception as exc:  # worker loop: the next look tries again
+                _logger.warning(f"moves check failed: {exc}")
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=interval)
+            except asyncio.TimeoutError:
+                pass
+
     async def _heartbeat_loop(self) -> None:
         interval = settings.storage.poster.heartbeat_seconds
         while not self._stop.is_set():
@@ -397,6 +423,7 @@ class MediaWorker:
 
         heartbeat_task = asyncio.create_task(self._heartbeat_loop())
         sweep_task = asyncio.create_task(self._sweep_loop())
+        moves_task = asyncio.create_task(self._moves_loop())
         semaphore = asyncio.Semaphore(self.concurrency)
         idle_delay = cfg.poll_interval_seconds
         try:
@@ -436,6 +463,7 @@ class MediaWorker:
                 await asyncio.gather(*self._running, return_exceptions=True)
             heartbeat_task.cancel()
             sweep_task.cancel()
+            moves_task.cancel()
             async with self.session_maker() as session:
                 released = await jobs.release_claims(session, self.name)
                 released_storyboards = await storyboard_jobs.release_storyboard_claims(session, self.name)

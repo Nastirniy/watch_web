@@ -180,6 +180,30 @@ def test_live_sessions_ended(conn):
     assert result.sessions_ended == 2
 
 
+def add_move(conn, move_id: int, status: str, schema=None):
+    conn.execute(sa.insert(t("pending_moves", schema)).values(
+        id=move_id, node_kind="post", node_id=1, requested_by=1, requested_at=EARLIER, status=status))
+
+
+def test_waiting_moves_of_the_backup_are_cancelled(conn):
+    """A restored database never keeps a move nothing will finish: the uploads it waited for are gone, and a move
+    nobody asked for since the backup must not run behind the restore"""
+    add_move(conn, 1, "waiting", schema="incoming")
+    add_move(conn, 2, "done", schema="incoming")
+    result = carry_over(conn, None, "incoming", NOW)
+    assert result.moves_cancelled == 1
+    table = t("pending_moves", "incoming")
+    rows = {row.id: row for row in conn.execute(sa.select(table))}
+    assert (rows[1].status, rows[1].finished_at) == ("cancelled", NAIVE_NOW)
+    assert (rows[2].status, rows[2].finished_at) == ("done", None)
+    assert carry_over(conn, None, "incoming", NOW).moves_cancelled == 0
+
+
+def test_a_backup_without_the_moves_table(conn):
+    conn.exec_driver_sql("DROP TABLE incoming.pending_moves")
+    assert carry_over(conn, None, "incoming", NOW).moves_cancelled == 0
+
+
 def test_idempotent(conn):
     both_users(conn, 1)
     add_cert(conn, 10, 1, "fp10", revoked_at=EARLIER, revocation_reason="key_compromise")

@@ -2,7 +2,9 @@
 
 A rollback of the database must not undo what is final: a revoked certificate stays revoked, a certificate issued
 after the backup comes back revoked (so a ca_issued one still goes on the CRL), the CRL number never goes backwards,
-and the sessions of the backup do not come back to life. Runs inside the restore's transaction, before the swap.
+the sessions of the backup do not come back to life, and a move that waited in the backup does not run: the uploads it
+waited for are gone with the sessions and clients of that moment, and a move nobody is watching any more must not
+happen behind a restore. Runs inside the restore's transaction, before the swap.
 
 outgoing / incoming are schema names (None: the default schema of the connection). The tables are reflected from
 each schema, not taken from the models: a backup may be at an older migration, and only the columns a table has are
@@ -15,7 +17,7 @@ from typing import Optional
 
 import sqlalchemy as sa
 
-from app.backend.enums.general import RevocationReason, SessionEndReason, SessionRevokeCause
+from app.backend.enums.general import MoveStatus, RevocationReason, SessionEndReason, SessionRevokeCause
 from app.backend.models.user import User, UserSession
 from app.backend.models.user_certificate import CertificateAuthorityState, UserCertificate
 
@@ -24,6 +26,7 @@ CA_STATE = CertificateAuthorityState.__tablename__
 SESSIONS = UserSession.__tablename__
 USERS = User.__tablename__
 POSTS = "posts"
+MOVES = "pending_moves"
 
 
 class CarryOverUnsupported(Exception):
@@ -41,6 +44,7 @@ class CarryOverResult:
     users_added: tuple[tuple[int, str], ...]     # (id, username as inserted): placeholders, archived
     crl_number: int
     sessions_ended: int
+    moves_cancelled: int = 0
 
 
 def reflect_table(conn: sa.Connection, name: str, schema: Optional[str]) -> Optional[sa.Table]:
@@ -164,8 +168,14 @@ def carry_over(conn: sa.Connection, outgoing: Optional[str], incoming: Optional[
             "revoke_cause": SessionRevokeCause.DATABASE_RESTORED.value}))).rowcount
     elif sessions is not None and "is_active" in sessions.c:
         ended = conn.execute(sa.update(sessions).where(sessions.c.is_active.is_(True)).values(is_active=False)).rowcount
+
+    # A backup from before migration 035 has no such table
+    moves = reflect_table(conn, MOVES, incoming)
+    moves_cancelled = 0 if moves is None else conn.execute(
+        sa.update(moves).where(moves.c.status == MoveStatus.WAITING.value).values(
+            status=MoveStatus.CANCELLED.value, finished_at=stamp)).rowcount
     return CarryOverResult(revocations=len(revoke), certificates_added=added, users_added=users_added,
-                           crl_number=crl_number, sessions_ended=ended)
+                           crl_number=crl_number, sessions_ended=ended, moves_cancelled=moves_cancelled)
 
 
 def user_state_differences(conn: sa.Connection, outgoing: Optional[str],

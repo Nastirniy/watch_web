@@ -181,6 +181,7 @@ def test_restore_order(cfg):
         "backup_id": manifest.id, "backup_label": "scheduled", "backup_revision": REVISION,
         "kept_schema": "db_before_20261022_120000", "revocation_count": 1, "added_certificate_count": 2,
         "added_user_count": 1, "crl_number": 7, "ended_session_count": 3, "raised_id_count": 4,
+        "cancelled_move_count": 0,
     }
     assert result.kept_schema == "db_before_20261022_120000"
     assert result.carry == CARRY
