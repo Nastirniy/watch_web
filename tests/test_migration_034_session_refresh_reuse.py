@@ -66,3 +66,26 @@ def test_fresh_install_down_and_up_again(tmp_path):
     assert conn.execute("select refresh_jti, previous_refresh_jti, refresh_rotated_at from user_sessions "
                         "where id = 's-before'").fetchone() == ("jti", None, None)
     conn.close()
+
+
+def test_downgrade_leaves_no_revoke_cause_the_old_code_cannot_read(tmp_path):
+    """Older code parses revoke_cause with its enum: a row kept as refresh_token_reused would answer 500 after a
+    rollback (the audit row keeps the true cause)"""
+    db_file = tmp_path / "sessions.db"
+    assert run_migrate(db_file).returncode == 0
+    conn = sqlite3.connect(db_file)
+    columns = list(conn.execute("pragma table_info(user_sessions)"))
+    required = {column[1]: "2026-10-30 00:00:00" if "DATE" in column[2].upper() else 1 if "INT" in column[2].upper()
+                else "x" for column in columns if column[3] and column[4] is None}
+    values = {**required, "id": "reused", "user_id": 1, "revoke_cause": "refresh_token_reused"}
+    conn.execute(f"insert into user_sessions ({', '.join(values)}) values ({', '.join('?' for _ in values)})",
+                 tuple(values.values()))
+    conn.commit()
+    conn.close()
+
+    down = _run_downgrade(db_file, PREVIOUS)
+    assert down.returncode == 0, down.stdout + down.stderr
+    conn = sqlite3.connect(db_file)
+    causes = [row[0] for row in conn.execute("select revoke_cause from user_sessions")]
+    conn.close()
+    assert causes == ["ended_by_admin"]

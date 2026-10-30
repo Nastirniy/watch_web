@@ -658,7 +658,10 @@ Resumable uploads step by step: `UPLOADS.md`.
 - `If-None-Match` with the `ETag` (`W/` is ignored, a list is read as a list) or `*` answers `304` with `ETag` and
   `Cache-Control` and no body, and the file is not read. Every access check comes first: a caller without access
   gets the same `401`, `403` or `404` as without the header, and a file gone from disk its `404`.
-- `If-Range` with the `ETag` works: the same file `206`, another one `200` with the whole file.
+- `If-Range` with the `ETag` works behind nginx: the same file `206`, another one `200` with the whole file. Without
+  nginx (development) it is ignored.
+- `If-Match` is not supported on these routes: behind nginx it answers `412` even with the right `ETag`. Compare the
+  `ETag` yourself.
 
 ### Video and audio in a player (`/stream`)
 

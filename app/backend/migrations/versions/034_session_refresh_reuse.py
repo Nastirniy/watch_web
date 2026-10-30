@@ -9,7 +9,8 @@ previous_refresh_jti VARCHAR(64) NULL, refresh_rotated_at DATETIME NULL, no inde
 its primary key). Sessions opened before the upgrade keep both empty until their next refresh: a used token presented
 before that is answered as before (invalid_refresh_token, the session stays), so nobody is logged out by the upgrade.
 The columns come from the models on a fresh install (002_sync_schema), so each is added only where it is missing.
-The downgrade drops both; older code ignores them anyway.
+The downgrade drops both and relabels revoke_cause refresh_token_reused as ended_by_admin (older code has no such
+value).
 
 Revision ID: 034_session_refresh_reuse
 Revises: 033_user_guides
@@ -42,6 +43,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Older code parses revoke_cause with its enum and would answer 500 on this value; the audit row keeps the true cause
+    op.execute(sa.text("UPDATE user_sessions SET revoke_cause = 'ended_by_admin' "
+                       "WHERE revoke_cause = 'refresh_token_reused'"))
     present = _columns()
     gone = [name for name in COLUMNS if name in present]
     if gone:
