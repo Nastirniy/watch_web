@@ -19,7 +19,7 @@ class MoveUploadResponse(BaseModel):
     received_bytes: int
     total_bytes: int
     last_chunk_at: Optional[ResponseDatetime] = Field(description="When bytes last arrived; null: none yet")
-    holding: bool = Field(description="false: silent too long, the upload is about to be cancelled")
+    holding: bool = Field(description="false: no bytes for too long, or past its expiry: it no longer keeps the move waiting and is left alone")
 
 
 class MoveResponse(BaseModel):
@@ -28,7 +28,8 @@ class MoveResponse(BaseModel):
     status: MoveStatus
     node_kind: MoveNodeKind
     node_id: int
-    target_group_id: Optional[int] = Field(description="The group it goes to; null: directly under the root")
+    target_group_id: Optional[int] = Field(description="The group it goes to; null: directly under the root, or hidden (target_visible false)")
+    target_visible: bool = Field(description="false: it goes to a group outside the reader's scope_group.view; the user who asked always sees the target")
     requested_by: int
     requested_at: ResponseDatetime
     finished_at: Optional[ResponseDatetime]
@@ -41,7 +42,7 @@ class MoveResponse(BaseModel):
 # What a move route answers when uploads hold the move
 MOVE_ACCEPTED = {202: {
     "model": MoveResponse,
-    "description": "Uploads run below the node: nothing moved yet, the move waits. Follow it at Location",
+    "description": "Uploads run below the node: nothing moved yet, the move waits, or this repeats the move that waits. Follow it at Location",
     "headers": {
         "Location": header("URL of the move operation"),
         "Retry-After": header("Seconds before it is worth asking again", "integer"),

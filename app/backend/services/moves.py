@@ -106,6 +106,7 @@ class MoveView:
     node_kind: str
     node_id: int
     target_group_id: Optional[int]
+    target_visible: bool
     requested_by: int
     requested_at: datetime
     finished_at: Optional[datetime]
@@ -207,9 +208,11 @@ async def _pending_sessions(session: AsyncSession, post_ids: Iterable[int]) -> L
     return list((await session.exec(query.order_by(UploadSession.id).execution_options(populate_existing=True))).all())
 
 
-async def view_of(session: AsyncSession, move: PendingMove, tree: ScopeTree, with_uploads: bool = True) -> MoveView:
+async def view_of(session: AsyncSession, move: PendingMove, tree: ScopeTree, with_uploads: bool = True,
+                  show_target: bool = True) -> MoveView:
     """The move and, while it waits, the uploads below its node (with_uploads False: none, for a requester who no
-    longer holds the permissions at the node)"""
+    longer holds the permissions at the node). show_target False: the target is a unit the reader does not see, its id
+    stays out and target_visible says so, because a null target already means the root."""
     now = _now()
     rows: List[UploadSession] = []
     if with_uploads and move.status == MoveStatus.WAITING.value:
@@ -217,7 +220,8 @@ async def view_of(session: AsyncSession, move: PendingMove, tree: ScopeTree, wit
     end = assume_utc(move.finished_at) if move.finished_at is not None else now
     return MoveView(
         id=move.id, status=move.status, node_kind=move.node_kind, node_id=move.node_id,
-        target_group_id=move.target_group_id, requested_by=move.requested_by, requested_at=move.requested_at,
+        target_group_id=move.target_group_id if show_target else None, target_visible=show_target,
+        requested_by=move.requested_by, requested_at=move.requested_at,
         finished_at=move.finished_at, force=move.force, error=move.error,
         waiting_seconds=max(0, int((end - assume_utc(move.requested_at)).total_seconds())),
         uploads=tuple(MoveUpload(upload_id=row.id, post_id=row.post_id, received_bytes=int(row.received_bytes),

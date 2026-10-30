@@ -14,6 +14,7 @@ from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.context import AuthContext
 from app.backend.auth.move_access import move_requirements, view_requirements
 from app.backend.auth.require import require
+from app.backend.auth.scope import Node
 from app.backend.database import get_session
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.enums.general import MoveNodeKind, MoveStatus
@@ -30,6 +31,12 @@ router = APIRouter(prefix=MoveRoutes.BASE.value, tags=[MoveRoutes.tag()])
 
 def _holds_view(auth: AuthContext, move: PendingMove) -> bool:
     return all(auth.covers(permission, node_of(move)) for permission in view_requirements(MoveNodeKind(move.node_kind)))
+
+
+def _target_shown(auth: AuthContext, move: PendingMove) -> bool:
+    """A holder at the post alone reads the move of the post, not the unit it goes to; the user who asked named it"""
+    return move.requested_by == auth.user.id or move.target_group_id is None or AccessControlService.node_visible(
+        auth, Node.group(move.target_group_id))
 
 
 async def _visible_move(session: AsyncSession, auth: AuthContext, move_id: int) -> PendingMove:
@@ -53,11 +60,14 @@ async def get_move(
 
     Needs the permissions a move of the node needs in effect at the node (post.view and post.update for a post; for a
     group also scope_group.view and scope_group.update). The user who asked may always read their move, without the
-    uploads once they lost those. Anyone else, and an unknown id: 404 move_not_found."""
+    uploads once they lost those. Anyone else, and an unknown id: 404 move_not_found. The target is shown to the user
+    who asked and to readers who see that group (scope_group.view); for anyone else target_group_id is null and
+    target_visible false."""
     move = await _visible_move(session, auth, move_id)
     if move.status == MoveStatus.WAITING.value and await run_due_move(session, move_id):
         move = await moves.get_move(session, move_id)
-    return move_response(await moves.view_of(session, move, auth.tree, with_uploads=_holds_view(auth, move)))
+    return move_response(await moves.view_of(session, move, auth.tree, with_uploads=_holds_view(auth, move),
+                                             show_target=_target_shown(auth, move)))
 
 
 @router.post(
@@ -87,4 +97,5 @@ async def cancel_move(
         move = await moves.cancel(session, move_id, auth.user.id, client_info(request, auth))
     except CodedError as exc:
         raise ApiError.from_coded(exc)
-    return move_response(await moves.view_of(session, move, auth.tree, with_uploads=False))
+    return move_response(await moves.view_of(session, move, auth.tree, with_uploads=False,
+                                             show_target=_target_shown(auth, move)))

@@ -1268,6 +1268,40 @@ async def test_a_requester_who_lost_the_right_reads_the_end_of_the_move(client, 
     assert seen.json()["status"] == "failed" and seen.json()["error"] == "permission_required_for_action", seen.text
 
 
+async def test_a_holder_at_the_post_alone_is_not_told_the_target(client, db, headers, storage):
+    """D6: the post is theirs, the unit it goes to may not be: the id stays out, a flag tells it from the root"""
+    scene = await _scene(client, db, headers)
+    move_id = await _waiting_move(client, headers, scene)
+    local = await make_user(db, perms=[], user_type=UserType.ADMINISTRATOR)
+    await give(db, local, [P.POST_VIEW, P.POST_UPDATE], Node.post(scene.post.id))
+    seen = await client.get(_move_url(move_id), headers=headers(local))
+    assert seen.status_code == 200, seen.text
+    assert seen.json()["target_group_id"] is None and seen.json()["target_visible"] is False
+
+    full = await client.get(_move_url(move_id), headers=headers(scene.admin))
+    assert full.json()["target_group_id"] == scene.there.id and full.json()["target_visible"] is True
+
+
+async def test_the_requester_always_sees_the_target_of_their_move(client, db, headers, storage):
+    scene, mover, move_id = await _mover_scene(client, db, headers, storage)
+    for grant in (await db.exec(select(RoleAssignment).where(RoleAssignment.user_id == mover.id))).all():
+        await db.delete(grant)
+    await db.commit()
+    seen = await client.get(_move_url(move_id), headers=headers(mover))
+    assert seen.json()["target_group_id"] == scene.there.id and seen.json()["target_visible"] is True
+
+
+async def test_the_root_is_no_unit_to_hide(client, db, headers, storage):
+    scene = await _scene(client, db, headers)
+    answer = await client.put(_post_url(scene.post), json={"group_id": None, "expected_group_id": scene.home.id},
+                              headers=headers(scene.admin))
+    assert answer.status_code == 202 and answer.json()["target_visible"] is True, answer.text
+    local = await make_user(db, perms=[], user_type=UserType.ADMINISTRATOR)
+    await give(db, local, [P.POST_VIEW, P.POST_UPDATE], Node.post(scene.post.id))
+    seen = await client.get(_move_url(answer.json()["id"]), headers=headers(local))
+    assert seen.json()["target_group_id"] is None and seen.json()["target_visible"] is True
+
+
 # ---------------------------------------------------------------- checks again when it runs
 
 async def _mover_scene(client, db, headers, storage):
