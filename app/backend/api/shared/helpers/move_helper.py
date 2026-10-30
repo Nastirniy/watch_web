@@ -6,7 +6,6 @@ from sqlalchemy.exc import OperationalError
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.api.shared.helpers.audit_helper import client_info
-from app.backend.api.shared.helpers.media_helper import storage_root
 from app.backend.auth.context import AuthContext
 from app.backend.auth.scope import Node
 from app.backend.config import settings
@@ -54,6 +53,6 @@ async def run_released_moves(session: AsyncSession, post_ids: Iterable[int]) -> 
     if not ids:
         return
     try:
-        await moves.after_uploads_ended(session.bind, ids, storage_root())
+        await moves.after_uploads_ended(session.bind, ids)
     except OperationalError as exc:
         _logger.warning(f"moves after an upload of posts {sorted(ids)} left to the worker: {type(exc).__name__}")

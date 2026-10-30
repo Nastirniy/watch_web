@@ -2,10 +2,12 @@
 
 A move of a post, a group or a brigade with uploads running below it does not run: the request leaves a row in
 pending_moves (admit, 202) and new uploads below the node answer 409 move_pending until the move ended. The move runs
-when nothing holds it any more (holds: uploads.holds_move), once: run_move is called by the end of the last upload
-(after_uploads_ended, in a transaction of its own after that upload's commit) and by the media worker, which also ends
-what went silent (advance). Permissions are read again when it runs, for the user who asked: refused means status
-failed, the problem code in error, nothing moved. force runs the move in its request; the uploads go on.
+when nothing holds it any more (holds: uploads.holds_move; a session gone silent holds nothing and is left alone: it
+may go on after the move), once: run_move is called by the end of the last upload (after_uploads_ended, in a
+transaction of its own after that upload's commit), by a request that meets the move when it is due (advance: a refused
+upload, GET /moves/{id}) and by the media worker, which is a backup and nothing else. Permissions are read again when
+it runs, for the user who asked: refused means status failed, the problem code in error, nothing moved. force runs the
+move in its request; the uploads go on.
 
 The locks, in the order every writer takes them (lock_for_move):
 
@@ -35,7 +37,6 @@ the plain reads of a run (the mover's grants, the tree, the names) come after th
 """
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from sqlalchemy import update
@@ -110,6 +111,12 @@ def _now() -> datetime:
 
 def _location(group_id: Optional[int]) -> Node:
     return Node.group(group_id) if group_id is not None else ROOT
+
+
+def _held(locks: MoveLocks) -> bool:
+    """A session lock_for_move locked keeps the move waiting (uploads.holds_move): the read that decides"""
+    now = _now()
+    return any(uploads.holds_move(row, now) for row in locks.pending)
 
 
 def locations(tree: ScopeTree, move: PendingMove) -> Tuple[Node, Node]:
@@ -211,7 +218,7 @@ async def admit(session: AsyncSession, node: Node, target_group_id: Optional[int
     for other in await waiting_moves(session):
         if tree.contains(node_of(other), node) or tree.contains(node, node_of(other)):
             raise CodedError(ErrorCode.MOVE_PENDING, move_id=other.id)
-    if not locks.pending:
+    if not _held(locks):
         return None
     now = _now()
     if force:
@@ -354,13 +361,13 @@ async def _fail(session: AsyncSession, move_id: int, code: ProblemType) -> None:
 async def run_move(session: AsyncSession, move_id: int) -> Optional[MoveStatus]:
     """Run a waiting move, in one transaction: the locks, the claim, the checks of now, the change, the audit rows,
     the commit. The status it ended in; None when this call changed nothing: it no longer waits, another runner has
-    it, or an upload below the node is still pending."""
+    it, or an upload below the node still holds it. Sessions that no longer hold it are locked and left as they are."""
     move = await get_move(session, move_id)
     if move is None or move.status != MoveStatus.WAITING.value:
         return None
     tree = await load_scope_tree(session)
     locks = await lock_for_move(session, tree, node_of(move), move.target_group_id)
-    if locks.pending or not await _end_waiting(session, move_id, MoveStatus.DONE):
+    if _held(locks) or not await _end_waiting(session, move_id, MoveStatus.DONE):
         await session.commit()
         return None
     try:
@@ -383,52 +390,24 @@ async def run_move(session: AsyncSession, move_id: int) -> Optional[MoveStatus]:
     return MoveStatus.DONE
 
 
-async def _cancel_stale(session: AsyncSession, move: PendingMove, upload_ids: Iterable[str], storage_root: Path) -> None:
-    """End the sessions that no longer hold the move, as an archive ends them: locked, checked again, aborted with an
-    audit row in one transaction, the part files removed after the commit"""
-    await start_write(session)
-    # By the primary key alone: never through the status index (uploads.lock_pending says why)
-    rows = await lock_all(session, select(UploadSession).where(UploadSession.id.in_(sorted(upload_ids)))
-                          .order_by(UploadSession.id))
-    now = _now()
-
-    async def audit(row: UploadSession) -> None:
-        await create_audit_log(
-            session, AuditEvent.UPLOAD_SESSION_ABORT,
-            params={"upload_id": row.id, "media_type": row.media_type, "observation_id": row.observation_id,
-                    "file_name": row.original_filename},
-            scope=Node.post(row.post_id), user_id=move.requested_by,
-            new_values={"received_bytes": row.received_bytes, "expected_size": row.expected_size, "move_id": move.id,
-                        "error": ErrorCode.UPLOAD_CANCELLED_BY_MOVE.value},
-        )
-
-    cancelled = await uploads.cancel_pending(session, [row for row in rows if not uploads.holds_move(row, now)],
-                                             ErrorCode.UPLOAD_CANCELLED_BY_MOVE, record=audit)
-    await session.commit()
-    await uploads.remove_parts(cancelled, storage_root)
-
-
-async def advance(session: AsyncSession, move_id: int, storage_root: Path) -> None:
-    """One look at a waiting move: sessions past their expiry end, sessions that went silent are cancelled, and with
-    nothing left below the node the move runs. Called with a session of its own (it commits)."""
+async def is_due(session: AsyncSession, move_id: int) -> bool:
+    """A waiting move nothing below its node holds any more: the plain read of a look at it, on any session. The
+    decision is run_move's, under its locks: this only spares a look the global lock while uploads run."""
     move = await get_move(session, move_id)
     if move is None or move.status != MoveStatus.WAITING.value:
-        return
-    post_ids = (await load_scope_tree(session)).posts_under(node_of(move))
-    rows = await _pending_sessions(session, post_ids)
+        return False
     now = _now()
-    await start_write(session)
-    for row in rows:
-        if uploads.is_expired(row, now):
-            await uploads.expire_if_due(session, row, storage_root, now)
-    stale = [row.id for row in rows if not uploads.is_expired(row, now) and not uploads.holds_move(row, now)]
-    if stale:
-        await _cancel_stale(session, move, stale, storage_root)
-    if not await _pending_sessions(session, post_ids):
-        await run_move(session, move_id)
+    rows = await _pending_sessions(session, (await load_scope_tree(session)).posts_under(node_of(move)))
+    return not any(uploads.holds_move(row, now) for row in rows)
 
 
-async def after_uploads_ended(bind: AsyncEngine, post_ids: Iterable[int], storage_root: Path) -> None:
+async def advance(session: AsyncSession, move_id: int) -> Optional[MoveStatus]:
+    """One look at a waiting move, with a session of its own (it commits): when nothing holds it any more it runs. A
+    look touches no upload, whatever the run decides. run_move's answer, None when it did not run."""
+    return await run_move(session, move_id) if await is_due(session, move_id) else None
+
+
+async def after_uploads_ended(bind: AsyncEngine, post_ids: Iterable[int]) -> None:
     """After the commit that ended uploads of these posts: every waiting move above them gets its look now, in a
     session of its own, so the caller's objects stay as they are. One read when no move waits."""
     posts = [Node.post(post_id) for post_id in post_ids]
@@ -441,4 +420,4 @@ async def after_uploads_ended(bind: AsyncEngine, post_ids: Iterable[int], storag
         tree = await load_scope_tree(session)
         for move in moves:
             if any(tree.contains(node_of(move), post) for post in posts):
-                await advance(session, move.id, storage_root)
+                await advance(session, move.id)

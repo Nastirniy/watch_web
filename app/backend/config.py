@@ -381,10 +381,12 @@ class HealthConfig(BaseModel):
 
 class MovesConfig(BaseModel):
     """Moves that wait for the uploads below them: MYSETTINGS_MOVES__*"""
-    # While a move waits, an upload that received no bytes for this long is cancelled. A chunk writer renews its claim
-    # every 30 seconds while bytes flow (services/media/uploads.py): stay well above that
+    # An upload that received no bytes for this long no longer keeps a move waiting; it is left alone and may go on after
+    # the move. A chunk writer renews its claim every 30 seconds while bytes flow (services/media/uploads.py): stay well
+    # above that
     upload_stale_seconds: int = Field(default=300, ge=60)
-    # How often the media worker looks at the waiting moves; also the Retry-After of the 202 and 409 move_pending
+    # How often the media worker looks at the waiting moves (a backup: the requests that meet a move look too); also
+    # the Retry-After of the 202 and 409 move_pending
     check_interval_seconds: int = Field(default=15, ge=1)
 
 

@@ -1,6 +1,6 @@
 """Queued moves (spec 2026-10-30): a move with uploads running below the node answers 202 and waits; new uploads below
-it answer 409 move_pending, other writes go on; an upload silent for moves.upload_stale_seconds is cancelled while the
-move waits; force runs it at once; the requester, or anyone who could make the same move, cancels it; the permission
+it answer 409 move_pending, other writes go on; an upload silent for moves.upload_stale_seconds stops holding it and
+goes on after the move; force runs it at once; the requester, or anyone who could make the same move, cancels it; the permission
 checks run again when it runs, and a mover who lost the right ends it failed with nothing moved.
 
 The SQLite tests cannot race: the concurrent cases were run against MariaDB 11.8 with the real routes."""
@@ -89,6 +89,11 @@ async def _age(db, upload_id: str, seconds: int = 3600) -> None:
     moment = datetime.now(timezone.utc) - timedelta(seconds=seconds)
     await db.execute(update(UploadSession).where(UploadSession.id == upload_id).values(last_chunk_at=moment))
     await db.commit()
+
+
+def _move_body(scene, **extra) -> dict:
+    """A post move as a form sends it: the target and the place it saw"""
+    return {"group_id": scene.there.id, "expected_group_id": scene.home.id, **extra}
 
 
 def _worker(session_maker, storage) -> MediaWorker:
@@ -301,30 +306,43 @@ async def test_an_archive_of_the_observation_ends_the_upload_and_runs_the_move(c
 
 # ---------------------------------------------------------------- the stale rule
 
-async def test_a_stale_upload_is_cancelled_and_the_move_runs(client, db, headers, storage, session_maker):
+async def test_a_quiet_upload_stops_holding_the_move_and_goes_on_after_it(client, db, headers, storage, session_maker):
+    """Owner, fix round: a quiet upload is left alone. The move runs, the session stays open at the post's new place,
+    its client continues and completes"""
     scene = await _scene(client, db, headers)
     move_id = await _waiting_move(client, headers, scene)
     await _age(db, scene.upload_id)
-    state = await client.get(_move_url(move_id), headers=headers(scene.admin))
-    assert state.json()["uploads"][0]["holding"] is False
-
     await _worker(session_maker, storage).check_moves()
+    assert (await _move(db, move_id)).status == "done"
 
     row = await _stored(db, scene.upload_id)
-    assert (row.status, row.error, row.writer_token) == ("aborted", "upload_cancelled_by_move", None)
-    assert not _part(storage, scene.upload_id).exists(), "the part file goes after the commit"
-    assert (await _move(db, move_id)).status == "done"
+    assert (row.status, row.error) == ("open", None)
+    assert _part(storage, scene.upload_id).exists(), "its bytes stay"
     assert await _group_of(db, scene.post) == scene.there.id
-    abort = (await _events(db, AuditEvent.UPLOAD_SESSION_ABORT))[-1]
-    assert abort.params["upload_id"] == scene.upload_id and abort.new_values["error"] == "upload_cancelled_by_move"
+    assert await _events(db, AuditEvent.UPLOAD_SESSION_ABORT) == []
 
-    chunk = await _chunk(client, headers, scene.admin, scene.upload_id, 10, 10)
-    assert chunk.status_code == 409 and chunk.json()["code"] == "upload_cancelled_by_move", chunk.text
-    assert chunk.json()["session_status"] == "aborted"
-    complete = await client.post(_complete_url(scene.upload_id), headers=headers(scene.admin))
-    assert complete.status_code == 409 and complete.json()["code"] == "upload_cancelled_by_move", complete.text
-    seen = await client.get(_session_url(scene.upload_id), headers=headers(scene.admin))
-    assert seen.json()["status"] == "aborted" and seen.json()["error"] == "upload_cancelled_by_move"
+    await _send_rest(client, headers, scene.admin, scene.upload_id, 10)
+    completed = await client.post(_complete_url(scene.upload_id), headers=headers(scene.admin))
+    assert completed.status_code == 200, completed.text
+
+
+async def test_a_move_with_only_quiet_uploads_below_it_runs_at_once(client, db, headers, storage):
+    scene = await _scene(client, db, headers)
+    await _age(db, scene.upload_id)
+    moved = await client.put(_post_url(scene.post), json=_move_body(scene), headers=headers(scene.admin))
+    assert moved.status_code == 200, moved.text
+    assert await _group_of(db, scene.post) == scene.there.id
+    assert (await _stored(db, scene.upload_id)).status == "open"
+    assert (await db.exec(select(PendingMove))).all() == [], "no operation: nothing held it"
+
+
+async def test_a_quiet_upload_that_wakes_up_holds_the_move_again(client, db, headers, storage, session_maker):
+    scene = await _scene(client, db, headers)
+    move_id = await _waiting_move(client, headers, scene)
+    await _age(db, scene.upload_id)
+    assert (await _chunk(client, headers, scene.admin, scene.upload_id, 10, 10)).status_code == 204
+    await _worker(session_maker, storage).check_moves()
+    assert (await _move(db, move_id)).status == "waiting"
 
 
 async def test_an_upload_that_receives_bytes_holds_the_move(client, db, headers, storage, session_maker):
@@ -345,7 +363,8 @@ async def test_a_session_that_never_received_a_chunk_counts_from_its_creation(cl
     await db.execute(update(UploadSession).where(UploadSession.id == scene.upload_id).values(created_at=moment))
     await db.commit()
     await _worker(session_maker, storage).check_moves()
-    assert (await _stored(db, scene.upload_id)).error == "upload_cancelled_by_move"
+    assert (await _move(db, move_id)).status == "done"
+    assert (await _stored(db, scene.upload_id)).status == "open"
 
 
 async def test_the_stale_rule_acts_only_while_a_move_waits(client, db, headers, storage, session_maker):
@@ -367,15 +386,44 @@ async def test_a_completion_that_runs_holds_the_move(client, db, headers, storag
     assert (await _move(db, move_id)).status == "waiting"
 
 
+async def test_a_completion_gone_silent_stops_holding_the_move(client, db, headers, storage, session_maker):
+    """An API restart during a complete must not hold a move for COMPLETION_STALE_SECONDS: past
+    moves.upload_stale_seconds the claim holds nothing; the session itself is left as it is"""
+    scene = await _scene(client, db, headers)
+    move_id = await _waiting_move(client, headers, scene)
+    moment = datetime.now(timezone.utc) - timedelta(seconds=settings.moves.upload_stale_seconds + 60)
+    await db.execute(update(UploadSession).where(UploadSession.id == scene.upload_id).values(
+        status="completing", writer_token="t" * 32, writer_since=moment, last_chunk_at=moment))
+    await db.commit()
+    await _worker(session_maker, storage).check_moves()
+    assert (await _move(db, move_id)).status == "done"
+    assert (await _stored(db, scene.upload_id)).status == "completing"
+
+
 async def test_an_expired_session_no_longer_holds_the_move(client, db, headers, storage, session_maker):
+    """Its end is the sweep's (uploads.expire_sessions): a look at a move touches no upload"""
     scene = await _scene(client, db, headers)
     move_id = await _waiting_move(client, headers, scene)
     moment = datetime.now(timezone.utc) - timedelta(minutes=1)
     await db.execute(update(UploadSession).where(UploadSession.id == scene.upload_id).values(expires_at=moment))
     await db.commit()
     await _worker(session_maker, storage).check_moves()
-    assert (await _stored(db, scene.upload_id)).status == "expired"
+    assert (await _stored(db, scene.upload_id)).status == "open"
     assert (await _move(db, move_id)).status == "done"
+
+
+async def test_a_refused_move_touches_no_upload(client, db, headers, storage, session_maker):
+    """D4: the checks of the run come first, a look never changes a session"""
+    scene, mover, move_id = await _mover_scene(client, db, headers, storage)
+    for grant in (await db.exec(select(RoleAssignment).where(RoleAssignment.user_id == mover.id))).all():
+        await db.delete(grant)
+    await db.commit()
+    await _age(db, scene.upload_id)
+    await _worker(session_maker, storage).check_moves()
+    row = await _move(db, move_id)
+    assert (row.status, row.error) == ("failed", "permission_required_for_action")
+    assert (await _stored(db, scene.upload_id)).status == "open"
+    assert _part(storage, scene.upload_id).exists()
 
 
 async def test_last_chunk_at_moves_with_bytes_only(client, db, headers, storage):

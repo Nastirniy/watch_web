@@ -504,10 +504,6 @@ class ErrorCode(ProblemType):
     UPLOAD_SESSION_CLOSED = ("upload_session_closed", problem(
         410, "Upload session is closed", "Upload session is {session_status}; open a new session",
         session_status=str, media_file_id=Optional[int]))
-    # Nothing arrived for moves.upload_stale_seconds while a move waited for the session: aborted, the bytes are gone
-    UPLOAD_CANCELLED_BY_MOVE = ("upload_cancelled_by_move", problem(
-        409, "Upload cancelled by a waiting move",
-        "No bytes arrived for too long while a move waited for this upload; open a new session", session_status=str))
     UPLOAD_SESSION_COMPLETED = ("upload_session_completed", problem(409, "Session is completed; archive the media file instead"))
     # Another complete is storing the file (status completing): no chunk, abort or second complete meanwhile
     UPLOAD_SESSION_COMPLETING = ("upload_session_completing", problem(409, "Session is being completed; ask GET for its status"))

@@ -32,11 +32,13 @@ finish: the transaction that inserts its media row begins with the post and
 observation locks and refuses an archived one (MediaManager.store_file_from_path),
 so nothing lands in an archived observation either way.
 
-A waiting move (services/moves.py) holds on to the pending sessions below its node: holds_move says which still count.
+A waiting move (services/moves.py) waits for the pending sessions below its node: holds_move says which still count.
 An open session counts while bytes arrive (last_chunk_at, moved by the first byte of a chunk, every renewal while it
-streams and the stored chunk, never by a claim or a retry without bytes); one silent for moves.upload_stale_seconds
-is ended like an archive ends one (cancel_pending, error upload_cancelled_by_move). A completion that runs counts
-until its claim goes stale.
+streams and the stored chunk, never by a claim or a retry without bytes), a completion for the same time after its
+claim: an API restart during a complete must not hold a move for COMPLETION_STALE_SECONDS. A session silent for
+moves.upload_stale_seconds holds nothing, and that is all: the move runs without touching it, the session stays open,
+its client may go on and complete (media.view and media.create asked at the post's new place), and
+storage.upload.session_ttl_hours removes one that was abandoned (owner decision 2026-10-30, fix round).
 """
 from __future__ import annotations
 
@@ -228,12 +230,16 @@ def last_bytes_at(row: UploadSession) -> datetime:
 
 
 def holds_move(row: UploadSession, now: Optional[datetime] = None) -> bool:
-    """The session keeps a move waiting: open with bytes arriving within moves.upload_stale_seconds, or a completion
-    that runs. What no longer holds is ended by the waiting move (services/moves.py), or has ended already."""
+    """The session keeps a move waiting: not past its expiry, open with bytes arriving within
+    moves.upload_stale_seconds, or claimed by a complete within that time. A session that no longer holds is left as it
+    is (the module docstring says why): the move runs around it."""
     now = now or utcnow()
-    if row.status == STATUS_COMPLETING:
-        return not _cancellable(row, now)
+    if is_expired(row, now):
+        return False
     stale_since = now - timedelta(seconds=settings.moves.upload_stale_seconds)
+    if row.status == STATUS_COMPLETING:
+        since = _aware(row.writer_since)
+        return since is not None and since >= stale_since
     return row.status == STATUS_OPEN and last_bytes_at(row) >= stale_since
 
 

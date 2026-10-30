@@ -346,14 +346,14 @@ class MediaWorker:
                 pass
 
     async def check_moves(self) -> None:
-        """One look at every waiting move (services/moves.py advance): sessions past their expiry end, sessions gone
-        silent are cancelled, a move nothing holds runs, also one left waiting by a crash after its last upload"""
+        """One look at every waiting move (services/moves.py advance): a move nothing holds runs. A backup: the end of
+        an upload and the requests that meet a move do the same, this catches a crash or a move nobody asks about"""
         async with self.session_maker() as session:
             move_ids = [move.id for move in await move_queue.waiting_moves(session)]
         for move_id in move_ids:
             try:
                 async with self.session_maker() as session:
-                    await moves.advance(session, move_id, self.storage_root)
+                    await moves.advance(session, move_id)
             except Exception as exc:  # worker loop: one move never stops the others, the next look tries again
                 _logger.warning(f"move {move_id}: check failed: {type(exc).__name__}: {exc}")
 

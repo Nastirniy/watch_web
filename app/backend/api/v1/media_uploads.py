@@ -126,11 +126,7 @@ def _completing(row: UploadSession) -> ApiError:
 
 
 def _closed(row: UploadSession) -> ApiError:
-    """The answer of a session that ended: 410 with its status; 409 upload_cancelled_by_move when a waiting move ended
-    it, which the client tells the user apart from any other end"""
     _logger.info(f"upload session {row.id} is {row.status} ({row.error})")
-    if row.error == ErrorCode.UPLOAD_CANCELLED_BY_MOVE.value:
-        return ApiError(ErrorCode.UPLOAD_CANCELLED_BY_MOVE, headers=_session_headers(row), session_status=row.status)
     return ApiError(
         ErrorCode.UPLOAD_SESSION_CLOSED,
         headers=_session_headers(row),
@@ -300,7 +296,7 @@ async def head_upload_session(
             ErrorCode.UPLOAD_OFFSET_MISMATCH, ErrorCode.UPLOAD_WRITER_BUSY, ErrorCode.UPLOAD_SESSION_CLOSED,
             ErrorCode.UPLOAD_SESSION_COMPLETING, ErrorCode.UPLOAD_BYTES_MISSING,
             ErrorCode.UPLOAD_CHUNK_OVERRUN, ErrorCode.UPLOAD_CHUNK_TOO_LARGE, ErrorCode.UPLOAD_CHUNK_CONTENT_TYPE,
-            ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.UPLOAD_CANCELLED_BY_MOVE, *GUARDED,
+            ErrorCode.OBSERVATION_NOT_FOUND, *GUARDED,
         ),
     },
 )
@@ -318,8 +314,9 @@ async def append_upload_chunk(
     413 when the chunk is larger than max_chunk_bytes or overruns the declared size; 410 when the session is not open
     (or the stored bytes are gone: the session is aborted; an archive of its observation, post or unit cancels it);
     409 while a complete stores the file; 404 observation_not_found when its observation is archived. A waiting move
-    does not stop a chunk; 409 upload_cancelled_by_move when the session went silent while one waited and was
-    cancelled for it (open a new session after the move).
+    does not stop a chunk. A session that went silent stops holding a waiting move and is left alone: the move runs and
+    the next chunk goes on as usual, media.view and media.create asked at the post's new place (403 when the uploader
+    lost them there).
     """
     row = await _require_open(session, await _owned_session(session, auth, upload_id, lock=True))
     await _refuse_archived_observation(session, row)
@@ -397,7 +394,7 @@ async def append_upload_chunk(
         ErrorCode.MEDIA_EXTENSION_DANGEROUS, ErrorCode.MEDIA_EXTENSION_NOT_ACCEPTED, ErrorCode.MEDIA_TYPE_UNKNOWN,
         ErrorCode.UPLOAD_CHECKSUM_MISMATCH, ErrorCode.MEDIA_STORE_FAILED, ErrorCode.POST_ARCHIVED,
         ErrorCode.OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_UPLOADS_BUSY, ErrorCode.UPLOAD_SESSION_COMPLETING,
-        ErrorCode.UPLOAD_WRITER_BUSY, ErrorCode.UPLOAD_CANCELLED_BY_MOVE, *GUARDED,
+        ErrorCode.UPLOAD_WRITER_BUSY, *GUARDED,
     ),
 )
 async def complete_upload_session(
@@ -415,10 +412,10 @@ async def complete_upload_session(
     observation, its post or a unit with its posts cancels the session: 410 upload_session_closed (aborted). An
     archived observation: 404 observation_not_found; the post archived: 409 post_archived (the session stays open
     when nothing cancelled it). When the archive comes while the file is being stored, the store refuses it (404
-    observation_not_found or 409 post_archived) and the session ends aborted. A waiting move does not stop a complete:
-    the last upload to end runs the move. 409 upload_cancelled_by_move: the session went silent while a move waited.
-    After a forced move media.view and media.create are asked at the post's new place (403 when the uploader lost
-    them; the bytes cannot be saved by the client).
+    observation_not_found or 409 post_archived) and the session ends aborted. A waiting move does not stop a complete,
+    and a complete that ends the last upload holding it, stored or refused, runs the move. After a move, forced or
+    not, media.view and media.create are asked at the post's new place (403 when the uploader lost them; the bytes
+    cannot be saved by the client).
     """
     # Ownership and scope on the session as read, then the write begins with the observation row (shared): an archive
     # of the observation waits for the claim or is seen; then the session row
