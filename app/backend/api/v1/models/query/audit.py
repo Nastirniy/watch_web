@@ -39,12 +39,12 @@ class AuditFilterParams(BaseFilterParams):
     request_id: Optional[str] = Field(default=None, max_length=32, description="X-Request-ID of the request")
     session_id: Optional[str] = Field(default=None, max_length=128,
                                       description="Login session (needs audit.view: matches nothing without it)")
-    post_id: Optional[int] = Field(default=None, description="Events at this post")
-    group_id: Optional[int] = Field(default=None, description="Events at this scope group or anywhere below it (the "
+    post_id: Optional[int] = Field(default=None, ge=1, description="Events at this post")
+    group_id: Optional[int] = Field(default=None, ge=1, description="Events at this scope group or anywhere below it (the "
                                                               "tree as it is now)")
-    corps_id: Optional[int] = Field(default=None, description="Events in this corps (its brigades and posts "
+    corps_id: Optional[int] = Field(default=None, ge=1, description="Events in this corps (its brigades and posts "
                                                               "included); an id of another kind gives nothing")
-    brigade_id: Optional[int] = Field(default=None, description="Events in this brigade (its posts included); an "
+    brigade_id: Optional[int] = Field(default=None, ge=1, description="Events in this brigade (its posts included); an "
                                                                 "id of another kind gives nothing")
     before_id: Optional[int] = Field(default=None, ge=1, description="Only entries with a smaller id: the id of the "
                                                                      "last entry of the previous page. It pages by "

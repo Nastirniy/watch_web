@@ -3,6 +3,7 @@ it is in effect and of the groups inside the subtrees where it is held; rows at 
 root; rows without a scope (system rows) never. The device fields (ip_address, user_agent, session_id, request_url)
 stay with audit.view. An entry that exists outside the caller's scope is 403 audit_entry_access_denied; a post_id /
 group_id / corps_id / brigade_id filter outside it is 403."""
+import pytest
 from sqlmodel import select
 
 from app.backend.api.v1 import V1
@@ -199,3 +200,14 @@ async def test_new_permission_is_tree_level_and_in_administrator(db):
     # seeding inserted the row with its level
     row = (await db.exec(select(Permission).where(Permission.name == name))).one()
     assert row.level == PermissionLevel.TREE.value and row.display_name
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["post_id", "group_id", "corps_id", "brigade_id"])
+@pytest.mark.parametrize("value", [0, -1])
+async def test_a_node_filter_below_one_is_a_validation_error(client, db, headers, name, value):
+    """An id that names no node answers 422; a scoped reader used to reach Node.group(0): 500"""
+    data = await _dataset(db)
+    h = headers(await _administrator(db, Node.group(data["brigade"].id)))
+    response = await client.get(ENTRIES, params={name: value}, headers=h)
+    assert response.status_code == 422, response.text

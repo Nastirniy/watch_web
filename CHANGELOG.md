@@ -9,6 +9,8 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ### Changed
 
+- `GET /audit-logs`: `post_id`, `group_id`, `corps_id` and `brigade_id` below 1 answer 422 `validation_error` (a scoped
+  reader used to get 500 on `group_id=0`, `corps_id=0`, `brigade_id=0`; the system view an empty list).
 - A valid token presented with another client certificate than the session's, an access token on any request or the
   current refresh token, now writes an audit row, the new event `session.certificate_mismatch` (params `username`,
   `token_kind`; the presenter's address and user agent, as on every audit row), at most one row per session in 5

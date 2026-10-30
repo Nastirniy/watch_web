@@ -30598,7 +30598,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "integer"
+                  "type": "integer",
+                  "minimum": 1
                 },
                 {
                   "type": "null"
@@ -30616,7 +30617,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "integer"
+                  "type": "integer",
+                  "minimum": 1
                 },
                 {
                   "type": "null"
@@ -30634,7 +30636,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "integer"
+                  "type": "integer",
+                  "minimum": 1
                 },
                 {
                   "type": "null"
@@ -30652,7 +30655,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "integer"
+                  "type": "integer",
+                  "minimum": 1
                 },
                 {
                   "type": "null"
