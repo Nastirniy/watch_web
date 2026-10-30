@@ -9,6 +9,7 @@ import secrets
 
 from app.backend.config import settings
 from app.backend.utils.logging_config import get_auth_logger
+from app.backend.models.audit import AuditLog
 from app.backend.models.user import User, UserSession
 from app.backend.models.user_certificate import UserCertificate
 from app.backend.enums.errors import AuthErrorCode
@@ -528,19 +529,36 @@ class AuthService:
         await session.commit()
         return True
 
+    # At most one audit row per session in this time: a client repeating a stolen token must not flood the audit log
+    CERTIFICATE_MISMATCH_AUDIT_INTERVAL = timedelta(minutes=5)
+
     @staticmethod
     async def record_certificate_mismatch(session: AsyncSession, user_session: UserSession, user: User,
-                                          ip_address: Optional[str] = None, user_agent: Optional[str] = None,
+                                          token_kind: str, ip_address: Optional[str] = None,
+                                          user_agent: Optional[str] = None,
                                           request_url: Optional[str] = None) -> None:
-        """The audit row of a refresh with the session's current token and another client certificate, the strongest
-        sign of a stolen token (the attempt is refused and the session stays: the owner still holds the token).
-        Rolls the caller's claim back first, so the token stays usable, and commits the row as a write of its own."""
+        """The audit row of a valid token of the session presented with another client certificate, the strongest sign
+        of a stolen token (token_kind: access or refresh). The attempt is refused and the session stays: the owner
+        still holds the token, and a browser that picked another certificate of the user looks the same.
+
+        Rolls the caller's work back first (a refresh claim, so the token stays usable) and commits the row as a write
+        of its own. The last row of the session is read first: two requests at the same moment may both write,
+        which is harmless. The caller raises token_certificate_mismatch."""
         session_id, user_id, username, scope = user_session.id, user.id, user.username, home_scope(user)
         await session.rollback()
+        since = datetime.now(timezone.utc) - AuthService.CERTIFICATE_MISMATCH_AUDIT_INTERVAL
+        recent = (await session.exec(select(AuditLog.id).where(
+            AuditLog.session_id == session_id,
+            AuditLog.event == AuditEvent.SESSION_CERTIFICATE_MISMATCH.code,
+            AuditLog.created_at >= since,
+        ).limit(1))).first()
+        if recent is not None:
+            await session.rollback()
+            return
         await create_audit_log(
             session,
             AuditEvent.SESSION_CERTIFICATE_MISMATCH,
-            params={"username": username},
+            params={"username": username, "token_kind": token_kind},
             scope=scope,
             resource_id=user_id,
             user_id=user_id,

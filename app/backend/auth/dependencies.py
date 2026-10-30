@@ -1,12 +1,13 @@
 from dataclasses import dataclass
 from typing import Optional
-from fastapi import Depends, Header
+from fastapi import Depends, Header, Request
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from loguru import logger
 
 from app.backend.database import get_session
+from app.backend.models.audit import AuditLog
 from app.backend.models.user import User
 from app.backend.enums.errors import AuthErrorCode
 from app.backend.auth.service import AuthService
@@ -14,6 +15,7 @@ from app.backend.auth.context import AuthContext, load_auth_context
 from app.backend.auth.presence import should_touch
 from app.backend.auth.sessions import TouchResult, certificate_matches, live_session, touch_session
 from app.backend.errors.problems import ApiError
+from app.backend.utils.text import fit_column
 
 security = HTTPBearer(auto_error=False)
 
@@ -46,6 +48,7 @@ async def get_token_claims(credentials: Optional[HTTPAuthorizationCredentials] =
 
 
 async def get_current_user(
+        request: Request,
         claims: TokenClaims = Depends(get_token_claims),
         session: AsyncSession = Depends(get_session),
         # Set by nginx from the verified client certificate (nginx-proxy.conf), never by the client
@@ -73,6 +76,12 @@ async def get_current_user(
         raise ApiError(AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH)
     if not await certificate_matches(user_session, x_ssl_client_fingerprint):
         logger.warning(f"Token presented with another client certificate: session_id={session_id}, user_id={user_id}")
+        await AuthService.record_certificate_mismatch(
+            session, user_session, user, "access",
+            ip_address=request.client.host if request.client else None,
+            user_agent=fit_column(AuditLog.user_agent, request.headers.get("user-agent")),
+            request_url=fit_column(AuditLog.request_url, str(request.url)),
+        )
         raise ApiError(AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH)
     if should_touch(user_session.last_activity) and \
             await touch_session(session, user_session) is TouchResult.ENDED:

@@ -173,7 +173,7 @@
           "AUTHENTICATION"
         ],
         "summary": "Refresh Token",
-        "description": "Refresh the access token with the refresh token. A refresh token works once: the answer carries a new access\ntoken and the next refresh token, and the token presented is used from then on.\n\nA used refresh token presented again (RFC 9700 section 4.14, refresh token reuse):\n\n- the token the last refresh of the session replaced, less than `security.refresh_reuse_grace_seconds` (30)\n  after that refresh: `invalid_refresh_token`, the session stays. Two tabs that refreshed at the same moment with\n  the same token: one got the new tokens, the other keeps using them (exactly one 200, one 401).\n- any other used token of the session (that one later, or an older one): `refresh_token_reused`, the session\n  ends (`revoke_cause` `refresh_token_reused`, an audit row `session.end`). Every token of the session, the\n  newest included, answers `session_expired` from then on: log in again.\n- a used token presented with another client certificate than the session's: `token_certificate_mismatch`,\n  and the session ends as well (`refresh_token_reused`), whatever the window. The current token presented with\n  another certificate answers `token_certificate_mismatch`: the session and the token stay as they were, and an\n  audit row `session.certificate_mismatch` records the attempt.\n- a session from before this rule that has not refreshed since (it records no previous token): a used token is\n  `invalid_refresh_token` and the session stays.\n\nKeep only the newest refresh token; a client that lost the answer of a refresh logs in again.",
+        "description": "Refresh the access token with the refresh token. A refresh token works once: the answer carries a new access\ntoken and the next refresh token, and the token presented is used from then on.\n\nA used refresh token presented again (RFC 9700 section 4.14, refresh token reuse):\n\n- the token the last refresh of the session replaced, less than `security.refresh_reuse_grace_seconds` (30)\n  after that refresh: `invalid_refresh_token`, the session stays. Two tabs that refreshed at the same moment with\n  the same token: one got the new tokens, the other keeps using them (exactly one 200, one 401).\n- any other used token of the session (that one later, or an older one): `refresh_token_reused`, the session\n  ends (`revoke_cause` `refresh_token_reused`, an audit row `session.end`). Every token of the session, the\n  newest included, answers `session_expired` from then on: log in again.\n- a used token presented with another client certificate than the session's: `token_certificate_mismatch`,\n  and the session ends as well (`refresh_token_reused`), whatever the window. The current token presented with\n  another certificate answers `token_certificate_mismatch`: the session and the token stay as they were, and an\n  audit row `session.certificate_mismatch` records the attempt (at most one per session in 5 minutes).\n- a session from before this rule that has not refreshed since (it records no previous token): a used token is\n  `invalid_refresh_token` and the session stays.\n\nKeep only the newest refresh token; a client that lost the answer of a refresh logs in again.",
         "operationId": "refresh_token",
         "requestBody": {
           "content": {
@@ -59280,10 +59280,14 @@
           "params"
         ],
         "title": "SessionCertificateMismatchAuditEntry",
-        "description": "Refresh token presented with another client certificate (event session.certificate_mismatch, category authentication)"
+        "description": "Token presented with another client certificate (event session.certificate_mismatch, category authentication)"
       },
       "SessionCertificateMismatchAuditParams": {
         "properties": {
+          "token_kind": {
+            "type": "string",
+            "title": "Token Kind"
+          },
           "username": {
             "type": "string",
             "title": "Username"
@@ -59291,10 +59295,11 @@
         },
         "type": "object",
         "required": [
+          "token_kind",
           "username"
         ],
         "title": "SessionCertificateMismatchAuditParams",
-        "description": "Params of session.certificate_mismatch (Refresh token presented with another client certificate)"
+        "description": "Params of session.certificate_mismatch (Token presented with another client certificate)"
       },
       "SessionEndAuditEntry": {
         "properties": {

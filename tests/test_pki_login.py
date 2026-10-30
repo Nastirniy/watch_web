@@ -1,11 +1,11 @@
 """Production login with the client certificate as nginx forwards it (X-SSL-Client-*), and its sessions."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.x509.oid import NameOID
-from sqlmodel import select
+from sqlmodel import select, update
 
 from app.backend.api.v1 import V1
 from app.backend.auth.certificates import hash_data, parse_cn
@@ -241,8 +241,43 @@ async def test_the_current_refresh_token_with_another_certificate_is_audited(cli
             AuditLog.event == AuditEvent.SESSION_CERTIFICATE_MISMATCH.code))).all()
         live = (await fresh.exec(select(UserSession).where(UserSession.user_id == owner.id))).one()
     assert [(row.user_id, row.resource_id, row.session_id) for row in rows] == [(owner.id, owner.id, live.id)]
-    assert rows[0].params["username"] == "auditowner"
+    assert rows[0].params == {"username": "auditowner", "token_kind": "refresh"}
     assert live.ended_at is None and live.revoke_cause is None
 
     again = await client.post(REFRESH, json={"refresh_token": tokens["refresh_token"]}, headers=nginx_headers(own))
     assert again.status_code == 200, again.text
+
+
+@pytest.mark.asyncio
+async def test_an_access_token_with_another_certificate_is_audited_once_in_the_interval(
+        client, db, headers, production, session_maker):
+    """The same signal on an ordinary request: refused, the session stays, one audit row. A client repeating the stolen
+    token cannot flood the log: at most one row per session in the interval, the refresh path included"""
+    own = make_certificate("cn-access-own", 0x8888)
+    other = make_certificate("cn-access-other", 0x9999)
+    await _create_user(client, db, headers, "accessowner", own)
+    await _create_user(client, db, headers, "accessother", other)
+    tokens = await _tokens(client, own)
+    bearer = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+    async def mismatch_rows():
+        async with session_maker() as fresh:
+            return (await fresh.exec(select(AuditLog).where(
+                AuditLog.event == AuditEvent.SESSION_CERTIFICATE_MISMATCH.code))).all()
+
+    for _ in range(3):
+        stolen = await client.get(ME, headers={**nginx_headers(other), **bearer})
+        assert stolen.status_code == 401 and stolen.json()["code"] == "token_certificate_mismatch"
+    refused = await client.post(REFRESH, json={"refresh_token": tokens["refresh_token"]}, headers=nginx_headers(other))
+    assert refused.status_code == 401
+    rows = await mismatch_rows()
+    assert len(rows) == 1 and rows[0].params == {"username": "accessowner", "token_kind": "access"}
+
+    async with session_maker() as other_session:
+        await other_session.exec(update(AuditLog).where(AuditLog.id == rows[0].id).values(
+            created_at=datetime.now(timezone.utc) - timedelta(minutes=6)))
+        await other_session.commit()
+    stolen = await client.get(ME, headers={**nginx_headers(other), **bearer})
+    assert stolen.status_code == 401
+    assert len(await mismatch_rows()) == 2
+    assert (await client.get(ME, headers={**nginx_headers(own), **bearer})).status_code == 200, "the session stays"
