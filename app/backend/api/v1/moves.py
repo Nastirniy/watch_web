@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Request
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.api.shared.helpers.audit_helper import client_info
+from app.backend.api.shared.helpers.move_helper import run_due_move
 from app.backend.api.v1.models.response.moves import MoveResponse, move_response
 from app.backend.auth.access_control import AccessControlService
 from app.backend.auth.context import AuthContext
@@ -15,7 +16,7 @@ from app.backend.auth.move_access import move_requirements, view_requirements
 from app.backend.auth.require import require
 from app.backend.database import get_session
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
-from app.backend.enums.general import MoveNodeKind
+from app.backend.enums.general import MoveNodeKind, MoveStatus
 from app.backend.enums.routes import MoveRoutes
 from app.backend.errors.coded import CodedError
 from app.backend.errors.openapi import problems
@@ -46,14 +47,16 @@ async def get_move(
 ):
     """The state of a move: status (waiting, done, cancelled, failed), node, target, requested_at, waiting_seconds,
     and while it waits the uploads below the node: per upload upload_id, post_id, received_bytes, total_bytes,
-    last_chunk_at, holding (false: silent for moves.upload_stale_seconds, cancelled at the worker's next look). A
-    failed move carries the problem code that refused it in error (the permission checks run again when it runs);
-    nothing moved then.
+    last_chunk_at, holding (false: silent for moves.upload_stale_seconds, it no longer keeps the move waiting and is
+    left alone). A move nothing holds any more runs now, before this answers. A failed move carries the problem code
+    that refused it in error (the permission checks run again when it runs); nothing moved then.
 
     Needs the permissions a move of the node needs in effect at the node (post.view and post.update for a post; for a
     group also scope_group.view and scope_group.update). The user who asked may always read their move, without the
     uploads once they lost those. Anyone else, and an unknown id: 404 move_not_found."""
     move = await _visible_move(session, auth, move_id)
+    if move.status == MoveStatus.WAITING.value and await run_due_move(session, move_id):
+        move = await moves.get_move(session, move_id)
     return move_response(await moves.view_of(session, move, auth.tree, with_uploads=_holds_view(auth, move)))
 
 

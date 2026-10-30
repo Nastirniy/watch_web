@@ -13,6 +13,7 @@ from app.backend.api.system.health_checks import (
     check_authorization_health,
     check_backups_health,
     check_database_health,
+    check_moves_health,
     check_pki_health,
     check_services_health,
     health_rate_limiter,
@@ -73,6 +74,7 @@ async def health_check(
         pki_health = await check_pki_health(session)
         backups_health = await check_backups_health()
         authorization_health = await check_authorization_health(session)
+        moves_health = await check_moves_health(session)
 
         # Determine overall status
         overall_status = ServiceHealthStatus.HEALTHY.value
@@ -93,6 +95,7 @@ async def health_check(
             pki=pki_health,
             backups=backups_health,
             authorization=authorization_health,
+            moves=moves_health,
         )
 
     except Exception as e:

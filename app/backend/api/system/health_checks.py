@@ -16,7 +16,9 @@ from app.backend.pki.authority import CaCheckError, load_ca_certificate
 from app.backend.errors.coded import CodedError
 from app.backend.services.backups.catalog import load_catalog_async
 from app.backend.services.crl_publisher import crl_status
+from app.backend.services.move_queue import waiting_report
 from app.backend.services.signer_client import SignerRefused, SignerUnavailable, signer_client
+from app.backend.utils.datetime_utils import assume_utc
 from app.backend.utils.validators import ResponseDatetime
 from app.backend.auth.integrity import authorization_report
 
@@ -86,6 +88,12 @@ class AuthorizationHealthModel(BaseModel):
                          "development), with an active certificate")
 
 
+class MovesHealthModel(BaseModel):
+    """Moves that wait for the uploads below them (services/moves.py), counts only"""
+    waiting: int = Field(..., description="Moves waiting now")
+    oldest_waiting_seconds: Optional[int] = Field(None, description="Seconds the oldest of them has waited; null: none")
+
+
 class HealthResponse(BaseModel):
     """Main health check response model"""
     status: str = Field(..., description="Overall system status")
@@ -98,6 +106,7 @@ class HealthResponse(BaseModel):
     pki: Optional[PkiHealthModel] = Field(None, description="Client certificate authority; only when configured")
     backups: Optional[BackupsHealthModel] = Field(None, description="Database backups; only when configured")
     authorization: Optional[AuthorizationHealthModel] = Field(None, description="Authorization data, counts only")
+    moves: Optional[MovesHealthModel] = Field(None, description="Moves waiting for uploads, counts only")
 
 
 # Rate limiting for health endpoint
@@ -265,6 +274,15 @@ async def check_authorization_health(session: AsyncSession) -> AuthorizationHeal
         status=(ServiceHealthStatus.HEALTHY if healthy else ServiceHealthStatus.DEGRADED).value,
         violations=len(report.violations), system_administrators=report.system_administrators,
     )
+
+
+async def check_moves_health(session: AsyncSession) -> MovesHealthModel:
+    """The moves part of /health: how many wait and for how long"""
+    report = await waiting_report(session)
+    if report.oldest_requested_at is None:
+        return MovesHealthModel(waiting=report.count)
+    age = datetime.now(timezone.utc) - assume_utc(report.oldest_requested_at)
+    return MovesHealthModel(waiting=report.count, oldest_waiting_seconds=max(0, int(age.total_seconds())))
 
 
 async def check_pki_health(session: AsyncSession) -> Optional[PkiHealthModel]:

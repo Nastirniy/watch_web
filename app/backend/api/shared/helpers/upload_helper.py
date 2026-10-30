@@ -14,6 +14,7 @@ from app.backend.models.post import Post
 from app.backend.models.upload_session import UploadSession
 from app.backend.auth.context import AuthContext
 from app.backend.auth.access_control import AccessControlService
+from app.backend.auth.move_access import committed
 from app.backend.services.media_manager import FileValidationConfig
 from app.backend.services.files import formats
 from app.backend.services.files.names import DANGEROUS_EXTENSIONS, extension_of
@@ -28,7 +29,7 @@ from app.backend.services.audit import create_audit_log
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.config import settings
 from app.backend.api.shared.helpers.media_helper import storage_root
-from app.backend.api.shared.helpers.move_helper import move_pending, retry_after, run_released_moves
+from app.backend.api.shared.helpers.move_helper import move_pending, retry_after, run_due_move, run_released_moves
 from app.backend.api.shared.helpers.post_helper import ensure_post_not_archived
 from app.backend.enums.errors import ErrorCode
 from app.backend.errors.problems import ApiError
@@ -120,7 +121,9 @@ def _check_declared_content_type(registry: formats.FormatRegistry, spec: formats
 async def load_observation_for_upload(session: AsyncSession, auth: AuthContext, observation_id: int,
                                      lock_parents: bool = False) -> Observation:
     """The observation an upload goes to: 404 when missing or archived, 403 without media.view and media.create in
-    effect at its post, 409 post_archived when its post is archived, 409 move_pending while a move waits above it.
+    effect at its post, 409 post_archived when its post is archived, 409 move_pending while a move waits above it. A
+    move that waits for nothing any more runs first (move_helper.run_due_move), and everything here is asked again at
+    the post's new place, with the tree of that moment: the rights of the request were read before the move.
 
     lock_parents for a write that inserts a row of the observation now (an upload session): its post (shared, the
     columns only: the Post entity's presence subqueries would take the snapshot) as the first statement of the
@@ -139,29 +142,34 @@ async def load_observation_for_upload(session: AsyncSession, auth: AuthContext, 
         AccessControlService.check_post(auth, Permissions.MEDIA_VIEW, observation.post_id, "media")
         AccessControlService.check_post(auth, Permissions.MEDIA_CREATE, observation.post_id, "media")
         await ensure_post_not_archived(session, observation.post_id)
-        await _refuse_waiting_move(session, observation.post_id)
-        return observation
-
-    # An observation never changes its post: read in the request's read transaction, which lock_first ends
-    post_id = (await session.exec(select(Observation.post_id).where(Observation.id == observation_id))).first()
-    if post_id is None:
-        raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
-    post = await lock_first(session, select(Post.id, Post.is_deleted).where(Post.id == post_id), shared=True)
-    observation = await lock(session, select(Observation).where(Observation.id == observation_id), shared=True)
-    if observation is None or observation.is_deleted:
-        raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
-    AccessControlService.check_post(auth, Permissions.MEDIA_VIEW, observation.post_id, "media")
-    AccessControlService.check_post(auth, Permissions.MEDIA_CREATE, observation.post_id, "media")
-    if post is not None and post.is_deleted:
-        raise ApiError(ErrorCode.POST_ARCHIVED, post_id=post_id)
-    await _refuse_waiting_move(session, post_id)
+    else:
+        # An observation never changes its post: read in the request's read transaction, which lock_first ends
+        post_id = (await session.exec(select(Observation.post_id).where(Observation.id == observation_id))).first()
+        if post_id is None:
+            raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
+        post = await lock_first(session, select(Post.id, Post.is_deleted).where(Post.id == post_id), shared=True)
+        observation = await lock(session, select(Observation).where(Observation.id == observation_id), shared=True)
+        if observation is None or observation.is_deleted:
+            raise ApiError(ErrorCode.OBSERVATION_NOT_FOUND)
+        AccessControlService.check_post(auth, Permissions.MEDIA_VIEW, observation.post_id, "media")
+        AccessControlService.check_post(auth, Permissions.MEDIA_CREATE, observation.post_id, "media")
+        if post is not None and post.is_deleted:
+            raise ApiError(ErrorCode.POST_ARCHIVED, post_id=post_id)
+    if await _move_ended_above(session, observation.post_id):
+        return await load_observation_for_upload(session, await committed(session, auth), observation_id, lock_parents)
     return observation
 
 
-async def _refuse_waiting_move(session: AsyncSession, post_id: int) -> None:
+async def _move_ended_above(session: AsyncSession, post_id: int) -> bool:
+    """False: no move waits above the post, read under the caller's locks when it holds them. True: one waited for
+    nothing and has ended now, the caller's transaction is over and it asks again. 409 move_pending: one still waits.
+    The upload path pays one indexed read; the rest only while a move waits."""
     move_id = await waiting_at_post(session, post_id)
-    if move_id is not None:
-        raise move_pending(move_id)
+    if move_id is None:
+        return False
+    if await run_due_move(session, move_id):
+        return True
+    raise move_pending(move_id)
 
 
 async def cancel_pending_uploads(request: Request, session: AsyncSession, auth: AuthContext,

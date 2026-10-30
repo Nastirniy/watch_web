@@ -468,6 +468,217 @@ async def test_the_worker_loop_keeps_going_and_runs_the_check(client, db, header
     assert (await _move(db, move_id)).status == "done"
 
 
+# ---------------------------------------------------------------- timeouts without the worker
+
+async def test_a_new_upload_that_meets_a_due_move_runs_it_and_goes_on(client, db, headers, storage):
+    """Nothing holds the move any more and no worker runs: the refused upload does the work of the worker"""
+    scene = await _scene(client, db, headers)
+    move_id = await _waiting_move(client, headers, scene)
+    await _age(db, scene.upload_id)
+    created = await client.post(CREATE, json=_create_body(scene.observation.id, DATA), headers=headers(scene.admin))
+    assert created.status_code == 201, created.text
+    assert (await _move(db, move_id)).status == "done"
+    assert await _group_of(db, scene.post) == scene.there.id
+
+
+@pytest.mark.parametrize("route", ["multipart", "nginx"])
+async def test_a_one_shot_upload_that_meets_a_due_move_runs_it(client, db, headers, storage, route, monkeypatch, tmp_path):
+    scene = await _scene(client, db, headers)
+    move_id = await _waiting_move(client, headers, scene)
+    await _age(db, scene.upload_id)
+    if route == "multipart":
+        stored = await client.post(V1.path(MediaRoutes.UPLOAD), headers=headers(scene.admin),
+                                   data={"observation_id": scene.observation.id, "media_type": "image"},
+                                   files={"file": ("a.png", DATA, "image/png")})
+    else:
+        monkeypatch.setattr(settings.storage, "enable_nginx", True)
+        monkeypatch.setattr(settings.storage, "nginx_upload_temp_path", str(tmp_path))
+        body = tmp_path / "0000000001"
+        body.write_bytes(DATA)
+        stored = await client.post(
+            V1.path(MediaRoutes.NGINX_UPLOAD), params={"observation_id": scene.observation.id, "media_type": "image"},
+            headers={**headers(scene.admin), "X-File-Name": str(body), "X-Original-Filename": "a.png",
+                     "Content-Type": "image/png"})
+    assert stored.status_code == 200, stored.text
+    assert (await _move(db, move_id)).status == "done"
+
+
+async def test_an_upload_that_ran_a_due_move_answers_for_the_post_s_new_place(client, db, headers, storage):
+    """The rights of the request were read before the move: they are asked again at the new place"""
+    scene = await _scene(client, db, headers)
+    uploader = await make_user(db, perms=[], user_type=UserType.OPERATOR)
+    await give(db, uploader, [P.MEDIA_VIEW, P.MEDIA_CREATE], Node.group(scene.home.id))
+    move_id = await _waiting_move(client, headers, scene)
+    await _age(db, scene.upload_id)
+    refused = await client.post(CREATE, json=_create_body(scene.observation.id, DATA), headers=headers(uploader))
+    assert refused.status_code == 403, refused.text
+    assert (await _move(db, move_id)).status == "done"
+
+
+async def test_an_upload_refused_by_a_move_that_is_held_runs_nothing(client, db, headers, storage):
+    scene = await _scene(client, db, headers)
+    move_id = await _waiting_move(client, headers, scene)
+    refused = await client.post(CREATE, json=_create_body(scene.observation.id, DATA), headers=headers(scene.admin))
+    assert refused.status_code == 409 and refused.json()["move_id"] == move_id, refused.text
+    assert (await _move(db, move_id)).status == "waiting"
+
+
+async def test_a_due_move_refused_at_its_run_lets_the_upload_through_at_the_old_place(client, db, headers, storage):
+    scene, mover, move_id = await _mover_scene(client, db, headers, storage)
+    for grant in (await db.exec(select(RoleAssignment).where(RoleAssignment.user_id == mover.id))).all():
+        await db.delete(grant)
+    await db.commit()
+    await _age(db, scene.upload_id)
+    created = await client.post(CREATE, json=_create_body(scene.observation.id, DATA), headers=headers(scene.admin))
+    assert created.status_code == 201, created.text
+    assert (await _move(db, move_id)).error == "permission_required_for_action"
+    assert await _group_of(db, scene.post) == scene.home.id
+
+
+async def test_reading_a_move_runs_it_when_it_is_due(client, db, headers, storage):
+    scene = await _scene(client, db, headers)
+    move_id = await _waiting_move(client, headers, scene)
+    seen = await client.get(_move_url(move_id), headers=headers(scene.admin))
+    assert seen.json()["status"] == "waiting" and seen.json()["uploads"][0]["holding"] is True
+    await _age(db, scene.upload_id)
+    seen = await client.get(_move_url(move_id), headers=headers(scene.admin))
+    assert seen.status_code == 200 and seen.json()["status"] == "done", seen.text
+    assert seen.json()["uploads"] == [] and seen.json()["finished_at"]
+    assert await _group_of(db, scene.post) == scene.there.id
+    (done,) = await _events(db, AuditEvent.MOVE_COMPLETED)
+    assert done.user_id == scene.admin.id, "the run is the requester's, whoever looked"
+
+
+async def test_a_look_of_a_request_and_of_the_worker_run_the_move_once(client, db, headers, storage, session_maker):
+    scene = await _scene(client, db, headers)
+    move_id = await _waiting_move(client, headers, scene)
+    await _age(db, scene.upload_id)
+    await client.get(_move_url(move_id), headers=headers(scene.admin))
+    await _worker(session_maker, storage).check_moves()
+    assert len(await _events(db, AuditEvent.MOVE_COMPLETED)) == 1
+
+
+async def test_a_move_request_that_meets_a_due_move_runs_it_and_is_told_to_try_again(client, db, headers, storage):
+    scene = await _scene(client, db, headers)
+    move_id = await _waiting_move(client, headers, scene)
+    await _age(db, scene.upload_id)
+    third = await make_group(db)
+    refused = await client.put(_post_url(scene.post), json={"group_id": third.id, "expected_group_id": scene.home.id},
+                               headers=headers(scene.admin))
+    assert refused.status_code == 409 and refused.json()["code"] == "move_pending", refused.text
+    assert (await _move(db, move_id)).status == "done"
+
+
+async def test_a_refused_file_at_complete_ends_the_last_upload_and_runs_the_move(client, db, headers, storage):
+    """D7: a complete that ends the session runs the move whatever became of the file"""
+    admin = await make_admin(db)
+    home, there = await make_group(db), await make_group(db)
+    post = await make_post(db, group_id=home.id)
+    observation = await _observation(db, admin, post)
+    created = await client.post(CREATE, json=_create_body(observation.id, DATA, sha256="0" * 64), headers=headers(admin))
+    assert created.status_code == 201, created.text
+    upload_id = created.json()["id"]
+    await _send_rest(client, headers, admin, upload_id, 0)
+    moved = await client.put(_post_url(post), json={"group_id": there.id, "expected_group_id": home.id}, headers=headers(admin))
+    assert moved.status_code == 202, moved.text
+    refused = await client.post(_complete_url(upload_id), headers=headers(admin))
+    assert refused.status_code == 422 and refused.json()["code"] == "upload_checksum_mismatch", refused.text
+    assert (await _move(db, moved.json()["id"])).status == "done"
+    assert await _group_of(db, post) == there.id
+
+
+async def test_a_failed_run_does_not_break_the_answer_of_the_upload_that_caused_it(client, db, headers, storage):
+    """The rollback of a refused run expires what the session holds: another waiting move must not be read from it
+    (a lazy load in an async session: 500 StatementError, greenlet_spawn; seen once in the review's chaos run)"""
+    scene, mover, move_id = await _mover_scene(client, db, headers, storage)
+    other_upload = await _open_session(client, headers, scene.admin,
+                                       await _observation(db, scene.admin, await make_post(db)), DATA, 10)
+    elsewhere = (await _stored(db, other_upload)).post_id
+    target = await make_group(db)
+    second = await client.put(V1.path(PostRoutes.POST_BY_ID, post_id=elsewhere),
+                              json={"group_id": target.id, "expected_group_id": None}, headers=headers(scene.admin))
+    assert second.status_code == 202 and second.json()["id"] > move_id, second.text
+    for grant in (await db.exec(select(RoleAssignment).where(RoleAssignment.user_id == mover.id))).all():
+        await db.delete(grant)
+    await db.commit()
+
+    aborted = await client.post(V1.path(MediaRoutes.UPLOAD_SESSION_ABORT, upload_id=scene.upload_id),
+                                headers=headers(scene.admin))
+    assert aborted.status_code == 200, aborted.text
+    assert (await _move(db, move_id)).status == "failed"
+    assert (await _move(db, second.json()["id"])).status == "waiting"
+
+
+async def test_no_second_session_when_no_move_waits(client, db, headers, storage, monkeypatch):
+    """D3: the pool is a known risk; the end of an upload reads the waiting moves on its own session"""
+    from app.backend.api.shared.helpers import move_helper
+
+    opened = []
+    real = move_helper.AsyncSession
+    monkeypatch.setattr(move_helper, "AsyncSession", lambda *args, **kw: opened.append(1) or real(*args, **kw))
+    scene = await _scene(client, db, headers)
+    aborted = await client.post(V1.path(MediaRoutes.UPLOAD_SESSION_ABORT, upload_id=scene.upload_id),
+                                headers=headers(scene.admin))
+    assert aborted.status_code == 200, aborted.text
+    assert opened == []
+
+
+@pytest.mark.parametrize("failure", ["deadlock", "pool"])
+async def test_a_database_that_refuses_the_look_leaves_the_upload_s_answer_alone(
+        client, db, headers, storage, monkeypatch, session_maker, failure):
+    """The upload has ended: its answer does not depend on the move that waited for it. D3: a pool that has no
+    connection left is sqlalchemy.exc.TimeoutError, which is no OperationalError"""
+    from sqlalchemy.exc import OperationalError, TimeoutError as PoolTimeout
+
+    scene = await _scene(client, db, headers)
+    move_id = await _waiting_move(client, headers, scene)
+
+    async def refused(*args):
+        raise PoolTimeout("QueuePool limit") if failure == "pool" else OperationalError("x", {}, Exception(1213, "deadlock"))
+
+    with monkeypatch.context() as patch:
+        patch.setattr(moves_service, "advance", refused)
+        aborted = await client.post(V1.path(MediaRoutes.UPLOAD_SESSION_ABORT, upload_id=scene.upload_id),
+                                    headers=headers(scene.admin))
+    assert aborted.status_code == 200, aborted.text
+    assert (await _move(db, move_id)).status == "waiting"
+    await _worker(session_maker, storage).check_moves()
+    assert (await _move(db, move_id)).status == "done"
+
+
+async def test_a_database_that_refuses_the_look_answers_the_refused_upload_as_refused(
+        client, db, headers, storage, monkeypatch):
+    from sqlalchemy.exc import TimeoutError as PoolTimeout
+
+    scene = await _scene(client, db, headers)
+    move_id = await _waiting_move(client, headers, scene)
+    await _age(db, scene.upload_id)
+
+    async def refused(*args):
+        raise PoolTimeout("QueuePool limit")
+
+    monkeypatch.setattr(moves_service, "run_move", refused)
+    answer = await client.post(CREATE, json=_create_body(scene.observation.id, DATA), headers=headers(scene.admin))
+    assert answer.status_code == 409 and answer.json()["move_id"] == move_id, answer.text
+    seen = await client.get(_move_url(move_id), headers=headers(scene.admin))
+    assert seen.status_code == 200 and seen.json()["status"] == "waiting", seen.text
+
+
+async def test_health_counts_the_waiting_moves(client, db, headers, storage, monkeypatch):
+    from app.backend.enums.routes import SystemRoutes
+
+    monkeypatch.setattr(settings.health, "enable_rate_limit", False)
+    idle = (await client.get(SystemRoutes.HEALTH.value)).json()
+    assert idle["moves"] == {"waiting": 0, "oldest_waiting_seconds": None}
+    scene = await _scene(client, db, headers)
+    move_id = await _waiting_move(client, headers, scene)
+    moment = datetime.now(timezone.utc) - timedelta(minutes=10)
+    await db.execute(update(PendingMove).where(PendingMove.id == move_id).values(requested_at=moment))
+    await db.commit()
+    part = (await client.get(SystemRoutes.HEALTH.value)).json()["moves"]
+    assert part["waiting"] == 1 and 600 <= part["oldest_waiting_seconds"] < 700
+
+
 # ---------------------------------------------------------------- one run only
 
 async def test_two_runs_of_one_move_change_it_once(client, db, headers, storage, session_maker):
@@ -898,27 +1109,6 @@ async def test_a_cascade_archive_cancels_the_waiting_move_of_a_post_inside(clien
     assert archived.status_code == 200, archived.text
     assert (await _move(db, answer.json()["id"])).status == "cancelled"
     assert await _group_of(db, post) == brigade.id
-
-
-async def test_a_database_failure_after_the_commit_of_an_upload_leaves_the_move_to_the_worker(
-        client, db, headers, storage, monkeypatch, session_maker):
-    """The upload has ended: its answer does not depend on the move that waited for it"""
-    from sqlalchemy.exc import OperationalError
-
-    scene = await _scene(client, db, headers)
-    move_id = await _waiting_move(client, headers, scene)
-
-    async def refused(*args):
-        raise OperationalError("statement", {}, Exception(1213, "deadlock"))
-
-    with monkeypatch.context() as patch:
-        patch.setattr(moves_service, "after_uploads_ended", refused)
-        aborted = await client.post(V1.path(MediaRoutes.UPLOAD_SESSION_ABORT, upload_id=scene.upload_id),
-                                    headers=headers(scene.admin))
-    assert aborted.status_code == 200, aborted.text
-    assert (await _move(db, move_id)).status == "waiting"
-    await _worker(session_maker, storage).check_moves()
-    assert (await _move(db, move_id)).status == "done"
 
 
 # ---------------------------------------------------------------- locks

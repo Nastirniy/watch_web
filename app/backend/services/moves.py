@@ -3,11 +3,11 @@
 A move of a post, a group or a brigade with uploads running below it does not run: the request leaves a row in
 pending_moves (admit, 202) and new uploads below the node answer 409 move_pending until the move ended. The move runs
 when nothing holds it any more (holds: uploads.holds_move; a session gone silent holds nothing and is left alone: it
-may go on after the move), once: run_move is called by the end of the last upload (after_uploads_ended, in a
-transaction of its own after that upload's commit), by a request that meets the move when it is due (advance: a refused
-upload, GET /moves/{id}) and by the media worker, which is a backup and nothing else. Permissions are read again when
-it runs, for the user who asked: refused means status failed, the problem code in error, nothing moved. force runs the
-move in its request; the uploads go on.
+may go on after the move), once: run_move is called by the end of the last upload (api/shared/helpers/move_helper.py
+run_released_moves, in a transaction of its own after that upload's commit), by a request that meets the move when it
+is due (run_due_move: a refused upload, a refused move, GET /moves/{id}) and by the media worker, which is a backup
+and nothing else. Permissions are read again when it runs, for the user who asked: refused means status failed, the
+problem code in error, nothing moved. force runs the move in its request; the uploads go on.
 
 The locks, in the order every writer takes them (lock_for_move):
 
@@ -41,7 +41,6 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -405,19 +404,3 @@ async def advance(session: AsyncSession, move_id: int) -> Optional[MoveStatus]:
     """One look at a waiting move, with a session of its own (it commits): when nothing holds it any more it runs. A
     look touches no upload, whatever the run decides. run_move's answer, None when it did not run."""
     return await run_move(session, move_id) if await is_due(session, move_id) else None
-
-
-async def after_uploads_ended(bind: AsyncEngine, post_ids: Iterable[int]) -> None:
-    """After the commit that ended uploads of these posts: every waiting move above them gets its look now, in a
-    session of its own, so the caller's objects stay as they are. One read when no move waits."""
-    posts = [Node.post(post_id) for post_id in post_ids]
-    if not posts:
-        return
-    async with AsyncSession(bind, expire_on_commit=False) as session:
-        moves = await waiting_moves(session)
-        if not moves:
-            return
-        tree = await load_scope_tree(session)
-        for move in moves:
-            if any(tree.contains(node_of(move), post) for post in posts):
-                await advance(session, move.id)

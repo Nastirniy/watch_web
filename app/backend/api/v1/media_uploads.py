@@ -438,14 +438,17 @@ async def complete_upload_session(
     if token is None:
         return await _claim_refused(session, row.id)
     row = await uploads.get_session_row(session, row.id)
+    post_id = row.post_id
     try:
         media_file_id = await _store_claimed(session, row, token)
-    except BaseException:
+    except BaseException as exc:
         # Not the file's fault (a refused file aborted the session already): open again, complete can be retried.
         # The failure may have come from the request session (a failed flush or commit, a lost connection), which
         # takes no statement before a rollback
         await session.rollback()
         await uploads.release_completion(session, upload_id, token)
+        if isinstance(exc, ApiError):
+            await run_released_moves(session, {post_id})    # a refused file was the last upload holding a move
         raise
 
     media_file = await record_upload(request, session, auth, media_file_id, row.observation_id, row.post_id, row.original_filename, background_tasks, UploadTransport.RESUMABLE, upload_id=row.id)

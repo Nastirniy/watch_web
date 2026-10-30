@@ -11,8 +11,11 @@ An archive locks the waiting moves of what it archives (lock_waiting) after its 
 read: a cancel or a run that changes such a row meanwhile waits for the archive instead of meeting it (MariaDB error
 1020). The order of every writer: groups, posts, upload sessions, then the pending_moves rows.
 """
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Iterable, List, Optional
 
+from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -55,6 +58,29 @@ async def waiting_at_post(session: AsyncSession, post_id: int) -> Optional[int]:
     tree = await load_scope_tree(session)
     post = Node.post(post_id)
     return next((move.id for move in moves if tree.contains(node_of(move), post)), None)
+
+
+async def waiting_above(session: AsyncSession, post_ids: Iterable[int]) -> List[int]:
+    """The ids of the waiting moves whose subtree holds one of the posts. One indexed read when no move waits."""
+    moves = await waiting_moves(session)
+    if not moves:
+        return []
+    tree = await load_scope_tree(session)
+    posts = [Node.post(post_id) for post_id in post_ids]
+    return [move.id for move in moves if any(tree.contains(node_of(move), post) for post in posts)]
+
+
+@dataclass(frozen=True)
+class WaitingReport:
+    """The waiting moves, counts only (/health)"""
+    count: int
+    oldest_requested_at: Optional[datetime]
+
+
+async def waiting_report(session: AsyncSession) -> WaitingReport:
+    count, oldest = (await session.exec(select(func.count(), func.min(PendingMove.requested_at))
+                                        .where(PendingMove.status == MoveStatus.WAITING.value))).one()
+    return WaitingReport(count, oldest)
 
 
 async def lock_waiting(session: AsyncSession, nodes: Iterable[Node]) -> List[PendingMove]:
