@@ -14070,7 +14070,7 @@
           "POSTS"
         ],
         "summary": "Update Post",
-        "description": "Update post by ID. post.view (403 post_access_denied) and post.update (403 post_write_denied) must be in effect\nat the post; a move (group_id) also needs post.update and post.view covering both the old and the new location\n(the group or above it; the root for a post directly under it; 403 permission_required_for_action, move_post).\nEvery role assignment at the new location and above it that does not already apply at the post comes into\neffect there with the move: the caller must be able to grant each of them at the post, holding every permission\nof its role there before the move, the grants of other users included (403 grant_exceeds_own_permissions with\nthe permissions missing; answered after the new group's existence).\n\nOnly the fields sent are changed; null is refused for name, code and is_active (omit them instead).\nArchived posts answer 404 until restored (POST /{post_id}/restore); is_deleted is never read from the body.\n\nA move during work: with uploads running below the node (upload sessions open or completing) the move waits. The\nanswer is 202 with the move operation, Location and Retry-After; nothing moves yet, and new uploads below the node\nanswer 409 move_pending; chunks, completes and every other write go on. The move runs when the last upload ended\n(finished, aborted, archived, expired, or cancelled because no bytes arrived for moves.upload_stale_seconds, 300 by\ndefault: its next chunk or complete answers 409 upload_cancelled_by_move). The permission checks run again then: a\nmove the caller may no longer make ends failed and nothing moves. Follow it at GET /moves/{move_id}; POST\n/moves/{move_id}/cancel cancels it. force true runs it at once and the uploads continue at the new place. A move\nwhose subtree overlaps a waiting one answers 409 move_pending (force too; cancel that one first). A request that\nwould have to wait and changes anything besides the move answers 422 move_not_alone with changed_fields and nothing\nhappens: send a move as its own request. Sessions and tokens stay valid; rights at the new place apply from the\nnext request (API.md, \"A move during work\").",
+        "description": "Update post by ID. post.view (403 post_access_denied) and post.update (403 post_write_denied) must be in effect\nat the post; a move (group_id) also needs post.update and post.view covering both the old and the new location\n(the group or above it; the root for a post directly under it; 403 permission_required_for_action, move_post).\nEvery role assignment at the new location and above it that does not already apply at the post comes into\neffect there with the move: the caller must be able to grant each of them at the post, holding every permission\nof its role there before the move, the grants of other users included (403 grant_exceeds_own_permissions with\nthe permissions missing; answered after the new group's existence).\n\nOnly the fields sent are changed; null is refused for name, code and is_active (omit them instead).\nArchived posts answer 404 until restored (POST /{post_id}/restore); is_deleted is never read from the body.\n\nA move states where it thinks the node is: with group_id send expected_group_id, the value the client read (null: directly under the root; presence counts).\nChecked under the move lock, force or not, in this order. The post already at group_id: 200 with already_there true,\nnothing written, the other fields sent included, no audit row. expected_group_id missing or other than where\nthe post sits: 409 move_conflict with the current place (current_place root; group with current_group_id; hidden for a\ngroup outside the caller's scope_group.view) and nothing moves: read the record and decide again. So a client that\nsends the whole record from an old form is refused, not obeyed. group_id sent with the current value is no move: an\nordinary edit, with no expected_group_id or with the same value there.\n\nA move during work: with uploads receiving bytes below the node (upload sessions open or completing) the move\nwaits. The answer is 202 with the move operation, Location and Retry-After; nothing moves yet, and new uploads\nbelow the node answer 409 move_pending; chunks, completes and every other write go on. The move runs when nothing\nholds it any more: an upload that ended (finished, aborted, archived, expired) holds nothing, nor does one with no\nbytes for moves.upload_stale_seconds, 300 by default, which is left alone and may go on at the new place after the\nmove. The first request that meets the move then runs it, or the worker. The permission checks run again at that\nmoment: a move the caller may no longer make ends failed and nothing moves. Follow it at GET /moves/{move_id}; POST\n/moves/{move_id}/cancel cancels it. force true runs it at once and the uploads continue at the new place. The same\nmove repeated while it waits answers 202 with that move, from anyone allowed to make it. A node on the way is busy:\nmoving a waiting node, anything below it or above it, moving anything into it, or moving its target (or a group\nholding the target) answers 409 move_pending with move_id, force too; cancel that move first. A request that would\nhave to wait and changes anything besides the move answers 422 move_not_alone with changed_fields and nothing\nhappens: send a move as its own request. Sessions and tokens stay valid; rights at the new place apply from the\nnext request (API.md, \"A move during work\").",
         "operationId": "update_post",
         "security": [
           {
@@ -14104,7 +14104,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PostResponse"
+                  "$ref": "#/components/schemas/PostUpdateResponse"
                 }
               }
             }
@@ -14188,7 +14188,7 @@
             }
           },
           "202": {
-            "description": "Uploads run below the node: nothing moved yet, the move waits. Follow it at Location",
+            "description": "Uploads run below the node: nothing moved yet, the move waits, or this repeats the move that waits. Follow it at Location",
             "headers": {
               "Location": {
                 "description": "URL of the move operation",
@@ -14286,11 +14286,25 @@
             }
           },
           "409": {
-            "description": "`move_pending`: A move is waiting here",
+            "description": "`move_conflict`: The node is not where this request expected; `move_pending`: A move is waiting here",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MovePendingProblem"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MoveConflictProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MovePendingProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "move_conflict": "#/components/schemas/MoveConflictProblem",
+                      "move_pending": "#/components/schemas/MovePendingProblem"
+                    }
+                  }
                 }
               }
             }
@@ -15552,7 +15566,7 @@
           "SCOPE_GROUPS"
         ],
         "summary": "Update Scope Group",
-        "description": "Rename, describe or move a group (parent_id null: directly under the root). Only the fields sent change.\nA group cannot move into its own subtree, and the moved subtree must still fit 6 levels. Archived, or outside\nthe caller's scope_group.view (the group or the new parent): 404. scope_group.update must cover the parent of the\ngroup (the root for a group directly under it), otherwise 403 permission_required_for_action (action\nupdate_scope_group): a holder at a group manages the groups inside it, not the group itself. A new name without a\nmove also needs scope_group.view covering that parent (same answer), the name is checked against it. A move needs\nscope_group.view and scope_group.update covering the old and the new parent location (the root for a group\ndirectly under it) and, as it takes every post below the group along, post.update and post.view covering both (the group or above it; the root for a group directly under it),\notherwise 403 permission_required_for_action (action move_scope_group), answered before the existence of the new\nparent and the tree rules; nothing changes on a refusal. Every role assignment at the new parent and above it that\ndoes not already apply at the group comes into effect for the whole subtree: the caller must be able to grant each\nof them at the group, holding every permission of its role there before the move, the grants of other users\nincluded (403 grant_exceeds_own_permissions, after the tree rules). The group keeps its kind and\nthe parent must suit it (a plain group never moves into a corps or brigade, a corps stays under the root, a\nbrigade in a corps): 409 scope_group_parent_not_allowed.\n\nA move during work: with uploads running below the node (upload sessions open or completing) the move waits. The\nanswer is 202 with the move operation, Location and Retry-After; nothing moves yet, and new uploads below the node\nanswer 409 move_pending; chunks, completes and every other write go on. The move runs when the last upload ended\n(finished, aborted, archived, expired, or cancelled because no bytes arrived for moves.upload_stale_seconds, 300 by\ndefault: its next chunk or complete answers 409 upload_cancelled_by_move). The permission checks run again then: a\nmove the caller may no longer make ends failed and nothing moves. Follow it at GET /moves/{move_id}; POST\n/moves/{move_id}/cancel cancels it. force true runs it at once and the uploads continue at the new place. A move\nwhose subtree overlaps a waiting one answers 409 move_pending (force too; cancel that one first). A request that\nwould have to wait and changes anything besides the move answers 422 move_not_alone with changed_fields and nothing\nhappens: send a move as its own request. Sessions and tokens stay valid; rights at the new place apply from the\nnext request (API.md, \"A move during work\").",
+        "description": "Rename, describe or move a group (parent_id null: directly under the root). Only the fields sent change.\nA group cannot move into its own subtree, and the moved subtree must still fit 6 levels. Archived, or outside\nthe caller's scope_group.view (the group or the new parent): 404. scope_group.update must cover the parent of the\ngroup (the root for a group directly under it), otherwise 403 permission_required_for_action (action\nupdate_scope_group): a holder at a group manages the groups inside it, not the group itself. A new name without a\nmove also needs scope_group.view covering that parent (same answer), the name is checked against it. A move needs\nscope_group.view and scope_group.update covering the old and the new parent location (the root for a group\ndirectly under it) and, as it takes every post below the group along, post.update and post.view covering both (the group or above it; the root for a group directly under it),\notherwise 403 permission_required_for_action (action move_scope_group), answered before the existence of the new\nparent and the tree rules; nothing changes on a refusal. Every role assignment at the new parent and above it that\ndoes not already apply at the group comes into effect for the whole subtree: the caller must be able to grant each\nof them at the group, holding every permission of its role there before the move, the grants of other users\nincluded (403 grant_exceeds_own_permissions, after the tree rules). The group keeps its kind and\nthe parent must suit it (a plain group never moves into a corps or brigade, a corps stays under the root, a\nbrigade in a corps): 409 scope_group_parent_not_allowed.\n\nA move states where it thinks the node is: with parent_id send expected_parent_id, the value the client read (null: directly under the root; presence counts).\nChecked under the move lock, force or not, in this order. The group already at parent_id: 200 with already_there true,\nnothing written, the other fields sent included, no audit row. expected_parent_id missing or other than where\nthe group sits: 409 move_conflict with the current place (current_place root; group with current_group_id; hidden for a\ngroup outside the caller's scope_group.view) and nothing moves: read the record and decide again. So a client that\nsends the whole record from an old form is refused, not obeyed. parent_id sent with the current value is no move: an\nordinary edit, with no expected_parent_id or with the same value there.\n\nA move during work: with uploads receiving bytes below the node (upload sessions open or completing) the move\nwaits. The answer is 202 with the move operation, Location and Retry-After; nothing moves yet, and new uploads\nbelow the node answer 409 move_pending; chunks, completes and every other write go on. The move runs when nothing\nholds it any more: an upload that ended (finished, aborted, archived, expired) holds nothing, nor does one with no\nbytes for moves.upload_stale_seconds, 300 by default, which is left alone and may go on at the new place after the\nmove. The first request that meets the move then runs it, or the worker. The permission checks run again at that\nmoment: a move the caller may no longer make ends failed and nothing moves. Follow it at GET /moves/{move_id}; POST\n/moves/{move_id}/cancel cancels it. force true runs it at once and the uploads continue at the new place. The same\nmove repeated while it waits answers 202 with that move, from anyone allowed to make it. A node on the way is busy:\nmoving a waiting node, anything below it or above it, moving anything into it, or moving its target (or a group\nholding the target) answers 409 move_pending with move_id, force too; cancel that move first. A request that would\nhave to wait and changes anything besides the move answers 422 move_not_alone with changed_fields and nothing\nhappens: send a move as its own request. Sessions and tokens stay valid; rights at the new place apply from the\nnext request (API.md, \"A move during work\").",
         "operationId": "update_scope_group",
         "security": [
           {
@@ -15587,7 +15601,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ScopeGroupResponse"
+                  "$ref": "#/components/schemas/ScopeGroupUpdateResponse"
                 }
               }
             }
@@ -15671,7 +15685,7 @@
             }
           },
           "202": {
-            "description": "Uploads run below the node: nothing moved yet, the move waits. Follow it at Location",
+            "description": "Uploads run below the node: nothing moved yet, the move waits, or this repeats the move that waits. Follow it at Location",
             "headers": {
               "Location": {
                 "description": "URL of the move operation",
@@ -15733,11 +15747,14 @@
             }
           },
           "409": {
-            "description": "`move_pending`: A move is waiting here; `scope_group_cycle`: Scope group cannot move into its own subtree; `scope_group_depth_exceeded`: Scope group tree is too deep; `scope_group_name_taken`: Scope group name already exists; `scope_group_parent_not_allowed`: Scope group cannot sit there",
+            "description": "`move_conflict`: The node is not where this request expected; `move_pending`: A move is waiting here; `scope_group_cycle`: Scope group cannot move into its own subtree; `scope_group_depth_exceeded`: Scope group tree is too deep; `scope_group_name_taken`: Scope group name already exists; `scope_group_parent_not_allowed`: Scope group cannot sit there",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MoveConflictProblem"
+                    },
                     {
                       "$ref": "#/components/schemas/MovePendingProblem"
                     },
@@ -15757,6 +15774,7 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
+                      "move_conflict": "#/components/schemas/MoveConflictProblem",
                       "move_pending": "#/components/schemas/MovePendingProblem",
                       "scope_group_cycle": "#/components/schemas/ScopeGroupCycleProblem",
                       "scope_group_depth_exceeded": "#/components/schemas/ScopeGroupDepthExceededProblem",
@@ -18648,7 +18666,7 @@
           "BRIGADES"
         ],
         "summary": "Update Brigade",
-        "description": "Rename, describe or move a brigade; only the fields sent change. Archived, another kind of group, or outside\nthe caller's scope_group.view: 404. scope_group.update must cover its corps (403 permission_required_for_action,\naction update_brigade): a holder at the brigade does not manage the brigade itself. A new name without a move also\nneeds scope_group.view covering the corps (same answer): the name is checked against its brigades. A move (corps_id other than\nits corps; its own corps sent back is no move and answers as without it) needs\nscope_group.view and scope_group.update covering the old and the new corps and, as it takes every post of the brigade along, post.view\nand post.update covering both (403 permission_required_for_action, action move_brigade), answered before the\nexistence of the new corps; the new corps unknown, archived or outside scope_group.view: 404, not a corps: 409\nscope_group_parent_not_allowed. Every role assignment at the new corps that does not already apply at the brigade\ncomes into effect for it and its posts: the caller must be able to grant each of them at the brigade, holding\nevery permission of its role there before the move, the grants of other users included (403\ngrant_exceeds_own_permissions, after the corps checks). Nothing changes on a refusal.\n\nA move during work: with uploads running below the node (upload sessions open or completing) the move waits. The\nanswer is 202 with the move operation, Location and Retry-After; nothing moves yet, and new uploads below the node\nanswer 409 move_pending; chunks, completes and every other write go on. The move runs when the last upload ended\n(finished, aborted, archived, expired, or cancelled because no bytes arrived for moves.upload_stale_seconds, 300 by\ndefault: its next chunk or complete answers 409 upload_cancelled_by_move). The permission checks run again then: a\nmove the caller may no longer make ends failed and nothing moves. Follow it at GET /moves/{move_id}; POST\n/moves/{move_id}/cancel cancels it. force true runs it at once and the uploads continue at the new place. A move\nwhose subtree overlaps a waiting one answers 409 move_pending (force too; cancel that one first). A request that\nwould have to wait and changes anything besides the move answers 422 move_not_alone with changed_fields and nothing\nhappens: send a move as its own request. Sessions and tokens stay valid; rights at the new place apply from the\nnext request (API.md, \"A move during work\").",
+        "description": "Rename, describe or move a brigade; only the fields sent change. Archived, another kind of group, or outside\nthe caller's scope_group.view: 404. scope_group.update must cover its corps (403 permission_required_for_action,\naction update_brigade): a holder at the brigade does not manage the brigade itself. A new name without a move also\nneeds scope_group.view covering the corps (same answer): the name is checked against its brigades. A move (corps_id other than\nits corps; its own corps sent back is no move and answers as without it) needs\nscope_group.view and scope_group.update covering the old and the new corps and, as it takes every post of the brigade along, post.view\nand post.update covering both (403 permission_required_for_action, action move_brigade), answered before the\nexistence of the new corps; the new corps unknown, archived or outside scope_group.view: 404, not a corps: 409\nscope_group_parent_not_allowed. Every role assignment at the new corps that does not already apply at the brigade\ncomes into effect for it and its posts: the caller must be able to grant each of them at the brigade, holding\nevery permission of its role there before the move, the grants of other users included (403\ngrant_exceeds_own_permissions, after the corps checks). Nothing changes on a refusal.\n\nA move states where it thinks the node is: with corps_id send expected_corps_id, the value the client read.\nChecked under the move lock, force or not, in this order. The brigade already at corps_id: 200 with already_there true,\nnothing written, the other fields sent included, no audit row. expected_corps_id missing or other than where\nthe brigade sits: 409 move_conflict with the current place (current_place root; group with current_group_id; hidden for a\ngroup outside the caller's scope_group.view) and nothing moves: read the record and decide again. So a client that\nsends the whole record from an old form is refused, not obeyed. corps_id sent with the current value is no move: an\nordinary edit, with no expected_corps_id or with the same value there.\n\nA move during work: with uploads receiving bytes below the node (upload sessions open or completing) the move\nwaits. The answer is 202 with the move operation, Location and Retry-After; nothing moves yet, and new uploads\nbelow the node answer 409 move_pending; chunks, completes and every other write go on. The move runs when nothing\nholds it any more: an upload that ended (finished, aborted, archived, expired) holds nothing, nor does one with no\nbytes for moves.upload_stale_seconds, 300 by default, which is left alone and may go on at the new place after the\nmove. The first request that meets the move then runs it, or the worker. The permission checks run again at that\nmoment: a move the caller may no longer make ends failed and nothing moves. Follow it at GET /moves/{move_id}; POST\n/moves/{move_id}/cancel cancels it. force true runs it at once and the uploads continue at the new place. The same\nmove repeated while it waits answers 202 with that move, from anyone allowed to make it. A node on the way is busy:\nmoving a waiting node, anything below it or above it, moving anything into it, or moving its target (or a group\nholding the target) answers 409 move_pending with move_id, force too; cancel that move first. A request that would\nhave to wait and changes anything besides the move answers 422 move_not_alone with changed_fields and nothing\nhappens: send a move as its own request. Sessions and tokens stay valid; rights at the new place apply from the\nnext request (API.md, \"A move during work\").",
         "operationId": "update_brigade",
         "security": [
           {
@@ -18683,7 +18701,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BrigadeResponse"
+                  "$ref": "#/components/schemas/BrigadeUpdateResponse"
                 }
               }
             }
@@ -18767,7 +18785,7 @@
             }
           },
           "202": {
-            "description": "Uploads run below the node: nothing moved yet, the move waits. Follow it at Location",
+            "description": "Uploads run below the node: nothing moved yet, the move waits, or this repeats the move that waits. Follow it at Location",
             "headers": {
               "Location": {
                 "description": "URL of the move operation",
@@ -18829,11 +18847,14 @@
             }
           },
           "409": {
-            "description": "`move_pending`: A move is waiting here; `scope_group_name_taken`: Scope group name already exists; `scope_group_parent_not_allowed`: Scope group cannot sit there",
+            "description": "`move_conflict`: The node is not where this request expected; `move_pending`: A move is waiting here; `scope_group_name_taken`: Scope group name already exists; `scope_group_parent_not_allowed`: Scope group cannot sit there",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MoveConflictProblem"
+                    },
                     {
                       "$ref": "#/components/schemas/MovePendingProblem"
                     },
@@ -18847,6 +18868,7 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
+                      "move_conflict": "#/components/schemas/MoveConflictProblem",
                       "move_pending": "#/components/schemas/MovePendingProblem",
                       "scope_group_name_taken": "#/components/schemas/ScopeGroupNameTakenProblem",
                       "scope_group_parent_not_allowed": "#/components/schemas/ScopeGroupParentNotAllowedProblem"
@@ -24175,7 +24197,7 @@
           "MEDIA"
         ],
         "summary": "Append Upload Chunk",
-        "description": "Append one chunk. Headers: Upload-Offset (must equal the session's received_bytes),\nContent-Type application/offset+octet-stream, Content-Length. Body: raw bytes.\n204 with the new Upload-Offset; 409 with the real Upload-Offset when they disagree;\n413 when the chunk is larger than max_chunk_bytes or overruns the declared size; 410 when the session is not open\n(or the stored bytes are gone: the session is aborted; an archive of its observation, post or unit cancels it);\n409 while a complete stores the file; 404 observation_not_found when its observation is archived. A waiting move\ndoes not stop a chunk; 409 upload_cancelled_by_move when the session went silent while one waited and was\ncancelled for it (open a new session after the move).",
+        "description": "Append one chunk. Headers: Upload-Offset (must equal the session's received_bytes),\nContent-Type application/offset+octet-stream, Content-Length. Body: raw bytes.\n204 with the new Upload-Offset; 409 with the real Upload-Offset when they disagree;\n413 when the chunk is larger than max_chunk_bytes or overruns the declared size; 410 when the session is not open\n(or the stored bytes are gone: the session is aborted; an archive of its observation, post or unit cancels it);\n409 while a complete stores the file; 404 observation_not_found when its observation is archived. A waiting move\ndoes not stop a chunk. A session that went silent stops holding a waiting move and is left alone: the move runs and\nthe next chunk goes on as usual, media.view and media.create asked at the post's new place (403 when the uploader\nlost them there).",
         "operationId": "append_upload_chunk",
         "security": [
           {
@@ -24401,14 +24423,11 @@
             }
           },
           "409": {
-            "description": "`upload_cancelled_by_move`: Upload cancelled by a waiting move; `upload_offset_mismatch`: Upload-Offset does not match the session offset; `upload_session_completing`: Session is being completed; ask GET for its status; `upload_writer_busy`: Another chunk is being written to this session; retry after it finishes",
+            "description": "`upload_offset_mismatch`: Upload-Offset does not match the session offset; `upload_session_completing`: Session is being completed; ask GET for its status; `upload_writer_busy`: Another chunk is being written to this session; retry after it finishes",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/UploadCancelledByMoveProblem"
-                    },
                     {
                       "$ref": "#/components/schemas/UploadOffsetMismatchProblem"
                     },
@@ -24422,7 +24441,6 @@
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
-                      "upload_cancelled_by_move": "#/components/schemas/UploadCancelledByMoveProblem",
                       "upload_offset_mismatch": "#/components/schemas/UploadOffsetMismatchProblem",
                       "upload_session_completing": "#/components/schemas/UploadSessionCompletingProblem",
                       "upload_writer_busy": "#/components/schemas/UploadWriterBusyProblem"
@@ -24499,7 +24517,7 @@
           "MEDIA"
         ],
         "summary": "Complete Upload Session",
-        "description": "Turn a fully received session into a media file: size, optional sha256, format and content checks,\nthen the same storage path as the other uploads. Calling it again on a completed session returns the same\nmedia file (200). 409 when bytes are missing (resend from Upload-Offset) or while another complete stores the\nfile; 422 on hash mismatch (session aborted); 415 / 413 as for other uploads (session aborted). An archive of the\nobservation, its post or a unit with its posts cancels the session: 410 upload_session_closed (aborted). An\narchived observation: 404 observation_not_found; the post archived: 409 post_archived (the session stays open\nwhen nothing cancelled it). When the archive comes while the file is being stored, the store refuses it (404\nobservation_not_found or 409 post_archived) and the session ends aborted. A waiting move does not stop a complete:\nthe last upload to end runs the move. 409 upload_cancelled_by_move: the session went silent while a move waited.\nAfter a forced move media.view and media.create are asked at the post's new place (403 when the uploader lost\nthem; the bytes cannot be saved by the client).",
+        "description": "Turn a fully received session into a media file: size, optional sha256, format and content checks,\nthen the same storage path as the other uploads. Calling it again on a completed session returns the same\nmedia file (200). 409 when bytes are missing (resend from Upload-Offset) or while another complete stores the\nfile; 422 on hash mismatch (session aborted); 415 / 413 as for other uploads (session aborted). An archive of the\nobservation, its post or a unit with its posts cancels the session: 410 upload_session_closed (aborted). An\narchived observation: 404 observation_not_found; the post archived: 409 post_archived (the session stays open\nwhen nothing cancelled it). When the archive comes while the file is being stored, the store refuses it (404\nobservation_not_found or 409 post_archived) and the session ends aborted. A waiting move does not stop a complete,\nand a complete that ends the last upload holding it, stored or refused, runs the move. After a move, forced or\nnot, media.view and media.create are asked at the post's new place (403 when the uploader lost them; the bytes\ncannot be saved by the client).",
         "operationId": "complete_upload_session",
         "security": [
           {
@@ -24705,16 +24723,13 @@
             }
           },
           "409": {
-            "description": "`post_archived`: Post is archived; `upload_cancelled_by_move`: Upload cancelled by a waiting move; `upload_incomplete`: Upload incomplete; `upload_session_completing`: Session is being completed; ask GET for its status; `upload_writer_busy`: Another chunk is being written to this session; retry after it finishes",
+            "description": "`post_archived`: Post is archived; `upload_incomplete`: Upload incomplete; `upload_session_completing`: Session is being completed; ask GET for its status; `upload_writer_busy`: Another chunk is being written to this session; retry after it finishes",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "oneOf": [
                     {
                       "$ref": "#/components/schemas/PostArchivedProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/UploadCancelledByMoveProblem"
                     },
                     {
                       "$ref": "#/components/schemas/UploadIncompleteProblem"
@@ -24730,7 +24745,6 @@
                     "propertyName": "code",
                     "mapping": {
                       "post_archived": "#/components/schemas/PostArchivedProblem",
-                      "upload_cancelled_by_move": "#/components/schemas/UploadCancelledByMoveProblem",
                       "upload_incomplete": "#/components/schemas/UploadIncompleteProblem",
                       "upload_session_completing": "#/components/schemas/UploadSessionCompletingProblem",
                       "upload_writer_busy": "#/components/schemas/UploadWriterBusyProblem"
@@ -33626,7 +33640,7 @@
           "MOVES"
         ],
         "summary": "Get Move",
-        "description": "The state of a move: status (waiting, done, cancelled, failed), node, target, requested_at, waiting_seconds,\nand while it waits the uploads below the node: per upload upload_id, post_id, received_bytes, total_bytes,\nlast_chunk_at, holding (false: silent for moves.upload_stale_seconds, cancelled at the worker's next look). A\nfailed move carries the problem code that refused it in error (the permission checks run again when it runs);\nnothing moved then.\n\nNeeds the permissions a move of the node needs in effect at the node (post.view and post.update for a post; for a\ngroup also scope_group.view and scope_group.update). The user who asked may always read their move, without the\nuploads once they lost those. Anyone else, and an unknown id: 404 move_not_found.",
+        "description": "The state of a move: status (waiting, done, cancelled, failed), node, target, requested_at, waiting_seconds,\nand while it waits the uploads below the node: per upload upload_id, post_id, received_bytes, total_bytes,\nlast_chunk_at, holding (false: silent for moves.upload_stale_seconds, it no longer keeps the move waiting and is\nleft alone). A move nothing holds any more runs now, before this answers. A failed move carries the problem code\nthat refused it in error (the permission checks run again when it runs); nothing moved then.\n\nNeeds the permissions a move of the node needs in effect at the node (post.view and post.update for a post; for a\ngroup also scope_group.view and scope_group.update). The user who asked may always read their move, without the\nuploads once they lost those. Anyone else, and an unknown id: 404 move_not_found. The target is shown to the user\nwho asked and to readers who see that group (scope_group.view); for anyone else target_group_id is null and\ntarget_visible false.",
         "operationId": "get_move",
         "security": [
           {
@@ -35476,6 +35490,19 @@
             ],
             "title": "Description"
           },
+          "expected_corps_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Corps Id",
+            "description": "With corps_id: the corps as the client read it. Required for a move: missing or out of date answers 409 move_conflict. Without corps_id it is not read"
+          },
           "force": {
             "type": "boolean",
             "title": "Force",
@@ -35487,6 +35514,72 @@
         "type": "object",
         "title": "BrigadeUpdate",
         "description": "Only the fields sent are changed; corps_id moves the brigade, with its posts, to another corps"
+      },
+      "BrigadeUpdateResponse": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "corps_id": {
+            "type": "integer",
+            "title": "Corps Id",
+            "description": "Corps the brigade sits in"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "is_deleted": {
+            "type": "boolean",
+            "title": "Is Deleted"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "post_count": {
+            "type": "integer",
+            "title": "Post Count",
+            "description": "Active posts of the brigade where the caller has post.view"
+          },
+          "already_there": {
+            "type": "boolean",
+            "title": "Already There",
+            "description": "true: the move this request asked for has already happened: nothing was written, the other fields sent included, and this is the record as it stands",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "corps_id",
+          "name",
+          "is_deleted",
+          "created_at",
+          "updated_at",
+          "post_count"
+        ],
+        "title": "BrigadeUpdateResponse",
+        "description": "The brigade after PATCH /brigades/{brigade_id}"
       },
       "BuiltinRoleNotArchivableProblem": {
         "properties": {
@@ -41083,6 +41176,17 @@
               }
             ],
             "description": "Authorization data, counts only"
+          },
+          "moves": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MovesHealthModel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Moves waiting for uploads, counts only"
           }
         },
         "type": "object",
@@ -46738,6 +46842,78 @@
         "title": "MoveCompletedAuditParams",
         "description": "Params of move.completed (Queued move completed)"
       },
+      "MoveConflictProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "The node is not where this request expected",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 409,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "Read the record again and decide; nothing moved"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "move_conflict",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          },
+          "current_place": {
+            "$ref": "#/components/schemas/MovePlace"
+          },
+          "current_group_id": {
+            "type": "integer",
+            "title": "Current Group Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code",
+          "current_place"
+        ],
+        "title": "MoveConflictProblem",
+        "description": "The node is not where this request expected (HTTP 409). Problem type move_conflict.",
+        "examples": [
+          {
+            "code": "move_conflict",
+            "current_place": "<current_place>",
+            "detail": "Read the record again and decide; nothing moved",
+            "instance": "/api/v1/...",
+            "status": 409,
+            "title": "The node is not where this request expected",
+            "type": "https://example.org/problems/move_conflict"
+          }
+        ]
+      },
       "MoveFailedAuditEntry": {
         "properties": {
           "id": {
@@ -47234,6 +47410,16 @@
           }
         ]
       },
+      "MovePlace": {
+        "type": "string",
+        "enum": [
+          "root",
+          "group",
+          "hidden"
+        ],
+        "title": "MovePlace",
+        "description": "Where a node sits, as 409 move_conflict says it (param current_place): the id only of a group the caller sees"
+      },
       "MoveRequestedAuditEntry": {
         "properties": {
           "id": {
@@ -47469,7 +47655,12 @@
               }
             ],
             "title": "Target Group Id",
-            "description": "The group it goes to; null: directly under the root"
+            "description": "The group it goes to; null: directly under the root, or hidden (target_visible false)"
+          },
+          "target_visible": {
+            "type": "boolean",
+            "title": "Target Visible",
+            "description": "false: it goes to a group outside the reader's scope_group.view; the user who asked always sees the target"
           },
           "requested_by": {
             "type": "integer",
@@ -47530,6 +47721,7 @@
           "node_kind",
           "node_id",
           "target_group_id",
+          "target_visible",
           "requested_by",
           "requested_at",
           "finished_at",
@@ -47586,7 +47778,7 @@
           "holding": {
             "type": "boolean",
             "title": "Holding",
-            "description": "false: silent too long, the upload is about to be cancelled"
+            "description": "false: no bytes for too long, or past its expiry: it no longer keeps the move waiting and is left alone"
           }
         },
         "type": "object",
@@ -47600,6 +47792,33 @@
         ],
         "title": "MoveUploadResponse",
         "description": "An upload the move waits for"
+      },
+      "MovesHealthModel": {
+        "properties": {
+          "waiting": {
+            "type": "integer",
+            "title": "Waiting",
+            "description": "Moves waiting now"
+          },
+          "oldest_waiting_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oldest Waiting Seconds",
+            "description": "Seconds the oldest of them has waited; null: none"
+          }
+        },
+        "type": "object",
+        "required": [
+          "waiting"
+        ],
+        "title": "MovesHealthModel",
+        "description": "Moves that wait for the uploads below them (services/moves.py), counts only"
       },
       "NginxFileNameInvalidProblem": {
         "properties": {
@@ -53253,6 +53472,19 @@
             "title": "Group Id",
             "description": "Scope group the post sits in; null: directly under the root"
           },
+          "expected_group_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Group Id",
+            "description": "With group_id: the group the post sits in as the client read it; null: directly under the root. Presence counts. Required for a move: missing or out of date answers 409 move_conflict. Without group_id it is not read"
+          },
           "force": {
             "type": "boolean",
             "title": "Force",
@@ -53459,6 +53691,151 @@
         ],
         "title": "PostUpdateAuditParams",
         "description": "Params of post.update (Post updated)"
+      },
+      "PostUpdateResponse": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id",
+            "description": "Scope group the post sits in; null: directly under the root"
+          },
+          "corps": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnitRefResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Corps the post sits in now (directly or through a brigade); null: outside any corps"
+          },
+          "brigade": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnitRefResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Brigade the post sits in now; null: outside any brigade"
+          },
+          "is_deleted": {
+            "type": "boolean",
+            "title": "Is Deleted",
+            "description": "Archived (POST /posts/{post_id}/archive): its data is read-only",
+            "default": false
+          },
+          "online_user_count": {
+            "type": "integer",
+            "title": "Online User Count",
+            "description": "Home users with an authenticated request within security.online_threshold_seconds",
+            "default": 0
+          },
+          "last_user_activity_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last User Activity At",
+            "description": "Latest activity of any home user; null when none has an active session"
+          },
+          "user_count": {
+            "type": "integer",
+            "title": "User Count",
+            "description": "Active, not archived users whose home post is this post",
+            "default": 0
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "already_there": {
+            "type": "boolean",
+            "title": "Already There",
+            "description": "true: the move this request asked for has already happened: nothing was written, the other fields sent included, and this is the record as it stands",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "code",
+          "is_active",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PostUpdateResponse",
+        "description": "The post after PUT /posts/{post_id}"
       },
       "PostWriteDeniedProblem": {
         "properties": {
@@ -58276,6 +58653,19 @@
             ],
             "title": "Description"
           },
+          "expected_parent_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Parent Id",
+            "description": "With parent_id: the parent as the client read it; null: directly under the root. Presence counts. Required for a move: missing or out of date answers 409 move_conflict. Without parent_id it is not read"
+          },
           "force": {
             "type": "boolean",
             "title": "Force",
@@ -58483,6 +58873,77 @@
         ],
         "title": "ScopeGroupUpdateAuditParams",
         "description": "Params of scope_group.update (Scope group updated)"
+      },
+      "ScopeGroupUpdateResponse": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ScopeGroupKind",
+            "description": "A plain group, or a unit: corps, brigade (fixed at create)"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id",
+            "description": "Group it sits in; null: directly under the root"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "is_deleted": {
+            "type": "boolean",
+            "title": "Is Deleted"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "already_there": {
+            "type": "boolean",
+            "title": "Already There",
+            "description": "true: the move this request asked for has already happened: nothing was written, the other fields sent included, and this is the record as it stands",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "is_deleted",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ScopeGroupUpdateResponse",
+        "description": "The group after PATCH /scope-groups/{group_id}"
       },
       "ScopeRef": {
         "properties": {
@@ -65908,75 +66369,6 @@
             "status": 410,
             "title": "Stored bytes are missing; open a new session",
             "type": "https://example.org/problems/upload_bytes_missing"
-          }
-        ]
-      },
-      "UploadCancelledByMoveProblem": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "format": "uri",
-            "title": "Type",
-            "description": "URI of the problem type; dereference it for its documentation"
-          },
-          "title": {
-            "type": "string",
-            "const": "Upload cancelled by a waiting move",
-            "title": "Title",
-            "description": "Summary of the problem type"
-          },
-          "status": {
-            "type": "integer",
-            "const": 409,
-            "title": "Status",
-            "description": "HTTP status code"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "Explanation of this occurrence",
-            "examples": [
-              "No bytes arrived for too long while a move waited for this upload; open a new session"
-            ]
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "description": "Path of the request that failed"
-          },
-          "code": {
-            "type": "string",
-            "const": "upload_cancelled_by_move",
-            "title": "Code",
-            "description": "Key of exactly this problem in the localization package"
-          },
-          "session_status": {
-            "type": "string",
-            "title": "Session Status"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "code",
-          "session_status"
-        ],
-        "title": "UploadCancelledByMoveProblem",
-        "description": "Upload cancelled by a waiting move (HTTP 409). Problem type upload_cancelled_by_move.",
-        "examples": [
-          {
-            "code": "upload_cancelled_by_move",
-            "detail": "No bytes arrived for too long while a move waited for this upload; open a new session",
-            "instance": "/api/v1/...",
-            "session_status": "<session_status>",
-            "status": 409,
-            "title": "Upload cancelled by a waiting move",
-            "type": "https://example.org/problems/upload_cancelled_by_move"
           }
         ]
       },

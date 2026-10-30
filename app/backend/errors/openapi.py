@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, create_model
 from app.backend.enums.errors import (
     PROBLEM_ENUMS, AccessErrorCode, AuthErrorCode, ErrorCode, FieldErrorCode, ProblemType,
 )
+from app.backend.enums.general import MovePlace
 from app.backend.enums.media_types import ContentType
 from app.backend.enums.routes import APIVersionRoutes
 from app.backend.errors.problems import PROBLEM_JSON
@@ -73,7 +74,7 @@ class FieldError(BaseModel):
     location: Optional[Literal["query", "path", "header", "cookie"]] = Field(default=None, description="Where parameter is")
 
 
-_PARAM_TYPES = {"errors": List[FieldError]}
+_PARAM_TYPES = {"errors": List[FieldError], "current_place": MovePlace}
 
 _EXAMPLE_VALUES: Dict[str, Any] = {
     "error_count": 1,
