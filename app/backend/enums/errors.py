@@ -516,7 +516,6 @@ class FieldErrorCode(FieldCode):
     VALUE_NULL = ("value_null", field("Value cannot be null, omit the field to keep the current value"))
     VALUE_NOT_STRING = ("value_not_string", field("Input must be a string"))
     STRING_TOO_LONG = ("string_too_long", field("String should have at most {max_length} characters", max_length=int))
-    TEXT_SQL_PATTERN = ("text_sql_pattern", field("Text contains a forbidden SQL keyword"))
     TEXT_SCRIPT_PATTERN = ("text_script_pattern", field("Text contains a forbidden script pattern"))
     TEXT_CONTROL_CHARACTER = ("text_control_character", field("Text contains a control character"))
     LANGUAGE_TAG_INVALID = ("language_tag_invalid", field(

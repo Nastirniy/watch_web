@@ -18,8 +18,8 @@ DESCRIPTION_DESCRIPTION = ("Plain text, line breaks kept, at most 2000 character
                            "null. Untrusted text: render it as text")
 
 
-# Guide text is natural plain text ("How to create an observation"): SecurityValidators.plain_text, not
-# sanitize_string (its SQL-keyword refusal would reject ordinary titles; values are bound parameters)
+# Guide text is natural plain text ("How to create an observation"): SecurityValidators.plain_text, the rule of every
+# free-text field
 def _title(value: str) -> str:
     """No min_length on the field: a title that strips or decodes to "" ("   ", "&nbsp;") answers value_empty"""
     title = SecurityValidators.plain_text(value, max_length=TITLE_MAX)

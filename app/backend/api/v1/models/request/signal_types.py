@@ -14,13 +14,13 @@ class SignalTypeCreate(SecureBaseModel):
     @field_validator('code', 'name')
     @classmethod
     def validate_required_fields(cls, v: str) -> str:
-        return SecurityValidators.sanitize_string(v.strip(), max_length=255)
+        return SecurityValidators.plain_text(v, max_length=255)
 
     @field_validator('description')
     @classmethod
     def validate_description(cls, v: Optional[str]) -> Optional[str]:
         if v is not None:
-            return SecurityValidators.sanitize_string(v.strip(), max_length=1000)
+            return SecurityValidators.plain_text(v, max_length=1000, multiline=True)
         return v
 
 
@@ -38,19 +38,19 @@ class SignalTypeUpdate(SecureBaseModel):
     @classmethod
     def validate_code(cls, v: Optional[str]) -> Optional[str]:
         if v is not None:
-            return SecurityValidators.sanitize_string(v.strip(), max_length=50)
+            return SecurityValidators.plain_text(v, max_length=50)
         return v
 
     @field_validator('name')
     @classmethod
     def validate_name(cls, v: Optional[str]) -> Optional[str]:
         if v is not None:
-            return SecurityValidators.sanitize_string(v.strip(), max_length=255)
+            return SecurityValidators.plain_text(v, max_length=255)
         return v
 
     @field_validator('description')
     @classmethod
     def validate_description(cls, v: Optional[str]) -> Optional[str]:
         if v is not None:
-            return SecurityValidators.sanitize_string(v.strip(), max_length=1000)
+            return SecurityValidators.plain_text(v, max_length=1000, multiline=True)
         return v

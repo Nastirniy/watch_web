@@ -6,14 +6,14 @@ from app.backend.enums.errors import FieldErrorCode
 
 
 def _clean_name(value: str) -> str:
-    value = SecurityValidators.sanitize_string(value.strip(), max_length=255)
+    value = SecurityValidators.plain_text(value, max_length=255)
     if not value:
         raise invalid(FieldErrorCode.VALUE_EMPTY)
     return value
 
 
 def _clean_description(value: Optional[str]) -> Optional[str]:
-    return SecurityValidators.sanitize_string(value.strip(), max_length=1000) if value is not None else value
+    return SecurityValidators.plain_text(value, max_length=1000, multiline=True) if value is not None else value
 
 
 class ScopeGroupCreate(SecureBaseModel):

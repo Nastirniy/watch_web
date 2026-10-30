@@ -269,7 +269,7 @@ async def test_control_characters_are_refused(client, db, headers, method, body,
 
 @pytest.mark.parametrize("title", ["<script>alert(1)</script>", "Open javascript:alert(1)", "x onerror=alert(1)"])
 async def test_script_patterns_are_refused_in_guide_text(client, db, headers, title):
-    """Guide text is untrusted: the web renders it as text, and the script patterns of sanitize_string stay refused"""
+    """Guide text is untrusted: the web renders it as text, and the script patterns of plain_text stay refused"""
     admin = await make_admin(db)
     h = headers(admin)
     for body, pointer in [({"title": title}, "#/title"), ({"title": "ok", "description": title}, "#/description")]:

@@ -39436,7 +39436,6 @@
           "value_null",
           "value_not_string",
           "string_too_long",
-          "text_sql_pattern",
           "text_script_pattern",
           "text_control_character",
           "language_tag_invalid",
@@ -46378,7 +46377,7 @@
               }
             ],
             "title": "Comment",
-            "description": "Comment limited to 1000 characters"
+            "description": "Comment, multi-line plain text up to 1000 characters: line breaks and tabs kept, other control characters (text_control_character) and script patterns (text_script_pattern) refused"
           },
           "confidence_level": {
             "anyOf": [
@@ -49062,7 +49061,7 @@
               }
             ],
             "title": "Comment",
-            "description": "Comment limited to 1000 characters"
+            "description": "Comment, multi-line plain text up to 1000 characters: line breaks and tabs kept, other control characters (text_control_character) and script patterns (text_script_pattern) refused"
           },
           "confidence_level": {
             "anyOf": [

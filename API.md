@@ -112,6 +112,25 @@ The localization package needs one entry per code:
 - Query, path, header and cookie values come as `parameter` + `location` instead (`{"parameter": "page", "location": "query"}`).
 - The submitted value is never echoed back.
 
+### Free text
+
+Every free-text field follows one rule, natural plain text: names, aliases, codes, labels and descriptions of posts,
+scope groups, corps, brigades, tags, categories, signal types, roles and media formats, a user's `username_alias`,
+an observation's `comment`, and a guide's `title` and `description`.
+
+- Leading and trailing spaces are trimmed; HTML entities a client sends anyway (`&#x27;`, `&amp;`) are decoded
+  first, so the value is stored and returned as the characters the user typed. Render it as text, never as HTML.
+- The field's length limit counts the decoded text (`string_too_long` with `max_length`).
+- Control characters and lone surrogates answer `text_control_character`. Descriptions and the observation comment
+  are multi-line: they keep line breaks and tabs. Every other field is single-line and also refuses line breaks,
+  U+2028 / U+2029 and the bidi controls (U+202A-202E, U+2066-2069, U+200E, U+200F, U+061C); ZWJ and ZWNJ stay.
+- Script patterns (`<script`, `javascript:`, `vbscript:`, `onload=`, `onerror=`, `onclick=`, any case) answer
+  `text_script_pattern`.
+- There is no keyword list: "Select the post, then create the observation" or "drop" is ordinary text (every value
+  reaches the database as a bound parameter). The code `text_sql_pattern` no longer exists.
+- Fields with a grammar of their own keep it: `username` (`username_invalid`, `username_reserved`), certificate
+  labels (`certificate_label_invalid`), Content-Types, extensions and the login certificate values.
+
 ### Lists and filters
 
 - Filters are query parameters, combined with AND. A parameter the list does not know answers 422 (item code
@@ -545,8 +564,9 @@ The help section: every authenticated user reads `GET /api/v1/guides/` and `GET 
   `v-html` / `innerHTML` as it is. Every other format (PDF, office documents) is only offered as the download.
 
 - A guide's `title` and `description` are untrusted text: render them as text, never as HTML (no `v-html`, no
-  `innerHTML`, no markdown-to-HTML without a sanitiser). The API refuses script patterns (`text_script_pattern`)
-  and control characters (`text_control_character`) but accepts any other natural text, SQL words included.
+  `innerHTML`, no markdown-to-HTML without a sanitiser). They follow the free-text rule ("Free text" under
+  "Errors"): script patterns (`text_script_pattern`) and control characters (`text_control_character`) are refused,
+  any other natural text, SQL words included, is accepted.
 - `description` keeps its line breaks (show them with `white-space: pre-line`); an empty one is null.
 - Files: `POST /api/v1/guides/{guide_id}/files` (multipart `file`, optional `language`, needs `guide.update`) adds
   one, of a format of media type `document`; refusals are the media upload ones (415 with `Accept-Post`, 413

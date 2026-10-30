@@ -9,7 +9,7 @@ class TagCreate(SecureBaseModel):
     @field_validator('name')
     @classmethod
     def validate_name(cls, v: str) -> str:
-        return SecurityValidators.sanitize_string(v.strip().lower(), max_length=100)
+        return SecurityValidators.plain_text(v.strip().lower(), max_length=100)
 
 
 class TagUpdate(SecureBaseModel):
@@ -21,5 +21,5 @@ class TagUpdate(SecureBaseModel):
     @classmethod
     def validate_name(cls, v: Optional[str]) -> Optional[str]:
         if v is not None:
-            return SecurityValidators.sanitize_string(v.strip().lower(), max_length=100)
+            return SecurityValidators.plain_text(v.strip().lower(), max_length=100)
         return v

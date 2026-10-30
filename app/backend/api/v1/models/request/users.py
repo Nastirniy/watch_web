@@ -26,7 +26,7 @@ class UserCreateData(SecureBaseModel):
     @field_validator('username_alias')
     @classmethod
     def validate_username_alias(cls, v: str) -> str:
-        return SecurityValidators.sanitize_string(v, max_length=255)
+        return SecurityValidators.plain_text(v, max_length=255)
 
 
 class UserUpdateData(SecureBaseModel):
@@ -52,7 +52,7 @@ class UserUpdateData(SecureBaseModel):
     @classmethod
     def validate_username_alias(cls, v: Optional[str]) -> Optional[str]:
         if v is not None:
-            return SecurityValidators.sanitize_string(v, max_length=255)
+            return SecurityValidators.plain_text(v, max_length=255)
         return v
 
 

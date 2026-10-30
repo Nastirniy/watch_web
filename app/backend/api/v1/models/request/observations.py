@@ -6,10 +6,16 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validat
 from app.backend.enums.general import (ConfidenceLevel, FrequencyKind, ObservationReportType, ObservationStatus, TagMatch,
                                       UnitPlacement)
 from app.backend.errors.coded import invalid
-from app.backend.utils.validators import INT_MAX, ObservationTime, UtcDatetime, not_null
+from app.backend.utils.validators import INT_MAX, ObservationTime, SecurityValidators, UtcDatetime, not_null
 from app.backend.enums.errors import FieldErrorCode
 
 FREQUENCY_QUANTUM = Decimal("0.001")
+COMMENT_DESCRIPTION = ("Comment, multi-line plain text up to 1000 characters: line breaks and tabs kept, other control "
+                       "characters (text_control_character) and script patterns (text_script_pattern) refused")
+
+
+def _comment(value: Optional[str]) -> Optional[str]:
+    return SecurityValidators.plain_text(value, max_length=1000, multiline=True) if value is not None else value
 
 
 def default_frequency_center(frequency_min: Decimal, frequency_max: Decimal) -> Decimal:
@@ -87,7 +93,7 @@ class ObservationCreate(BaseModel):
                     "between 2000-01-01T00:00:00Z and now + 1 day (422 time_out_of_range); the current UTC time when omitted"
     )
     duration_seconds: Optional[int] = Field(None, ge=0, le=INT_MAX, description="Duration must be non-negative")
-    comment: Optional[str] = Field(None, max_length=1000, description="Comment limited to 1000 characters")
+    comment: Optional[str] = Field(None, max_length=1000, description=COMMENT_DESCRIPTION)
     confidence_level: Optional[str] = Field(
         None,
         max_length=10,
@@ -105,6 +111,11 @@ class ObservationCreate(BaseModel):
         if v is not None:
             return list(dict.fromkeys(v))
         return v
+
+    @field_validator('comment')
+    @classmethod
+    def validate_comment(cls, v: Optional[str]) -> Optional[str]:
+        return _comment(v)
 
     @field_validator('confidence_level')
     @classmethod
@@ -127,7 +138,7 @@ class ObservationUpdate(BaseModel):
     observed_at: Optional[ObservationTime] = Field(
         None, description="When the signal was observed, between 2000-01-01T00:00:00Z and now + 1 day (422 time_out_of_range)")
     duration_seconds: Optional[int] = Field(None, ge=0, le=INT_MAX, description="Duration must be non-negative")
-    comment: Optional[str] = Field(None, max_length=1000, description="Comment limited to 1000 characters")
+    comment: Optional[str] = Field(None, max_length=1000, description=COMMENT_DESCRIPTION)
     confidence_level: Optional[str] = Field(
         None,
         max_length=10,
@@ -147,6 +158,11 @@ class ObservationUpdate(BaseModel):
         if v is not None:
             return list(dict.fromkeys(v))
         return v
+
+    @field_validator('comment')
+    @classmethod
+    def validate_comment(cls, v: Optional[str]) -> Optional[str]:
+        return _comment(v)
 
     @field_validator('confidence_level')
     @classmethod

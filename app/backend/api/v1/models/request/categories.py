@@ -10,7 +10,7 @@ class CategoryCreate(SecureBaseModel):
     @field_validator('name', 'alias')
     @classmethod
     def validate_fields(cls, v: str) -> str:
-        return SecurityValidators.sanitize_string(v.strip(), max_length=255)
+        return SecurityValidators.plain_text(v, max_length=255)
 
 
 class CategoryUpdate(SecureBaseModel):
@@ -23,5 +23,5 @@ class CategoryUpdate(SecureBaseModel):
     @classmethod
     def validate_fields(cls, v: Optional[str]) -> Optional[str]:
         if v is not None:
-            return SecurityValidators.sanitize_string(v.strip(), max_length=255)
+            return SecurityValidators.plain_text(v, max_length=255)
         return v

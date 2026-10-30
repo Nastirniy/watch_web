@@ -9,7 +9,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated
 from app.backend.utils.text import unescape_html, unescape_deep
 from app.backend.utils.datetime_utils import as_utc, assume_utc
-import bleach
 from pydantic import AfterValidator, BaseModel, WrapSerializer, field_validator
 from email_validator import validate_email, EmailNotValidError
 from app.backend.errors.coded import invalid
@@ -99,43 +98,8 @@ class SecurityValidators:
         'ip_address': re.compile(r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'),
         'mac_address': re.compile(r'^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$'),
         'url_safe': re.compile(r'^[a-zA-Z0-9._~:/?#[\]@!$&\'()*+,;=-]+$'),
-        'sql_injection': re.compile(r'(\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|UNION|SCRIPT)\b)', re.IGNORECASE),
         'xss_patterns': re.compile(r'(<script|javascript:|vbscript:|onload=|onerror=|onclick=)', re.IGNORECASE)
     }
-
-    @classmethod
-    def sanitize_string(cls, value: str, max_length: int = 255, allow_html: bool = False) -> str:
-        """Validate a plain-text value and return it as the characters the user typed.
-
-        The value is stored and returned as plain text: apostrophes, quotes and
-        ampersands stay as they are (the API is JSON, escaping belongs to the
-        renderer). Entities a client sends anyway ("&#x27;", "&amp;") are decoded
-        first so the checks below see the real text.
-        """
-        if not isinstance(value, str):
-            raise invalid(FieldErrorCode.VALUE_NOT_STRING)
-
-        # Decode entities, then trim whitespace
-        value = unescape_html(value).strip()
-
-        # Length validation
-        if len(value) > max_length:
-            raise invalid(FieldErrorCode.STRING_TOO_LONG, max_length=max_length)
-
-        # Check for SQL injection patterns
-        if cls.PATTERNS['sql_injection'].search(value):
-            raise invalid(FieldErrorCode.TEXT_SQL_PATTERN)
-
-        # Check for XSS patterns
-        if cls.PATTERNS['xss_patterns'].search(value):
-            raise invalid(FieldErrorCode.TEXT_SCRIPT_PATTERN)
-
-        if allow_html:
-            # Keep only harmless formatting tags
-            allowed_tags = ['b', 'i', 'u', 'em', 'strong', 'p', 'br']
-            value = bleach.clean(value, tags=allowed_tags, strip=True)
-
-        return value
 
     # Whitespace controls a multi-line text keeps (line breaks and tabs); every other control character is refused
     MULTILINE_CONTROLS = frozenset("\n\r\t")
@@ -147,15 +111,17 @@ class SecurityValidators:
 
     @classmethod
     def plain_text(cls, value: str, max_length: int, multiline: bool = False) -> str:
-        """Natural plain text (user guide titles and descriptions): trimmed, at most max_length characters, without
-        script patterns (the xss_patterns of sanitize_string: text_script_pattern), control characters or lone
-        surrogates (text_control_character). multiline keeps line breaks and tabs; single-line text also refuses
-        SINGLE_LINE_HIDDEN. May return "": the caller decides what an empty text means.
+        """Natural plain text, the one rule of every free-text field (names, labels, descriptions, comments, guide
+        titles): trimmed, at most max_length characters, without script patterns (xss_patterns: text_script_pattern),
+        control characters or lone surrogates (text_control_character). multiline keeps line breaks and tabs;
+        single-line text also refuses SINGLE_LINE_HIDDEN. May return "": the caller decides what an empty text means.
 
-        Unlike sanitize_string it does not refuse SQL keywords: the ORM binds every value as a parameter, so "How to
-        create an observation" is harmless at the database layer. Entities a client sends anyway are decoded first,
-        as in sanitize_string, so the checks see the real text: "&#10;" is a line break, "&nbsp;" strips away (a
-        reference to a C0 control such as "&#7;" is dropped by html.unescape, not refused).
+        There is no keyword list: the ORM binds every value as a parameter, so "Select the post, then create an
+        observation" is harmless at the database layer (the SQL-keyword rule was removed on 2026-10-30). The value is
+        stored and returned as plain text: apostrophes, quotes and ampersands stay as they are (the API is JSON,
+        escaping belongs to the renderer). Entities a client sends anyway ("&#x27;", "&amp;") are decoded first so the
+        checks see the real text: "&#10;" is a line break, "&nbsp;" strips away (a reference to a C0 control such as
+        "&#7;" is dropped by html.unescape, not refused).
         """
         if not isinstance(value, str):
             raise invalid(FieldErrorCode.VALUE_NOT_STRING)

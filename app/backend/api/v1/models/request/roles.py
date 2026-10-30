@@ -16,18 +16,18 @@ class RoleClone(SecureBaseModel):
     @field_validator('name')
     @classmethod
     def validate_name(cls, v):
-        return SecurityValidators.sanitize_string(v, max_length=100)
+        return SecurityValidators.plain_text(v, max_length=100)
 
     @field_validator('display_name')
     @classmethod
     def validate_display_name(cls, v):
-        return SecurityValidators.sanitize_string(v, max_length=255)
+        return SecurityValidators.plain_text(v, max_length=255)
 
     @field_validator('description')
     @classmethod
     def validate_description(cls, v):
         if v is not None:
-            return SecurityValidators.sanitize_string(v, max_length=500)
+            return SecurityValidators.plain_text(v, max_length=500, multiline=True)
         return v
 
 
@@ -55,21 +55,21 @@ class RoleUpdate(SecureBaseModel):
     @classmethod
     def validate_name(cls, v):
         if v is not None:
-            return SecurityValidators.sanitize_string(v, max_length=100)
+            return SecurityValidators.plain_text(v, max_length=100)
         return v
 
     @field_validator('display_name')
     @classmethod
     def validate_display_name(cls, v):
         if v is not None:
-            return SecurityValidators.sanitize_string(v, max_length=255)
+            return SecurityValidators.plain_text(v, max_length=255)
         return v
 
     @field_validator('description')
     @classmethod
     def validate_description(cls, v):
         if v is not None:
-            return SecurityValidators.sanitize_string(v, max_length=500)
+            return SecurityValidators.plain_text(v, max_length=500, multiline=True)
         return v
 
     @field_validator('permission_ids')

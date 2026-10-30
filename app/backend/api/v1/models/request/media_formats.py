@@ -77,7 +77,7 @@ class MediaFormatCreate(SecureBaseModel):
     @field_validator("label")
     @classmethod
     def validate_label(cls, v: str) -> str:
-        return SecurityValidators.sanitize_string(v.strip(), max_length=255)
+        return SecurityValidators.plain_text(v, max_length=255)
 
     @field_validator("extensions")
     @classmethod
@@ -129,7 +129,7 @@ class MediaFormatUpdate(SecureBaseModel):
     @field_validator("label")
     @classmethod
     def validate_label(cls, v: Optional[str]) -> Optional[str]:
-        return SecurityValidators.sanitize_string(v.strip(), max_length=255) if v is not None else v
+        return SecurityValidators.plain_text(v, max_length=255) if v is not None else v
 
     @field_validator("extensions")
     @classmethod

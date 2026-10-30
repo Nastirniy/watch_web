@@ -42,12 +42,12 @@ def test_unescape_deep_walks_containers_and_leaves_other_types():
     assert unescape_deep(value) == {"name": "кур'єр", "tags": ["a&b", 3], "nested": {"x": ("'", None)}, "n": 1.5}
 
 
-def test_sanitize_string_keeps_plain_characters_and_decodes_entities():
-    assert SecurityValidators.sanitize_string("кур'єр") == "кур'єр"
-    assert SecurityValidators.sanitize_string('Пост "Північ" & Co') == 'Пост "Північ" & Co'
-    assert SecurityValidators.sanitize_string("кур&#x27;єр") == "кур'єр"
+def test_plain_text_keeps_plain_characters_and_decodes_entities():
+    assert SecurityValidators.plain_text("кур'єр", max_length=255) == "кур'єр"
+    assert SecurityValidators.plain_text('Пост "Північ" & Co', max_length=255) == 'Пост "Північ" & Co'
+    assert SecurityValidators.plain_text("кур&#x27;єр", max_length=255) == "кур'єр"
     with pytest.raises(ValueError):
-        SecurityValidators.sanitize_string("&lt;script&gt;alert(1)&lt;/script&gt;")
+        SecurityValidators.plain_text("&lt;script&gt;alert(1)&lt;/script&gt;", max_length=255)
 
 
 def test_plain_text_model_decodes_strings_in_every_field():

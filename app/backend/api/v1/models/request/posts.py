@@ -1,6 +1,6 @@
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 from app.backend.utils.validators import SecurityValidators
 from app.backend.errors.coded import invalid
@@ -8,11 +8,21 @@ from app.backend.enums.errors import FieldErrorCode
 
 
 def _required_text(value: str, max_length: int) -> str:
-    """Sanitize a required string; spaces alone would store an empty value, so they are rejected"""
-    value = SecurityValidators.sanitize_string(value.strip(), max_length=max_length)
+    """A required single-line plain text (SecurityValidators.plain_text); spaces alone would store an empty value, so
+    they are rejected"""
+    value = SecurityValidators.plain_text(value, max_length=max_length)
     if not value:
         raise invalid(FieldErrorCode.VALUE_EMPTY)
     return value
+
+
+def _optional_text(value: Optional[str], field: str) -> Optional[str]:
+    """description: multi-line plain text up to 1000 characters; region and city: single-line up to 255"""
+    if value is None:
+        return value
+    if field == "description":
+        return SecurityValidators.plain_text(value, max_length=1000, multiline=True)
+    return SecurityValidators.plain_text(value, max_length=255)
 
 
 class PostCreate(BaseModel):
@@ -33,11 +43,9 @@ class PostCreate(BaseModel):
 
     @field_validator('description', 'region', 'city')
     @classmethod
-    def validate_optional_fields(cls, v: Optional[str]) -> Optional[str]:
-        """Validate and sanitize optional string fields"""
-        if v is not None:
-            return SecurityValidators.sanitize_string(v.strip(), max_length=1000)
-        return v
+    def validate_optional_fields(cls, v: Optional[str], info: ValidationInfo) -> Optional[str]:
+        """Plain text: description multi-line, region and city single-line"""
+        return _optional_text(v, info.field_name)
 
 
 class PostUpdate(BaseModel):
@@ -69,8 +77,6 @@ class PostUpdate(BaseModel):
 
     @field_validator('description', 'region', 'city')
     @classmethod
-    def validate_optional_fields(cls, v: Optional[str]) -> Optional[str]:
-        """Validate and sanitize optional string fields"""
-        if v is not None:
-            return SecurityValidators.sanitize_string(v.strip(), max_length=1000)
-        return v
+    def validate_optional_fields(cls, v: Optional[str], info: ValidationInfo) -> Optional[str]:
+        """Plain text: description multi-line, region and city single-line"""
+        return _optional_text(v, info.field_name)

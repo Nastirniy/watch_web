@@ -38,6 +38,24 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `If-None-Match` on `/stream` goes the same way and answers 405, as `HEAD` does on `/download`.
 - Contract: the three routes declare 304, `Repr-Digest` and, on the 206, `ETag` and `Repr-Digest`; the descriptions
   no longer say the ETag behind nginx is nginx's own.
+- Free text has one rule, natural plain text (`SecurityValidators.plain_text`, the rule guide titles already had):
+  trimmed, entities decoded, length limits as before, control characters and lone surrogates refused
+  (`text_control_character`; descriptions and the observation comment keep line breaks and tabs, every other field
+  is single-line and also refuses U+2028 / U+2029 and the bidi controls), script patterns refused
+  (`text_script_pattern`), and no keyword list: SQL words ("select", "create", "update", "drop", "script", ...) are
+  ordinary text, every value is a bound parameter. It applies to the names, aliases, codes, labels and descriptions
+  of posts, scope groups, corps, brigades, tags, categories, signal types, roles and media formats, to
+  `username_alias`, and, new, to the observation `comment` (`POST /observations/`, `PATCH /observations/{id}`), which
+  had only its length limit. Newly refused there: control characters other than line breaks and tabs, and script
+  patterns; newly refused in single-line fields that went through the old rule: line breaks, other control
+  characters, U+2028 / U+2029 and the bidi controls. `username`, certificate labels, Content-Types, extensions and
+  the login certificate values keep their own rules. API.md "Free text".
+
+### Removed
+
+- The field error code `text_sql_pattern` (the SQL-keyword rule of `sanitize_string`, now removed): no request
+  answers it any more, the web drops its translation. Contract: the value `text_sql_pattern` is gone from the
+  `FieldErrorCode` enum; the `comment` descriptions of `ObservationCreate` and `ObservationUpdate` name the rule.
 
 ## Owner decisions 2026-10-29
 
