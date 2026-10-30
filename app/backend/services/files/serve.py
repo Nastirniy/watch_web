@@ -9,15 +9,22 @@ Every file the API hands out (originals of media, user guides, generated reports
   frame) runs as a sandboxed document of a unique origin with nothing allowed to load: a Markdown guide or an
   uploaded HTML file with a <script> cannot run it on the site's origin. CSP governs documents only: the same file
   loaded by <video src>, <audio src> or <img src> of the web page is a subresource, not a document, so the policy
-  does not apply there and playback and display keep working.
+  does not apply there and playback and display keep working;
+- ETag: "<sha256 hex>" and Repr-Digest: sha-256=:<base64 of the digest>: (RFC 9530) when the file has a hash: the same
+  on a 200 and a 206, both describe the whole file. If-None-Match is answered by the API before the file is handed
+  over (none_match, not_modified_headers): nginx cannot give a 304 for an ETag of the API.
 
 Behind nginx (X-Accel-Redirect) nginx adds the safety headers and Cache-Control itself where it serves the file
 (nginx-app.conf /protected_uploads/ and the stream location) and the API leaves them out of its answer
 (accel_headers): checked live in nginx:1.27, nginx passes on only a few known headers of an X-Accel answer and drops
-any other, so a copy of the API's would never arrive, and a header it does pass would arrive twice.
+any other, so a copy of the API's would never arrive, and a header it does pass would arrive twice. ETag, Repr-Digest
+and X-File-Hash stay in that answer: those locations turn nginx's own ETag off and copy the three from it
+($upstream_http_* in nginx-app.conf).
 """
 from __future__ import annotations
 
+import base64
+import re
 import unicodedata
 from typing import Callable, Dict, Mapping, Optional
 from urllib.parse import quote
@@ -35,6 +42,10 @@ STORED_FILE_CACHE_CONTROL = "private, max-age=3600"
 NGINX_ADDED_HEADERS = ("Cache-Control", "X-Content-Type-Options", "Content-Security-Policy")
 # nginx's static module answers Accept-Ranges itself on an X-Accel answer
 _NGINX_OWN_HEADERS = ("Accept-Ranges",)
+
+_SHA256_HEX = re.compile(r"[0-9a-fA-F]{64}")
+# One entity-tag of a list (RFC 9110 section 8.8.3) and what follows it: a comma, or the end of the header
+_ENTITY_TAG = re.compile(r'[ \t]*(?:W/)?"([^"]*)"[ \t]*(?:,|$)')
 
 # RFC 8187 attr-char without ALPHA / DIGIT (quote keeps those and "_.-~" itself)
 _ATTR_CHAR_SAFE = "!#$&+-.^_`|~"
@@ -109,9 +120,43 @@ def content_disposition(disposition: Disposition, filename: str) -> str:
     return f"{disposition.value}; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
 
 
+def repr_digest(sha256_hex: Optional[str]) -> Optional[str]:
+    """Repr-Digest of a file (RFC 9530): sha-256=:<base64 of the 32 raw bytes>:, None for a value that is no sha256"""
+    if not sha256_hex or _SHA256_HEX.fullmatch(sha256_hex) is None:
+        return None
+    return f"sha-256=:{base64.b64encode(bytes.fromhex(sha256_hex)).decode('ascii')}:"
+
+
+def none_match(if_none_match: Optional[str], etag: Optional[str]) -> bool:
+    """The header matches the existing file, so the answer is 304 (RFC 9110 section 13.1.2): "*", or one tag of its
+    list equal to the file's by weak comparison (W/ ignored, the opaque tag byte by byte). etag is the unquoted hash.
+    What cannot be read as a list of entity tags is no match: the file is served."""
+    if not if_none_match or not if_none_match.strip():
+        return False
+    if if_none_match.strip() == "*":
+        return True
+    position = 0
+    while position < len(if_none_match):
+        tag = _ENTITY_TAG.match(if_none_match, position)
+        if tag is None:
+            return False
+        if etag and tag.group(1) == etag:
+            return True
+        position = tag.end()
+    return False
+
+
+def not_modified_headers(etag: Optional[str]) -> Dict[str, str]:
+    """The 304 of a stored file: what a 200 would send of ETag and Cache-Control (RFC 9110 section 15.4.5)"""
+    headers = {"Cache-Control": STORED_FILE_CACHE_CONTROL}
+    if etag:
+        headers["ETag"] = f'"{etag}"'
+    return headers
+
+
 def file_headers(*, content_type: str, filename: str, disposition: Disposition, etag: Optional[str]) -> Dict[str, str]:
     """Headers of every file answer: the served Content-Type (text types with their charset), the name, nosniff,
-    the sandbox CSP, and the ETag when the file has one (quoted here)"""
+    the sandbox CSP, and when the file has a hash its ETag (quoted here) and Repr-Digest"""
     headers = {
         # in the headers, never media_type=: Starlette would add its own charset to a text type
         "Content-Type": served_content_type(content_type),
@@ -121,6 +166,9 @@ def file_headers(*, content_type: str, filename: str, disposition: Disposition, 
     }
     if etag:
         headers["ETag"] = f'"{etag}"'
+    digest = repr_digest(etag)
+    if digest:
+        headers["Repr-Digest"] = digest
     return headers
 
 

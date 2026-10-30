@@ -27,6 +27,17 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - Contract: `refresh_token` declares `refresh_token_reused` (new schema `RefreshTokenReusedProblem`) and describes
   the rule; `SessionRevokeCause` has the value `refresh_token_reused` (web translations: one new error code, one new
   revoke cause).
+- `GET /media/{id}/download`, `GET /media/{id}/stream` and `GET /guides/{id}/files/{id}/download` carry the file's own
+  `ETag` (`"<sha256 hex>"`), `X-File-Hash` and the new `Repr-Digest: sha-256=:<base64>:` (RFC 9530) on every 200 and
+  206, behind nginx as well: nginx's own ETag (mtime-size) is off in `/protected_uploads/` and the stream location,
+  which copy the API's (`nginx-app.conf`, reload nginx). `If-Range` with that ETag works: same file 206, another 200.
+- `If-None-Match` with the ETag (weak comparison, a list, or `*`) answers 304 with `ETag` and `Cache-Control`, no
+  body, on those three routes: the API answers it after every access check and before the file is handed to nginx
+  (nginx cannot, its not_modified filter runs before add_header). `/stream` used to answer 200 here: nginx now sends
+  a request with `If-None-Match` to the API directly, past the 30 second cache of the access answer. A `HEAD` with
+  `If-None-Match` on `/stream` goes the same way and answers 405, as `HEAD` does on `/download`.
+- Contract: the three routes declare 304, `Repr-Digest` and, on the 206, `ETag` and `Repr-Digest`; the descriptions
+  no longer say the ETag behind nginx is nginx's own.
 
 ## Owner decisions 2026-10-29
 

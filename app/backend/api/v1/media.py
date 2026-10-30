@@ -49,7 +49,10 @@ from app.backend.api.v1.models.response.media import (
     StorageStatisticsResponse,
     UploadResultResponse,
     upload_result,
+    FILE_NOT_MODIFIED,
+    FILE_NOT_MODIFIED_HEADERS,
     ORIGINAL_FILE_HEADERS,
+    PARTIAL_FILE_HEADERS,
     THUMBNAIL_PENDING_HEADERS,
     STORYBOARD_HEADERS,
     STORYBOARD_PENDING_HEADERS,
@@ -64,6 +67,7 @@ from app.backend.api.shared.helpers.post_helper import ensure_post_not_archived
 from app.backend.api.shared.helpers.media_helper import (
     get_observation_from_media,
     get_media_or_404,
+    if_none_match_of,
     original_file_response,
     source_file_exists,
     storage_root,
@@ -209,7 +213,8 @@ async def get_media_info(
     response_class=Response,
     responses={
         **file_response("The original file (attachment), in its own Content-Type", [ContentType.ANY], ORIGINAL_FILE_HEADERS),
-        **file_response("The requested byte range (Range header)", [ContentType.ANY], {"Content-Range": header("bytes start-end/size")}, status=206),
+        **file_response("The requested byte range (Range header)", [ContentType.ANY], PARTIAL_FILE_HEADERS, status=206),
+        **empty_response(304, FILE_NOT_MODIFIED, FILE_NOT_MODIFIED_HEADERS),
         **problems(
             AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.MEDIA_FILE_MISSING,
             ErrorCode.MEDIA_NOT_FOUND, ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_PATH_UNRESOLVED,
@@ -223,11 +228,14 @@ async def download_media_file(
     session: AsyncSession = Depends(get_session),
     auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW]))
 ):
-    """Download the original as an attachment. nginx serves it via X-Accel-Redirect; otherwise FileResponse with Range support."""
+    """Download the original as an attachment (nginx serves it via X-Accel-Redirect; otherwise the API, with Range
+    support). ETag and Repr-Digest name the file, on a 206 as well. If-None-Match with the ETag (or *) answers 304
+    without the file, after the access checks; If-Range with the ETag works as usual."""
     media_file = await get_media_or_404(session, media_id)
     observation = await get_observation_from_media(session, media_file)
     AccessControlService.check_post(auth, Permissions.MEDIA_VIEW, observation.post_id, "media")
-    return original_file_response(media_file, Disposition.ATTACHMENT, request.headers.get("range"))
+    return original_file_response(media_file, Disposition.ATTACHMENT, request.headers.get("range"),
+                                  if_none_match_of(request))
 
 
 @router.get(
@@ -235,7 +243,8 @@ async def download_media_file(
     response_class=Response,
     responses={
         **file_response("The original file (inline), in its own Content-Type", [ContentType.ANY], ORIGINAL_FILE_HEADERS),
-        **file_response("The requested byte range (Range header)", [ContentType.ANY], {"Content-Range": header("bytes start-end/size")}, status=206),
+        **file_response("The requested byte range (Range header)", [ContentType.ANY], PARTIAL_FILE_HEADERS, status=206),
+        **empty_response(304, FILE_NOT_MODIFIED, FILE_NOT_MODIFIED_HEADERS),
         **problems(
             AccessErrorCode.NO_POST_ASSIGNED, AccessErrorCode.POST_ACCESS_DENIED, ErrorCode.MEDIA_FILE_MISSING,
             ErrorCode.MEDIA_NOT_FOUND, ErrorCode.MEDIA_OBSERVATION_NOT_FOUND, ErrorCode.MEDIA_PATH_UNRESOLVED,
@@ -249,11 +258,15 @@ async def stream_media_file(
     session: AsyncSession = Depends(get_session),
     auth: AuthContext = Depends(require(all=[Permissions.MEDIA_VIEW]))
 ):
-    """Serve the original inline (video and audio players). Same transport as download, with Range support."""
+    """Serve the original inline (video and audio players). Same transport as download, with Range support. ETag and
+    Repr-Digest name the file, on a 206 as well. If-None-Match with the ETag (or *) answers 304 without the file,
+    after the access checks: nginx sends a request with If-None-Match to the API (never its 30 second cache of the
+    access answer); If-Range with the ETag works as usual."""
     media_file = await get_media_or_404(session, media_id)
     observation = await get_observation_from_media(session, media_file)
     AccessControlService.check_post(auth, Permissions.MEDIA_VIEW, observation.post_id, "media")
-    return original_file_response(media_file, Disposition.INLINE, request.headers.get("range"))
+    return original_file_response(media_file, Disposition.INLINE, request.headers.get("range"),
+                                  if_none_match_of(request))
 
 
 async def _set_media_archived(request: Request, session: AsyncSession, auth: AuthContext, media_id: int, archived: bool) -> MediaFileInfo:

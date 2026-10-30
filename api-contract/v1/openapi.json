@@ -20923,7 +20923,7 @@
           "MEDIA"
         ],
         "summary": "Download Media File",
-        "description": "Download the original as an attachment. nginx serves it via X-Accel-Redirect; otherwise FileResponse with Range support.",
+        "description": "Download the original as an attachment (nginx serves it via X-Accel-Redirect; otherwise the API, with Range\nsupport). ETag and Repr-Digest name the file, on a 206 as well. If-None-Match with the ETag (or *) answers 304\nwithout the file, after the access checks; If-Range with the ETag works as usual.",
         "operationId": "download_media_file",
         "security": [
           {
@@ -20972,13 +20972,19 @@
                 }
               },
               "ETag": {
-                "description": "sha256 of the file, quoted (/stream always; /download only when the API serves the file itself: behind nginx nginx's own ETag)",
+                "description": "sha256 of the file, quoted (\"<64 hex digits>\"): send it back in If-None-Match or If-Range",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Repr-Digest": {
+                "description": "SHA-256 of the whole file, on a 206 as well (RFC 9530): sha-256=:<base64 of the 32 digest bytes>:",
                 "schema": {
                   "type": "string"
                 }
               },
               "X-File-Hash": {
-                "description": "sha256 of the file (/stream always; /download only when the API serves the file itself, absent behind nginx)",
+                "description": "sha256 of the file",
                 "schema": {
                   "type": "string"
                 }
@@ -21088,6 +21094,35 @@
             "headers": {
               "Content-Range": {
                 "description": "bytes start-end/size",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "sha256 of the file, quoted (\"<64 hex digits>\"): send it back in If-None-Match or If-Range",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Repr-Digest": {
+                "description": "SHA-256 of the whole file, on a 206 as well (RFC 9530): sha-256=:<base64 of the 32 digest bytes>:",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "If-None-Match matched (one of its tags equals the ETag of the file by weak comparison, or it is *): no body, the copy the client holds is current. Comes after every access check",
+            "headers": {
+              "ETag": {
+                "description": "sha256 of the file, quoted (\"<64 hex digits>\"): send it back in If-None-Match or If-Range",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "private, max-age=3600",
                 "schema": {
                   "type": "string"
                 }
@@ -21169,7 +21204,7 @@
           "MEDIA"
         ],
         "summary": "Stream Media File",
-        "description": "Serve the original inline (video and audio players). Same transport as download, with Range support.",
+        "description": "Serve the original inline (video and audio players). Same transport as download, with Range support. ETag and\nRepr-Digest name the file, on a 206 as well. If-None-Match with the ETag (or *) answers 304 without the file,\nafter the access checks: nginx sends a request with If-None-Match to the API (never its 30 second cache of the\naccess answer); If-Range with the ETag works as usual.",
         "operationId": "stream_media_file",
         "security": [
           {
@@ -21218,13 +21253,19 @@
                 }
               },
               "ETag": {
-                "description": "sha256 of the file, quoted (/stream always; /download only when the API serves the file itself: behind nginx nginx's own ETag)",
+                "description": "sha256 of the file, quoted (\"<64 hex digits>\"): send it back in If-None-Match or If-Range",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Repr-Digest": {
+                "description": "SHA-256 of the whole file, on a 206 as well (RFC 9530): sha-256=:<base64 of the 32 digest bytes>:",
                 "schema": {
                   "type": "string"
                 }
               },
               "X-File-Hash": {
-                "description": "sha256 of the file (/stream always; /download only when the API serves the file itself, absent behind nginx)",
+                "description": "sha256 of the file",
                 "schema": {
                   "type": "string"
                 }
@@ -21334,6 +21375,35 @@
             "headers": {
               "Content-Range": {
                 "description": "bytes start-end/size",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "sha256 of the file, quoted (\"<64 hex digits>\"): send it back in If-None-Match or If-Range",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Repr-Digest": {
+                "description": "SHA-256 of the whole file, on a 206 as well (RFC 9530): sha-256=:<base64 of the 32 digest bytes>:",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "If-None-Match matched (one of its tags equals the ETag of the file by weak comparison, or it is *): no body, the copy the client holds is current. Comes after every access check",
+            "headers": {
+              "ETag": {
+                "description": "sha256 of the file, quoted (\"<64 hex digits>\"): send it back in If-None-Match or If-Range",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "private, max-age=3600",
                 "schema": {
                   "type": "string"
                 }
@@ -32731,7 +32801,7 @@
           "GUIDES"
         ],
         "summary": "Download Guide File",
-        "description": "Download a file of a guide as an attachment under its file name (nginx serves it via X-Accel-Redirect;\notherwise the API, with Range support). An archived file, or a file of an archived guide, only with\ninclude_deleted (requires guide.archive); otherwise 404. A guide whose audience the caller is not in: 404\nguide_not_found, as an unknown one. A file gone from disk: 404 guide_file_not_found.",
+        "description": "Download a file of a guide as an attachment under its file name (nginx serves it via X-Accel-Redirect;\notherwise the API, with Range support). An archived file, or a file of an archived guide, only with\ninclude_deleted (requires guide.archive); otherwise 404. A guide whose audience the caller is not in: 404\nguide_not_found, as an unknown one. A file gone from disk: 404 guide_file_not_found. ETag and Repr-Digest name the\nfile, on a 206 as well. If-None-Match with the ETag (or *) answers 304 without the file, after those checks;\nIf-Range with the ETag works as usual.",
         "operationId": "download_guide_file",
         "security": [
           {
@@ -32801,13 +32871,19 @@
                 }
               },
               "ETag": {
-                "description": "sha256 of the file, quoted, when the API serves the file itself; behind nginx nginx's own ETag (the sha256 is GuideFileResponse.sha256)",
+                "description": "sha256 of the file, quoted (\"<64 hex digits>\"): send it back in If-None-Match or If-Range",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Repr-Digest": {
+                "description": "SHA-256 of the whole file, on a 206 as well (RFC 9530): sha-256=:<base64 of the 32 digest bytes>:",
                 "schema": {
                   "type": "string"
                 }
               },
               "X-File-Hash": {
-                "description": "sha256 of the file, only when the API serves the file itself; absent behind nginx (the sha256 is GuideFileResponse.sha256)",
+                "description": "sha256 of the file (GuideFileResponse.sha256)",
                 "schema": {
                   "type": "string"
                 }
@@ -32917,6 +32993,35 @@
             "headers": {
               "Content-Range": {
                 "description": "bytes start-end/size",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "sha256 of the file, quoted (\"<64 hex digits>\"): send it back in If-None-Match or If-Range",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Repr-Digest": {
+                "description": "SHA-256 of the whole file, on a 206 as well (RFC 9530): sha-256=:<base64 of the 32 digest bytes>:",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "If-None-Match matched (one of its tags equals the ETag of the file by weak comparison, or it is *): no body, the copy the client holds is current. Comes after every access check",
+            "headers": {
+              "ETag": {
+                "description": "sha256 of the file, quoted (\"<64 hex digits>\"): send it back in If-None-Match or If-Range",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "private, max-age=3600",
                 "schema": {
                   "type": "string"
                 }

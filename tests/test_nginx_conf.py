@@ -267,15 +267,24 @@ def test_stream_is_authorised_by_the_api_and_served_by_nginx():
     body = _location(APP, STREAM)
     assert "auth_request /_stream_auth;" in body
     for header, var in (("x_accel_redirect", "stream_accel"), ("content_type", "stream_type"),
-                        ("content_disposition", "stream_disposition"), ("x_file_hash", "stream_hash")):
+                        ("content_disposition", "stream_disposition"), ("x_file_hash", "stream_hash"),
+                        ("etag", "stream_etag"), ("repr_digest", "stream_digest")):
         assert f"auth_request_set ${var} $upstream_http_{header};" in body
-    assert "error_page 401 403 500 = @stream_api;" in body
+    assert "error_page 401 403 418 500 = @stream_api;" in body
     assert "try_files $stream_file @stream_api;" in body, "a missing file falls back to the API (media_file_missing)"
     assert "types { } default_type \"\";" in body and "add_header Content-Type $stream_type;" in body
     assert "etag off;" in body and "add_header X-Request-ID $request_id always;" in body
     root = re.search(r"\broot (\S+);", body).group(1)
     alias = re.search(r"\balias (\S+);", _location(APP, "^~ /protected_uploads/")).group(1)
     assert root.rstrip("/") + "/" == alias
+
+
+def test_a_stream_request_with_if_none_match_goes_to_the_api():
+    """Only the API can answer it (nginx's not_modified filter never sees the API's ETag): the rewrite phase hands it
+    over before auth_request, so its answer never comes from the 30 s cache of the access answer"""
+    body = _location(APP, STREAM)
+    assert body.index("if ($http_if_none_match) { return 418; }") < body.index("auth_request /_stream_auth;")
+    assert "418" in re.search(r"error_page ([^;]*) = @stream_api;", body).group(1)
 
 
 def test_stream_authorisation_is_cached_30_s_per_token_certificate_and_uri():
@@ -344,6 +353,7 @@ def test_stream_answers_cannot_be_framed_by_another_site():
 # the safety headers where it serves the file, and the API leaves out of its X-Accel answer every header the
 # location adds (services/files/serve.py NGINX_ADDED_HEADERS) and Accept-Ranges, which nginx's static module sends.
 # Before: Cache-Control arrived twice and Accept-Ranges three times on a download, nosniff once, no CSP.
+# ETag, Repr-Digest and X-File-Hash stay in the X-Accel answer and the locations copy them from it (2026-10-30).
 
 FILE_LOCATIONS = ("^~ /protected_uploads/", STREAM)
 # Without "always" (live check): with it nginx's own 416 (a Range past the end) carried both headers twice
@@ -375,3 +385,18 @@ def test_file_locations_add_no_header_the_api_or_nginx_already_sends():
         assert len(names) == len(set(names)), (header, names)
         for name in NGINX_ADDED_HEADERS:
             assert name in names, (header, name)
+
+
+def test_file_locations_send_the_api_etag_never_their_own():
+    """nginx's ETag (mtime-size) is off where a stored file is served; the API's ETag (the sha256) and Repr-Digest
+    arrive instead, without "always": they belong to the file answer, and an empty value sends no header"""
+    protected = _location(APP, "^~ /protected_uploads/")
+    assert "etag off;" in protected
+    for directive in ("add_header ETag $upstream_http_etag;", "add_header Repr-Digest $upstream_http_repr_digest;",
+                      "add_header X-File-Hash $upstream_http_x_file_hash;"):
+        assert directive in protected, directive
+    stream = _location(APP, STREAM)
+    assert "etag off;" in stream
+    for directive in ("add_header ETag $stream_etag;", "add_header Repr-Digest $stream_digest;",
+                      "add_header X-File-Hash $stream_hash;"):
+        assert directive in stream, directive

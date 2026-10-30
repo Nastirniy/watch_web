@@ -3,13 +3,15 @@ import re
 from pathlib import Path
 from typing import Iterator, Optional, Tuple
 
-from fastapi import Response
+from fastapi import Request, Response
 from fastapi.responses import StreamingResponse
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.models.media import MediaFile
-from app.backend.services.files.serve import STORED_FILE_CACHE_CONTROL, accel_headers, file_headers
+from app.backend.services.files.serve import (
+    STORED_FILE_CACHE_CONTROL, accel_headers, file_headers, none_match, not_modified_headers,
+)
 from app.backend.services.files.store import upload_root
 from app.backend.utils.row_locks import lock_first
 from app.backend.models.observation import Observation
@@ -96,18 +98,30 @@ def _read_range(path: Path, start: int, length: int) -> Iterator[bytes]:
             yield chunk
 
 
+def if_none_match_of(request: Request) -> Optional[str]:
+    """If-None-Match of the request as one value: repeated lines are one list (RFC 9110 section 5.3)"""
+    return ", ".join(request.headers.getlist("if-none-match")) or None
+
+
 def stored_file_response(path: Path, *, content_type: str, filename: str, disposition: Disposition, etag: Optional[str],
-                         range_header: Optional[str], missing: ErrorCode = ErrorCode.MEDIA_FILE_MISSING) -> Response:
+                         range_header: Optional[str], if_none_match: Optional[str] = None,
+                         missing: ErrorCode = ErrorCode.MEDIA_FILE_MISSING) -> Response:
     """The one answer for a stored file under the uploads root (services/files/serve.py has its headers): behind
     nginx X-Accel-Redirect (nginx serves it, Range included, and adds the safety headers itself), otherwise the API
     streams it and answers a single byte range itself (parse_byte_range); a 206 keeps every header.
 
     The API decides whether the file is there, also before handing it to nginx: otherwise nginx answered its own
-    404 page instead of the problem `missing` (tests/test_media_download.py)."""
+    404 page instead of the problem `missing` (tests/test_media_download.py).
+
+    The API answers If-None-Match itself, for an existing file, before Range (RFC 9110 section 13.2.2): a match is a
+    304 with the ETag and the file is not handed to nginx, which cannot give it (its not_modified filter runs before
+    the add_header that sets the API's ETag). The caller has checked access first: the ETag is the hash of the file."""
     headers = file_headers(content_type=content_type, filename=filename, disposition=disposition, etag=etag)
     root = storage_root()
     if not path.is_file():
         raise ApiError(missing)
+    if none_match(if_none_match, etag):
+        return Response(status_code=304, headers=not_modified_headers(etag))
 
     if settings.storage.enable_nginx:
         try:
@@ -132,12 +146,13 @@ def stored_file_response(path: Path, *, content_type: str, filename: str, dispos
     )
 
 
-def original_file_response(media_file: MediaFile, disposition: Disposition, range_header: Optional[str] = None) -> Response:
+def original_file_response(media_file: MediaFile, disposition: Disposition, range_header: Optional[str] = None,
+                           if_none_match: Optional[str] = None) -> Response:
     """The original of a media file (download: attachment, stream: inline) under its original name and stored type"""
     response = stored_file_response(
         media_file.resolve_path(storage_root()), content_type=media_file.mime_type,
         filename=media_file.original_filename, disposition=disposition, etag=media_file.file_hash,
-        range_header=range_header,
+        range_header=range_header, if_none_match=if_none_match,
     )
     # sha256 of the file (the stream location of nginx-app.conf answers it from here)
     response.headers["X-File-Hash"] = media_file.file_hash

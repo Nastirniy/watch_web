@@ -277,4 +277,5 @@ On the first visit the worker controls the page only after a reload (`navigator.
 the token and play a blob URL instead, without seeking before it is loaded.
 
 nginx keeps the API's permission for a stream 30 seconds (API.md, "Video and audio in a player"): access taken
-away stops a stream within about 30 s, and `/stream` never answers `304`.
+away stops a stream within about 30 s. `ETag` is the file's sha256 on `/stream` and `/download`, and `If-None-Match`
+with it answers `304` on both (API.md, "Stored files").

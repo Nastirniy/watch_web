@@ -35,15 +35,18 @@ from fastapi.responses import Response
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.api.shared.helpers.audit_helper import client_info
-from app.backend.api.shared.helpers.media_helper import stored_file_response
+from app.backend.api.shared.helpers.media_helper import if_none_match_of, stored_file_response
 from app.backend.api.shared.helpers.upload_helper import check_guide_format, format_rejected, store_rejected, too_large
-from app.backend.api.shared.openapi_docs import file_response, header
+from app.backend.api.shared.openapi_docs import empty_response, file_response
 from app.backend.api.v1.models.query.guides import GuideFilterParams, GuideReadParams
 from app.backend.api.v1.models.request.guides import (
     LANGUAGE_DESCRIPTION, LANGUAGE_MAX, GuideCreate, GuideUpdate, guide_file_language,
 )
 from app.backend.api.v1.models.response.guides import (
     GUIDE_FILE_HEADERS, GuideFileResponse, GuideResponse, guide_file_to_response, guide_to_response,
+)
+from app.backend.api.v1.models.response.media import (
+    FILE_NOT_MODIFIED, FILE_NOT_MODIFIED_HEADERS, PARTIAL_FILE_HEADERS,
 )
 from app.backend.api.versioning import PublishedVersion, request_version
 from app.backend.auth.access_control import AccessControlService
@@ -361,8 +364,8 @@ async def upload_guide_file(
     responses={
         **file_response("The file (attachment), in its format's Content-Type (text types with charset)",
                         [ContentType.ANY], GUIDE_FILE_HEADERS),
-        **file_response("The requested byte range (Range header)", [ContentType.ANY],
-                        {"Content-Range": header("bytes start-end/size")}, status=206),
+        **file_response("The requested byte range (Range header)", [ContentType.ANY], PARTIAL_FILE_HEADERS, status=206),
+        **empty_response(304, FILE_NOT_MODIFIED, FILE_NOT_MODIFIED_HEADERS),
         **problems(
             ErrorCode.GUIDE_NOT_FOUND, ErrorCode.GUIDE_FILE_NOT_FOUND, ErrorCode.MEDIA_PATH_UNRESOLVED,
             ErrorCode.RANGE_NOT_SATISFIABLE, AccessErrorCode.PERMISSION_REQUIRED_FOR_ACTION,
@@ -380,14 +383,16 @@ async def download_guide_file(
     """Download a file of a guide as an attachment under its file name (nginx serves it via X-Accel-Redirect;
     otherwise the API, with Range support). An archived file, or a file of an archived guide, only with
     include_deleted (requires guide.archive); otherwise 404. A guide whose audience the caller is not in: 404
-    guide_not_found, as an unknown one. A file gone from disk: 404 guide_file_not_found."""
+    guide_not_found, as an unknown one. A file gone from disk: 404 guide_file_not_found. ETag and Repr-Digest name the
+    file, on a 206 as well. If-None-Match with the ETag (or *) answers 304 without the file, after those checks;
+    If-Range with the ETag works as usual."""
     AccessControlService.check_include_deleted(auth, params, Permissions.GUIDE_ARCHIVE)
     await _guide_or_404(session, guide_id, auth, include_deleted=params.include_deleted)
     row = await _file_or_404(session, guide_id, file_id, include_deleted=params.include_deleted)
     response = stored_file_response(
         file_store.guide_file_location(row), content_type=row.content_type, filename=row.file_name,
         disposition=Disposition.ATTACHMENT, etag=row.sha256, range_header=request.headers.get("range"),
-        missing=ErrorCode.GUIDE_FILE_NOT_FOUND,
+        if_none_match=if_none_match_of(request), missing=ErrorCode.GUIDE_FILE_NOT_FOUND,
     )
     response.headers["X-File-Hash"] = row.sha256
     return response

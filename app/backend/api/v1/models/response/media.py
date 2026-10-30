@@ -204,6 +204,21 @@ FILE_SAFETY_HEADERS = {
     "X-Content-Type-Options": header("nosniff"),
     "Content-Security-Policy": header("sandbox; default-src 'none' (the file opened as a page runs sandboxed)"),
 }
+# What identifies the file on a 200 and a 206 (services/files/serve.py file_headers; behind nginx nginx-app.conf
+# passes on the API's)
+FILE_IDENTITY_HEADERS = {
+    "ETag": header("sha256 of the file, quoted (\"<64 hex digits>\"): send it back in If-None-Match or If-Range"),
+    "Repr-Digest": header("SHA-256 of the whole file, on a 206 as well (RFC 9530): "
+                          "sha-256=:<base64 of the 32 digest bytes>:"),
+}
+PARTIAL_FILE_HEADERS = {"Content-Range": header("bytes start-end/size"), **FILE_IDENTITY_HEADERS}
+# The 304 of a stored file (RFC 9110 section 15.4.5: what a 200 would send of these), with empty_response
+FILE_NOT_MODIFIED = ("If-None-Match matched (one of its tags equals the ETag of the file by weak comparison, or it is "
+                     "*): no body, the copy the client holds is current. Comes after every access check")
+FILE_NOT_MODIFIED_HEADERS = {
+    "ETag": FILE_IDENTITY_HEADERS["ETag"],
+    "Cache-Control": header("private, max-age=3600"),
+}
 
 
 def disposition_header(kind: str, name: str) -> dict:
@@ -216,10 +231,8 @@ def disposition_header(kind: str, name: str) -> dict:
 ORIGINAL_FILE_HEADERS = {
     "Content-Disposition": disposition_header(f"{Disposition.ATTACHMENT} (download) or {Disposition.INLINE} (stream)", "original name"),
     **FILE_SAFETY_HEADERS,
-    "ETag": header("sha256 of the file, quoted (/stream always; /download only when the API serves the file "
-                   "itself: behind nginx nginx's own ETag)"),
-    "X-File-Hash": header("sha256 of the file (/stream always; /download only when the API serves the file itself, "
-                          "absent behind nginx)"),
+    **FILE_IDENTITY_HEADERS,
+    "X-File-Hash": header("sha256 of the file"),
     "Accept-Ranges": header("bytes: the file can be read in parts with Range"),
     "Cache-Control": header("private, max-age=3600"),
 }

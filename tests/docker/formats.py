@@ -28,6 +28,8 @@ Needs ffmpeg on the host (imageio-ffmpeg) and Pillow; the stack's worker runs wi
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import io
 import math
 import os
@@ -503,6 +505,21 @@ def check_stream(headers: dict, video: dict) -> None:
           f"{head.status_code} {head.headers.get('Content-Length')}")
     beyond = requests.get(stream_url(media_id), headers={**headers, "Range": f"bytes={len(source) + 10}-"}, timeout=30)
     check("stream", beyond.status_code == 416, "unsatisfiable Range: 416", str(beyond.status_code))
+    digest = "sha-256=:" + base64.b64encode(hashlib.sha256(source).digest()).decode("ascii") + ":"
+    check("stream", full.headers.get("Repr-Digest") == digest, "Repr-Digest is the digest of the bytes",
+          str(full.headers.get("Repr-Digest")))
+    for route in (MediaRoutes.MEDIA_STREAM, MediaRoutes.MEDIA_DOWNLOAD):
+        url = media_url(route, media_id)
+        same = requests.get(url, headers={**headers, "If-None-Match": etag}, timeout=30)
+        check("stream", same.status_code == 304 and not same.content and same.headers.get("ETag") == etag,
+              f"{route.name} If-None-Match: 304 with the ETag, no body", f"{same.status_code} {same.headers.get('ETag')}")
+        other = requests.get(url, headers={**headers, "If-None-Match": '"other"'}, timeout=60)
+        check("stream", other.status_code == 200 and other.content == source and other.headers.get("ETag") == etag,
+              f"{route.name} If-None-Match of another file: the file", f"{other.status_code} {other.headers.get('ETag')}")
+        again = requests.get(url, headers={**headers, "Range": "bytes=0-9", "If-Range": etag}, timeout=30)
+        check("stream", again.status_code == 206 and again.headers.get("ETag") == etag
+              and again.headers.get("Repr-Digest") == digest, f"{route.name} If-Range with the ETag: 206",
+              f"{again.status_code} {again.headers.get('ETag')}")
 
 
 # nginx keeps an allowed stream 30 s and counts whole seconds: refused at most ~31 s after the access went away

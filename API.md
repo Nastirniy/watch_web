@@ -534,9 +534,9 @@ The help section: every authenticated user reads `GET /api/v1/guides/` and `GET 
 - Get: `GET /api/v1/guides/{guide_id}` answers one `GuideResponse` (404 `guide_not_found` as above).
 - Download: `GET` the file's `download_url` (`/api/v1/guides/{guide_id}/files/{file_id}/download`) with the token,
   as any download: always `attachment` under `file_name`, `Content-Type` the file's format (text types with their
-  charset), `Range` supported. The file's sha256 is `GuideFileResponse.sha256` in the guide listing: behind nginx
-  (production) the download carries no `X-File-Hash` and its `ETag` is nginx's own, not the sha256 (only an API
-  serving the file itself, without nginx, sends both as the sha256). A file gone or archived is 404
+  charset), `Range` supported. The file's sha256 is `GuideFileResponse.sha256` in the guide listing, and the download
+  carries it like every stored file (`ETag`, `Repr-Digest`, `If-None-Match`: "Stored files" under "Responses that are
+  not JSON"). A file gone or archived is 404
   `guide_file_not_found`.
 - Render as text: a guide's text and the content of its text files are shown as text. A `.txt` or `.csv` file is
   shown as text (`textContent`, a `<pre>`) or offered as the download. A Markdown file (`text/markdown`) is rendered
@@ -598,13 +598,25 @@ format's canonical `content_type` and its `aliases`.
 
 | Operation | Response |
 |-----------|----------|
-| `GET /api/v1/media/{media_id}/download`, `/stream` | The file in its stored type (the canonical name, see Media types); `206` for a single `Range`; an unsatisfiable one is `416` `range_not_satisfiable` with `Content-Range: bytes */size` |
+| `GET /api/v1/media/{media_id}/download`, `/stream` | The file in its stored type (the canonical name, see Media types); `206` for a single `Range`; an unsatisfiable one is `416` `range_not_satisfiable` with `Content-Range: bytes */size`; `304` for `If-None-Match` with its `ETag` |
 | `GET /api/v1/media/{media_id}/thumbnail` | The image; `202` with `Retry-After` while a video poster is being extracted |
 | `GET /api/v1/media/{media_id}/storyboard` | WebVTT (`text/vtt`) for seek previews; `202` with `Retry-After` and `X-Storyboard-Status` while the worker has not produced it |
 | `POST /api/v1/observations/report` | An `.xlsx` file with one row per frequency band; at most `reports.max_rows` rows (20000 by default), a larger result is `422` `report_too_large` with `max_rows`: narrow the filters |
 | `PATCH /api/v1/media/uploads/{upload_id}` | `204`, the result is in the `Upload-*` headers |
 
 Resumable uploads step by step: `UPLOADS.md`.
+
+### Stored files: `ETag`, `Repr-Digest`, `If-None-Match`
+
+`/media/{id}/download`, `/media/{id}/stream` and `/guides/{id}/files/{id}/download`, behind nginx and without it:
+
+- `ETag` is the file's sha256 in quotes (`"<64 hex digits>"`), `X-File-Hash` the same value without them, and
+  `Repr-Digest: sha-256=:<base64 of the 32 digest bytes>:` (RFC 9530) the digest of the whole file, on a `206` as
+  well: check a download with it, after joining the parts.
+- `If-None-Match` with the `ETag` (`W/` is ignored, a list is read as a list) or `*` answers `304` with `ETag` and
+  `Cache-Control` and no body, and the file is not read. Every access check comes first: a caller without access
+  gets the same `401`, `403` or `404` as without the header, and a file gone from disk its `404`.
+- `If-Range` with the `ETag` works: the same file `206`, another one `200` with the whole file.
 
 ### Video and audio in a player (`/stream`)
 
@@ -614,9 +626,8 @@ own problem (`401`, `403`, `404 media_not_found`, ...). What follows for the cli
 
 - Access taken away (logout, a revoked session or certificate, a removed permission, archived media) stops a stream
   within about 30 seconds, not at once (nginx counts whole seconds; measured 30.4 to 31.4 s).
-- `If-None-Match` on `/stream` answers `200` with the file, never `304`; `ETag` and `X-File-Hash` are the file hash.
-  `/download` behind nginx carries no `X-File-Hash` and nginx's own `ETag` (not the file hash); only an API serving
-  the file itself, without nginx, sends both as the sha256 there.
+- A request with `If-None-Match` goes to the API every time (that is the only place it can be answered), with the
+  current access check instead of the 30 seconds; plain `Range` requests stay as above.
 - An unsatisfiable `Range` on `/stream` or `/download` is answered by nginx (`416`, by status, like any
   infrastructure error); the `range_not_satisfiable` problem comes only from an API without nginx in front.
 - A `<video>` or `<audio>` element cannot send the Bearer token: register the starter service worker of
