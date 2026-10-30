@@ -245,6 +245,9 @@ player.vttThumbnails({ src: vtt });
 
 ## 10. Video in a player
 
+Build a player only for `playback_supported: true`. For `false` (Matroska) offer the download and show no player, in
+every browser (API.md, "Video and audio in a player").
+
 A `<video>` or `<audio>` element cannot send the Bearer token. The starter service worker does it for the stream
 route: it sends the element's own `Range` requests to `GET /api/v1/media/{media_id}/stream` again with the token,
 so the plain URL works as `src` and seeking works. It touches only the requests of media elements (never a page

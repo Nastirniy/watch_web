@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import inspect as sa_inspect
 
 from app.backend.enums.general import TIMED_MEDIA_TYPES, UploadTransport
@@ -11,7 +11,7 @@ from app.backend.config import settings
 from app.backend.services.media.storyboards import client_status
 from app.backend.services.media.urls import thumbnail_urls
 from app.backend.api.shared.openapi_docs import header
-from app.backend.enums.media_types import Disposition
+from app.backend.enums.media_types import ContentType, Disposition
 
 
 class ThumbnailUrls(BaseModel):
@@ -20,6 +20,14 @@ class ThumbnailUrls(BaseModel):
     medium: str
     large: str
     preview: str
+
+
+def playback_supported(media: MediaFile) -> Optional[bool]:
+    """Whether the web shows a player: Matroska never (a row stores the canonical name), null for what is not played.
+    Derived, never stored; advice to the UI, the stream route serves every file."""
+    if media.media_type not in TIMED_MEDIA_TYPES:
+        return None
+    return media.mime_type != ContentType.VIDEO_MATROSKA.value
 
 
 def media_info_payload(media: MediaFile) -> Dict[str, Any]:
@@ -47,6 +55,7 @@ def media_info_payload(media: MediaFile) -> Dict[str, Any]:
         "video_codec": media.video_codec,
         "audio_codec": media.audio_codec,
         "playback_type": media.playback_type or (media.mime_type if media.media_type in TIMED_MEDIA_TYPES else None),
+        "playback_supported": playback_supported(media),
         "user": user,
     }
 
@@ -83,6 +92,13 @@ class MediaFileInfo(PlainTextModel):
     # Hand this to HTMLMediaElement.canPlayType() before building a player;
     # falls back to the bare mime_type until the file has been probed
     playback_type: Optional[str] = None
+    playback_supported: Optional[bool] = Field(
+        default=None,
+        description="Whether the web shows a player: true for video and audio, false for Matroska (video/matroska), "
+                    "null for media that is not played (images, documents). false: offer the download only and show "
+                    "no player, in every browser, even though Chromium can play some Matroska files (it answers \"\" "
+                    "to canPlayType) and Firefox plays none. Derived from mime_type. It is advice to the UI, not a "
+                    "refusal: GET /media/{media_id}/stream keeps serving the file")
 
     # Nested projection named after the ORM relationship (uploader)
     user: Optional[UserPublicResponse] = None
