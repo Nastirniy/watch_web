@@ -21,7 +21,7 @@ from app.backend.models.user import User, UserSession
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.enums.routes import AuthRoutes
 from app.backend.api.versioning import PublishedVersion, request_version
-from app.backend.enums.general import AppEnvironment, SessionRevokeCause
+from app.backend.enums.general import ActivityHint, AppEnvironment, SessionRevokeCause
 from app.backend.utils.logging_config import get_auth_logger
 from app.backend.config import settings
 from app.backend.auth.certificates import parse_cn
@@ -177,9 +177,12 @@ async def refresh_token(
         session: AsyncSession = Depends(get_session),
         # Set by nginx from the verified client certificate (nginx-proxy.conf), never by the client
         x_ssl_client_fingerprint: Optional[str] = Header(None, include_in_schema=False),
+        x_activity: Optional[str] = Header(None, include_in_schema=False),
 ):
     """Refresh the access token with the refresh token. A refresh token works once: the answer carries a new access
-    token and the next refresh token, and the token presented is used from then on.
+    token and the next refresh token, and the token presented is used from then on. A refresh is activity: it moves
+    the idle end of the session, unless it sends X-Activity: background (a refresh for the stream of events, a
+    poller): then the tokens rotate and the session keeps its end.
 
     A used refresh token presented again (RFC 9700 section 4.14, refresh token reuse):
 
@@ -286,8 +289,10 @@ async def refresh_token(
         # previous token (from before migration 034): refused, the session stays live
         _logger.warning(f"Refresh token used again ({reuse.value}): session_id={session_id}, user_id={user_id}")
         raise ApiError(AuthErrorCode.INVALID_REFRESH_TOKEN)
-    # A refresh is activity: it moves the end of the session (never past the hard end, when one is set)
-    touch(refresh_session)
+    # A refresh is activity: it moves the end of the session (never past the hard end, when one is set); a background
+    # refresh only rotates the tokens
+    if x_activity != ActivityHint.BACKGROUND.value:
+        touch(refresh_session)
     session.add(refresh_session)
     await session.commit()
 

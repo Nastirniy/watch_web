@@ -5,6 +5,15 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Real-time events
+
+### Added
+
+- `X-Activity: background` on any request: authorized as any other, but it does not count as activity, so the session
+  is not touched (`last_activity` and the idle end stay). For requests the user did not cause: pollers, refetches an
+  event asked for, the refresh of a tab for its stream. `POST /auth/refresh` with the header still rotates its tokens
+  and keeps the session's idle end. Any other value, or none, is activity as before. API.md, "Background requests".
+
 ## Performance 2026-11-22
 
 ### Changed

@@ -10,6 +10,7 @@ from app.backend.database import get_session
 from app.backend.models.audit import AuditLog
 from app.backend.models.user import User
 from app.backend.enums.errors import AuthErrorCode
+from app.backend.enums.general import ActivityHint
 from app.backend.auth.service import AuthService
 from app.backend.auth.context import AuthContext, load_auth_context
 from app.backend.auth.presence import should_touch
@@ -24,6 +25,7 @@ security = HTTPBearer(auto_error=False)
 class TokenClaims:
     user_id: int
     session_id: str
+    expires_at: float       # exp of the access token (POSIX seconds): the stream of events closes at it
 
 
 async def get_token_claims(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> TokenClaims:
@@ -44,7 +46,11 @@ async def get_token_claims(credentials: Optional[HTTPAuthorizationCredentials] =
     if not session_id or not isinstance(session_id, str):
         logger.warning(f"Authentication failed: the token names no session, user_id={user_id}")
         raise ApiError(AuthErrorCode.INVALID_TOKEN)
-    return TokenClaims(user_id=user_id, session_id=session_id)
+    expires_at = payload.get("exp")
+    if not isinstance(expires_at, (int, float)) or isinstance(expires_at, bool):
+        logger.warning(f"Authentication failed: the token has no expiry, user_id={user_id}")
+        raise ApiError(AuthErrorCode.INVALID_TOKEN)
+    return TokenClaims(user_id=user_id, session_id=session_id, expires_at=float(expires_at))
 
 
 async def get_current_user(
@@ -53,8 +59,27 @@ async def get_current_user(
         session: AsyncSession = Depends(get_session),
         # Set by nginx from the verified client certificate (nginx-proxy.conf), never by the client
         x_ssl_client_fingerprint: Optional[str] = Header(None, include_in_schema=False),
+        # A request the user did not cause (API.md, "Background requests"): every check, no touch
+        x_activity: Optional[str] = Header(None, include_in_schema=False),
 ) -> User:
-    """Get current authenticated user"""
+    """The authenticated user of the request; the request counts as activity unless it says X-Activity: background"""
+    return await _authenticate(request, claims, session, x_ssl_client_fingerprint,
+                               touch=x_activity != ActivityHint.BACKGROUND.value)
+
+
+async def get_stream_user(
+        request: Request,
+        claims: TokenClaims = Depends(get_token_claims),
+        session: AsyncSession = Depends(get_session),
+        x_ssl_client_fingerprint: Optional[str] = Header(None, include_in_schema=False),
+) -> User:
+    """get_current_user for the stream of events: the same checks, never a touch. A stream is not activity"""
+    return await _authenticate(request, claims, session, x_ssl_client_fingerprint, touch=False)
+
+
+async def _authenticate(request: Request, claims: TokenClaims, session: AsyncSession,
+                        x_ssl_client_fingerprint: Optional[str], touch: bool) -> User:
+    """Account, session, certificate binding; touch: the request moves the end of the session (activity)"""
     user_id = claims.user_id
     session_id = claims.session_id
 
@@ -83,7 +108,7 @@ async def get_current_user(
             request_url=fit_column(AuditLog.request_url, str(request.url)),
         )
         raise ApiError(AuthErrorCode.TOKEN_CERTIFICATE_MISMATCH)
-    if should_touch(user_session.last_activity) and \
+    if touch and should_touch(user_session.last_activity) and \
             await touch_session(session, user_session) is TouchResult.ENDED:
         # Activity moves the end of the session (and feeds presence), at most once per touch interval; a write of
         # its own, so parallel requests of the session never answer 1020 (auth/sessions.py touch_session). The touch
@@ -134,4 +159,13 @@ async def get_auth_context(
         session: AsyncSession = Depends(get_session)
 ) -> AuthContext:
     """Authenticated user plus permissions, roles, post scope and the session of the token, loaded once per request"""
+    return await load_auth_context(session, current_user, session_id=claims.session_id)
+
+
+async def get_stream_auth_context(
+        claims: TokenClaims = Depends(get_token_claims),
+        current_user: User = Depends(get_stream_user),
+        session: AsyncSession = Depends(get_session)
+) -> AuthContext:
+    """get_auth_context over get_stream_user: the stream of events, no touch"""
     return await load_auth_context(session, current_user, session_id=claims.session_id)

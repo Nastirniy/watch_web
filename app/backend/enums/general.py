@@ -317,6 +317,12 @@ class SessionEndReason(str, Enum):
     REVOKED = "revoked"            # ended by the server before its time; the cause is a SessionRevokeCause
 
 
+class ActivityHint(str, Enum):
+    """X-Activity: a request the user did not cause (a poller, a refetch an event asked for, a refresh for the stream)
+    is authorized as any other and does not count as activity: the session is not touched (API.md)"""
+    BACKGROUND = "background"
+
+
 class SessionRevokeCause(str, Enum):
     """What made the server revoke a session; the account itself may stay as it is"""
     ACCOUNT_DEACTIVATED = "account_deactivated"

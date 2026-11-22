@@ -25,7 +25,7 @@ from loguru import logger
 
 from app.backend.enums.general import Permissions
 from app.backend.enums.errors import AccessErrorCode
-from app.backend.auth.dependencies import get_auth_context
+from app.backend.auth.dependencies import get_auth_context, get_stream_auth_context
 from app.backend.auth.context import AuthContext, permission_name
 from app.backend.auth.access_errors import access_denied
 
@@ -89,3 +89,17 @@ def require(
     registers the route in the route access map.
     """
     return Require.of(all=all, any=any, at_root=at_root)
+
+
+@dataclass(frozen=True)
+class StreamRequire(Require):
+    """require() for the stream of events: the same checks, no touch. A stream is not activity. Still a Require, so
+    route_access_map and GET /auth/route-access find the route."""
+
+    async def __call__(self, auth: AuthContext = Depends(get_stream_auth_context)) -> AuthContext:
+        return await super().__call__(auth)
+
+
+def require_stream() -> StreamRequire:
+    """Dependency of the stream route: any authenticated user, Depends(require_stream())"""
+    return StreamRequire()
