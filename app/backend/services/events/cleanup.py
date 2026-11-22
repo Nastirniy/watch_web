@@ -54,8 +54,14 @@ async def clean(session_maker: async_sessionmaker, retention_seconds: int, batch
                 return removed
 
 
+def oldest_age_query(connection):
+    """The age of the oldest row in ms. select_from is required: on MariaDB age_ms is a literal column, which names no
+    table, and without it the statement had no FROM (1054 Unknown column 'occurred_at', /health unhealthy)"""
+    return select(age_ms(connection)).select_from(OutboxEvent.__table__).order_by(T.id).limit(1)
+
+
 async def oldest_row_age_seconds(session) -> Optional[int]:
     """Seconds since the oldest row was written, by the database clock; None for an empty table (/health)"""
     connection = await session.connection()
-    age = (await session.execute(select(age_ms(connection)).order_by(T.id).limit(1))).scalar()
+    age = (await session.execute(oldest_age_query(connection))).scalar()
     return None if age is None else max(0, int(age)) // 1000

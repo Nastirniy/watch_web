@@ -5,6 +5,13 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Real-time events: fixes
+
+### Fixed
+
+- `/health` with events on, on MariaDB: `events.oldest_row_age_seconds` read a statement without FROM (1054), so the
+  whole report answered `unhealthy` and logged a traceback on every call. The query names `outbox_events` now.
+
 ## Real-time events: the administration
 
 ### Added

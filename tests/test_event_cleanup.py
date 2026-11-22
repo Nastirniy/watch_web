@@ -84,3 +84,14 @@ async def test_a_young_row_below_the_boundary_stays(engine, session_maker, monke
     await _insert(engine, [5], age_seconds=10)
     assert await clean(session_maker, retention_seconds=3600) == 3
     assert await _ids(engine) == [3, 5]
+
+
+def test_the_age_of_the_oldest_row_reads_from_the_table_on_mariadb():
+    """On MariaDB age_ms is a literal column naming no table: the query must say FROM outbox_events itself (found by
+    the load generator: /health answered unhealthy with 1054 on every call once events were on)"""
+    from types import SimpleNamespace
+    from sqlalchemy.dialects import mysql
+    from app.backend.services.events.cleanup import oldest_age_query
+    connection = SimpleNamespace(dialect=SimpleNamespace(name="mysql"))
+    sql = str(oldest_age_query(connection).compile(dialect=mysql.dialect()))
+    assert "FROM outbox_events" in sql
