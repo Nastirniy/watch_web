@@ -11,6 +11,7 @@ from app.backend.api.v1.models.response.events import StreamMessage
 from app.backend.auth.context import AuthContext
 from app.backend.auth.dependencies import TokenClaims, get_token_claims
 from app.backend.auth.require import require_stream
+from app.backend.config import settings
 from app.backend.database import get_session
 from app.backend.enums.errors import ErrorCode
 from app.backend.enums.routes import EventRoutes
@@ -59,12 +60,17 @@ async def stream_events(
     stops the events of that place within 30 s.
 
     204: events are off on this server, do not reconnect until the page reloads. 503 event_stream_capacity with
-    Retry-After: this server holds as many streams as it can, or it is stopping; back off. 429, 502, 503 and 504
+    Retry-After: this server holds as many streams as it can, it is stopping, or its event hub is not running yet
+    (it is retried); back off for Retry-After at least. 429, 502, 503 and 504
     without a problem body come from nginx (too many streams of one certificate, the API restarting): back off by
     status."""
+    if not (settings.events.enabled and settings.events.serve_streams):
+        return Response(status_code=204)
     hub = getattr(request.app.state, "event_hub", None)
     if hub is None:
-        return Response(status_code=204)
+        # This process should serve streams, but its hub has not started (app/main.py retries the start): a client
+        # that stopped on 204 would never come back, so back off for longer than when the hub is full
+        raise ApiError(ErrorCode.EVENT_STREAM_CAPACITY, headers={"Retry-After": str(randint(30, 120))})
     connection = hub.attach(auth, claims.expires_at, last_event_id)
     if connection is None:
         raise ApiError(ErrorCode.EVENT_STREAM_CAPACITY, headers={"Retry-After": str(randint(5, 30))})

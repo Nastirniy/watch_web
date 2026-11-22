@@ -13,9 +13,10 @@ const event = (id, position, type = "move.changed") =>
 function server(answers) {
   const requests = [];
   const fetch = async (url, init) => {
-    requests.push({ url, headers: init.headers });
+    requests.push({ url, headers: init.headers, at: Date.now() });
     const answer = answers.shift() ?? 503;
     if (typeof answer === "number") return new Response(answer === 204 ? null : "x", { status: answer });
+    if (!Array.isArray(answer)) return new Response("x", answer);         // { status, headers }
     const body = new ReadableStream({
       start(controller) { for (const chunk of answer) controller.enqueue(encoder.encode(chunk)); controller.close(); },
     });
@@ -122,6 +123,15 @@ test("503 backs off and tries again", async () => {
   const { seen, handle } = start(fetch);
   await until(() => seen.events.length === 1);
   assert.equal(requests.length, 3);
+  handle.stop();
+});
+
+test("503 with Retry-After waits at least that long", async () => {
+  const { fetch, requests } = server([[sse(1, "ready", {}, "retry: 10\n")], { status: 503, headers: { "Retry-After": "1" } },
+    [sse(1, "ready"), event(8, 2)]]);
+  const { seen, handle } = start(fetch);
+  await until(() => seen.events.length === 1, 3000);
+  assert.ok(requests[2].at - requests[1].at >= 950, `waited ${requests[2].at - requests[1].at} ms, not retry (10 ms)`);
   handle.stop();
 });
 

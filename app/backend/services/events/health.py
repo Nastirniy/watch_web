@@ -11,7 +11,8 @@ from app.backend.models.worker import WorkerHeartbeat
 from app.backend.services.events.hub import HEARTBEAT_KIND
 from app.backend.utils.datetime_utils import assume_utc
 
-COUNTS = ("streams", "lag_ms", "gaps", "slow_closed", "reloads")
+# down: the row of a process whose hub has not started yet (services/events/starter.py), every other count zero
+COUNTS = ("streams", "lag_ms", "gaps", "slow_closed", "reloads", "down")
 
 
 async def hub_reports(session: AsyncSession, within_seconds: int) -> List[Dict[str, int]]:

@@ -61,6 +61,11 @@ class Renderer(Protocol):
     def close(self, reason: StreamCloseReason) -> bytes: ...
 
 
+def hub_name() -> str:
+    """The row of this process in worker_heartbeats: the hub's report, or the starter's while the hub is down"""
+    return f"{HEARTBEAT_KIND}@{socket.gethostname()}:{os.getpid()}"[:64]
+
+
 def retry_line(milliseconds: int) -> bytes:
     """WHATWG SSE: digits only; fetch does not apply it by itself, the web kit does"""
     return b"retry: %d\n" % milliseconds
@@ -89,7 +94,7 @@ class EventHub:
         self.slow_closed = 0
         self.reloads = 0
         self._lags: Deque[int] = deque(maxlen=500)
-        self.name = f"{HEARTBEAT_KIND}@{socket.gethostname()}:{os.getpid()}"[:64]
+        self.name = hub_name()
         self.started_at = datetime.now(timezone.utc)
 
     # ------------------------------------------------------------------ lifecycle

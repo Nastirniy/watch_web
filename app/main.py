@@ -15,8 +15,9 @@ from app.backend.errors.openapi import problems
 from app.backend.api.v1 import V1
 from app.backend.api.system import health, problems as problem_pages
 from app.backend.api.v1.models.response.events import render_v1
-from app.backend.database import create_events_engine
+from app.backend.database import create_events_engine, get_session_maker
 from app.backend.services.events.hub import EventHub
+from app.backend.services.events.starter import HubStarter
 from app.backend.enums.routes import AuthRoutes, DocsRoutes, SystemRoutes
 
 # Initialize logging system
@@ -66,22 +67,45 @@ operation ids are the endpoint names (`update_post`).
 """
 
 
+async def _new_event_hub() -> EventHub:
+    """A started hub on an engine of its own; a failed start disposes the engine"""
+    engine = await create_events_engine()
+    hub = EventHub(engine, render_v1, settings.events, settings.server.workers)
+    try:
+        await hub.start()
+    except BaseException:
+        await engine.dispose()
+        raise
+    return hub
+
+
 async def start_event_hub(app: FastAPI) -> None:
     """The hub of this process when events are on and this process serves the streams (events.serve_streams false:
-    it only publishes, a separate process serves them); app.state.event_hub None otherwise: the route answers 204"""
+    it only publishes, a separate process serves them, and the route answers 204).
+
+    Best effort: a hub that fails to start never stops the API. The error is logged, the start is retried in the
+    background (services/events/starter.py) and the route answers 503 until app.state.event_hub is set; the SIGTERM
+    drain is chained in when the hub starts, early or late."""
     app.state.event_hub = None
-    if settings.events.enabled and settings.events.serve_streams:
-        hub = EventHub(await create_events_engine(), render_v1, settings.events, settings.server.workers)
-        await hub.start()
+    app.state.event_hub_starter = None
+    if not (settings.events.enabled and settings.events.serve_streams):
+        return
+
+    def started(hub: EventHub) -> None:
         hub.install_drain(asyncio.get_running_loop())
         app.state.event_hub = hub
 
+    app.state.event_hub_starter = HubStarter(_new_event_hub, started, get_session_maker)
+    await app.state.event_hub_starter.start()
+
 
 async def stop_event_hub(app: FastAPI) -> None:
-    hub = getattr(app.state, "event_hub", None)
-    if hub is not None:
-        await hub.stop()
-        app.state.event_hub = None
+    """Cancel a start still retried, stop the hub (started early or late)"""
+    starter = getattr(app.state, "event_hub_starter", None)
+    if starter is not None:
+        await starter.stop()
+        app.state.event_hub_starter = None
+    app.state.event_hub = None
 
 
 @asynccontextmanager

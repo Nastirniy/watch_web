@@ -22,6 +22,14 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   a node directly under the root), once, in the transaction of the create. Open streams learn of a new node at once
   instead of at the next 30 s rights refresh, and the events of a new post reach the holders above it at once (the
   hubs reload their tree on it).
+- A hub that fails to start no longer stops the API. The error is logged with its traceback (a repeat of the same
+  kind of failure in one line), the API starts, and the start is retried in the background (5 s, doubling to 5 min)
+  until it works; then streams are served and the SIGTERM drain is in place. Meanwhile `GET /events/stream` answers
+  503 `event_stream_capacity` with `Retry-After` 30 to 120 s (204 stays only for events off or
+  `events.serve_streams` false). `/health` `events` has a new field `workers_down` (worker processes whose hub is
+  down, from a row of `worker_heartbeats` the process keeps while it retries): degraded while it is above 0, and
+  `workers` counts running hubs only.
+- The web kit's `events.ts` waits at least `Retry-After` after an answer that carries one.
 
 ## Real-time events
 

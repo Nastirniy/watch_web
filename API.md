@@ -437,7 +437,7 @@ below (WEB_TOOLING.md section 11).
 | `200` `text/event-stream` | The stream | Read it |
 | `204` | Events are off on this server | Stop until the page reloads; keep working on refetch |
 | `401` problem | As any request | Stop; the normal authentication flow decides. Never reconnect in a loop on a 401 |
-| `503` problem `event_stream_capacity`, `Retry-After` | This server holds as many streams as it can, or it is stopping | Back off |
+| `503` problem `event_stream_capacity`, `Retry-After` | This server holds as many streams as it can (`Retry-After` 5 to 30 s), it is stopping, or its event hub has not started yet: the server retries the start in the background (`Retry-After` 30 to 120 s) | Back off, at least `Retry-After`; keep working on refetch meanwhile |
 | `429`, `502`, `503`, `504`, no problem body | nginx ("Errors"): too many streams of one client certificate (32), too many connects, the API restarting | Back off by status |
 
 ### Messages
@@ -477,7 +477,8 @@ A position the server cannot answer for gives `reload`, never an error.
   of different resources may arrive in any order. A refetch reads the latest state anyway.
 - **A stream may end at any time.** Reconnect with the position after `retry` (sent at the start of each connection,
   3 to 15 s); after a network error or a `429` / `502` / `503` / `504` wait a random time between `retry` and
-  `min(60 s, retry x 2^n)`. `close` `restart` carries its own `retry` (1 to 60 s): wait that long.
+  `min(60 s, retry x 2^n)`, and at least `Retry-After` when the answer has one. `close` `restart` carries its own
+  `retry` (1 to 60 s): wait that long.
 - **Watchdog**: a connect may take over a minute (nginx delays connects after a deploy): allow 120 s for the answer,
   and 65 s without a byte once connected, then abort and reconnect.
 

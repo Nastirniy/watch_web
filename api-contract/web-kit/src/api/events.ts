@@ -82,7 +82,12 @@ export function startEvents(o: EventsOptions): { stop: () => void } {
   if (protocol() !== "h2") { stop("not_http2"); return { stop: () => stop("stopped") }; }
 
   const later = (ms: number) => { if (!stopped) setTimeout(connect, ms); };
-  const backoff = () => { failures += 1; later(retry + random() * (Math.min(60_000, retry * 2 ** failures) - retry)); };
+  const backoff = (atLeast = 0) => {
+    failures += 1;
+    later(Math.max(atLeast, retry + random() * (Math.min(60_000, retry * 2 ** failures) - retry)));
+  };
+  // 503 event_stream_capacity carries Retry-After in seconds (longer while the server's hub is down): wait that long
+  const retryAfter = (response: Response) => { const s = Number(response.headers.get("Retry-After")); return s > 0 ? s * 1000 : 0; };
 
   function handle(block: SseBlock): "go" | "end" {
     if (block.id !== undefined) position = block.id;             // the heartbeat's too
@@ -118,7 +123,7 @@ export function startEvents(o: EventsOptions): { stop: () => void } {
       clearTimeout(watchdog);
       if (response.status === 204) { stop("events_off"); return; }
       if (response.status === 401) { stop("unauthorized"); return; }   // never reconnect on a 401
-      if (response.status !== 200 || !response.body) { backoff(); return; }
+      if (response.status !== 200 || !response.body) { backoff(retryAfter(response)); return; }
       failures = 0;
       const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
       const parser = new SseParser();

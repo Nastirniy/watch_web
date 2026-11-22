@@ -33884,7 +33884,7 @@
           "EVENTS"
         ],
         "summary": "Stream Events",
-        "description": "The stream of events: a hint that something on screen changed, never data and never history. Everything works\nwithout it; refetch through the REST routes when an event says so. Any authenticated user; one stream per tab,\nread with fetch (Authorization: Bearer, Accept: text/event-stream), only over HTTP/2 (API.md).\n\nMessages (StreamMessage, discriminated by type): ready first; heartbeat about every 20 s; reload when the\nserver cannot replay from the position sent (refetch everything on screen); close with a reason before the\nserver ends the stream; domain events (move.changed, scope.changed, security.certificate_mismatch). A domain\nevent carries refetch_within_ms: refetch after a random wait below it, never at once.\n\nTwo ids, both opaque. The `id:` line of every block is a position: store it (heartbeats included) and send it\nback as Last-Event-ID when reconnecting; never compare or compute it. A position this server cannot answer for\n(unknown, malformed, too old, from before a restore) gives reload, never an error. The `id` in the JSON is the\nidentity of an event: ignore one already seen (delivery is at least once). Order holds within one resource only.\n\nOpening a stream and keeping it open is not activity: the session is not touched, so an idle tab still reaches\nthe idle timeout. The stream closes with token_expired at the expiry of the access token (refresh with\nX-Activity: background, then reconnect), with session_ended within 10 s of a logout, an idle end, a revocation or\nan account change (stop), and with restart when the server stops (reconnect after its retry). A right lost\nstops the events of that place within 30 s.\n\n204: events are off on this server, do not reconnect until the page reloads. 503 event_stream_capacity with\nRetry-After: this server holds as many streams as it can, or it is stopping; back off. 429, 502, 503 and 504\nwithout a problem body come from nginx (too many streams of one certificate, the API restarting): back off by\nstatus.",
+        "description": "The stream of events: a hint that something on screen changed, never data and never history. Everything works\nwithout it; refetch through the REST routes when an event says so. Any authenticated user; one stream per tab,\nread with fetch (Authorization: Bearer, Accept: text/event-stream), only over HTTP/2 (API.md).\n\nMessages (StreamMessage, discriminated by type): ready first; heartbeat about every 20 s; reload when the\nserver cannot replay from the position sent (refetch everything on screen); close with a reason before the\nserver ends the stream; domain events (move.changed, scope.changed, security.certificate_mismatch). A domain\nevent carries refetch_within_ms: refetch after a random wait below it, never at once.\n\nTwo ids, both opaque. The `id:` line of every block is a position: store it (heartbeats included) and send it\nback as Last-Event-ID when reconnecting; never compare or compute it. A position this server cannot answer for\n(unknown, malformed, too old, from before a restore) gives reload, never an error. The `id` in the JSON is the\nidentity of an event: ignore one already seen (delivery is at least once). Order holds within one resource only.\n\nOpening a stream and keeping it open is not activity: the session is not touched, so an idle tab still reaches\nthe idle timeout. The stream closes with token_expired at the expiry of the access token (refresh with\nX-Activity: background, then reconnect), with session_ended within 10 s of a logout, an idle end, a revocation or\nan account change (stop), and with restart when the server stops (reconnect after its retry). A right lost\nstops the events of that place within 30 s.\n\n204: events are off on this server, do not reconnect until the page reloads. 503 event_stream_capacity with\nRetry-After: this server holds as many streams as it can, it is stopping, or its event hub is not running yet\n(it is retried); back off for Retry-After at least. 429, 502, 503 and 504\nwithout a problem body come from nginx (too many streams of one certificate, the API restarting): back off by\nstatus.",
         "operationId": "stream_events",
         "security": [
           {
@@ -40121,12 +40121,17 @@
           "status": {
             "type": "string",
             "title": "Status",
-            "description": "healthy, or degraded: no hub reported within 60 s, or the event lag is above 30 s"
+            "description": "healthy, or degraded: no hub running reported within 60 s, a worker's hub is down, or the event lag is above 30 s"
           },
           "workers": {
             "type": "integer",
             "title": "Workers",
             "description": "Hubs (api worker processes serving streams) that reported within 60 s"
+          },
+          "workers_down": {
+            "type": "integer",
+            "title": "Workers Down",
+            "description": "Api worker processes that should serve streams but whose hub failed to start, reported within 60 s: the start is retried, and their streams answer 503 meanwhile; the log has the error"
           },
           "streams": {
             "type": "integer",
@@ -40170,6 +40175,7 @@
         "required": [
           "status",
           "workers",
+          "workers_down",
           "streams",
           "lag_ms",
           "gaps",

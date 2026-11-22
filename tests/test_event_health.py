@@ -47,8 +47,20 @@ async def test_the_fresh_reports_are_summed(client, db, monkeypatch):
     db.add(WorkerHeartbeat(name="media@a:4", kind="media", hostname="h", pid=4, details="running=0"))
     await db.commit()
     events = (await health(client))["events"]
-    assert events == {"status": "healthy", "workers": 2, "streams": 15, "lag_ms": 900, "gaps": 1, "slow_closed": 2,
-                      "reloads": 4, "oldest_row_age_seconds": None}
+    assert events == {"status": "healthy", "workers": 2, "workers_down": 0, "streams": 15, "lag_ms": 900, "gaps": 1,
+                      "slow_closed": 2, "reloads": 4, "oldest_row_age_seconds": None}
+
+
+async def test_a_worker_whose_hub_is_down_is_counted_and_degraded(client, db, monkeypatch):
+    monkeypatch.setattr(settings.events, "enabled", True)
+    db.add(_row("events@a:1", 5, streams=10, lag_ms=400))
+    db.add(_row("events@a:2", 5, down=1))
+    db.add(_row("events@a:3", 600, down=1))                            # long gone
+    await db.commit()
+    body = await health(client)
+    assert {key: body["events"][key] for key in ("status", "workers", "workers_down", "streams")} == {
+        "status": "degraded", "workers": 1, "workers_down": 1, "streams": 10}
+    assert body["status"] == "degraded"
 
 
 async def test_a_lag_above_30_s_is_degraded(client, db, monkeypatch):

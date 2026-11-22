@@ -98,9 +98,12 @@ class MovesHealthModel(BaseModel):
 
 class EventsHealthModel(BaseModel):
     """Real-time events (only when settings.events.enabled): the sum of the hubs that reported within 60 s"""
-    status: str = Field(..., description="healthy, or degraded: no hub reported within 60 s, or the event lag is "
-                                         "above 30 s")
+    status: str = Field(..., description="healthy, or degraded: no hub running reported within 60 s, a worker's "
+                                         "hub is down, or the event lag is above 30 s")
     workers: int = Field(..., description="Hubs (api worker processes serving streams) that reported within 60 s")
+    workers_down: int = Field(..., description="Api worker processes that should serve streams but whose hub failed "
+                                               "to start, reported within 60 s: the start is retried, and their "
+                                               "streams answer 503 meanwhile; the log has the error")
     streams: int = Field(..., description="Open streams, all hubs")
     lag_ms: int = Field(..., description="The highest p95 of the hubs: database clock at read minus occurred_at")
     gaps: int = Field(..., description="Ids the hubs still watch for a late commit, all hubs")
@@ -312,12 +315,14 @@ async def check_events_health(session: AsyncSession) -> Optional[EventsHealthMod
     if not settings.events.enabled:
         return None
     reports = await hub_reports(session, EVENTS_REPORT_SECONDS)
-    lag_ms = max((report.get("lag_ms", 0) for report in reports), default=0)
-    healthy = bool(reports) and lag_ms <= EVENTS_LAG_LIMIT_MS
+    running = [report for report in reports if not report.get("down")]
+    down = len(reports) - len(running)
+    lag_ms = max((report.get("lag_ms", 0) for report in running), default=0)
+    healthy = bool(running) and not down and lag_ms <= EVENTS_LAG_LIMIT_MS
     return EventsHealthModel(
         status=(ServiceHealthStatus.HEALTHY if healthy else ServiceHealthStatus.DEGRADED).value,
-        workers=len(reports), lag_ms=lag_ms,
-        **{name: sum(report.get(name, 0) for report in reports) for name in ("streams", "gaps", "slow_closed", "reloads")},
+        workers=len(running), workers_down=down, lag_ms=lag_ms,
+        **{name: sum(report.get(name, 0) for report in running) for name in ("streams", "gaps", "slow_closed", "reloads")},
         oldest_row_age_seconds=await oldest_row_age_seconds(session))
 
 
