@@ -304,6 +304,32 @@ async def test_the_session_check_closes_ended_sessions(engine, db, events_on):
     assert live.open and queued(gone)[-1][2:] == ("close", {"reason": "session_ended"})
 
 
+async def test_a_stream_that_attaches_during_the_session_check_is_not_closed(engine, db, events_on, monkeypatch):
+    """The check reads the sessions it collected, then awaits the database: a tab that attaches meanwhile was not in
+    that query, so it must not count as ended (found on the test server: 2 of 200 browsers got session_ended at once
+    after their login, their sessions live)"""
+    user = await make_user(db)
+    now = datetime.now(timezone.utc)
+    for session_id in ("old", "new"):
+        db.add(UserSession(id=session_id, user_id=user.id, created_at=now, last_activity=now,
+                           expires_at=now + timedelta(minutes=30)))
+    await db.commit()
+    hub = await hub_of(engine)
+    old = hub.attach(auth_of(user.id, session_id="old"), later(), None)
+    import app.backend.services.events.hub as hub_module
+    real = hub_module.live_sessions
+    late = []
+
+    async def slow_query(session, session_ids, **kwargs):
+        alive = await real(session, session_ids, **kwargs)
+        late.append(hub.attach(auth_of(user.id, session_id="new"), later(), None))   # a login in the meantime
+        return alive
+
+    monkeypatch.setattr(hub_module, "live_sessions", slow_query)
+    await hub.check_sessions()
+    assert old.open and late[0].open
+
+
 async def test_the_rights_refresh_follows_a_lost_grant(engine, db, events_on):
     user = await make_user(db)
     roles = await give(db, user, [P.POST_VIEW])

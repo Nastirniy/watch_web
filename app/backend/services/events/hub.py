@@ -420,8 +420,10 @@ class EventHub:
         async with self.sessions() as session:
             alive = await live_sessions(session, sorted(session_ids))
             await session.rollback()
+        # Only the sessions the query asked about: a tab that attached during the await was not in it (closing it as
+        # ended killed fresh streams right after their login, measured on the test server)
         for connection in list(self.connections):
-            if connection.open and connection.session_id not in alive:
+            if connection.open and connection.session_id in session_ids and connection.session_id not in alive:
                 self._close(connection, StreamCloseReason.SESSION_ENDED)
 
     async def refresh_rights(self) -> None:
