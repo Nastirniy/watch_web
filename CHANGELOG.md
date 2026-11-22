@@ -29,6 +29,9 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 - `/health` with events on, on MariaDB: `events.oldest_row_age_seconds` read a statement without FROM (1054), so the
   whole report answered `unhealthy` and logged a traceback on every call. The query names `outbox_events` now.
+- nginx closes idle upstream connections before uvicorn (4 s, uvicorn 5 s) and imgproxy (8 s, imgproxy 10 s) do: a
+  request sent on a connection the server was closing failed with a reset, a 502 on a POST (seen once under load on
+  the test server). Hosts: copy `nginx-http.conf` again and reload.
 
 ## Real-time events: the administration
 

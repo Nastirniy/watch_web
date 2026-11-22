@@ -452,3 +452,16 @@ def test_the_stream_location_comes_before_the_api_prefix():
     """An exact location wins over a prefix in nginx whatever the order; kept before /api/ for the reader"""
     headers = [header for header, _ in _blocks(APP, "location")]
     assert headers.index(EVENTS) < headers.index("/api/")
+
+
+def test_idle_upstream_connections_are_closed_by_nginx_first():
+    """nginx keeps idle upstream connections 60 s by default, uvicorn 5 s and imgproxy 10 s: a request sent on a
+    connection the server is closing fails with a reset (a 502 on a POST, which nginx does not resend; seen on the test
+    server). Every upstream with keepalive closes idle connections before its server does."""
+    import re
+    limits = {"watch_web_api": 5, "imgproxy": 10}
+    for name, server_seconds in limits.items():
+        block = re.search(r"upstream %s \{(.*?)\}" % name, HTTP, re.S).group(1)
+        assert re.search(r"^\s*keepalive \d+;", block, re.M), name
+        timeout = re.search(r"^\s*keepalive_timeout (\d+)s;", block, re.M)
+        assert timeout and int(timeout.group(1)) < server_seconds, name
