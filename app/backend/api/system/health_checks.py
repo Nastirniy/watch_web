@@ -16,6 +16,8 @@ from app.backend.pki.authority import CaCheckError, load_ca_certificate
 from app.backend.errors.coded import CodedError
 from app.backend.services.backups.catalog import load_catalog_async
 from app.backend.services.crl_publisher import crl_status
+from app.backend.services.events.cleanup import oldest_row_age_seconds
+from app.backend.services.events.health import hub_reports
 from app.backend.services.move_queue import waiting_report
 from app.backend.services.signer_client import SignerRefused, SignerUnavailable, signer_client
 from app.backend.utils.datetime_utils import assume_utc
@@ -94,6 +96,20 @@ class MovesHealthModel(BaseModel):
     oldest_waiting_seconds: Optional[int] = Field(None, description="Seconds the oldest of them has waited; null: none")
 
 
+class EventsHealthModel(BaseModel):
+    """Real-time events (only when settings.events.enabled): the sum of the hubs that reported within 60 s"""
+    status: str = Field(..., description="healthy, or degraded: no hub reported within 60 s, or the event lag is "
+                                         "above 30 s")
+    workers: int = Field(..., description="Hubs (api worker processes serving streams) that reported within 60 s")
+    streams: int = Field(..., description="Open streams, all hubs")
+    lag_ms: int = Field(..., description="The highest p95 of the hubs: database clock at read minus occurred_at")
+    gaps: int = Field(..., description="Ids the hubs still watch for a late commit, all hubs")
+    slow_closed: int = Field(..., description="Streams closed for not reading, since each hub started")
+    reloads: int = Field(..., description="reload messages sent, since each hub started")
+    oldest_row_age_seconds: Optional[int] = Field(None, description="Age of the oldest row of outbox_events; null "
+                                                                    "when the table is empty")
+
+
 class HealthResponse(BaseModel):
     """Main health check response model"""
     status: str = Field(..., description="Overall system status")
@@ -107,6 +123,7 @@ class HealthResponse(BaseModel):
     backups: Optional[BackupsHealthModel] = Field(None, description="Database backups; only when configured")
     authorization: Optional[AuthorizationHealthModel] = Field(None, description="Authorization data, counts only")
     moves: Optional[MovesHealthModel] = Field(None, description="Moves waiting for uploads, counts only")
+    events: Optional[EventsHealthModel] = Field(None, description="Real-time events, counts only; only when they are on")
 
 
 # Rate limiting for health endpoint
@@ -283,6 +300,25 @@ async def check_moves_health(session: AsyncSession) -> MovesHealthModel:
         return MovesHealthModel(waiting=report.count)
     age = datetime.now(timezone.utc) - assume_utc(report.oldest_requested_at)
     return MovesHealthModel(waiting=report.count, oldest_waiting_seconds=max(0, int(age.total_seconds())))
+
+
+EVENTS_REPORT_SECONDS = 60      # a hub reports every 15 s
+EVENTS_LAG_LIMIT_MS = 30000
+
+
+async def check_events_health(session: AsyncSession) -> Optional[EventsHealthModel]:
+    """The events part of /health, None when events are off. Read from the table: a request lands on one worker of
+    four and knows only its own hub"""
+    if not settings.events.enabled:
+        return None
+    reports = await hub_reports(session, EVENTS_REPORT_SECONDS)
+    lag_ms = max((report.get("lag_ms", 0) for report in reports), default=0)
+    healthy = bool(reports) and lag_ms <= EVENTS_LAG_LIMIT_MS
+    return EventsHealthModel(
+        status=(ServiceHealthStatus.HEALTHY if healthy else ServiceHealthStatus.DEGRADED).value,
+        workers=len(reports), lag_ms=lag_ms,
+        **{name: sum(report.get(name, 0) for report in reports) for name in ("streams", "gaps", "slow_closed", "reloads")},
+        oldest_row_age_seconds=await oldest_row_age_seconds(session))
 
 
 async def check_pki_health(session: AsyncSession) -> Optional[PkiHealthModel]:

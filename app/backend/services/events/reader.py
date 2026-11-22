@@ -37,7 +37,8 @@ def _is_sqlite(connection: AsyncConnection) -> bool:
     return connection.dialect.name == "sqlite"
 
 
-def _lag_ms(connection: AsyncConnection) -> ColumnElement:
+def age_ms(connection: AsyncConnection) -> ColumnElement:
+    """Milliseconds since occurred_at, by the database clock (UTC)"""
     if _is_sqlite(connection):
         return cast((func.julianday("now") - func.julianday(T.occurred_at)) * 86400000, Integer)
     return literal_column("TIMESTAMPDIFF(MICROSECOND, occurred_at, UTC_TIMESTAMP(6)) DIV 1000")
@@ -52,7 +53,7 @@ def cutoff(connection: AsyncConnection, seconds: int) -> ColumnElement:
 
 def _columns(connection: AsyncConnection):
     return (T.id, T.type, T.v, T.scope_key, T.permission, T.user_id, T.conflate_key, T.payload, T.occurred_at,
-            _lag_ms(connection).label("lag_ms"))
+            age_ms(connection).label("lag_ms"))
 
 
 def _row(row) -> OutboxRow:

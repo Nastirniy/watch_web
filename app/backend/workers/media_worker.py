@@ -35,6 +35,7 @@ from app.backend.config import settings
 from app.backend.models.media import MediaFile
 from app.backend.models.storyboard import VideoStoryboard, storyboard_relative_dir
 from app.backend.services import move_queue, moves
+from app.backend.services.events import cleanup as events_cleanup
 from app.backend.services.media import jobs, storyboard_jobs, uploads
 from app.backend.services.media.posters import PosterError, make_poster, resolve_binary
 from app.backend.services.media.probe import has_no_video_stream, metadata_for, resolve_tools
@@ -51,6 +52,7 @@ from app.backend.utils.logging_config import get_logger
 _logger = get_logger("media_worker")
 
 WORKER_KIND = "media"
+EVENTS_CLEANUP_SECONDS = 60
 # A running job renews its lease every half lease, never more often than this
 LEASE_RENEW_MIN_SECONDS = 5
 
@@ -345,6 +347,21 @@ class MediaWorker:
             except asyncio.TimeoutError:
                 pass
 
+    async def _events_cleanup_loop(self) -> None:
+        """Every 60 s while events are on: rows of outbox_events past events.retention_seconds go (services/events/
+        cleanup.py). Two media workers are safe; a failed run is logged and the next one tries again"""
+        while not self._stop.is_set():
+            try:
+                removed = await events_cleanup.clean(self.session_maker, settings.events.retention_seconds)
+                if removed:
+                    _logger.info(f"outbox_events: {removed} row(s) past retention removed")
+            except Exception as exc:  # worker loop: the next run tries again
+                _logger.warning(f"outbox_events cleanup failed: {type(exc).__name__}: {exc}")
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=EVENTS_CLEANUP_SECONDS)
+            except asyncio.TimeoutError:
+                pass
+
     async def check_moves(self) -> None:
         """One look at every waiting move (services/moves.py advance): a move nothing holds runs. A backup: the end of
         an upload and the requests that meet a move do the same, this catches a crash or a move nobody asks about"""
@@ -424,6 +441,7 @@ class MediaWorker:
         heartbeat_task = asyncio.create_task(self._heartbeat_loop())
         sweep_task = asyncio.create_task(self._sweep_loop())
         moves_task = asyncio.create_task(self._moves_loop())
+        events_task = asyncio.create_task(self._events_cleanup_loop()) if settings.events.enabled else None
         semaphore = asyncio.Semaphore(self.concurrency)
         idle_delay = cfg.poll_interval_seconds
         try:
@@ -464,6 +482,8 @@ class MediaWorker:
             heartbeat_task.cancel()
             sweep_task.cancel()
             moves_task.cancel()
+            if events_task is not None:
+                events_task.cancel()
             async with self.session_maker() as session:
                 released = await jobs.release_claims(session, self.name)
                 released_storyboards = await storyboard_jobs.release_storyboard_claims(session, self.name)

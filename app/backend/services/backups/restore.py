@@ -450,7 +450,8 @@ def _merge(first: CarryOverResult, second: CarryOverResult) -> CarryOverResult:
                            users_added=first.users_added + second.users_added,
                            crl_number=max(first.crl_number, second.crl_number),
                            sessions_ended=first.sessions_ended + second.sessions_ended,
-                           moves_cancelled=first.moves_cancelled + second.moves_cancelled)
+                           moves_cancelled=first.moves_cancelled + second.moves_cancelled,
+                           events_removed=first.events_removed + second.events_removed)
 
 
 def _free_kept_name(backend: RestoreBackend, db: str, now: Callable[[], datetime]) -> str:

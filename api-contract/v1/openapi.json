@@ -40096,6 +40096,69 @@
           }
         ]
       },
+      "EventsHealthModel": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "healthy, or degraded: no hub reported within 60 s, or the event lag is above 30 s"
+          },
+          "workers": {
+            "type": "integer",
+            "title": "Workers",
+            "description": "Hubs (api worker processes serving streams) that reported within 60 s"
+          },
+          "streams": {
+            "type": "integer",
+            "title": "Streams",
+            "description": "Open streams, all hubs"
+          },
+          "lag_ms": {
+            "type": "integer",
+            "title": "Lag Ms",
+            "description": "The highest p95 of the hubs: database clock at read minus occurred_at"
+          },
+          "gaps": {
+            "type": "integer",
+            "title": "Gaps",
+            "description": "Ids the hubs still watch for a late commit, all hubs"
+          },
+          "slow_closed": {
+            "type": "integer",
+            "title": "Slow Closed",
+            "description": "Streams closed for not reading, since each hub started"
+          },
+          "reloads": {
+            "type": "integer",
+            "title": "Reloads",
+            "description": "reload messages sent, since each hub started"
+          },
+          "oldest_row_age_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oldest Row Age Seconds",
+            "description": "Age of the oldest row of outbox_events; null when the table is empty"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "workers",
+          "streams",
+          "lag_ms",
+          "gaps",
+          "slow_closed",
+          "reloads"
+        ],
+        "title": "EventsHealthModel",
+        "description": "Real-time events (only when settings.events.enabled): the sum of the hubs that reported within 60 s"
+      },
       "ExcessAssignment": {
         "properties": {
           "kind": {
@@ -41416,6 +41479,17 @@
               }
             ],
             "description": "Moves waiting for uploads, counts only"
+          },
+          "events": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventsHealthModel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Real-time events, counts only; only when they are on"
           }
         },
         "type": "object",

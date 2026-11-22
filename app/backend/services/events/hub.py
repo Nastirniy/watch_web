@@ -103,6 +103,7 @@ class EventHub:
         await self.tick()
         self.started = True
         if run_tasks:
+            await self.report()             # /health sees this worker at once, not after the first interval
             self.tasks = [asyncio.create_task(loop, name=f"events-{name}") for name, loop in (
                 ("pump", self._loop(self.tick, self.config.poll_seconds, jitter=0.1)),
                 ("ticker", self._loop(self.beat, 1.0)),

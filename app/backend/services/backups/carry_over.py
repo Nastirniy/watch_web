@@ -27,6 +27,7 @@ SESSIONS = UserSession.__tablename__
 USERS = User.__tablename__
 POSTS = "posts"
 MOVES = "pending_moves"
+OUTBOX = "outbox_events"
 
 
 class CarryOverUnsupported(Exception):
@@ -45,6 +46,7 @@ class CarryOverResult:
     crl_number: int
     sessions_ended: int
     moves_cancelled: int = 0
+    events_removed: int = 0
 
 
 def reflect_table(conn: sa.Connection, name: str, schema: Optional[str]) -> Optional[sa.Table]:
@@ -174,8 +176,15 @@ def carry_over(conn: sa.Connection, outgoing: Optional[str], incoming: Optional[
     moves_cancelled = 0 if moves is None else conn.execute(
         sa.update(moves).where(moves.c.status == MoveStatus.WAITING.value).values(
             status=MoveStatus.CANCELLED.value, finished_at=stamp)).rowcount
+
+    # Delivery data of the backup: it describes a past the restored rows contradict and must not replay. DELETE, not
+    # TRUNCATE: TRUNCATE resets the counter before raise_statements raises it past the replaced data, so ids (and the
+    # positions of clients) never go backwards. A backup from before migration 037 has no such table
+    events = reflect_table(conn, OUTBOX, incoming)
+    events_removed = 0 if events is None else conn.execute(sa.delete(events)).rowcount
     return CarryOverResult(revocations=len(revoke), certificates_added=added, users_added=users_added,
-                           crl_number=crl_number, sessions_ended=ended, moves_cancelled=moves_cancelled)
+                           crl_number=crl_number, sessions_ended=ended, moves_cancelled=moves_cancelled,
+                           events_removed=events_removed)
 
 
 def user_state_differences(conn: sa.Connection, outgoing: Optional[str],

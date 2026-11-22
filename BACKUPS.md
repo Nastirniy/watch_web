@@ -191,6 +191,12 @@ What `restore` does:
    - **Sessions:** every session of the backup is ended (`database_restored`), so users log in again.
    - **Waiting moves:** every move that was waiting in the backup is cancelled: the uploads it waited for are gone with
      that moment, and it must not run behind the restore.
+   - **Events to the web client:** the rows of `outbox_events` in the backup are deleted (with `DELETE`, so the id
+     counter is raised like every other below): they describe a past the restored data contradicts and must not be
+     replayed. The live rows are not carried either. A backup from before migration 037 has no such table: the api
+     creates it at its next start with ids from 1, below the positions clients held. That is safe: every session of
+     the backup is ended, so no stream survives the restore, a new login starts without a position, and a position
+     the server cannot answer for gets `reload`. `outbox_events` needs no rule in `restore_reconcile` (no files).
    - **Right before the swap** the connections are checked again (`connections` if a client connected during the
      load) and the carry-over runs a second time, so a revocation made during the load is not lost.
    - **Users created after the backup** who have a certificate come back archived (`is_deleted`, inactive, no

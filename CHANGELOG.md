@@ -23,6 +23,11 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   change of a queued move (to `post.update` holders at the node and to the requester), `scope.changed` when a post,
   group, corps or brigade moves (the node and its old place), is archived or restored (the node, once per
   operation).
+- `/health` has an `events` part while events are on (`EventsHealthModel`, counts only): the hubs that reported
+  within 60 s (`workers`), open `streams`, `lag_ms`, open `gaps`, `slow_closed`, `reloads`,
+  `oldest_row_age_seconds`. Degraded when no hub reported or the lag is above 30 s. Each hub writes its counts to
+  `worker_heartbeats` (kind `events`) every 15 s; the media worker removes rows past retention every 60 s.
+- A restore deletes the rows of `outbox_events` in the backup (carry-over): they must not replay (BACKUPS.md).
 - `X-Activity: background` on any request: authorized as any other, but it does not count as activity, so the session
   is not touched (`last_activity` and the idle end stay). For requests the user did not cause: pollers, refetches an
   event asked for, the refresh of a tab for its stream. `POST /auth/refresh` with the header still rotates its tokens

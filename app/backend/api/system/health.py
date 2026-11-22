@@ -13,6 +13,7 @@ from app.backend.api.system.health_checks import (
     check_authorization_health,
     check_backups_health,
     check_database_health,
+    check_events_health,
     check_moves_health,
     check_pki_health,
     check_services_health,
@@ -75,13 +76,15 @@ async def health_check(
         backups_health = await check_backups_health()
         authorization_health = await check_authorization_health(session)
         moves_health = await check_moves_health(session)
+        events_health = await check_events_health(session)
 
         # Determine overall status
         overall_status = ServiceHealthStatus.HEALTHY.value
         if db_health.status != ServiceHealthStatus.HEALTHY.value or (
                 pki_health is not None and pki_health.status != ServiceHealthStatus.HEALTHY.value) or (
                 backups_health is not None and backups_health.status != ServiceHealthStatus.HEALTHY.value) or (
-                authorization_health.status != ServiceHealthStatus.HEALTHY.value):
+                authorization_health.status != ServiceHealthStatus.HEALTHY.value) or (
+                events_health is not None and events_health.status != ServiceHealthStatus.HEALTHY.value):
             overall_status = ServiceHealthStatus.DEGRADED.value
 
         return HealthResponse(
@@ -96,6 +99,7 @@ async def health_check(
             backups=backups_health,
             authorization=authorization_health,
             moves=moves_health,
+            events=events_health,
         )
 
     except Exception as e:

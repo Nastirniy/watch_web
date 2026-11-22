@@ -304,3 +304,34 @@ def test_placeholder_username_stays_within_the_column(conn):
     add_cert(conn, 44, 7, "fp44")
     ((user_id, username),) = carry_over(conn, None, "incoming", NOW).users_added
     assert user_id == 7 and len(username) <= 255 and username.endswith("~7")
+
+
+def add_event(conn, event_id: int, schema=None):
+    conn.execute(sa.insert(t("outbox_events", schema)).values(
+        id=event_id, type="scope.changed", v=1, scope_key="root", permission="post.view", payload="{}",
+        occurred_at=EARLIER))
+
+
+def test_events_of_the_backup_are_removed_and_the_live_ones_not_carried(conn):
+    """Delivery data: the restored rows must not replay, the outgoing ones describe data the restore replaced"""
+    add_event(conn, 1, schema="incoming")
+    add_event(conn, 2, schema="incoming")
+    add_event(conn, 7)
+    result = carry_over(conn, None, "incoming", NOW)
+    assert result.events_removed == 2
+    assert conn.execute(sa.select(t("outbox_events", "incoming"))).all() == []
+    assert [row.id for row in conn.execute(sa.select(t("outbox_events")))] == [7], "the outgoing table is not touched"
+    assert carry_over(conn, None, "incoming", NOW).events_removed == 0
+
+
+def test_a_backup_without_the_events_table(conn):
+    conn.exec_driver_sql("DROP TABLE incoming.outbox_events")
+    assert carry_over(conn, None, "incoming", NOW).events_removed == 0
+
+
+def test_the_events_table_keeps_its_counter_for_the_raise():
+    """DELETE, not TRUNCATE: raise_statements raises AUTO_INCREMENT past the replaced data for every table both schemas
+    have, outbox_events included"""
+    from app.backend.services.backups.schemas import raise_statements
+    statements = raise_statements("db_restore", {"outbox_events": 500}, {"outbox_events": 3})
+    assert any("outbox_events" in statement and "500" in statement for statement in statements)
