@@ -223,3 +223,113 @@ def test_the_node_modes_are_unchanged_by_the_star_entries():
     index.set_user(5, (grant("p:8", P.ROLE_VIEW.value),))
     assert list(index.holders("*", P.ROLE_VIEW.value)) == [5]
     assert list(index.holders("p:7", P.ROLE_VIEW.value)) == [] and list(index.holders("root", P.ROLE_VIEW.value)) == []
+
+
+# ---------------------------------------------------------------- the fingerprint of what is in effect
+
+def rights_fields(auth: AuthContext) -> tuple:
+    """The rights GET /auth/me shows (api/v1/models/response/auth.py _authorization_fields), assignments aside"""
+    return (auth.permissions, auth.system_permissions, auth.root_permissions, auth.post_permissions(),
+            auth.group_permissions())
+
+
+def grant_of(node_key: str, *permissions: str, kind: str = "tree", role_id: int = 1) -> Grant:
+    return Grant(role_id, f"role{role_id}", "Role", False, Node.parse(node_key), frozenset(permissions),
+                 assignment_id=role_id, kind=kind)
+
+
+VIEW, UPDATE, AUDIT = P.POST_VIEW.value, P.POST_UPDATE.value, P.AUDIT_VIEW.value
+MOVED = {**POST_GROUP, 8: 2}                # p:8 moved from g:3 into g:2
+
+GRANT_SETS = [
+    (),
+    (grant_of("root", VIEW),),
+    (grant_of("root", AUDIT, kind="system"),),
+    (grant_of("root", VIEW), grant_of("root", AUDIT, kind="system")),
+    (grant_of("g:1", VIEW),),
+    (grant_of("g:2", VIEW),),
+    (grant_of("g:2", VIEW, UPDATE),),
+    (grant_of("g:1", VIEW), grant_of("g:2", UPDATE, role_id=2)),
+    (grant_of("p:7", VIEW),),
+    (grant_of("p:7", VIEW), grant_of("p:8", VIEW, role_id=2)),
+    (grant_of("p:99", VIEW),),
+    (grant_of("g:3", UPDATE), grant_of("p:7", VIEW, role_id=2)),
+]
+TREES = [
+    tree(),
+    tree(archived_posts=(7,)),
+    tree(archived_groups=(2,)),
+    tree(archived_groups=(1,), archived_posts=(9,)),
+    ScopeTree(group_parent=GROUP_PARENT, archived_groups=frozenset(), post_group=MOVED, archived_posts=frozenset()),
+    ScopeTree(group_parent={**GROUP_PARENT, 4: 2}, archived_groups=frozenset(),
+              post_group={**POST_GROUP, 21: 4}, archived_posts=frozenset()),     # a new group with a post
+]
+
+
+def fingerprint_of(scope_tree: ScopeTree, grants) -> object:
+    index = RightsIndex(scope_tree)
+    index.set_user(5, tuple(grants))
+    return index.fingerprint(5)
+
+
+def test_an_equal_fingerprint_means_equal_rights_in_auth_me():
+    """The fingerprint never misses a change of what GET /auth/me shows: over every pair of grant sets and trees of
+    the table, equal fingerprints come only with equal rights fields"""
+    seen = {}
+    for scope_tree in TREES:
+        for grants in GRANT_SETS:
+            auth = AuthContext(user=User(id=5, username="u", username_alias="U"), grants=grants, tree=scope_tree)
+            fields = rights_fields(auth)
+            fingerprint = fingerprint_of(scope_tree, grants)
+            assert seen.setdefault(fingerprint, fields) == fields, (grants, scope_tree)
+
+
+def test_the_fingerprint_ignores_which_role_gives_a_permission():
+    """A permission held through two roles stays in effect when one of them loses it; ids of roles and
+    assignments, and grants that put nothing in effect, change nothing"""
+    both_roles = (grant_of("root", VIEW, UPDATE), grant_of("root", UPDATE, role_id=2))
+    one_left = (grant_of("root", VIEW), grant_of("root", UPDATE, role_id=2))
+    assert fingerprint_of(tree(), both_roles) == fingerprint_of(tree(), one_left)
+    at_post = fingerprint_of(tree(), (grant_of("p:7", VIEW),))
+    assert fingerprint_of(tree(), (grant_of("p:7", VIEW, role_id=3),)) == at_post
+    assert fingerprint_of(tree(), (grant_of("p:7", VIEW), grant_of("p:8"))) == at_post
+    system = fingerprint_of(tree(), (grant_of("root", VIEW, kind="system"),))
+    assert fingerprint_of(tree(), (grant_of("root", VIEW),)) != system, "root_permissions and system_permissions differ"
+
+
+def test_the_fingerprint_follows_the_tree_where_the_grants_reach():
+    grants = (grant_of("g:2", VIEW),)
+    base = fingerprint_of(tree(), grants)
+    assert fingerprint_of(tree(archived_groups=(2,)), grants) != base, "its node archived"
+    assert fingerprint_of(tree(archived_groups=(3,)), grants) == base, "another node archived"
+    assert fingerprint_of(tree(archived_posts=(7,)), grants) == base, "a group's grant applies to its archived posts"
+    moved = ScopeTree(group_parent=GROUP_PARENT, archived_groups=frozenset(), post_group=MOVED,
+                      archived_posts=frozenset())
+    assert fingerprint_of(moved, grants) != base, "a post moved into the group"
+    assert fingerprint_of(moved, (grant_of("p:7", VIEW),)) == fingerprint_of(tree(), (grant_of("p:7", VIEW),))
+
+
+def test_the_fingerprint_is_re_evaluated_on_a_tree_change_and_none_for_a_stranger():
+    index = RightsIndex(tree())
+    index.set_user(5, (grant_of("p:7", VIEW),))
+    before = index.fingerprint(5)
+    index.set_tree(tree(archived_posts=(7,)))
+    assert index.fingerprint(5) != before
+    index.set_tree(tree())
+    assert index.fingerprint(5) == before
+    assert index.fingerprint(6) is None
+
+
+def test_a_reach_that_did_not_change_keeps_its_object_across_trees():
+    """After a tree change the fingerprints of every connected user are compared: a group whose posts and groups did
+    not change keeps the same objects, so the comparison walks nothing per user"""
+    index = RightsIndex(tree())
+    index.set_user(5, (grant_of("g:1", VIEW),))
+    (_, first), = index.fingerprint(5)[1]
+    index.set_tree(tree(archived_posts=(8,)))
+    (_, second), = index.fingerprint(5)[1]
+    assert second is first
+    index.set_tree(ScopeTree(group_parent=GROUP_PARENT, archived_groups=frozenset(), post_group=MOVED,
+                             archived_posts=frozenset()))
+    (_, moved), = index.fingerprint(5)[1]
+    assert moved != first and 8 in moved[0], "p:8 moved from g:3 into g:2, inside g:1"

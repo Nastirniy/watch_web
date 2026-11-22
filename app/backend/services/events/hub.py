@@ -2,15 +2,25 @@
 
     pump        every events.poll_seconds (10% jitter): read the outbox (new rows and open gaps), reload the tree when a
                 scope.changed came and the grants of the connected users a user.changed or role.changed concerns,
-                deliver each row once to the connections whose user may receive it
+                deliver each row once to the connections whose user may receive it, then rights_changed
     ticker      every second, one task for every connection: heartbeats due, tokens expired
     sessions    every events.session_check_seconds: one batched query, ended sessions close their streams
-    rights      every events.rights_refresh_seconds (jitter): the tree and the grants of the connected users
+    rights      every events.rights_refresh_seconds (jitter): the tree and the grants of the connected users, then
+                rights_changed
     report      every 15 s: counts into worker_heartbeats (kind events), which /health sums
 
 The hub has its own engine (pool 1, overflow 1): the pump never waits for the request pool, and a stream holds no
 connection at all. A block is built once per event and shared by every connection; each connection writes one chunk
 per tick. Streams do not spread evenly over workers (one usually holds nearly all): nothing here assumes they do.
+
+rights_changed: the hub keeps, per connected user, the fingerprint of what their grants put in effect on its tree
+(RightsIndex.fingerprint, equal means equal rights in GET /auth/me). The grants of the first connect are the baseline;
+after every load of the tree or of grants (the pump, the refresh, a new tab whose request read other grants) each user
+whose fingerprint moved gets one rights_changed on every open stream (conflated: one waits per stream), so a tab
+refetches its own rights though no event names it (a role's permissions for a holder without role.view, an archived
+node, a post moved into a group they hold a role at). Nothing is published for it: every hub holding streams of the
+user computes the same. It may come with a user.changed or scope.changed of the same tick that asks for GET /auth/me
+too.
 
 Rendering belongs to the version (api/v1/models/response/events.py): app/main.py hands the renderer in, because
 services never import api. Every loop catches Exception, logs it and goes on (the allowed broad catch of a worker loop).
@@ -24,7 +34,7 @@ import socket
 import time
 from collections import deque
 from datetime import datetime, timezone
-from typing import Callable, Deque, Dict, Iterable, List, Optional, Protocol, Set
+from typing import Callable, Deque, Dict, Hashable, Iterable, List, Optional, Protocol, Set
 
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
@@ -48,6 +58,7 @@ HEARTBEAT_KIND = "events"
 READ_BATCH = 1000
 # Rows whose receivers are read on the tree or the grants before the change as well (those who just lost the right)
 RIGHTS_CHANGES = frozenset({EventType.SCOPE_CHANGED.value, EventType.ROLE_CHANGED.value})
+RIGHTS_CHANGED_KEY = "stream:rights_changed"     # the conflate key of rights_changed: one waits per stream
 
 
 class EveryUser:
@@ -84,6 +95,8 @@ class Renderer(Protocol):
 
     def reload(self, refetch_within_ms: int) -> bytes: ...
 
+    def rights_changed(self, refetch_within_ms: int) -> bytes: ...
+
     def close(self, reason: StreamCloseReason) -> bytes: ...
 
 
@@ -115,6 +128,8 @@ class EventHub:
         self._loads = 0
         self._tree_load = 0
         self._grant_loads: Dict[int, int] = {}
+        # user -> the fingerprint of their rights the tabs were last told of (the baseline: the first connect)
+        self._fingerprints: Dict[int, Hashable] = {}
         self.position = 0
         self.connections: Set[Connection] = set()
         self.by_user: Dict[int, Set[Connection]] = {}
@@ -231,7 +246,8 @@ class EventHub:
             # The tree and the grants after it are loaded before any delivery
             before: Dict[int, Set[Connection]] = {row.id: set(self._targets(row)) for row in rows
                                                   if row.type in RIGHTS_CHANGES}
-            if any(row.type == EventType.SCOPE_CHANGED.value for row in rows):
+            tree_changed = any(row.type == EventType.SCOPE_CHANGED.value for row in rows)
+            if tree_changed:
                 await self.reload_tree()
             reload = grants_to_reload(rows)
             if reload:
@@ -242,6 +258,10 @@ class EventHub:
             self.position = self.gaps.position(now)
             for row in rows:
                 self._deliver(row, before.get(row.id, set()))
+            if tree_changed or reload is EVERY_USER:
+                self._tell_rights_changed(list(self.by_user))
+            elif reload:
+                self._tell_rights_changed(reload)
             total += len(rows)
             if new_rows_of(rows, head) < READ_BATCH:
                 return total
@@ -297,6 +317,10 @@ class EventHub:
         connection.on_end = self.detach
         self.rights.set_user(user_id, auth.grants)
         self._grant_loads[user_id] = self._next_load()
+        if user_id in self.by_user:
+            self._tell_rights_changed([user_id])    # the tabs already open, before this one joins them
+        else:
+            self._fingerprints[user_id] = self.rights.fingerprint(user_id)
         retry = random.randint(self.config.retry_min_ms, self.config.retry_max_ms)
         connection.offer(block(self.position, retry_line(retry) + self.render.ready()))
         replay = self._replay(user_id, last_event_id)
@@ -337,6 +361,7 @@ class EventHub:
                 del self.by_user[connection.user_id]
                 self.rights.drop_user(connection.user_id)
                 self._grant_loads.pop(connection.user_id, None)
+                self._fingerprints.pop(connection.user_id, None)
         if connection.slow:
             self.slow_closed += 1
         reason = "slow" if connection.slow else (connection.closing.value if connection.closing else "client")
@@ -391,6 +416,7 @@ class EventHub:
             await session.rollback()
         self._set_tree(tree, load)
         self._set_grants(user_ids, grants, load)
+        self._tell_rights_changed(list(self.by_user))
 
     async def reload_grants(self, user_ids: Optional[Iterable[int]] = None) -> None:
         """The grants of these connected users (None: every one) at once, in one batch on the hub's engine: a
@@ -417,6 +443,25 @@ class EventHub:
             if user_id in self.by_user and load > self._grant_loads.get(user_id, 0):
                 self._grant_loads[user_id] = load
                 self.rights.set_user(user_id, grants.get(user_id, ()))
+
+    def _tell_rights_changed(self, user_ids: Iterable[int]) -> None:
+        """rights_changed to every open stream of the connected users whose fingerprint moved since they were last told
+        (no await: called after the last await of a tick or a refresh). One body for all, its refetch window spread
+        over every stream told"""
+        told: List[Connection] = []
+        for user_id in user_ids:
+            connections = self.by_user.get(user_id)
+            if not connections:
+                continue
+            fingerprint = self.rights.fingerprint(user_id)
+            if fingerprint == self._fingerprints.get(user_id):
+                continue
+            self._fingerprints[user_id] = fingerprint
+            told.extend(connection for connection in connections if connection.open)
+        if told:
+            frame = block(self.position, self.render.rights_changed(self._refetch_window(len(told))))
+            for connection in told:
+                connection.offer(frame, RIGHTS_CHANGED_KEY)
 
     def stats(self) -> Dict[str, int]:
         lags = sorted(self._lags)

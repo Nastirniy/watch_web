@@ -249,7 +249,8 @@ async def test_the_create_event_lets_the_hub_deliver_events_of_the_new_post_at_o
                                 json={"name": "Fresh", "code": "FRESH", "group_id": group.id})
     assert created.status_code == 200, created.text
     assert await hub.tick() == 1
-    assert [event for _, _, event, _ in queued(at_group)] == ["ready", "scope.changed"]
+    assert [event for _, _, event, _ in queued(at_group)] == ["ready", "scope.changed", "rights_changed"], \
+        "the new post is in the post_permissions of the holder at its group (GET /auth/me)"
     assert [event for _, _, event, _ in queued(at_other)] == ["ready"]
 
     publish(db, EventType.MOVE_CHANGED, scope=Node.post(created.json()["id"]), permission=Permissions.POST_UPDATE,

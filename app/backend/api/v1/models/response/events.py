@@ -172,6 +172,19 @@ class StreamReload(BaseModel):
     refetch_within_ms: int = REFETCH
 
 
+class StreamRightsChanged(BaseModel):
+    """Your rights in effect changed, also when no event names you: a permission added to or removed from a role you
+    hold, a role you hold archived or restored, a node where you hold a role archived or restored, a post or group
+    moved into or out of a group where you hold a role, your own assignments or user type. Reread GET /auth/me
+    (permissions, root_permissions, post_permissions, group_permissions, system_permissions) after a random wait
+    below refetch_within_ms and rebuild the menu and the buttons from it. A user.changed about you or a scope.changed
+    may come at the same time: one refetch serves them all. Never sent at connect: read GET /auth/me as on any page
+    load"""
+    type: Literal["rights_changed"]
+    refetch_within_ms: int = Field(description="Reread GET /auth/me after a random wait below this many milliseconds, "
+                                               "never at once: the server spreads the refetches of every tab told")
+
+
 class StreamClose(BaseModel):
     """The server ends the stream; the connection then ends"""
     type: Literal["close"]
@@ -180,7 +193,8 @@ class StreamClose(BaseModel):
 
 class StreamMessage(RootModel[Annotated[Union[MoveChanged, ScopeChanged, SecurityCertificateMismatch, UserChanged,
                                               CertificateChanged, SessionChanged, RoleChanged, DictionaryChanged,
-                                              StreamReady, StreamHeartbeat, StreamReload, StreamClose],
+                                              StreamReady, StreamHeartbeat, StreamReload, StreamRightsChanged,
+                                              StreamClose],
                                         Field(discriminator="type")]]):
     """One message of the stream: event: is its type, data: this JSON"""
 
@@ -226,6 +240,10 @@ class V1Renderer:
     def reload(self, refetch_within_ms: int) -> bytes:
         return _message(StreamMessageType.RELOAD.value, {"type": StreamMessageType.RELOAD.value,
                                                          "refetch_within_ms": refetch_within_ms})
+
+    def rights_changed(self, refetch_within_ms: int) -> bytes:
+        return _message(StreamMessageType.RIGHTS_CHANGED.value, {"type": StreamMessageType.RIGHTS_CHANGED.value,
+                                                                 "refetch_within_ms": refetch_within_ms})
 
     def close(self, reason: StreamCloseReason) -> bytes:
         return _message(StreamMessageType.CLOSE.value, {"type": StreamMessageType.CLOSE.value,

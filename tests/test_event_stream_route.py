@@ -14,7 +14,7 @@ from app.backend.auth.scope import Node, ROOT
 from app.backend.auth.service import AuthService
 from app.backend.auth.sessions import utc
 from app.backend.config import EventsConfig, settings
-from app.backend.enums.events import EventType, StreamCloseReason
+from app.backend.enums.events import EventType, StreamCloseReason, StreamMessageType
 from app.backend.enums.general import Permissions as P
 from app.backend.enums.routes import EventRoutes
 from app.backend.models.user import UserSession
@@ -230,9 +230,23 @@ def test_every_rendered_event_validates(row):
 
 
 def test_every_stream_message_validates():
-    for body in (render_v1.ready(), render_v1.heartbeat(), render_v1.reload(500),
+    for body in (render_v1.ready(), render_v1.heartbeat(), render_v1.reload(500), render_v1.rights_changed(700),
                  *(render_v1.close(reason) for reason in StreamCloseReason)):
         StreamMessage.model_validate(_value(body))
+
+
+def test_rights_changed_renders_its_type_and_window():
+    body = render_v1.rights_changed(700)
+    assert body.startswith(b"event: rights_changed\n")
+    message = StreamMessage.model_validate(_value(body)).root
+    assert (message.type, message.refetch_within_ms) == ("rights_changed", 700)
+    assert _value(body) == {"type": "rights_changed", "refetch_within_ms": 700}, "no id: it is no event of the outbox"
+
+
+def test_every_stream_message_type_has_a_member_in_the_union():
+    members = get_args(get_args(StreamMessage.model_fields["root"].annotation)[0])
+    declared = {get_args(member.model_fields["type"].annotation)[0] for member in members}
+    assert {kind.value for kind in StreamMessageType} <= declared
 
 
 def test_every_event_type_has_a_member_in_the_union():

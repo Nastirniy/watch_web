@@ -9,7 +9,7 @@ from app.backend.auth.context import AuthContext, load_auth_context
 from app.backend.auth.scope import Grant, Node, ROOT
 from app.backend.config import EventsConfig, settings
 from app.backend.enums.events import EventType, StreamCloseReason
-from app.backend.enums.general import Permissions as P
+from app.backend.enums.general import Permissions as P, UserType
 from app.backend.models.user import User, UserSession
 from app.backend.services.events import publish
 from app.backend.services.events.hub import EventHub
@@ -33,6 +33,9 @@ class TextRenderer:
 
     def reload(self, refetch_within_ms):
         return self._block("reload", {"refetch_within_ms": refetch_within_ms})
+
+    def rights_changed(self, refetch_within_ms):
+        return self._block("rights_changed", {"refetch_within_ms": refetch_within_ms})
 
     def close(self, reason):
         return self._block("close", {"reason": reason.value})
@@ -127,7 +130,9 @@ async def test_a_scope_change_in_a_tick_changes_who_gets_the_rows_of_that_tick(e
             move_status="done")
     await db.commit()
     await hub.tick()
-    assert [event for _, _, event, _ in queued(watcher)] == ["ready", "scope.changed", "move.changed"]
+    assert [event for _, _, event, _ in queued(watcher)] == ["ready", "scope.changed", "move.changed",
+                                                             "rights_changed"], \
+        "the post now in the watcher's group is in its post_permissions (GET /auth/me)"
 
 
 async def test_a_slow_connection_never_holds_more_than_queue_max_and_ends(engine, db, events_on):
@@ -395,6 +400,88 @@ async def test_an_archive_reaches_the_holders_who_lose_the_node(engine, db, even
     publish(db, EventType.SCOPE_CHANGED, scope=Node.post(post.id), permission=P.POST_VIEW)
     await db.commit()
     await hub.tick()
-    assert queued(at_post)[-1][2] == "scope.changed", "the holder at the archived post is told"
-    assert queued(at_group)[-1][2] == "scope.changed"
+    assert [event for _, _, event, _ in queued(at_post)] == ["ready", "scope.changed", "rights_changed"], \
+        "the holder at the archived post is told, and its grant there no longer applies"
+    assert [event for _, _, event, _ in queued(at_group)] == ["ready", "scope.changed"], \
+        "a group's grant keeps applying to its archived posts"
     assert [event for _, _, event, _ in queued(stranger)] == ["ready"]
+
+
+# ---------------------------------------------------------------- rights_changed
+
+def events_of(connection) -> list:
+    return [event for _, _, event, _ in queued(connection)]
+
+
+async def test_no_rights_changed_at_connect(engine, events_on):
+    """The grants of a connect are the baseline; a second tab with the same rights tells the first nothing"""
+    hub = await hub_of(engine)
+    first = hub.attach(auth_of(1, grant(ROOT, P.POST_VIEW)), later(), None)
+    second = hub.attach(auth_of(1, grant(ROOT, P.POST_VIEW)), later(), None)
+    other = hub.attach(auth_of(2), later(), None)
+    assert [events_of(c) for c in (first, second, other)] == [["ready"]] * 3
+
+
+async def test_a_new_tab_with_other_rights_tells_the_tabs_already_open(engine, events_on):
+    """The request of a new tab read the user's grants after the change: the open tabs refetch, the new one read
+    GET /auth/me itself"""
+    hub = await hub_of(engine)
+    first = hub.attach(auth_of(1, grant(ROOT, P.POST_VIEW)), later(), None)
+    second = hub.attach(auth_of(1, grant(ROOT, P.POST_VIEW, P.POST_UPDATE)), later(), None)
+    assert events_of(first) == ["ready", "rights_changed"] and events_of(second) == ["ready"]
+
+
+async def test_the_rights_refresh_finding_an_archived_node_tells_its_users(engine, db, events_on):
+    """No event names the user (an archive made with events off, a type boundary, anything): the 30 s refresh compares
+    what is in effect and tells every tab of a user whose rights changed, nobody else"""
+    post, elsewhere = await make_post(db), await make_post(db)
+    holder = await make_user(db, user_type=UserType.VIEWER)
+    await give(db, holder, [P.POST_VIEW, P.OBSERVATION_VIEW], Node.post(post.id))
+    other = await make_user(db, user_type=UserType.VIEWER)
+    await give(db, other, [P.POST_VIEW], Node.post(elsewhere.id))
+    hub = await hub_of(engine)
+    tabs = [hub.attach(await load_auth_context(db, holder, session_id=f"s{n}"), later(), None) for n in range(2)]
+    stranger = hub.attach(await load_auth_context(db, other, session_id="o"), later(), None)
+    await hub.refresh_rights()
+    assert [events_of(c) for c in (*tabs, stranger)] == [["ready"]] * 3, "nothing changed, nothing sent"
+
+    post.is_deleted = True
+    db.add(post)
+    await db.commit()
+    await hub.refresh_rights()
+    for tab in tabs:
+        assert queued(tab)[-1][2:] == ("rights_changed", {"refetch_within_ms": hub._refetch_window(2)})
+    assert events_of(stranger) == ["ready"]
+    for tab in tabs:
+        tab.queue.clear()
+    await hub.refresh_rights()
+    assert [events_of(tab) for tab in tabs] == [[], []], "told once per change"
+
+
+async def test_rights_changed_waits_once_in_a_queue(engine, db, events_on):
+    """Conflated: a stream that has not read the last one keeps one, the latest, behind what came after it"""
+    post = await make_post(db)
+    holder = await make_user(db, user_type=UserType.VIEWER)
+    await give(db, holder, [P.POST_VIEW], Node.post(post.id))
+    hub = await hub_of(engine)
+    tab = hub.attach(await load_auth_context(db, holder, session_id="s"), later(), None)
+    post.is_deleted = True
+    db.add(post)
+    await db.commit()
+    await hub.refresh_rights()
+    await _publish(db, EventType.MOVE_CHANGED, user_id=holder.id, move_id=1, move_status="done")
+    await hub.tick()
+    assert events_of(tab) == ["ready", "rights_changed", "move.changed"]
+    post.is_deleted = False
+    db.add(post)
+    await db.commit()
+    await hub.refresh_rights()
+    assert events_of(tab) == ["ready", "move.changed", "rights_changed"]
+
+
+async def test_a_user_who_left_has_no_fingerprint_left(engine, events_on):
+    hub = await hub_of(engine)
+    connection = hub.attach(auth_of(1, grant(ROOT, P.POST_VIEW)), later(), None)
+    connection.ended = True
+    hub.detach(connection)
+    assert hub._fingerprints == {}

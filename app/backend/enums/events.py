@@ -69,6 +69,7 @@ class StreamMessageType(str, Enum):
     READY = "ready"
     HEARTBEAT = "heartbeat"
     RELOAD = "reload"
+    RIGHTS_CHANGED = "rights_changed"   # what is in effect for this user changed: reread GET /auth/me
     CLOSE = "close"
 
 

@@ -64969,6 +64969,9 @@
             "$ref": "#/components/schemas/StreamReload"
           },
           {
+            "$ref": "#/components/schemas/StreamRightsChanged"
+          },
+          {
             "$ref": "#/components/schemas/StreamClose"
           }
         ],
@@ -64984,6 +64987,7 @@
             "move.changed": "#/components/schemas/MoveChanged",
             "ready": "#/components/schemas/StreamReady",
             "reload": "#/components/schemas/StreamReload",
+            "rights_changed": "#/components/schemas/StreamRightsChanged",
             "role.changed": "#/components/schemas/RoleChanged",
             "scope.changed": "#/components/schemas/ScopeChanged",
             "security.certificate_mismatch": "#/components/schemas/SecurityCertificateMismatch",
@@ -65027,6 +65031,27 @@
         ],
         "title": "StreamReload",
         "description": "Too far behind, a position this server cannot answer for, or from before a restore: refetch what is on screen"
+      },
+      "StreamRightsChanged": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "rights_changed",
+            "title": "Type"
+          },
+          "refetch_within_ms": {
+            "type": "integer",
+            "title": "Refetch Within Ms",
+            "description": "Reread GET /auth/me after a random wait below this many milliseconds, never at once: the server spreads the refetches of every tab told"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "refetch_within_ms"
+        ],
+        "title": "StreamRightsChanged",
+        "description": "Your rights in effect changed, also when no event names you: a permission added to or removed from a role you\nhold, a role you hold archived or restored, a node where you hold a role archived or restored, a post or group\nmoved into or out of a group where you hold a role, your own assignments or user type. Reread GET /auth/me\n(permissions, root_permissions, post_permissions, group_permissions, system_permissions) after a random wait\nbelow refetch_within_ms and rebuild the menu and the buttons from it. A user.changed about you or a scope.changed\nmay come at the same time: one refetch serves them all. Never sent at connect: read GET /auth/me as on any page\nload"
       },
       "SystemAssignmentCreate": {
         "properties": {

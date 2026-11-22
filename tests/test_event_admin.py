@@ -16,8 +16,8 @@ from app.backend.config import EventsConfig, settings
 from app.backend.enums.audit import AuditCategory, AuditEvent
 from app.backend.enums.events import AUDIT_EVENT_TYPES, Dictionary, EventType
 from app.backend.enums.general import BuiltinRole, Permissions as P, SessionRevokeCause, UserType
-from app.backend.enums.routes import (AuthRoutes, CategoryRoutes, GuideRoutes, MediaFormatRoutes, RoleRoutes,
-                                      SignalTypeRoutes, TagRoutes, UserRoutes)
+from app.backend.enums.routes import (AuthRoutes, CategoryRoutes, GuideRoutes, MediaFormatRoutes, PostRoutes,
+                                      RoleRoutes, SignalTypeRoutes, TagRoutes, UserRoutes)
 from app.backend.models.outbox_event import OutboxEvent
 from app.backend.models.role import Permission
 from app.backend.services.events import EVERY_STREAM, HELD_ANYWHERE, publish
@@ -457,7 +457,8 @@ async def test_an_assignment_moves_the_rights_of_a_stream_in_the_same_tick(clien
                                 json={"name": "after_grant", "display_name": "After", "kind": "tree"})
     assert created.status_code == 201, created.text
     assert await hub.tick() == 2
-    assert [event for event, _ in _received(stream)] == ["user.changed", "role.changed"]
+    assert [event for event, _ in _received(stream)] == ["user.changed", "role.changed", "rights_changed"], \
+        "its own user.changed and the rights_changed of the same tick both come (one refetch of GET /auth/me serves)"
 
 
 async def test_a_role_change_moves_the_rights_of_its_holders(client, db, engine, headers, events_on):
@@ -477,21 +478,101 @@ async def test_a_role_change_moves_the_rights_of_its_holders(client, db, engine,
     assert added.status_code == 200, added.text
     assert (await client.post(V1.path(TagRoutes.CREATE), headers=h, json={"name": "fresh"})).status_code in (200, 201)
     assert await hub.tick() == 2
-    assert [event for event, _ in _received(stream)] == ["role.changed", "dictionary.changed"]
+    assert [event for event, _ in _received(stream)] == ["role.changed", "dictionary.changed", "rights_changed"]
     stream.queue.clear()                    # read by the client (a role.changed of the same role would conflate)
 
     removed = await client.delete(V1.path(RoleRoutes.ROLE_PERMISSION_BY_ID, role_id=role.id,
                                           permission_id=role_view.id), headers=h)
     assert removed.status_code == 200, removed.text
     assert await hub.tick() == 1
-    assert [(event, data["role_id"]) for _, _, event, data in queued(stream)] == [("role.changed", role.id)], \
-        "the removal reaches those who held role.view before it"
+    assert [(event, data.get("role_id")) for _, _, event, data in queued(stream)] == [
+        ("role.changed", role.id), ("rights_changed", None)], "the removal reaches those who held role.view before it"
     stream.queue.clear()
     other = await client.post(V1.path(RoleRoutes.ROOT), headers=h,
                               json={"name": "unseen", "display_name": "Unseen", "kind": "tree"})
     assert other.status_code == 201, other.text
     assert await hub.tick() == 1
     assert queued(stream) == [], "the next role.changed no longer does"
+
+
+# ---------------------------------------------------------------- rights_changed: no event names the holder
+
+def _events(connection) -> list:
+    return [event for _, _, event, _ in queued(connection)[1:]]
+
+
+async def test_a_role_permission_change_tells_its_holders_without_role_view(client, db, engine, headers, events_on):
+    """Owner, 2026-11-22: the holders of a role whose permissions change refetch their rights though they cannot read
+    roles; those who do not hold it, and those whose rights in effect stay the same (the permission comes through
+    another role too), get nothing"""
+    admin = await make_admin(db)
+    role = await make_role(db, [P.POST_VIEW])
+    holder = await make_user(db, user_type=UserType.VIEWER)
+    await assign(db, holder, role, ROOT)
+    twice = await make_user(db, user_type=UserType.VIEWER)
+    await assign(db, twice, role, ROOT)
+    await assign(db, twice, await make_role(db, [P.OBSERVATION_VIEW]), ROOT)
+    stranger = await make_user(db, user_type=UserType.VIEWER)
+    await give(db, stranger, [P.POST_VIEW])
+    watcher = await make_user(db, user_type=UserType.ADMINISTRATOR)
+    await give(db, watcher, [P.ROLE_VIEW])
+    hub = await _hub(engine)
+    streams = {name: await _attach(hub, db, user) for name, user in (
+        ("holder", holder), ("twice", twice), ("stranger", stranger), ("watcher", watcher))}
+    observation_view = (await db.exec(select(Permission).where(Permission.name == "observation.view"))).one()
+    url = V1.path(RoleRoutes.ROLE_PERMISSION_BY_ID, role_id=role.id, permission_id=observation_view.id)
+
+    added = await client.put(url, headers=headers(admin))
+    assert added.status_code == 200, added.text
+    assert await hub.tick() == 1
+    assert {name: _events(stream) for name, stream in streams.items()} == {
+        "holder": ["rights_changed"], "twice": [], "stranger": [], "watcher": ["role.changed"]}
+    refetch = queued(streams["holder"])[-1][3]["refetch_within_ms"]
+    assert refetch == hub._refetch_window(1), "spread over the streams told"
+
+    for stream in streams.values():
+        stream.queue.clear()
+    removed = await client.delete(url, headers=headers(admin))
+    assert removed.status_code == 200, removed.text
+    assert await hub.tick() == 1
+    assert {name: [event for _, _, event, _ in queued(stream)] for name, stream in streams.items()} == {
+        "holder": ["rights_changed"], "twice": [], "stranger": [], "watcher": ["role.changed"]}
+
+
+async def test_a_permission_outside_the_type_changes_nothing_in_effect(client, db, engine, headers, events_on):
+    """A role holding a permission beyond a holder's type (written before the type allowed less): removing it changes
+    nothing in effect for that holder, so no rights_changed"""
+    from tests.helpers import _grant
+    admin = await make_admin(db)
+    role = await make_role(db, [P.POST_VIEW])
+    viewer = await make_user(db, user_type=UserType.VIEWER)
+    await assign(db, viewer, role, ROOT)
+    await _grant(db, role, ["post.update"])         # outside the viewer boundary: never in effect for them
+    await db.commit()
+    hub = await _hub(engine)
+    stream = await _attach(hub, db, viewer)
+    post_update = (await db.exec(select(Permission).where(Permission.name == "post.update"))).one()
+    removed = await client.delete(V1.path(RoleRoutes.ROLE_PERMISSION_BY_ID, role_id=role.id,
+                                          permission_id=post_update.id), headers=headers(admin))
+    assert removed.status_code == 200, removed.text
+    assert await hub.tick() == 1
+    assert _events(stream) == []
+
+
+async def test_an_archive_tells_who_loses_rights_there_without_seeing_the_post(client, db, engine, headers,
+                                                                              events_on):
+    """A holder of observation.view at a post (no post.view: the scope.changed is not theirs) learns at once that its
+    grant there stopped applying"""
+    post = await make_post(db)
+    admin = await make_admin(db)
+    observer = await make_user(db, user_type=UserType.VIEWER)
+    await give(db, observer, [P.OBSERVATION_VIEW], Node.post(post.id))
+    hub = await _hub(engine)
+    stream = await _attach(hub, db, observer)
+    archived = await client.post(V1.path(PostRoutes.POST_ARCHIVE, post_id=post.id), headers=headers(admin))
+    assert archived.status_code == 200, archived.text
+    await hub.tick()
+    assert _events(stream) == ["rights_changed"]
 
 
 def _outbox_row(row_id: int, type_: str, payload: str):
