@@ -458,6 +458,41 @@ docker compose exec media-worker python -m app.backend.cli.media_tools reconcile
 `storyboard-status` prints the counts per state (pending, processing, ready, failed) and the latest errors (media id, state, attempts, message). The worker heartbeat
 details include `storyboards=<n>` running.
 
+## Real-time events
+
+`GET /api/v1/events/stream` (API.md, "Real-time events") is off until `EVENTS_ENABLED=true` in `.env` (it sets
+`MYSETTINGS_EVENTS__ENABLED` on `api` and `media-worker`; restart both). Off, nothing is published, the route answers
+204 and clients stop reconnecting. Migration 037 (table `outbox_events`) is applied by the normal start either way.
+
+What the repository files already do: `nginx.conf` speaks HTTP/2 on 443 (`http2 on;`, required: on HTTP/1.1 a browser
+with 6 tabs holding streams hangs every request of the app); `nginx-app.conf` has `location = /api/v1/events/stream`
+(unbuffered, `proxy_read_timeout 70s`, 32 streams and 2 connects/s per client certificate, 40 connects/s overall,
+delayed); `nginx-http.conf` has `upstream watch_web_events` (today the api port: moving streams to a separate process
+is that one line) and the `limit_*_zone` lines. A zone's key cannot change on a reload: restart nginx after changing
+one.
+
+The host's main `/etc/nginx/nginx.conf` is not in this repository. Set there:
+
+```nginx
+worker_rlimit_nofile 16384;           # main context
+worker_shutdown_timeout 35m;          # main context: each CRL publish reloads nginx, old workers stay while streams live
+events { worker_connections 4096; }   # stock Ubuntu 768: 2,000 streams fit at 98% with nothing left for requests
+```
+
+On HTTP/2 a browser is one client connection and each stream one upstream connection: about 3,000 connections at the
+target of 2,000 streams. Then `nginx -t`, reload, and read the error log: a failed reload keeps the old configuration
+and says so only there. Check the open-file limit of the api container: `docker compose exec api sh -c 'ulimit -n'`
+(65536 from `docker-compose.yml`; each stream is a file descriptor).
+
+Before switching events on, check HTTP/2 against everything it touches, over real TLS: a resumable upload of a 2 GB
+file, `nginx-upload` of a large file, `/download`, `/stream` with seeking in Chromium, thumbnails. Compare the upload
+throughput with `http2 off;`; if uploads are slower, raise `http2_body_preread_size` and write the value down here.
+
+Each api worker runs one hub with its own database engine (pool 1, overflow 1): budget 2 connections per worker on top
+of the pool (ENV.md). `/health` has an `events` part while events are on. Rollback: `EVENTS_ENABLED=false` and restart
+`api` and `media-worker`; clients fall back to refetching. Without HTTP/2 (`http2 on;` removed) the web client opens
+no stream by itself (it checks the protocol).
+
 ## End-to-end test stack
 
 `tests/docker/compose.test.yml` runs the whole pipeline on a developer machine, including Docker Desktop on Windows: MySQL and nginx are containers there too (a bridge network, not the production layout), but the media path, the real locations and proxy headers (`nginx-app.conf`, `nginx-proxy.conf`) and the uid handling are the same as in production. Only the server block differs (`tests/docker/nginx-server.test.conf`: plain http, no client certificates, the API in development mode).

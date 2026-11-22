@@ -11,8 +11,10 @@ from pathlib import Path
 
 import yaml
 
+from app.backend.api.v1 import V1
 from app.backend.api.v1.auth import login
-from app.backend.config import settings
+from app.backend.config import EventsConfig, settings
+from app.backend.enums.routes import EventRoutes
 from app.backend.services.files.formats import hard_limit_bytes
 from app.backend.services.files.serve import NGINX_ADDED_HEADERS
 from app.main import fastapi_app
@@ -65,11 +67,15 @@ def test_proxy_snippet_sets_every_certificate_header_from_nginx_variables():
     assert found == expected
 
 
+API_UPSTREAMS = ("proxy_pass http://watch_web_api", "proxy_pass http://watch_web_events")
+
+
 def _api_locations() -> list[tuple[str, str]]:
-    """The locations a client reaches that proxy to the API (internal and named locations are reached only from
-    another location)"""
+    """The locations a client reaches that proxy to the API, the events upstream included (internal and named
+    locations are reached only from another location)"""
     return [(header, body) for header, body in _blocks(APP, "location")
-            if "proxy_pass http://watch_web_api" in body and not header.startswith("@") and "internal;" not in body]
+            if any(upstream in body for upstream in API_UPSTREAMS) and not header.startswith("@")
+            and "internal;" not in body]
 
 
 def _matches(header: str, path: str) -> bool:
@@ -400,3 +406,49 @@ def test_file_locations_send_the_api_etag_never_their_own():
     for directive in ("add_header ETag $stream_etag;", "add_header Repr-Digest $stream_digest;",
                       "add_header X-File-Hash $stream_hash;"):
         assert directive in stream, directive
+
+
+# ------------------------------------------------------------------ the stream of events
+
+EVENTS = f"= {V1.path(EventRoutes.STREAM)}"
+
+
+def test_the_stream_of_events_has_a_location_of_its_own():
+    body = _location(APP, EVENTS)
+    assert f"include {PROXY_SNIPPET};" in body
+    assert "proxy_pass http://watch_web_events;" in body
+    assert "proxy_buffering off;" in body and "proxy_cache off;" in body and "gzip off;" in body
+    assert "add_header" not in body, "X-Request-ID is inherited only by a location that sets no add_header"
+
+
+def test_the_read_timeout_outlasts_three_heartbeats():
+    seconds = int(re.search(r"proxy_read_timeout (\d+)s;", _location(APP, EVENTS)).group(1))
+    assert seconds > 3 * EventsConfig().heartbeat_seconds
+
+
+def test_streams_are_limited_per_certificate_and_delayed_overall():
+    body = _location(APP, EVENTS)
+    assert "limit_conn events_per_certificate 32;" in body
+    assert "limit_req zone=events_connects_per_certificate burst=20 nodelay;" in body
+    assert "limit_req zone=events_connects burst=3000;" in body       # delayed: no nodelay
+    assert "limit_conn_status 429;" in body and "limit_req_status 429;" in body
+
+
+def test_the_zones_live_at_http_level_in_both_stacks():
+    for name, text in (("nginx-http.conf", HTTP), ("nginx-http.test.conf", E2E_HTTP)):
+        flat = _directives(text)
+        assert "upstream watch_web_events" in flat and "zone=events_per_certificate:" in flat, name
+        assert "zone=events_connects_per_certificate:" in flat and "zone=events_connects:" in flat, name
+        upstream = dict(_blocks(text, "upstream"))["watch_web_events"]
+        assert "keepalive" not in upstream, f"{name}: a stream holds its upstream connection for its whole life"
+
+
+def test_production_speaks_http2():
+    tls = [body for _, body in _blocks(SERVERS, "server") if "listen 443 ssl" in body]
+    assert "http2 on;" in tls[0]
+
+
+def test_the_stream_location_comes_before_the_api_prefix():
+    """An exact location wins over a prefix in nginx whatever the order; kept before /api/ for the reader"""
+    headers = [header for header, _ in _blocks(APP, "location")]
+    assert headers.index(EVENTS) < headers.index("/api/")

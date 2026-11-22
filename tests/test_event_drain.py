@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from app.backend.api.v1 import V1
 from app.backend.enums.routes import EventRoutes
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="POSIX signals and uvicorn --workers")

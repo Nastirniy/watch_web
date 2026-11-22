@@ -84,6 +84,55 @@ def make_mp4(path: Path) -> Path:
     return path
 
 
+def read_events(response, wanted: str, timeout: float = 15) -> tuple[list[dict], str]:
+    """(messages, last position) of an open text/event-stream response until a message of type wanted"""
+    import json
+    messages, position, fields = [], "", {}
+    deadline = time.time() + timeout
+    for line in response.iter_lines(decode_unicode=True):
+        if time.time() > deadline:
+            break
+        if line:
+            name, _, value = line.partition(": ")
+            fields[name] = value
+            continue
+        if "id" in fields:
+            position = fields["id"]
+        if "data" in fields:
+            messages.append(json.loads(fields["data"]))
+            if messages[-1]["type"] == wanted:
+                break
+        fields = {}
+    return messages, position
+
+
+def check_events(headers: dict, post_id: int) -> None:
+    """A stream through nginx: ready first, a scope.changed of an archive arrives, a reconnect with Last-Event-ID
+    replays the event it missed"""
+    stream_headers = {**headers, "Accept": "text/event-stream"}
+    stream = requests.get(f"{API}/events/stream", headers=stream_headers, stream=True, timeout=30)
+    check(stream.status_code == 200 and stream.headers.get("content-type", "").startswith("text/event-stream"),
+          "event stream opens through nginx", f"{stream.status_code} {stream.headers.get('content-type')}")
+    first, _ = read_events(stream, "ready")
+    check(bool(first) and first[0]["type"] == "ready", "event stream starts with ready")
+    archived = requests.post(f"{API}/posts/{post_id}/archive", headers=headers, timeout=10)
+    check(archived.status_code == 200, "archive a post for an event", archived.text[:200])
+    seen, position = read_events(stream, "scope.changed")
+    event = next((m for m in seen if m["type"] == "scope.changed"), None)
+    check(event is not None and event.get("scope") == {"kind": "post", "id": post_id}, "scope.changed arrives",
+          f"{seen[-1:] if seen else 'none'}")
+    stream.close()
+    restored = requests.post(f"{API}/posts/{post_id}/restore", headers=headers, timeout=10)
+    check(restored.status_code == 200, "restore the post while disconnected", restored.text[:200])
+    time.sleep(3)       # every worker has read it (poll 1 s)
+    again = requests.get(f"{API}/events/stream", headers={**stream_headers, "Last-Event-ID": position},
+                         stream=True, timeout=30)
+    replayed, _ = read_events(again, "scope.changed")
+    check(any(m["type"] == "scope.changed" and m.get("id") != (event or {}).get("id") for m in replayed),
+          "a reconnect with Last-Event-ID replays the missed event", f"{[m['type'] for m in replayed]}")
+    again.close()
+
+
 def main() -> int:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     wait_for(f"{NGINX}/health")
@@ -255,6 +304,9 @@ def main() -> int:
         check(rinfo.get("file_size") == len(video) and rinfo.get("video_codec") == "h264", "resumed file stored and probed", f"{rinfo.get('file_size')} {rinfo.get('video_codec')}")
         again = requests.post(f"{API}/media/uploads/{upload_id}/complete", headers=headers, timeout=60)
         check(again.status_code == 200 and again.json().get("media_file_id") == resumed_id, "complete is idempotent")
+
+    # --- real-time events through nginx
+    check_events(headers, post_id)
 
     # --- nginx-less API: proxied renderer and FileResponse
     dtoken = requests.post(f"{DIRECT}/api/v1/auth/login", json=LOGIN, timeout=10)

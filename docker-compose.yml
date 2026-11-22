@@ -49,6 +49,8 @@ services:
       MYSETTINGS_STORAGE__THUMBNAIL__PREWARM: "false"
       # imgproxy's limit: larger images are stored with thumbnail_status unsupported (same variable as imgproxy below)
       MYSETTINGS_STORAGE__IMGPROXY__MAX_SRC_RESOLUTION_MP: ${IMGPROXY_MAX_SRC_RESOLUTION:-250}
+      # Real-time events (API.md): the same value on api and media-worker (the worker removes old rows)
+      MYSETTINGS_EVENTS__ENABLED: ${EVENTS_ENABLED:-false}
     volumes:
       - ${MEDIA_ROOT}:${MEDIA_ROOT}
       - ${NGINX_UPLOAD_TEMP}:${NGINX_UPLOAD_TEMP}
@@ -78,6 +80,7 @@ services:
     environment:
       MYSETTINGS_STORAGE__UPLOAD_PATH: ${MEDIA_ROOT:?set MEDIA_ROOT in .env}
       MYSETTINGS_STORAGE__TEMP_PATH: ${MEDIA_ROOT}/_tmp
+      MYSETTINGS_EVENTS__ENABLED: ${EVENTS_ENABLED:-false}
     volumes:
       - ${MEDIA_ROOT}:${MEDIA_ROOT}
     deploy:

@@ -1,4 +1,4 @@
-"""A small app for tests/test_event_drain.py: the real hub, the real response class and the v1 renderer behind
+"""A small app for tests/test_event_drain.py (and a live nginx check of the events location): the real hub, the real response class and the v1 renderer behind
 uvicorn, over a SQLite file (WW_DRAIN_DB). Every stream belongs to user 1; nothing else of the API is here."""
 import asyncio
 import os
@@ -11,6 +11,7 @@ from sqlmodel import SQLModel
 
 import app.backend.models  # noqa: F401  (every table, for create_all)
 from app.backend.api.shared.event_stream import EventStreamResponse
+from app.backend.api.v1 import V1
 from app.backend.api.v1.models.response.events import render_v1
 from app.backend.auth.context import AuthContext
 from app.backend.config import EventsConfig
@@ -35,7 +36,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
-@app.get(EventRoutes.STREAM.value)
+@app.get(V1.path(EventRoutes.STREAM))     # the published path: nginx passes it on unchanged
 async def stream():
     hub = app.state.event_hub
     connection = hub.attach(AuthContext(user=User(id=1, username="u", username_alias="U"), session_id="s"),
