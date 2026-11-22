@@ -170,28 +170,44 @@ class EventHub:
         self.rights.set_tree(tree)
 
     async def tick(self) -> int:
-        """One round of the pump: every row committed since the last one, delivered. The number of rows"""
+        """One round of the pump: every row committed since the last one, delivered. The number of rows.
+
+        Every await comes first (the read, the tree): a failure there leaves the head and the position where they
+        were, so the next tick reads the same rows again, and no heartbeat can carry a position past rows not yet
+        delivered. What follows has no await: the rows count as read, enter the ring and are delivered at once."""
         total = 0
         while True:
             head = self.gaps.head
             rows = await read_tick(self.engine, self.gaps, READ_BATCH)
+            # scope.changed reaches the holders on the tree before the change too: those who just lost the node (an
+            # archive, a move away) are the ones whose tree changed. The tree after it is loaded before any delivery
+            before: Dict[int, Set[Connection]] = {}
+            if any(row.type == EventType.SCOPE_CHANGED.value for row in rows):
+                before = {row.id: set(self._targets(row)) for row in rows if row.type == EventType.SCOPE_CHANGED.value}
+                await self.reload_tree()
             now = self.clock()
             self.gaps.saw((row.id for row in rows), now)
             self.gaps.expire(now)
             self.position = self.gaps.position(now)
-            if any(row.type == EventType.SCOPE_CHANGED.value for row in rows):
-                await self.reload_tree()            # before anything of this tick is delivered
             for row in rows:
-                self._lags.append(row.lag_ms)
-                targets = self._targets(row)
-                body = self.render.event(row, self._refetch_window(len(targets)))
-                self.ring.add(row, body)
-                frame = block(self.position, body)  # built once, shared by every connection
-                for connection in targets:
-                    connection.offer(frame, row.conflate_key)
+                self._deliver(row, before.get(row.id, set()))
             total += len(rows)
             if new_rows_of(rows, head) < READ_BATCH:
                 return total
+
+    def _deliver(self, row: OutboxRow, also: Set[Connection]) -> None:
+        """One row to the ring and its connections; a row that cannot be rendered is logged and skipped, never the
+        others (the allowed broad catch: the pump goes on)"""
+        try:
+            self._lags.append(row.lag_ms)
+            targets = set(self._targets(row)) | {connection for connection in also if connection.open}
+            body = self.render.event(row, self._refetch_window(len(targets)))
+            self.ring.add(row, body)
+            frame = block(self.position, body)      # built once, shared by every connection
+            for connection in targets:
+                connection.offer(frame, row.conflate_key)
+        except Exception:
+            logger.exception(f"Event hub: row {row.id} ({row.type}) not delivered")
 
     def _refetch_window(self, subscribers: int) -> int:
         """One event never asks the API for more than refetch_rate_per_second: each worker spreads its own clients, so

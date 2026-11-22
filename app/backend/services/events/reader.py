@@ -89,14 +89,13 @@ def new_rows_of(rows: Sequence[OutboxRow], head: int) -> int:
 
 
 async def first_head(engine: AsyncEngine, seconds: int) -> int:
-    """Where a worker that starts begins: the id before the first row younger than seconds, so the gaps of the last
-    minute are known and the ring is filled from there. 0 on an empty table, MAX(id) when every row is older."""
+    """Where a worker that starts begins: the newest row older than seconds, so every id above it is read or watched
+    as a gap, a transaction still in flight below the first young visible row included, and the ring is filled with
+    the last minute. 0 when no row is that old (an empty table, or only young rows: all of them are read)."""
     async with engine.connect() as connection:
         try:
-            first = (await connection.execute(
-                select(T.id).where(T.occurred_at >= cutoff(connection, seconds)).order_by(T.id).limit(1))).scalar()
-            if first is not None:
-                return int(first) - 1
-            return int((await connection.execute(select(func.coalesce(func.max(T.id), 0)))).scalar() or 0)
+            last_old = (await connection.execute(
+                select(func.max(T.id)).where(T.occurred_at < cutoff(connection, seconds)))).scalar()
+            return int(last_old or 0)
         finally:
             await connection.rollback()

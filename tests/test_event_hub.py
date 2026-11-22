@@ -342,3 +342,59 @@ async def test_the_rows_read_at_start_do_not_count_as_lag(engine, db, events_on)
     hub = await hub_of(engine)
     assert len(hub.ring) == 1, "the start fills the ring"
     assert hub.stats()["lag_ms"] == 0, "filling the ring is no delivery"
+
+
+async def test_a_failed_tree_reload_loses_no_row_and_moves_no_position(engine, db, events_on, monkeypatch):
+    """Review: the head and the position moved before the await of the tree; a failure there dropped the rows"""
+    hub = await hub_of(engine)
+    connection = hub.attach(auth_of(1, grant(ROOT, P.POST_VIEW)), later(), None)
+    start = hub.position
+    await _publish(db, EventType.SCOPE_CHANGED, scope=ROOT, permission=P.POST_VIEW)
+    original = hub.reload_tree
+
+    async def broken():
+        raise RuntimeError("database blip")
+
+    monkeypatch.setattr(hub, "reload_tree", broken)
+    with pytest.raises(RuntimeError):
+        await hub.tick()
+    assert hub.position == start and hub.gaps.head == start, "nothing counted as read"
+    monkeypatch.setattr(hub, "reload_tree", original)
+    await hub.tick()
+    assert queued(connection)[-1][2] == "scope.changed" and hub.position == start + 1
+
+
+async def test_one_row_that_fails_to_render_does_not_drop_the_others(engine, db, events_on):
+    hub = await hub_of(engine)
+    connection = hub.attach(auth_of(1, grant(ROOT, P.POST_VIEW, P.POST_UPDATE)), later(), None)
+    publish(db, EventType.MOVE_CHANGED, scope=ROOT, permission=P.POST_UPDATE, move_id=1, move_status="done")
+    publish(db, EventType.MOVE_CHANGED, scope=ROOT, permission=P.POST_UPDATE, move_id=2, move_status="done")
+    await db.commit()
+    render = hub.render.event
+
+    def picky(row, refetch_within_ms):
+        if json.loads(row.payload)["move_id"] == 1:
+            raise ValueError("a row this renderer cannot write")
+        return render(row, refetch_within_ms)
+
+    hub.render.event = picky
+    assert await hub.tick() == 2
+    assert [data.get("move_id") for _, _, event, data in queued(connection) if event == "move.changed"] == [2]
+
+
+async def test_an_archive_reaches_the_holders_who_lose_the_node(engine, db, events_on):
+    """Review: delivery after the tree reload left out the archived node, so its own holders never heard of it"""
+    group = await make_group(db)
+    post = await make_post(db, group_id=group.id)
+    hub = await hub_of(engine)
+    at_post = hub.attach(auth_of(1, grant(Node.post(post.id), P.POST_VIEW)), later(), None)
+    at_group = hub.attach(auth_of(2, grant(Node.group(group.id), P.POST_VIEW)), later(), None)
+    stranger = hub.attach(auth_of(3, grant(Node.post(post.id + 100), P.POST_VIEW)), later(), None)
+    post.is_deleted = True
+    db.add(post)
+    publish(db, EventType.SCOPE_CHANGED, scope=Node.post(post.id), permission=P.POST_VIEW)
+    await db.commit()
+    await hub.tick()
+    assert queued(at_post)[-1][2] == "scope.changed", "the holder at the archived post is told"
+    assert queued(at_group)[-1][2] == "scope.changed"
+    assert [event for _, _, event, _ in queued(stranger)] == ["ready"]

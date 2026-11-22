@@ -79,3 +79,14 @@ async def test_first_head_keeps_the_last_minute(engine):
 async def test_first_head_when_every_row_is_older(engine):
     await _insert(engine, 1, 2, age_seconds=600)
     assert await first_head(engine, 60) == 2
+
+
+async def test_first_head_watches_ids_still_in_flight_below_the_first_young_row(engine):
+    """Review: a transaction that took id 3 and commits after the start, while 4 is visible, was never watched"""
+    await _insert(engine, 1, 2, age_seconds=600)
+    await _insert(engine, 4, 5)                # 3: taken, not committed yet
+    head = await first_head(engine, 60)
+    gaps = tracker(head=head)
+    assert await _tick(engine, gaps) == [4, 5] and gaps.open_ids() == [3]
+    await _insert(engine, 3)
+    assert await _tick(engine, gaps) == [3]
