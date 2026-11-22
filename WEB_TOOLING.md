@@ -312,6 +312,7 @@ const events = startEvents({
     }
   },
   onReload: (refetch) => refetch(() => reloadWhatIsOnScreen({ headers: BACKGROUND })),
+  onRightsChanged: (refetch) => refetch(() => reloadMe({ headers: BACKGROUND })),        // GET /auth/me: menu, buttons
   onVisible: (run) => document.addEventListener("visibilitychange", () => { if (!document.hidden) run(); }),
 });
 // logout: events.stop()

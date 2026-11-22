@@ -450,6 +450,7 @@ sets it. All are one union, `components["schemas"]["StreamMessage"]`, discrimina
 | `ready` | First message of a connection | none |
 | `heartbeat` | About every 20 s | none |
 | `reload` | The server cannot replay from the position sent (unknown, too old, too far behind, from before a restore): refetch what is on screen | `refetch_within_ms` |
+| `rights_changed` | Your own rights in effect changed (see "Your own rights" below): reread `GET /auth/me` | `refetch_within_ms` |
 | `close` | The server ends the stream; the connection then ends | `data.reason`: `token_expired`, `session_ended`, `restart` |
 | `move.changed` | A queued move changed state (waiting, done, cancelled, failed) | `data.move_id`, `data.move_status` |
 | `scope.changed` | The scope tree changed around this node: a move (the node and its old place), an archive or a restore (the node), a create (the new node's parent: the group of a new post, the parent of a new group, the corps of a new brigade, the root for a new corps or a post or group directly under it) | none |
@@ -460,7 +461,7 @@ sets it. All are one union, `components["schemas"]["StreamMessage"]`, discrimina
 | `role.changed` | A role, its permissions or its state changed | `data.role_id` |
 | `dictionary.changed` | An entry of a dictionary changed | `data.dictionary`: `categories`, `signal_types`, `tags`, `media_formats`, `guides` |
 
-A domain event (every type but `ready`, `heartbeat`, `reload`, `close`) also carries `id`, `v`, `occurred_at`,
+A domain event (every type but `ready`, `heartbeat`, `reload`, `rights_changed`, `close`) also carries `id`, `v`, `occurred_at`,
 `scope` (`{kind, id}`; `id` absent at the root; absent when the event has no place: an event of one user, a role, a
 dictionary) and `refetch_within_ms`. A new type is added to the union: the exhaustive `switch` of the web client then
 fails to compile until it handles it.
@@ -481,6 +482,26 @@ user, certificate, role or dictionary waits in its queue.
 | `session.changed` | A login, a logout, a session ended by an administrator, by a revocation of its certificate, by a deactivation, archive or type change, by a refresh token used again. Never a session that only went idle or expired (computed when read), never a touch | Holders of `user.view` in effect at the user's home node, and the user (their own devices) | `GET /users/{subject_user_id}/sessions`; the online state and last login of the user record |
 | `role.changed` | A role is created, cloned, updated, archived, restored or deleted permanently, or a permission is added to it or removed from it | Holders of `role.view` at any node in effect (no `scope`) | `GET /roles/{role_id}` and `/permissions` (404 after a permanent delete); assignment lists that show the role |
 | `dictionary.changed` | An entry of a dictionary is created, updated, archived or restored (a guide's files too) | `categories`, `signal_types`, `tags`, `media_formats`: holders of `category.view`, `signal_type.view`, `tag.view`, `media_format.view` at any node in effect; `guides`: every stream (reading the guides needs only a login). No `scope` | The list named, and the pickers that use it |
+
+### Your own rights: `rights_changed`
+
+The menu and the buttons come from `GET /auth/me` (`permissions`, `system_permissions`, `root_permissions`,
+`post_permissions`, `group_permissions`). When what is in effect for the user changes, every stream of that user gets
+`rights_changed`, also when no event names them: a permission added to or removed from a role they hold (they may not
+hold `role.view`, so `role.changed` is not theirs), a role they hold archived or restored, a node where they hold a role
+archived or restored, a post or group moved into or out of a group where they hold a role, their own assignments or
+user type. The client rereads `GET /auth/me` with `X-Activity: background` after a random wait below
+`refetch_within_ms` and rebuilds the menu and the buttons from it; a page the user can no longer open answers `403` on
+its next request as before.
+
+- It carries no `id` (no event of the outbox) and is never sent at connect: read `GET /auth/me` on every page load as
+  today. While a stream is behind only one waits in its queue.
+- The server compares what is in effect, not what changed: a permission removed from a role that the user still holds
+  through another role, or one their user type never put in effect, sends nothing. A rare refetch finds nothing new.
+- A `user.changed` about the user themself or a `scope.changed` may come in the same moment: one refetch of
+  `GET /auth/me` serves them all.
+- Through events (a role, an assignment, an archive, a move) it comes within about a second; anything else (a change
+  made with events off) within 30 s, at the server's rights refresh.
 
 Not on events: audit log rows, backups and the database status, statistics. A database restore sends none of these
 (it is no request of the API): it ends the sessions of the backup (`close` `session_ended`), and a position from
@@ -528,7 +549,7 @@ receives.
 
 - A right lost stops the events of that place within 30 s (the same bound as `/stream`); a right lost or gained
   through the user's own assignments, user type or a role they hold applies at once, with the `user.changed` or
-  `role.changed` that tells of it.
+  `role.changed` that tells of it; the tab learns of its own new rights from `rights_changed`.
 - A session that ends (logout, idle timeout, a revocation, an account or certificate change) closes its streams with
   `session_ended` within 10 s: stop and leave the page to the normal flow.
 - The access token's expiry closes the stream with `token_expired`: refresh with `X-Activity: background`, then

@@ -5,6 +5,22 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Real-time events: rights_changed
+
+### Added
+
+- Stream message `rights_changed` (`StreamRightsChanged`: `type`, `refetch_within_ms`; a new member of
+  `StreamMessage`, no `id`, like `reload`): the rights in effect for the user changed, also when no event names them (a
+  permission added to or removed from a role they hold without `role.view`, a role they hold archived or restored, a
+  node where they hold a role archived or restored, a post or group moved into or out of a group where they hold a
+  role, their own assignments or type). The tab rereads `GET /auth/me` after a random wait below `refetch_within_ms`.
+  Sent to every stream of that user by each hub holding one (nothing is published to the outbox: the hub compares a
+  fingerprint of what is in effect after every load of the tree or of grants); never at connect; conflated, one waits
+  per stream; a change in effect only (a permission still held through another role, or outside the user type, sends
+  nothing). Within about a second through events, within 30 s otherwise (the rights refresh). The web translates
+  nothing (no code); its exhaustive `switch` handles the new type: the web kit's `startEvents` takes the required
+  option `onRightsChanged`. API.md, "Your own rights: `rights_changed`".
+
 ## Real-time events: fixes
 
 ### Fixed

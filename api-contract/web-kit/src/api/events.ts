@@ -14,6 +14,7 @@ export interface EventsOptions {
   refresh: () => Promise<boolean>;                    // refresh with BACKGROUND; false: the session is over
   onEvent: (event: DomainEvent, refetch: Refetch) => void;
   onReload: (refetch: Refetch) => void;               // refetch everything on screen
+  onRightsChanged: (refetch: Refetch) => void;        // reread GET /auth/me: the menu and the buttons
   onStop?: (why: string) => void;
   // for tests and special hosts
   fetch?: typeof fetch;
@@ -97,6 +98,7 @@ export function startEvents(o: EventsOptions): { stop: () => void } {
     switch (message.type) {
       case "ready": case "heartbeat": return "go";
       case "reload": o.onReload(spread(message.refetch_within_ms)); return "go";
+      case "rights_changed": o.onRightsChanged(spread(message.refetch_within_ms)); return "go";   // no id: never skipped
       case "close":
         if (message.data.reason === "session_ended") stop("session_ended");
         else if (message.data.reason === "token_expired") o.refresh().then((ok) => (ok ? later(0) : stop("session_ended")));

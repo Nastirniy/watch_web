@@ -26,12 +26,13 @@ function server(answers) {
 }
 
 function start(fetch, overrides = {}) {
-  const seen = { events: [], reloads: 0, stops: [], refreshes: 0 };
+  const seen = { events: [], reloads: 0, rights: 0, stops: [], refreshes: 0 };
   const handle = startEvents({
     url: "/stream", token: () => "t", fetch, random: () => 0, protocol: () => "h2", hidden: () => false,
     refresh: async () => { seen.refreshes += 1; return true; },
     onEvent: (message, refetch) => refetch(() => seen.events.push(message.id)),
     onReload: (refetch) => refetch(() => { seen.reloads += 1; }),
+    onRightsChanged: (refetch) => refetch(() => { seen.rights += 1; }),
     onStop: (why) => seen.stops.push(why),
     ...overrides,
   });
@@ -128,6 +129,18 @@ test("a reload refetches what is on screen", async () => {
   const { fetch } = server([[sse(1, "ready"), sse(1, "reload", { refetch_within_ms: 0 })]]);
   const { seen, handle } = start(fetch);
   await until(() => seen.reloads === 1);
+  handle.stop();
+});
+
+test("rights_changed rereads the user's own rights, each time, after the wait it carries", async () => {
+  const { fetch } = server([[sse(1, "ready"), sse(2, "rights_changed", { refetch_within_ms: 40 }),
+    sse(3, "rights_changed", { refetch_within_ms: 40 })]]);
+  const { seen, handle } = start(fetch, { random: () => 0.5 });   // 20 ms
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(seen.rights, 0, "never at once");
+  await until(() => seen.rights === 2);
+  assert.deepEqual(seen.events, [], "no domain event");
+  assert.equal(seen.reloads, 0);
   handle.stop();
 });
 
