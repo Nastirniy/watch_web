@@ -40053,7 +40053,7 @@
         "properties": {
           "dictionary": {
             "$ref": "#/components/schemas/Dictionary",
-            "description": "The list to read again: categories, signal_types, tags, media_formats (GET /media-formats) or guides (GET /guides)"
+            "description": "The list to read again: categories, signal_types, tags, media_formats (GET /media-formats/list-all) or guides (GET /guides)"
           }
         },
         "type": "object",

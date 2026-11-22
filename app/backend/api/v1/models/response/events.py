@@ -78,7 +78,7 @@ class RoleChangedData(BaseModel):
 
 class DictionaryChangedData(BaseModel):
     dictionary: Dictionary = Field(description="The list to read again: categories, signal_types, tags, media_formats "
-                                               "(GET /media-formats) or guides (GET /guides)")
+                                               "(GET /media-formats/list-all) or guides (GET /guides)")
 
 
 class CloseData(BaseModel):
