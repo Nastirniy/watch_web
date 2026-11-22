@@ -521,3 +521,68 @@ def nginx_headers(cert: x509.Certificate) -> dict:
         "X-SSL-Client-Serial": serial.to_bytes((serial.bit_length() + 7) // 8, "big").hex().upper(),
         "X-SSL-Client-Fingerprint": hashlib.sha1(cert.public_bytes(serialization.Encoding.DER)).hexdigest(),
     }
+
+class OpenStream:
+    """A streaming response read through the ASGI app directly: httpx's ASGITransport buffers a whole response, so an
+    endless stream would hang. The test controls the end of the request (disconnect) and reads the messages."""
+
+    def __init__(self, app, path: str, headers: Dict[str, str]):
+        import asyncio
+        self.app, self.path, self.headers = app, path, headers
+        self.sent = asyncio.Queue()
+        self.gone = asyncio.Event()
+        self.requested = False
+        self.status: Optional[int] = None
+        self.response_headers: Dict[str, str] = {}
+        self.task = None
+        self.ended = False
+
+    async def _receive(self):
+        if not self.requested:
+            self.requested = True
+            return {"type": "http.request", "body": b"", "more_body": False}
+        await self.gone.wait()
+        return {"type": "http.disconnect"}
+
+    async def _send(self, message):
+        await self.sent.put(message)
+
+    async def start(self, timeout: float = 5.0) -> "OpenStream":
+        import asyncio
+        scope = {
+            "type": "http", "asgi": {"version": "3.0", "spec_version": "2.3"}, "http_version": "1.1",
+            "method": "GET", "scheme": "http", "path": self.path, "raw_path": self.path.encode(), "root_path": "",
+            "query_string": b"", "headers": [(k.lower().encode(), v.encode()) for k, v in self.headers.items()],
+            "client": ("127.0.0.1", 50000), "server": ("testserver", 80),
+        }
+        self.task = asyncio.create_task(self.app(scope, self._receive, self._send))
+        start = await asyncio.wait_for(self.sent.get(), timeout)
+        self.status = start["status"]
+        self.response_headers = {k.decode().lower(): v.decode() for k, v in start["headers"]}
+        return self
+
+    async def chunk(self, timeout: float = 5.0) -> bytes:
+        """The next body message (ended is True after the last one)"""
+        import asyncio
+        message = await asyncio.wait_for(self.sent.get(), timeout)
+        self.ended = not message.get("more_body", False)
+        return message.get("body", b"")
+
+    async def body(self, timeout: float = 5.0) -> bytes:
+        """Every chunk until the response ends"""
+        parts = []
+        while not self.ended:
+            parts.append(await self.chunk(timeout))
+        return b"".join(parts)
+
+    async def disconnect(self, timeout: float = 5.0) -> None:
+        import asyncio
+        self.gone.set()
+        await asyncio.wait_for(self.task, timeout)
+
+
+async def open_stream(app, path: str, headers: Dict[str, str], last_event_id: Optional[str] = None) -> OpenStream:
+    sent = dict(headers)
+    if last_event_id is not None:
+        sent["Last-Event-ID"] = last_event_id
+    return await OpenStream(app, path, sent).start()

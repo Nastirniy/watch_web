@@ -171,3 +171,18 @@ async def test_real_bodies_validate_against_their_problem_schema(client, db, hea
 def test_openapi_is_json_serialisable_and_compact(schema):
     size = len(json.dumps(schema, separators=(",", ":")))
     assert size < 2_000_000, f"openapi.json is {size} bytes"
+
+
+def test_the_stream_of_events_is_one_named_message_schema(schema):
+    """FastAPI writes {"type": "string"} next to the model of a non-JSON class; openapi-typescript would give
+    string & (union). The media type holds only the $ref (errors/openapi.py _finish)"""
+    from app.backend.enums.media_types import ContentType
+    from app.backend.enums.routes import EventRoutes
+    operation = schema["paths"][V1.path(EventRoutes.STREAM)]["get"]
+    media = operation["responses"]["200"]["content"]
+    assert list(media) == [ContentType.EVENT_STREAM.value]
+    assert media[ContentType.EVENT_STREAM.value]["schema"] == {"$ref": "#/components/schemas/StreamMessage"}
+    assert "content" not in operation["responses"]["204"]
+    assert "EventStreamCapacityProblem" in _codes(operation["responses"]["503"])
+    message = schema["components"]["schemas"]["StreamMessage"]
+    assert message["discriminator"]["propertyName"] == "type"

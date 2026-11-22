@@ -9,6 +9,20 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ### Added
 
+- `GET /api/v1/events/stream` (tag `EVENTS`, operation `stream_events`): a `text/event-stream` of hints that something
+  on screen changed, for any authenticated user, read with `fetch` over HTTP/2. Thin events: no data, the client
+  refetches through REST. Messages are the union `StreamMessage` (discriminated by `type`): `ready`, `heartbeat`,
+  `reload`, `close` (`data.reason`: `token_expired`, `session_ended`, `restart`), and the domain events
+  `move.changed` (`data.move_id`, `data.move_status`) and `scope.changed`. A domain event carries `id`, `v`,
+  `occurred_at`, `scope` (absent for an event of one user) and `refetch_within_ms`. The `id:` line of each block is
+  a position to send back as `Last-Event-ID`; a position the server cannot answer for gives `reload`. 204 while
+  events are off (`MYSETTINGS_EVENTS__ENABLED`, false by default); new problem `event_stream_capacity` (503 with
+  `Retry-After`). Opening or holding a stream is not activity. API.md, "Real-time events".
+- Table `outbox_events` (migration 037): one row per event in the transaction of the change, deleted after
+  `events.retention_seconds` (1 hour). Delivery data, never a record. Published today: `move.changed` at every state
+  change of a queued move (to `post.update` holders at the node and to the requester), `scope.changed` when a post,
+  group, corps or brigade moves (the node and its old place), is archived or restored (the node, once per
+  operation).
 - `X-Activity: background` on any request: authorized as any other, but it does not count as activity, so the session
   is not touched (`last_activity` and the idle end stay). For requests the user did not cause: pollers, refetches an
   event asked for, the refresh of a tab for its stream. `POST /auth/refresh` with the header still rotates its tokens

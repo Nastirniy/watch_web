@@ -4,7 +4,8 @@ outbox_events: id BIGINT UNSIGNED auto-increment (2^31 ids are 250 days at 100 a
 v SMALLINT (payload version), scope_key VARCHAR(24) null (root, g:<id>, p:<id>; null: personal only), permission
 VARCHAR(48) null, user_id INT null (also this user), conflate_key VARCHAR(48) null, payload VARCHAR(512) (JSON of the
 catalog's typed params, enums/events.py keeps every event below it), occurred_at DATETIME(6) default the database
-clock (lag and retention).
+clock in UTC, UTC_TIMESTAMP(6) whatever the session time zone, like every time the application stores (lag and
+retention are computed against the same clock).
 
 A row is written in the transaction of the change (services/events/publish.py), read by every api worker and
 deleted after events.retention_seconds by the media worker: delivery data, never a record.
@@ -56,7 +57,7 @@ def upgrade() -> None:
         sa.Column("payload", sa.String(length=512), nullable=False),
         sa.Column("occurred_at", sa.DateTime().with_variant(mysql.DATETIME(fsp=6), "mysql").with_variant(
             mysql.DATETIME(fsp=6), "mariadb"), nullable=False,
-            server_default=sa.text("CURRENT_TIMESTAMP(6)") if op.get_bind().dialect.name in ("mysql", "mariadb")
+            server_default=sa.text("(UTC_TIMESTAMP(6))") if op.get_bind().dialect.name in ("mysql", "mariadb")
             else sa.text("CURRENT_TIMESTAMP")),
         mysql_engine="InnoDB",
     )

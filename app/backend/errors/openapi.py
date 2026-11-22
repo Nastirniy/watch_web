@@ -221,6 +221,11 @@ def _finish(schema: Dict[str, Any]) -> None:
     for path_item in schema.get("paths", {}).values():
         for operation in path_item.values():
             for status, response in operation.get("responses", {}).items():
+                for media_type, media in response.get("content", {}).items():
+                    # FastAPI writes {"type": "string"} next to the model of any non-JSON response class, and
+                    # openapi-typescript then gives string & (union): the stream's schema is one message
+                    if media_type == ContentType.EVENT_STREAM.value:
+                        media.get("schema", {}).pop("type", None)
                 if str(status)[:1] not in ("4", "5") or "content" not in response:
                     continue
                 # FastAPI puts additional responses under the route's media type; errors are problem+json

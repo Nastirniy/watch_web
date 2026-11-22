@@ -9,7 +9,7 @@ from app.backend.enums.routes import APIVersionRoutes
 from app.backend.api.v1 import (
     auth, users, user_certificates, certificates, roles, categories, signal_types, tags, observations, posts,
     scope_groups, corps, brigades, media, media_uploads, media_formats, search, statistics, user_types, database, audit_logs,
-    guides, moves,
+    guides, moves, events,
 )
 
 # Order matters only inside one prefix: users before user_certificates (both under /users), media before
@@ -18,5 +18,5 @@ V1 = PublishedVersion(
     APIVersionRoutes.V1,
     auth, users, user_certificates, certificates, roles, categories, signal_types, tags, observations, posts,
     scope_groups, corps, brigades, media, media_uploads, media_formats, search, statistics, user_types, database, audit_logs,
-    guides, moves,
+    guides, moves, events,
 )

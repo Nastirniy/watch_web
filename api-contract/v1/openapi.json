@@ -33877,6 +33877,128 @@
           }
         }
       }
+    },
+    "/api/v1/events/stream": {
+      "get": {
+        "tags": [
+          "EVENTS"
+        ],
+        "summary": "Stream Events",
+        "description": "The stream of events: a hint that something on screen changed, never data and never history. Everything works\nwithout it; refetch through the REST routes when an event says so. Any authenticated user; one stream per tab,\nread with fetch (Authorization: Bearer, Accept: text/event-stream), only over HTTP/2 (API.md).\n\nMessages (StreamMessage, discriminated by type): ready first; heartbeat about every 20 s; reload when the\nserver cannot replay from the position sent (refetch everything on screen); close with a reason before the\nserver ends the stream; domain events (move.changed, scope.changed). A domain event carries refetch_within_ms:\nrefetch after a random wait below it, never at once.\n\nTwo ids, both opaque. The `id:` line of every block is a position: store it (heartbeats included) and send it\nback as Last-Event-ID when reconnecting; never compare or compute it. A position this server cannot answer for\n(unknown, malformed, too old, from before a restore) gives reload, never an error. The `id` in the JSON is the\nidentity of an event: ignore one already seen (delivery is at least once). Order holds within one resource only.\n\nOpening a stream and keeping it open is not activity: the session is not touched, so an idle tab still reaches\nthe idle timeout. The stream closes with token_expired at the expiry of the access token (refresh with\nX-Activity: background, then reconnect), with session_ended within 10 s of a logout, an idle end, a revocation or\nan account change (stop), and with restart when the server stops (reconnect after its retry). A right lost\nstops the events of that place within 30 s.\n\n204: events are off on this server, do not reconnect until the page reloads. 503 event_stream_capacity with\nRetry-After: this server holds as many streams as it can, or it is stopping; back off. 429, 502, 503 and 504\nwithout a problem body come from nginx (too many streams of one certificate, the API restarting): back off by\nstatus.",
+        "operationId": "stream_events",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last-Event-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One text/event-stream message per item: `event:` is the `type`, `data:` this JSON, `id:` the position to send back as Last-Event-ID",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamMessage"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountDeactivatedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountDeletedProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountNotFoundProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialsRequiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidTokenProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionExpiredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "account_deactivated": "#/components/schemas/AccountDeactivatedProblem",
+                      "account_deleted": "#/components/schemas/AccountDeletedProblem",
+                      "account_not_found": "#/components/schemas/AccountNotFoundProblem",
+                      "credentials_required": "#/components/schemas/CredentialsRequiredProblem",
+                      "invalid_token": "#/components/schemas/InvalidTokenProblem",
+                      "session_expired": "#/components/schemas/SessionExpiredProblem",
+                      "token_certificate_mismatch": "#/components/schemas/TokenCertificateMismatchProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_error`: Request validation failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorProblem"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "Events are off on this server: do not reconnect"
+          },
+          "503": {
+            "description": "`event_stream_capacity`: Event stream unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventStreamCapacityProblem"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -38458,6 +38580,19 @@
           }
         ]
       },
+      "CloseData": {
+        "properties": {
+          "reason": {
+            "$ref": "#/components/schemas/StreamCloseReason",
+            "description": "token_expired: refresh (X-Activity: background) and reconnect; session_ended: stop; restart: reconnect after the retry it carries"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "title": "CloseData"
+      },
       "ConfidenceLevel": {
         "type": "string",
         "enum": [
@@ -39864,6 +39999,100 @@
             "status": 415,
             "title": "Document text is not valid UTF-8",
             "type": "https://example.org/problems/document_text_invalid"
+          }
+        ]
+      },
+      "EmptyData": {
+        "properties": {},
+        "additionalProperties": false,
+        "type": "object",
+        "title": "EmptyData",
+        "description": "No data: the type says everything"
+      },
+      "EventScope": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "root",
+              "group",
+              "post"
+            ],
+            "title": "Kind"
+          },
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "Id of the group or the post; absent at the root"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "title": "EventScope",
+        "description": "Where the event happened: the root, a scope group or a post"
+      },
+      "EventStreamCapacityProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Event stream unavailable",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 503,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "This server cannot open another event stream now; try again later"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "event_stream_capacity",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "EventStreamCapacityProblem",
+        "description": "Event stream unavailable (HTTP 503). Problem type event_stream_capacity.",
+        "examples": [
+          {
+            "code": "event_stream_capacity",
+            "detail": "This server cannot open another event stream now; try again later",
+            "instance": "/api/v1/...",
+            "status": 503,
+            "title": "Event stream unavailable",
+            "type": "https://example.org/problems/event_stream_capacity"
           }
         ]
       },
@@ -46628,6 +46857,78 @@
         ],
         "title": "MoveCancelledAuditParams",
         "description": "Params of move.cancelled (Queued move cancelled)"
+      },
+      "MoveChanged": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Identity of the event, for ignoring a repeat (at-least-once delivery). Opaque: never compare, compute or parse it; it may be lower than a position already seen"
+          },
+          "v": {
+            "type": "integer",
+            "title": "V",
+            "description": "Version of data for this type"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/EventScope",
+            "description": "Where it happened; absent: an event for this user only"
+          },
+          "refetch_within_ms": {
+            "type": "integer",
+            "title": "Refetch Within Ms",
+            "description": "Refetch what this event concerns after a random wait below this many milliseconds, never at once: the server spreads the refetches of everyone who received it. A user's own action is refetched at once by the page that made it"
+          },
+          "type": {
+            "type": "string",
+            "const": "move.changed",
+            "title": "Type"
+          },
+          "data": {
+            "$ref": "#/components/schemas/MoveChangedData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "v",
+          "occurred_at",
+          "refetch_within_ms",
+          "type",
+          "data"
+        ],
+        "title": "MoveChanged",
+        "description": "A move changed state (waiting, done, cancelled, failed): read GET /moves/{move_id}; when it is done the tree\nchanged too (a scope.changed follows)"
+      },
+      "MoveChangedData": {
+        "properties": {
+          "move_id": {
+            "type": "integer",
+            "title": "Move Id",
+            "description": "Read GET /moves/{move_id}"
+          },
+          "move_status": {
+            "type": "string",
+            "enum": [
+              "waiting",
+              "done",
+              "cancelled",
+              "failed"
+            ],
+            "title": "Move Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "move_id",
+          "move_status"
+        ],
+        "title": "MoveChangedData"
       },
       "MoveCompletedAuditEntry": {
         "properties": {
@@ -57451,6 +57752,53 @@
         ],
         "title": "RouteAccessResponse"
       },
+      "ScopeChanged": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Identity of the event, for ignoring a repeat (at-least-once delivery). Opaque: never compare, compute or parse it; it may be lower than a position already seen"
+          },
+          "v": {
+            "type": "integer",
+            "title": "V",
+            "description": "Version of data for this type"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/EventScope",
+            "description": "Where it happened; absent: an event for this user only"
+          },
+          "refetch_within_ms": {
+            "type": "integer",
+            "title": "Refetch Within Ms",
+            "description": "Refetch what this event concerns after a random wait below this many milliseconds, never at once: the server spreads the refetches of everyone who received it. A user's own action is refetched at once by the page that made it"
+          },
+          "type": {
+            "type": "string",
+            "const": "scope.changed",
+            "title": "Type"
+          },
+          "data": {
+            "$ref": "#/components/schemas/EmptyData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "v",
+          "occurred_at",
+          "refetch_within_ms",
+          "type",
+          "data"
+        ],
+        "title": "ScopeChanged",
+        "description": "The scope tree changed around this node (a move, an archive, a restore): reread GET /auth/me and the tree"
+      },
       "ScopeGroupArchiveAuditEntry": {
         "properties": {
           "id": {
@@ -64132,6 +64480,121 @@
             "type": "https://example.org/problems/storyboard_unsupported"
           }
         ]
+      },
+      "StreamClose": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "close",
+            "title": "Type"
+          },
+          "data": {
+            "$ref": "#/components/schemas/CloseData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "data"
+        ],
+        "title": "StreamClose",
+        "description": "The server ends the stream; the connection then ends"
+      },
+      "StreamCloseReason": {
+        "type": "string",
+        "enum": [
+          "token_expired",
+          "session_ended",
+          "restart"
+        ],
+        "title": "StreamCloseReason",
+        "description": "Why the server ends a stream (the close message)"
+      },
+      "StreamHeartbeat": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "heartbeat",
+            "title": "Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "StreamHeartbeat",
+        "description": "About every 20 s. It carries the position too: store its id"
+      },
+      "StreamMessage": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/MoveChanged"
+          },
+          {
+            "$ref": "#/components/schemas/ScopeChanged"
+          },
+          {
+            "$ref": "#/components/schemas/StreamReady"
+          },
+          {
+            "$ref": "#/components/schemas/StreamHeartbeat"
+          },
+          {
+            "$ref": "#/components/schemas/StreamReload"
+          },
+          {
+            "$ref": "#/components/schemas/StreamClose"
+          }
+        ],
+        "title": "StreamMessage",
+        "description": "One message of the stream: event: is its type, data: this JSON",
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "close": "#/components/schemas/StreamClose",
+            "heartbeat": "#/components/schemas/StreamHeartbeat",
+            "move.changed": "#/components/schemas/MoveChanged",
+            "ready": "#/components/schemas/StreamReady",
+            "reload": "#/components/schemas/StreamReload",
+            "scope.changed": "#/components/schemas/ScopeChanged"
+          }
+        }
+      },
+      "StreamReady": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "ready",
+            "title": "Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "StreamReady",
+        "description": "The first message of a connection"
+      },
+      "StreamReload": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "reload",
+            "title": "Type"
+          },
+          "refetch_within_ms": {
+            "type": "integer",
+            "title": "Refetch Within Ms",
+            "description": "Refetch what this event concerns after a random wait below this many milliseconds, never at once: the server spreads the refetches of everyone who received it. A user's own action is refetched at once by the page that made it"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "refetch_within_ms"
+        ],
+        "title": "StreamReload",
+        "description": "Too far behind, a position this server cannot answer for, or from before a restore: refetch what is on screen"
       },
       "SystemAssignmentCreate": {
         "properties": {

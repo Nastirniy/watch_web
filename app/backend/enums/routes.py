@@ -372,6 +372,16 @@ class AuditRoutes(str, Enum):
         return "AUDIT"
 
 
+class EventRoutes(str, Enum):
+    """The stream of events to the web client; served through an nginx location of its own"""
+    BASE = "/events"
+    STREAM = "/stream"
+
+    @staticmethod
+    def tag() -> str:
+        return "EVENTS"
+
+
 class SignerRoutes(str, Enum):
     """Paths of the signing service (a separate app on a Unix socket, not part of the main app)"""
     SIGN_CLIENT = "/sign/client"
@@ -405,3 +415,4 @@ class Routes:
     SEARCH = SearchRoutes
     DATABASE = DatabaseRoutes
     AUDIT = AuditRoutes
+    EVENTS = EventRoutes

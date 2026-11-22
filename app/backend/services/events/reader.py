@@ -2,7 +2,8 @@
 
 A tick is two statements in one short transaction, ended at once: a poller in one open transaction would see nothing
 new (proved). The new rows above the head, and the ids the gap tracker still watches (late commits). Times come from
-the database clock only: the rows carry it (occurred_at), and the lag and the retention boundary are computed there.
+the database clock only, in UTC: the rows carry it (occurred_at), and the lag and the retention boundary are computed
+there.
 """
 from dataclasses import dataclass
 from datetime import datetime
@@ -39,14 +40,14 @@ def _is_sqlite(connection: AsyncConnection) -> bool:
 def _lag_ms(connection: AsyncConnection) -> ColumnElement:
     if _is_sqlite(connection):
         return cast((func.julianday("now") - func.julianday(T.occurred_at)) * 86400000, Integer)
-    return literal_column("TIMESTAMPDIFF(MICROSECOND, occurred_at, NOW(6)) DIV 1000")
+    return literal_column("TIMESTAMPDIFF(MICROSECOND, occurred_at, UTC_TIMESTAMP(6)) DIV 1000")
 
 
 def cutoff(connection: AsyncConnection, seconds: int) -> ColumnElement:
-    """The database clock minus seconds, comparable with occurred_at"""
+    """The database clock (UTC) minus seconds, comparable with occurred_at"""
     if _is_sqlite(connection):
         return func.datetime("now", f"-{int(seconds)} seconds")
-    return text("NOW(6) - INTERVAL :cutoff_seconds SECOND").bindparams(cutoff_seconds=int(seconds))
+    return text("UTC_TIMESTAMP(6) - INTERVAL :cutoff_seconds SECOND").bindparams(cutoff_seconds=int(seconds))
 
 
 def _columns(connection: AsyncConnection):

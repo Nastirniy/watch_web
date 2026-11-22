@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
@@ -13,6 +14,9 @@ from app.backend.enums.errors import ErrorCode
 from app.backend.errors.openapi import problems
 from app.backend.api.v1 import V1
 from app.backend.api.system import health, problems as problem_pages
+from app.backend.api.v1.models.response.events import render_v1
+from app.backend.database import create_events_engine
+from app.backend.services.events.hub import EventHub
 from app.backend.enums.routes import AuthRoutes, DocsRoutes, SystemRoutes
 
 # Initialize logging system
@@ -62,6 +66,24 @@ operation ids are the endpoint names (`update_post`).
 """
 
 
+async def start_event_hub(app: FastAPI) -> None:
+    """The hub of this process when events are on and this process serves the streams (events.serve_streams false:
+    it only publishes, a separate process serves them); app.state.event_hub None otherwise: the route answers 204"""
+    app.state.event_hub = None
+    if settings.events.enabled and settings.events.serve_streams:
+        hub = EventHub(await create_events_engine(), render_v1, settings.events, settings.server.workers)
+        await hub.start()
+        hub.install_drain(asyncio.get_running_loop())
+        app.state.event_hub = hub
+
+
+async def stop_event_hub(app: FastAPI) -> None:
+    hub = getattr(app.state, "event_hub", None)
+    if hub is not None:
+        await hub.stop()
+        app.state.event_hub = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifecycle"""
@@ -72,9 +94,11 @@ async def lifespan(app: FastAPI):
         _logger.info("Starting application...")
         await initialize_database_with_migrations()
         await publish_crl_at_startup()
+        await start_event_hub(app)
         _logger.info("Database initialization completed. Server ready.")
         yield
         _logger.info("Shutting down application...")
+        await stop_event_hub(app)
     except Exception as e:
         _logger.error(f"Startup failed: {e}")
         import traceback

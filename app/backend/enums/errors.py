@@ -360,6 +360,11 @@ class ErrorCode(ProblemType):
         "Uploads hold this move, and the request also changes: {changed_fields}. Send the move on its own",
         changed_fields=List[str]))
 
+    # ---------------------------------------------------------------- events
+    # This worker holds events.max_streams_per_worker streams, or it is stopping (Retry-After)
+    EVENT_STREAM_CAPACITY = ("event_stream_capacity", problem(
+        503, "Event stream unavailable", "This server cannot open another event stream now; try again later"))
+
     # ---------------------------------------------------------------- dictionaries
     CATEGORY_NOT_FOUND = ("category_not_found", problem(404, "Category not found", category_id=Optional[int]))
     CATEGORY_NOT_ARCHIVED = ("category_not_archived", problem(409, "Category is not archived"))
