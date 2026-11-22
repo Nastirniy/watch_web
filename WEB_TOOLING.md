@@ -301,6 +301,7 @@ const events = startEvents({
     switch (event.type) {
       case "move.changed": refetch(() => reloadMove(event.data.move_id, { headers: BACKGROUND })); break;
       case "scope.changed": refetch(() => reloadTreeAndMe({ headers: BACKGROUND })); break;
+      case "security.certificate_mismatch": notifySecurity(event.data.audit_log_id); break;     // audit.view holders
       default: { const unhandled: never = event; return unhandled; }      // a new event type fails here
     }
   },

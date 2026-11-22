@@ -33884,7 +33884,7 @@
           "EVENTS"
         ],
         "summary": "Stream Events",
-        "description": "The stream of events: a hint that something on screen changed, never data and never history. Everything works\nwithout it; refetch through the REST routes when an event says so. Any authenticated user; one stream per tab,\nread with fetch (Authorization: Bearer, Accept: text/event-stream), only over HTTP/2 (API.md).\n\nMessages (StreamMessage, discriminated by type): ready first; heartbeat about every 20 s; reload when the\nserver cannot replay from the position sent (refetch everything on screen); close with a reason before the\nserver ends the stream; domain events (move.changed, scope.changed). A domain event carries refetch_within_ms:\nrefetch after a random wait below it, never at once.\n\nTwo ids, both opaque. The `id:` line of every block is a position: store it (heartbeats included) and send it\nback as Last-Event-ID when reconnecting; never compare or compute it. A position this server cannot answer for\n(unknown, malformed, too old, from before a restore) gives reload, never an error. The `id` in the JSON is the\nidentity of an event: ignore one already seen (delivery is at least once). Order holds within one resource only.\n\nOpening a stream and keeping it open is not activity: the session is not touched, so an idle tab still reaches\nthe idle timeout. The stream closes with token_expired at the expiry of the access token (refresh with\nX-Activity: background, then reconnect), with session_ended within 10 s of a logout, an idle end, a revocation or\nan account change (stop), and with restart when the server stops (reconnect after its retry). A right lost\nstops the events of that place within 30 s.\n\n204: events are off on this server, do not reconnect until the page reloads. 503 event_stream_capacity with\nRetry-After: this server holds as many streams as it can, or it is stopping; back off. 429, 502, 503 and 504\nwithout a problem body come from nginx (too many streams of one certificate, the API restarting): back off by\nstatus.",
+        "description": "The stream of events: a hint that something on screen changed, never data and never history. Everything works\nwithout it; refetch through the REST routes when an event says so. Any authenticated user; one stream per tab,\nread with fetch (Authorization: Bearer, Accept: text/event-stream), only over HTTP/2 (API.md).\n\nMessages (StreamMessage, discriminated by type): ready first; heartbeat about every 20 s; reload when the\nserver cannot replay from the position sent (refetch everything on screen); close with a reason before the\nserver ends the stream; domain events (move.changed, scope.changed, security.certificate_mismatch). A domain\nevent carries refetch_within_ms: refetch after a random wait below it, never at once.\n\nTwo ids, both opaque. The `id:` line of every block is a position: store it (heartbeats included) and send it\nback as Last-Event-ID when reconnecting; never compare or compute it. A position this server cannot answer for\n(unknown, malformed, too old, from before a restore) gives reload, never an error. The `id` in the JSON is the\nidentity of an event: ignore one already seen (delivery is at least once). Order holds within one resource only.\n\nOpening a stream and keeping it open is not activity: the session is not touched, so an idle tab still reaches\nthe idle timeout. The stream closes with token_expired at the expiry of the access token (refresh with\nX-Activity: background, then reconnect), with session_ended within 10 s of a logout, an idle end, a revocation or\nan account change (stop), and with restart when the server stops (reconnect after its retry). A right lost\nstops the events of that place within 30 s.\n\n204: events are off on this server, do not reconnect until the page reloads. 503 event_stream_capacity with\nRetry-After: this server holds as many streams as it can, or it is stopping; back off. 429, 502, 503 and 504\nwithout a problem body come from nginx (too many streams of one certificate, the API restarting): back off by\nstatus.",
         "operationId": "stream_events",
         "security": [
           {
@@ -37883,6 +37883,26 @@
         ],
         "title": "CertificateIssueRequest",
         "description": "Body of POST /users/{user_id}/certificates"
+      },
+      "CertificateMismatchData": {
+        "properties": {
+          "audit_log_id": {
+            "type": "integer",
+            "title": "Audit Log Id",
+            "description": "Read GET /audit-logs/{audit_log_id}"
+          },
+          "session_user_id": {
+            "type": "integer",
+            "title": "Session User Id",
+            "description": "The user whose session's token came with another client certificate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "audit_log_id",
+          "session_user_id"
+        ],
+        "title": "CertificateMismatchData"
       },
       "CertificateNotActiveProblem": {
         "properties": {
@@ -61605,6 +61625,53 @@
         "title": "SearchUsersAuditParams",
         "description": "Params of search.users (Users searched)"
       },
+      "SecurityCertificateMismatch": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Identity of the event, for ignoring a repeat (at-least-once delivery). Opaque: never compare, compute or parse it; it may be lower than a position already seen"
+          },
+          "v": {
+            "type": "integer",
+            "title": "V",
+            "description": "Version of data for this type"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/EventScope",
+            "description": "Where it happened; absent: an event for this user only"
+          },
+          "refetch_within_ms": {
+            "type": "integer",
+            "title": "Refetch Within Ms",
+            "description": "Refetch what this event concerns after a random wait below this many milliseconds, never at once: the server spreads the refetches of everyone who received it. A user's own action is refetched at once by the page that made it"
+          },
+          "type": {
+            "type": "string",
+            "const": "security.certificate_mismatch",
+            "title": "Type"
+          },
+          "data": {
+            "$ref": "#/components/schemas/CertificateMismatchData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "v",
+          "occurred_at",
+          "refetch_within_ms",
+          "type",
+          "data"
+        ],
+        "title": "SecurityCertificateMismatch",
+        "description": "A valid token of a session was presented with another client certificate: the request was refused, the session\nstays, and an audit row session.certificate_mismatch records it (at most one per session in 5 minutes, and this\nevent exactly as often). Sent to the holders of audit.view only, never to the user of the session"
+      },
       "ServiceStatusModel": {
         "properties": {
           "status": {
@@ -64608,6 +64675,9 @@
             "$ref": "#/components/schemas/ScopeChanged"
           },
           {
+            "$ref": "#/components/schemas/SecurityCertificateMismatch"
+          },
+          {
             "$ref": "#/components/schemas/StreamReady"
           },
           {
@@ -64630,7 +64700,8 @@
             "move.changed": "#/components/schemas/MoveChanged",
             "ready": "#/components/schemas/StreamReady",
             "reload": "#/components/schemas/StreamReload",
-            "scope.changed": "#/components/schemas/ScopeChanged"
+            "scope.changed": "#/components/schemas/ScopeChanged",
+            "security.certificate_mismatch": "#/components/schemas/SecurityCertificateMismatch"
           }
         }
       },

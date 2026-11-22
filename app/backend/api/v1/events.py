@@ -44,8 +44,8 @@ async def stream_events(
 
     Messages (StreamMessage, discriminated by type): ready first; heartbeat about every 20 s; reload when the
     server cannot replay from the position sent (refetch everything on screen); close with a reason before the
-    server ends the stream; domain events (move.changed, scope.changed). A domain event carries refetch_within_ms:
-    refetch after a random wait below it, never at once.
+    server ends the stream; domain events (move.changed, scope.changed, security.certificate_mismatch). A domain
+    event carries refetch_within_ms: refetch after a random wait below it, never at once.
 
     Two ids, both opaque. The `id:` line of every block is a position: store it (heartbeats included) and send it
     back as Last-Event-ID when reconnecting; never compare or compute it. A position this server cannot answer for

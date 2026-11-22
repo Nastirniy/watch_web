@@ -5,6 +5,16 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Real-time events: follow-ups
+
+### Added
+
+- New event type `security.certificate_mismatch` (union member `SecurityCertificateMismatch`, data
+  `CertificateMismatchData`: `audit_log_id`, `session_user_id`): a valid token of a session presented with another
+  client certificate. Published with the audit row `session.certificate_mismatch`, in its transaction and exactly as
+  often (at most one per session in 5 minutes), to the holders of `audit.view` (scope root); never to the user of the
+  session, never a token, fingerprint or certificate value. The web translates the new type. API.md, "Messages".
+
 ## Real-time events
 
 ### Added

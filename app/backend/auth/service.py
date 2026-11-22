@@ -23,8 +23,12 @@ from app.backend.auth.certificates import (
 )
 from app.backend.errors.coded import CodedError
 from app.backend.enums.audit import AuditEvent
+from app.backend.enums.events import EventType
+from app.backend.enums.general import Permissions
+from app.backend.auth.scope import ROOT
 from app.backend.services.audit import create_audit_log, home_node, home_scope, user_facts
 from app.backend.services.certificates import active_certificate, certificate_state
+from app.backend.services.events import publish
 from app.backend.utils.row_locks import lock_all
 from app.backend.utils.text import fit_column
 
@@ -543,7 +547,11 @@ class AuthService:
 
         Rolls the caller's work back first (a refresh claim, so the token stays usable) and commits the row as a write
         of its own. The last row of the session is read first: two requests at the same moment may both write,
-        which is harmless. The caller raises token_certificate_mismatch."""
+        which is harmless. The caller raises token_certificate_mismatch.
+
+        With the row, in its transaction, the event security.certificate_mismatch to the holders of audit.view (a
+        system permission: in effect at the root): the audit row's id and the user's, never more often than the row,
+        never to the user by id (the token's owner learns nothing through the stream)."""
         session_id, user_id, username, scope = user_session.id, user.id, user.username, home_scope(user)
         await session.rollback()
         since = datetime.now(timezone.utc) - AuthService.CERTIFICATE_MISMATCH_AUDIT_INTERVAL
@@ -555,7 +563,7 @@ class AuthService:
         if recent is not None:
             await session.rollback()
             return
-        await create_audit_log(
+        audit = await create_audit_log(
             session,
             AuditEvent.SESSION_CERTIFICATE_MISMATCH,
             params={"username": username, "token_kind": token_kind},
@@ -567,6 +575,10 @@ class AuthService:
             user_agent=user_agent,
             request_url=request_url,
         )
+        if audit is not None:
+            await session.flush()       # the id of the audit row, which the event names
+            publish(session, EventType.SECURITY_CERTIFICATE_MISMATCH, scope=ROOT, permission=Permissions.AUDIT_VIEW,
+                    audit_log_id=audit.id, session_user_id=user_id)
         await session.commit()
 
     @staticmethod

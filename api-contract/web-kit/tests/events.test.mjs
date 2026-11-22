@@ -84,6 +84,20 @@ test("events once, the position of every block, sent back on reconnect", async (
   handle.stop();
 });
 
+test("every domain event type reaches onEvent with its data", async () => {
+  const mismatch = sse(3, "security.certificate_mismatch", {
+    id: "43", v: 1, occurred_at: "2026-11-22T10:00:00Z", scope: { kind: "root" },
+    data: { audit_log_id: 12, session_user_id: 5 }, refetch_within_ms: 0,
+  });
+  const { fetch } = server([[sse(1, "ready"), event(41, 2, "scope.changed"), mismatch]]);
+  const received = [];
+  const { handle } = start(fetch, { onEvent: (message) => received.push([message.type, message.data]) });
+  await until(() => received.length === 2);
+  assert.deepEqual(received, [["scope.changed", {}],
+    ["security.certificate_mismatch", { audit_log_id: 12, session_user_id: 5 }]]);
+  handle.stop();
+});
+
 test("a reload refetches what is on screen", async () => {
   const { fetch } = server([[sse(1, "ready"), sse(1, "reload", { refetch_within_ms: 0 })]]);
   const { seen, handle } = start(fetch);

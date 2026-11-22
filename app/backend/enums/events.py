@@ -19,6 +19,11 @@ class EventSpec(NamedTuple):
 class EventType(str, Enum):
     MOVE_CHANGED = ("move.changed", EventSpec(1, {"move_id": int, "move_status": MOVE_STATUSES}))
     SCOPE_CHANGED = ("scope.changed", EventSpec(1, {}))
+    # A valid token of a session came with another client certificate (the audit row session.certificate_mismatch):
+    # to the holders of audit.view, as often as that row is written. Ids only, never a token or a certificate value
+    # (session_user_id, not user_id: publish() targets a user by that name, and this event never goes to that user)
+    SECURITY_CERTIFICATE_MISMATCH = ("security.certificate_mismatch", EventSpec(1, {"audit_log_id": int,
+                                                                                   "session_user_id": int}))
 
     def __new__(cls, code: str, spec: EventSpec):
         member = str.__new__(cls, code)

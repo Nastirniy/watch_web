@@ -49,6 +49,11 @@ class MoveChangedData(BaseModel):
     move_status: MOVE_STATUSES
 
 
+class CertificateMismatchData(BaseModel):
+    audit_log_id: int = Field(description="Read GET /audit-logs/{audit_log_id}")
+    session_user_id: int = Field(description="The user whose session's token came with another client certificate")
+
+
 class CloseData(BaseModel):
     reason: StreamCloseReason = Field(description="token_expired: refresh (X-Activity: background) and reconnect; "
                                                   "session_ended: stop; restart: reconnect after the retry it carries")
@@ -77,6 +82,14 @@ class ScopeChanged(EventEnvelope):
     data: EmptyData
 
 
+class SecurityCertificateMismatch(EventEnvelope):
+    """A valid token of a session was presented with another client certificate: the request was refused, the session
+    stays, and an audit row session.certificate_mismatch records it (at most one per session in 5 minutes, and this
+    event exactly as often). Sent to the holders of audit.view only, never to the user of the session"""
+    type: Literal["security.certificate_mismatch"]
+    data: CertificateMismatchData
+
+
 class StreamReady(BaseModel):
     """The first message of a connection"""
     type: Literal["ready"]
@@ -99,8 +112,9 @@ class StreamClose(BaseModel):
     data: CloseData
 
 
-class StreamMessage(RootModel[Annotated[Union[MoveChanged, ScopeChanged, StreamReady, StreamHeartbeat, StreamReload,
-                                              StreamClose], Field(discriminator="type")]]):
+class StreamMessage(RootModel[Annotated[Union[MoveChanged, ScopeChanged, SecurityCertificateMismatch, StreamReady,
+                                              StreamHeartbeat, StreamReload, StreamClose],
+                                        Field(discriminator="type")]]):
     """One message of the stream: event: is its type, data: this JSON"""
 
 

@@ -210,6 +210,8 @@ def _value(body: bytes) -> dict:
     _row(scope_key="root"),
     _row(scope_key=None, user_id=3),
     _row(type="scope.changed", payload="{}", scope_key="p:7", occurred_at=datetime(2026, 11, 22, 10, 0, 0)),
+    _row(type="security.certificate_mismatch", payload='{"audit_log_id":12,"session_user_id":5}', scope_key="root",
+         permission="audit.view"),
 ])
 def test_every_rendered_event_validates(row):
     value = _value(render_v1.event(row, 1234))
