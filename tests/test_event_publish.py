@@ -7,13 +7,16 @@ from sqlmodel import select
 
 from app.backend.api.v1 import V1
 from app.backend.auth.scope import Node, ROOT
-from app.backend.config import settings
+from app.backend.config import EventsConfig, settings
 from app.backend.enums.events import EventType
 from app.backend.enums.general import Permissions
-from app.backend.enums.routes import BrigadeRoutes, MediaRoutes, MoveRoutes, PostRoutes, ScopeGroupRoutes
+from app.backend.enums.routes import (BrigadeRoutes, CorpsRoutes, MediaRoutes, MoveRoutes, PostRoutes,
+                                      ScopeGroupRoutes)
 from app.backend.models.outbox_event import OutboxEvent
 from app.backend.services.events import publish
+from app.backend.services.events.hub import EventHub
 from tests.helpers import make_admin, make_group, make_post, make_user
+from tests.test_event_hub import TextRenderer, auth_of, grant, later, queued
 from tests.test_media_uploads import storage  # noqa: F401
 from tests.test_queued_moves import DATA, _move_body, _scene, _waiting_move
 from tests.test_upload_archive_cancel import _observation, _open_session
@@ -178,6 +181,83 @@ async def test_a_brigade_move_publishes_the_brigade_and_its_old_corps(client, db
                                json={"corps_id": other.id, "expected_corps_id": corps.id}, headers=headers(admin))
     assert moved.status_code == 200, moved.text
     assert [row.scope_key for row in await _rows(db)] == [f"g:{brigade.id}", f"g:{corps.id}"]
+
+
+# ---------------------------------------------------------------- creates: one event, at the new node's parent
+
+@pytest.mark.parametrize("in_group", [True, False])
+async def test_a_post_create_publishes_its_group(client, db, headers, events_on, in_group):
+    admin = await make_admin(db)
+    group = await make_group(db) if in_group else None
+    created = await client.post(V1.path(PostRoutes.ROOT), headers=headers(admin), json={
+        "name": "New", "code": f"NEW-{in_group}", "group_id": group.id if group else None})
+    assert created.status_code == 200, created.text
+    assert _summary(await _rows(db)) == [("scope.changed", f"g:{group.id}" if group else "root", "post.view", None, {})]
+
+
+@pytest.mark.parametrize("in_group", [True, False])
+async def test_a_group_create_publishes_its_parent(client, db, headers, events_on, in_group):
+    admin = await make_admin(db)
+    parent = await make_group(db) if in_group else None
+    created = await client.post(V1.path(ScopeGroupRoutes.ROOT), headers=headers(admin),
+                                json={"name": "Inner", "parent_id": parent.id if parent else None})
+    assert created.status_code == 200, created.text
+    assert _summary(await _rows(db)) == [("scope.changed", f"g:{parent.id}" if parent else "root", "post.view", None,
+                                          {})]
+
+
+async def test_a_brigade_create_publishes_its_corps_and_a_corps_create_the_root(client, db, headers, events_on):
+    admin = await make_admin(db)
+    corps = await client.post(V1.path(CorpsRoutes.ROOT), headers=headers(admin), json={"name": "Corps A"})
+    assert corps.status_code == 201, corps.text
+    brigade = await client.post(V1.path(BrigadeRoutes.ROOT), headers=headers(admin),
+                                json={"name": "Brigade A", "corps_id": corps.json()["id"]})
+    assert brigade.status_code == 201, brigade.text
+    assert [(row.type, row.scope_key) for row in await _rows(db)] == [
+        ("scope.changed", "root"), ("scope.changed", f"g:{corps.json()['id']}")]
+
+
+async def test_a_refused_create_publishes_nothing(client, db, headers, events_on):
+    admin = await make_admin(db)
+    taken = await make_post(db)
+    group = await make_group(db)
+    for path, body in ((V1.path(PostRoutes.ROOT), {"name": "Again", "code": taken.code}),
+                       (V1.path(ScopeGroupRoutes.ROOT), {"name": group.name}),
+                       (V1.path(CorpsRoutes.ROOT), {"name": group.name})):
+        refused = await client.post(path, headers=headers(admin), json=body)
+        assert refused.status_code in (400, 409), refused.text      # post_code_taken is 400, a name taken 409
+    clerk = await make_user(db, [Permissions.POST_VIEW, Permissions.POST_CREATE], post_id=taken.id)
+    forbidden = await client.post(V1.path(PostRoutes.ROOT), headers=headers(clerk),
+                                  json={"name": "Mine", "code": "MINE", "group_id": group.id})
+    assert forbidden.status_code == 403, forbidden.text
+    assert await _rows(db) == []
+
+
+async def test_the_create_event_lets_the_hub_deliver_events_of_the_new_post_at_once(client, db, engine, headers,
+                                                                                     events_on):
+    """The hub reloads its tree on the scope.changed of the create: the next event of the new post reaches a holder
+    at its group without waiting for the rights refresh (an unknown post sits under the root only)"""
+    admin = await make_admin(db)
+    group, other = await make_group(db), await make_group(db)
+    hub = EventHub(engine, TextRenderer(), EventsConfig(enabled=True), workers=1)
+    await hub.start(run_tasks=False)
+    at_group = hub.attach(auth_of(1, grant(Node.group(group.id), Permissions.POST_VIEW, Permissions.POST_UPDATE)),
+                          later(), None)
+    at_other = hub.attach(auth_of(2, grant(Node.group(other.id), Permissions.POST_VIEW, Permissions.POST_UPDATE)),
+                          later(), None)
+    created = await client.post(V1.path(PostRoutes.ROOT), headers=headers(admin),
+                                json={"name": "Fresh", "code": "FRESH", "group_id": group.id})
+    assert created.status_code == 200, created.text
+    assert await hub.tick() == 1
+    assert [event for _, _, event, _ in queued(at_group)] == ["ready", "scope.changed"]
+    assert [event for _, _, event, _ in queued(at_other)] == ["ready"]
+
+    publish(db, EventType.MOVE_CHANGED, scope=Node.post(created.json()["id"]), permission=Permissions.POST_UPDATE,
+            move_id=1, move_status="waiting")
+    await db.commit()
+    assert await hub.tick() == 1
+    assert [event for _, _, event, _ in queued(at_group)][-1] == "move.changed"
+    assert [event for _, _, event, _ in queued(at_other)] == ["ready"]
 
 
 # ---------------------------------------------------------------- archive and restore: one event, the top node

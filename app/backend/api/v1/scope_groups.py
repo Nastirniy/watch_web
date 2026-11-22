@@ -146,6 +146,7 @@ async def create_scope_group(
         await session.flush()
         await session.refresh(group)
         await audit_group(request, session, auth, "create", group, None)
+        publish_scope_changed(session, (parent_location(group.parent_id),))      # at the parent (posts.create_post)
         await session.commit()
     return ScopeGroupResponse.model_validate(group)
 

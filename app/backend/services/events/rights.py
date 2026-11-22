@@ -13,8 +13,9 @@ Every grant enters the index, a grant at an archived node too: the walk leaves a
 needs no rebuild and a restore puts the grant back in effect at once. tests/test_event_rights.py compares this with
 AuthContext over a table of cases.
 
-An unknown post is a live node under the root (the ScopeTree rule): a post created since the last reload reaches the
-holders at the root only, for at most events.rights_refresh_seconds.
+An unknown post is a live node under the root (the ScopeTree rule). A create publishes scope.changed at the new node's
+parent in its transaction, and the pump reloads the tree before it delivers anything of that tick: the events of a
+new post reach the holders above it at once. Only a create made with events off is seen at the next rights refresh.
 """
 from typing import Dict, Iterator, Set, Tuple
 

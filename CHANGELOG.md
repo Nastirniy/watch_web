@@ -15,6 +15,14 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   often (at most one per session in 5 minutes), to the holders of `audit.view` (scope root); never to the user of the
   session, never a token, fingerprint or certificate value. The web translates the new type. API.md, "Messages".
 
+### Changed
+
+- `POST /posts`, `POST /scope-groups`, `POST /brigades` and `POST /corps` publish `scope.changed` at the new node's
+  parent (the group of a new post, the parent of a new group, the corps of a new brigade, the root for a new corps or
+  a node directly under the root), once, in the transaction of the create. Open streams learn of a new node at once
+  instead of at the next 30 s rights refresh, and the events of a new post reach the holders above it at once (the
+  hubs reload their tree on it).
+
 ## Real-time events
 
 ### Added

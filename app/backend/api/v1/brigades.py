@@ -129,6 +129,7 @@ async def create_brigade(
         await session.flush()
         await session.refresh(brigade)
         await audit_group(request, session, auth, "create", brigade, None)
+        publish_scope_changed(session, (Node.group(brigade.parent_id),))     # at its corps (posts.create_post)
         await session.commit()
     return brigade_to_response(brigade, auth)
 

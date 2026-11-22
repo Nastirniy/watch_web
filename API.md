@@ -452,7 +452,7 @@ sets it. All are one union, `components["schemas"]["StreamMessage"]`, discrimina
 | `reload` | The server cannot replay from the position sent (unknown, too old, too far behind, from before a restore): refetch what is on screen | `refetch_within_ms` |
 | `close` | The server ends the stream; the connection then ends | `data.reason`: `token_expired`, `session_ended`, `restart` |
 | `move.changed` | A queued move changed state (waiting, done, cancelled, failed) | `data.move_id`, `data.move_status` |
-| `scope.changed` | The scope tree changed around this node: a move, an archive, a restore | none |
+| `scope.changed` | The scope tree changed around this node: a move (the node and its old place), an archive or a restore (the node), a create (the new node's parent: the group of a new post, the parent of a new group, the corps of a new brigade, the root for a new corps or a post or group directly under it) | none |
 | `security.certificate_mismatch` | A valid token of a session came with another client certificate: refused, the session stays, an audit row records it (at most one per session in 5 minutes, this event exactly as often). Only to holders of `audit.view`, never to the user of the session | `data.audit_log_id` (`GET /audit-logs/{audit_log_id}`), `data.session_user_id` |
 
 A domain event (`move.changed`, `scope.changed`, `security.certificate_mismatch`) also carries `id`, `v`,

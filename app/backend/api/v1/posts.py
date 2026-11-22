@@ -61,8 +61,8 @@ def _code_taken(code: str, exclude_post_id: Optional[int] = None):
 
 
 async def _store_post(session: AsyncSession, post: Post, audit) -> None:
-    """Flush the post, refresh it, write the audit row (`audit()` returns the create_audit_log awaitable) and commit
-    ONCE; a code taken by a concurrent request after the check hits the unique index"""
+    """Flush the post, refresh it, write the audit row and the events (`audit()`) and commit ONCE; a code taken by a
+    concurrent request after the check hits the unique index"""
     try:
         await session.flush()
         await session.refresh(post)
@@ -143,13 +143,20 @@ async def create_post(
 
     post = Post(**post_data.model_dump())
     session.add(post)
-    await _store_post(session, post, audit=lambda: create_audit_log(
-        session, AuditEvent.POST_CREATE, scope=Node.post(post.id), resource_id=post.id,
-        params={"post_name": post.name, "post_code": post.code},
-        user_id=current_user.id,
-        new_values=post.model_dump(),
-        **client_info(request, auth)
-    ))
+
+    async def audit() -> None:
+        await create_audit_log(
+            session, AuditEvent.POST_CREATE, scope=Node.post(post.id), resource_id=post.id,
+            params={"post_name": post.name, "post_code": post.code},
+            user_id=current_user.id,
+            new_values=post.model_dump(),
+            **client_info(request, auth)
+        )
+        # At its group: the holders who see the new post are told, and every hub reloads its tree on it, so the
+        # post's own events reach its holders at once (a post the tree does not know sits under the root only)
+        publish_scope_changed(session, (_location(post.group_id),))
+
+    await _store_post(session, post, audit=audit)
 
     return await _post_response(session, auth, post)
 

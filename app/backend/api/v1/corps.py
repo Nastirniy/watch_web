@@ -38,6 +38,7 @@ from app.backend.filters.post_filter import PostFilterService
 from app.backend.filters.unit_filter import UnitFilterService
 from app.backend.models.post import Post
 from app.backend.models.scope_group import ScopeGroup
+from app.backend.services.events import publish_scope_changed
 from app.backend.services.units import posts_within
 from app.backend.utils.validators import UtcDatetime
 
@@ -98,6 +99,7 @@ async def create_corps(
         await session.flush()
         await session.refresh(corps)
         await audit_group(request, session, auth, "create", corps, None)
+        publish_scope_changed(session, (ROOT,))         # a corps sits under the root (posts.create_post)
         await session.commit()
     return corps_to_response(corps, auth)
 
