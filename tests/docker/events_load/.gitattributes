@@ -1,0 +1,2 @@
+# Copied into a Linux image and run by sh: LF whatever the checkout
+*.sh text eol=lf
