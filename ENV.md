@@ -145,6 +145,35 @@ Thumbnails and previews are rendered on demand by [imgproxy](https://imgproxy.ne
 | `MYSETTINGS_MOVES__UPLOAD_STALE_SECONDS` | `300` | An upload that received no bytes for this long no longer keeps a move waiting; it is left alone and may go on after the move (minimum 60) |
 | `MYSETTINGS_MOVES__CHECK_INTERVAL_SECONDS` | `15` | How often the media worker looks at the waiting moves (a backup: requests that meet a move look too); also the `Retry-After` of the answers 202 and 409 `move_pending` |
 
+### Real-time events
+
+Set on `api` and `media-worker` alike (compose: `EVENTS_ENABLED` in `.env`). The contract is API.md, "Real-time events".
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MYSETTINGS_EVENTS__ENABLED` | `false` | Off: nothing is published, no hub runs and `GET /events/stream` answers 204 (clients stop reconnecting); the media worker does not clean `outbox_events` |
+| `MYSETTINGS_EVENTS__SERVE_STREAMS` | `true` | `false`: this process publishes but runs no hub and answers the stream with 204; the streams are served by a separate process (`--workers 1`, nginx upstream `watch_web_events`) |
+| `MYSETTINGS_EVENTS__POLL_SECONDS` | `1.0` | How often each worker reads `outbox_events` (10% jitter) |
+| `MYSETTINGS_EVENTS__GAP_TTL_SECONDS` | `60` | An id skipped by a late commit is watched this long, then counts as a rollback; keep it above `innodb_lock_wait_timeout` (50) |
+| `MYSETTINGS_EVENTS__POSITION_HOLD_SECONDS` | `8` | A gap keeps the resume position below it this long at most |
+| `MYSETTINGS_EVENTS__MAX_GAP_JUMP` | `1000` | A jump in ids above this is no gap (a restore raised `AUTO_INCREMENT`) |
+| `MYSETTINGS_EVENTS__MAX_OPEN_GAPS` | `5000` | Gaps watched at most; the oldest go first |
+| `MYSETTINGS_EVENTS__RING_ROWS` | `10000` | Events each worker keeps in memory for replay after a reconnect (about 5 MB) |
+| `MYSETTINGS_EVENTS__QUEUE_MAX` | `256` | Messages waiting per stream; above it the stream closes (a client that stopped reading) |
+| `MYSETTINGS_EVENTS__REPLAY_MAX` | `240` | A longer replay is `reload`; must stay below `QUEUE_MAX` |
+| `MYSETTINGS_EVENTS__HEARTBEAT_SECONDS` | `20` | Heartbeat interval per stream; nginx `proxy_read_timeout` of the events location stays above three of them |
+| `MYSETTINGS_EVENTS__SESSION_CHECK_SECONDS` | `10` | How often each worker checks the sessions of its streams (logout, idle end, revocation, a revoked certificate) |
+| `MYSETTINGS_EVENTS__RIGHTS_REFRESH_SECONDS` | `30` | How often each worker reloads the scope tree and the grants of its connected users |
+| `MYSETTINGS_EVENTS__RETENTION_SECONDS` | `3600` | Rows of `outbox_events` older than this are deleted by the media worker (minimum 60) |
+| `MYSETTINGS_EVENTS__MAX_STREAMS_PER_WORKER` | `3000` | Above it a worker answers 503 `event_stream_capacity`; above the whole target, because streams do not spread evenly |
+| `MYSETTINGS_EVENTS__REFETCH_RATE_PER_SECOND` | `30` | What one event may ask of the API: `refetch_within_ms` = subscribers x workers x 1000 / this |
+| `MYSETTINGS_EVENTS__REFETCH_WINDOW_MAX_MS` | `60000` | Upper bound of `refetch_within_ms` |
+| `MYSETTINGS_EVENTS__RETRY_MIN_MS` | `3000` | `retry:` at the start of a stream is random between this and `RETRY_MAX_MS` |
+| `MYSETTINGS_EVENTS__RETRY_MAX_MS` | `15000` | See `RETRY_MIN_MS` |
+| `MYSETTINGS_EVENTS__DRAIN_RETRY_MAX_MS` | `60000` | A `close` `restart` at shutdown carries a `retry` random between 1000 and this |
+
+The hub of each worker has its own database engine (pool 1, overflow 1): budget 2 connections per api worker on top of `MYSETTINGS_DATABASE__POOL_SIZE` + `MAX_OVERFLOW`.
+
 ### Video posters (media worker)
 
 Run the worker as its own process: `python -m app.backend.workers.media_worker` (compose service `media-worker`, or `deploy/systemd/watch-web-media-worker.service`).

@@ -27,6 +27,7 @@ class ContentType(str, Enum):
     # Not registered: the tus resumable upload protocol's own name for a chunk body (UPLOADS.md)
     OFFSET_OCTET_STREAM = "application/offset+octet-stream"
     WEBVTT = "text/vtt"                                       # W3C WebVTT: always UTF-8, no charset parameter
+    EVENT_STREAM = "text/event-stream"                        # WHATWG HTML server-sent events: always UTF-8
     PKCS12 = "application/pkcs12"                             # RFC 7292 (.p12); application/x-pkcs12 is not registered
     HTML = "text/html"
     # A media range (RFC 9110 section 12.5.1), not a media type: "any type", for OpenAPI descriptions of originals

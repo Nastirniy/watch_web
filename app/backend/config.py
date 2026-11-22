@@ -391,6 +391,42 @@ class MovesConfig(BaseModel):
     check_interval_seconds: int = Field(default=15, ge=1)
 
 
+class EventsConfig(BaseModel):
+    """Events to the web client: MYSETTINGS_EVENTS__* (API.md "Real-time events", ENV.md).
+    Off: nothing is published, the stream answers 204 (WHATWG: stop reconnecting)."""
+    enabled: bool = False
+    # False: this process publishes but runs no hub and serves no stream (204): the streams live in a separate process
+    serve_streams: bool = True
+    poll_seconds: float = Field(default=1.0, gt=0)
+    # A gap is watched this long; above innodb_lock_wait_timeout (50): a transaction that commits later loses its event
+    gap_ttl_seconds: int = Field(default=60, ge=1)
+    # A gap holds the resume position this long: a rollback must not pin every reconnect to a minute of duplicates
+    position_hold_seconds: int = Field(default=8, ge=0)
+    max_gap_jump: PositiveInt = 1000      # a jump above this is no gap: AUTO_INCREMENT was raised (a restore)
+    max_open_gaps: PositiveInt = 5000
+    ring_rows: PositiveInt = 10000        # replay comes only from here; about 5 MB per worker
+    queue_max: PositiveInt = 256          # frames waiting per connection; above it the stream closes
+    replay_max: PositiveInt = 240         # below queue_max; a longer replay is reload
+    heartbeat_seconds: int = Field(default=20, ge=1)
+    session_check_seconds: int = Field(default=10, ge=1)
+    rights_refresh_seconds: int = Field(default=30, ge=1)
+    retention_seconds: int = Field(default=3600, ge=60)
+    max_streams_per_worker: PositiveInt = 3000   # above the whole target: one worker usually holds nearly all
+    refetch_rate_per_second: PositiveInt = 30    # what one event may ask of the API
+    refetch_window_max_ms: PositiveInt = 60000
+    retry_min_ms: PositiveInt = 3000
+    retry_max_ms: PositiveInt = 15000
+    drain_retry_max_ms: PositiveInt = 60000
+
+    @model_validator(mode="after")
+    def replay_fits_the_queue(self):
+        if self.replay_max >= self.queue_max:
+            raise ValueError("events.replay_max must stay below events.queue_max: a replay goes through the queue")
+        if self.retry_min_ms > self.retry_max_ms:
+            raise ValueError("events.retry_min_ms must be at most events.retry_max_ms")
+        return self
+
+
 class ReportConfig(BaseModel):
     """Configuration of the Excel reports"""
     # Band rows of one observations report; more answer 422 report_too_large (the workbook is built in memory)
@@ -451,6 +487,7 @@ class Settings(BaseSettings):
     reports: ReportConfig = Field(default_factory=ReportConfig)
     backup: BackupConfig = Field(default_factory=BackupConfig)
     moves: MovesConfig = Field(default_factory=MovesConfig)
+    events: EventsConfig = Field(default_factory=EventsConfig)
 
     def __init__(self, **kwargs):
         # Load from TOML first
