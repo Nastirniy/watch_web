@@ -25,8 +25,9 @@ class DatabaseConfig(BaseModel):
     user: str = "dbuser"
     password: str
     echo: bool = False
-    pool_size: int = 20
-    max_overflow: int = 40
+    # Per process: 4 api workers x 20 plus the media worker stay under MariaDB's default max_connections 151
+    pool_size: int = 10
+    max_overflow: int = 10
 
     @property
     def url(self) -> str:

@@ -52,8 +52,8 @@ Variables marked `[REQUIRED in prod]` have an insecure or wrong default and must
 | `MYSETTINGS_DATABASE__NAME` | `radio_monitoring` | Database name |
 | `MYSETTINGS_DATABASE__USER` | `dbuser` | Database user |
 | `MYSETTINGS_DATABASE__PASSWORD` | **[REQUIRED]** | Database password. Latin-1 characters only (ASCII is safest): the MySQL driver (PyMySQL, also under aiomysql) sends it latin-1 encoded, a Cyrillic password cannot log in. Quotes, backslash, `#`, `;`, spaces, `$` and backticks work (checked live with the backup tools) |
-| `MYSETTINGS_DATABASE__POOL_SIZE` | `20` | Connection pool size |
-| `MYSETTINGS_DATABASE__MAX_OVERFLOW` | `40` | Max extra connections above pool size |
+| `MYSETTINGS_DATABASE__POOL_SIZE` | `10` | Connection pool size, per process |
+| `MYSETTINGS_DATABASE__MAX_OVERFLOW` | `10` | Max extra connections above pool size, per process. Every api worker and the media worker is a process with its own pool: (`POOL_SIZE` + `MAX_OVERFLOW`) x (`MYSETTINGS_SERVER__WORKERS` + 1) must stay below the server's `max_connections` (151 by default) with room for the backup and admin tools. The defaults give 4 x 20 + 20 = 100 |
 
 ---
 

@@ -12,8 +12,8 @@ name = "radio_monitoring"
 user = "root"
 password = "pythops"
 echo = false
-pool_size = 20
-max_overflow = 40
+pool_size = 10
+max_overflow = 10
 
 [security]
 secret_key = "your-secret-key-change-this-in-production"  # Use MYSETTINGS_SECURITY__SECRET_KEY env var in production

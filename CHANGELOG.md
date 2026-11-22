@@ -5,6 +5,14 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Performance 2026-11-22
+
+### Changed
+
+- Database pool per process lowered from 20 + 40 to 10 + 10 (`database.pool_size`, `database.max_overflow`): four api
+  workers could open 240 connections against MariaDB's default `max_connections` of 151. Now 4 x 20 plus the media
+  worker's 20 = 100. ENV.md says how to size it.
+
 ## Owner decisions 2026-10-30
 
 ### Added
