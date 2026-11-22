@@ -73,6 +73,21 @@ async def get_engine() -> AsyncEngine:
     return engine
 
 
+async def create_events_engine() -> AsyncEngine:
+    """The engine of the event hub of this process (services/events/hub.py): pool 1, overflow 1, its own, so the pump
+    never waits for the request pool and API load never delays it (2 connections per api worker in the budget)"""
+    return create_async_engine(
+        settings.database.url,
+        echo=settings.database.echo,
+        pool_size=1,
+        max_overflow=1,
+        pool_timeout=5,
+        pool_recycle=3600,
+        pool_pre_ping=True,
+        connect_args={"connect_timeout": 10, "charset": "utf8mb4", "use_unicode": True, "autocommit": False},
+    )
+
+
 async def get_session_maker():
     """Get or create session maker"""
     global async_session_maker

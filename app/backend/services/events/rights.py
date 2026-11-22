@@ -63,3 +63,7 @@ class RightsIndex:
                 if user_id not in seen:
                     seen.add(user_id)
                     yield user_id
+
+    def allows(self, user_id: int, scope_key: str, permission: str) -> bool:
+        """The permission is in effect for this user at the scope (a replay filters each row by it)"""
+        return any(user_id in self.index.get((node.key, permission), ()) for node in self._nodes(scope_key))
