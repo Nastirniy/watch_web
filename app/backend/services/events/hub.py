@@ -16,7 +16,9 @@ per tick. Streams do not spread evenly over workers (one usually holds nearly al
 rights_changed: the hub keeps, per connected user, the fingerprint of what their grants put in effect on its tree
 (RightsIndex.fingerprint, equal means equal rights in GET /auth/me). The grants of the first connect are the baseline;
 after every load of the tree or of grants (the pump, the refresh, a new tab whose request read other grants) each user
-whose fingerprint moved gets one rights_changed on every open stream (conflated: one waits per stream), so a tab
+whose fingerprint moved gets one rights_changed on every open stream (conflated: one waits per stream); a tab that
+reconnects with its position is told what it missed meanwhile (its user's last fingerprint and the position of the last
+rights_changed stay after the last tab leaves, until the ring passes them: an older position gets reload). So a tab
 refetches its own rights though no event names it (a role's permissions for a holder without role.view, an archived
 node, a post moved into a group they hold a role at). Nothing is published for it: every hub holding streams of the
 user computes the same. It may come with a user.changed or scope.changed of the same tick that asks for GET /auth/me
@@ -34,7 +36,7 @@ import socket
 import time
 from collections import deque
 from datetime import datetime, timezone
-from typing import Callable, Deque, Dict, Hashable, Iterable, List, Optional, Protocol, Set
+from typing import Callable, Deque, Dict, Hashable, Iterable, List, Optional, Protocol, Set, Tuple
 
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
@@ -128,8 +130,12 @@ class EventHub:
         self._loads = 0
         self._tree_load = 0
         self._grant_loads: Dict[int, int] = {}
-        # user -> the fingerprint of their rights the tabs were last told of (the baseline: the first connect)
+        # user -> the fingerprint of their rights the tabs were last told of (the baseline: the first connect); when the
+        # last tab of a user leaves, that fingerprint and the position (departed), and the position of the last
+        # rights_changed of each user (told_at), for a tab that reconnects with its position
         self._fingerprints: Dict[int, Hashable] = {}
+        self._departed: Dict[int, Tuple[Hashable, int]] = {}
+        self._told_at: Dict[int, int] = {}
         self.position = 0
         self.connections: Set[Connection] = set()
         self.by_user: Dict[int, Set[Connection]] = {}
@@ -315,12 +321,16 @@ class EventHub:
         connection = Connection(user_id, auth.session_id, expires_at, self.config.queue_max,
                                 next_beat=now + random.uniform(0, self.config.heartbeat_seconds), opened_at=now)
         connection.on_end = self.detach
+        connected = user_id in self.by_user
+        known = self._fingerprints.get(user_id) if connected else self._departed.pop(user_id, (None, 0))[0]
+        told_at = self._told_at.get(user_id)
         self.rights.set_user(user_id, auth.grants)
         self._grant_loads[user_id] = self._next_load()
-        if user_id in self.by_user:
+        fingerprint = self.rights.fingerprint(user_id)
+        if connected:
             self._tell_rights_changed([user_id])    # the tabs already open, before this one joins them
         else:
-            self._fingerprints[user_id] = self.rights.fingerprint(user_id)
+            self._fingerprints[user_id] = fingerprint
         retry = random.randint(self.config.retry_min_ms, self.config.retry_max_ms)
         connection.offer(block(self.position, retry_line(retry) + self.render.ready()))
         replay = self._replay(user_id, last_event_id)
@@ -330,6 +340,13 @@ class EventHub:
         else:
             for body in replay:
                 connection.offer(block(self.position, body))
+            # A tab back with its position: told when its rights moved while it was away (since the user's last tab
+            # here left, or since the open tabs were last told) or when the other tabs were told after its position
+            if last_event_id is not None and known is not None and (
+                    known != fingerprint or (told_at is not None and told_at >= parse_position(last_event_id))):
+                self._told_at[user_id] = self.position
+                connection.offer(block(self.position, self.render.rights_changed(self._refetch_window(1))),
+                                 RIGHTS_CHANGED_KEY)
         self.connections.add(connection)
         self.by_user.setdefault(user_id, set()).add(connection)
         return connection
@@ -361,7 +378,8 @@ class EventHub:
                 del self.by_user[connection.user_id]
                 self.rights.drop_user(connection.user_id)
                 self._grant_loads.pop(connection.user_id, None)
-                self._fingerprints.pop(connection.user_id, None)
+                # what its tabs were told, for a tab that comes back with its position (dropped once the ring passed)
+                self._departed[connection.user_id] = (self._fingerprints.pop(connection.user_id, None), self.position)
         if connection.slow:
             self.slow_closed += 1
         reason = "slow" if connection.slow else (connection.closing.value if connection.closing else "client")
@@ -417,6 +435,7 @@ class EventHub:
         self._set_tree(tree, load)
         self._set_grants(user_ids, grants, load)
         self._tell_rights_changed(list(self.by_user))
+        self._forget_rights_before(self.ring.floor)
 
     async def reload_grants(self, user_ids: Optional[Iterable[int]] = None) -> None:
         """The grants of these connected users (None: every one) at once, in one batch on the hub's engine: a
@@ -457,11 +476,18 @@ class EventHub:
             if fingerprint == self._fingerprints.get(user_id):
                 continue
             self._fingerprints[user_id] = fingerprint
+            self._told_at[user_id] = self.position
             told.extend(connection for connection in connections if connection.open)
         if told:
             frame = block(self.position, self.render.rights_changed(self._refetch_window(len(told))))
             for connection in told:
                 connection.offer(frame, RIGHTS_CHANGED_KEY)
+
+    def _forget_rights_before(self, floor: int) -> None:
+        """A position below the ring floor gets reload, never a replay: what a reconnect from before it would compare
+        with is dropped"""
+        self._departed = {user_id: left for user_id, left in self._departed.items() if left[1] >= floor}
+        self._told_at = {user_id: told for user_id, told in self._told_at.items() if told >= floor}
 
     def stats(self) -> Dict[str, int]:
         lags = sorted(self._lags)

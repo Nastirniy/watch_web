@@ -65030,7 +65030,7 @@
           "refetch_within_ms"
         ],
         "title": "StreamReload",
-        "description": "Too far behind, a position this server cannot answer for, or from before a restore: refetch what is on screen"
+        "description": "Too far behind, a position this server cannot answer for, or from before a restore: refetch what is on screen,\nyour own rights (GET /auth/me) included"
       },
       "StreamRightsChanged": {
         "properties": {
@@ -65051,7 +65051,7 @@
           "refetch_within_ms"
         ],
         "title": "StreamRightsChanged",
-        "description": "Your rights in effect changed, also when no event names you: a permission added to or removed from a role you\nhold, a role you hold archived or restored, a node where you hold a role archived or restored, a post or group\nmoved into or out of a group where you hold a role, your own assignments or user type. Reread GET /auth/me\n(permissions, root_permissions, post_permissions, group_permissions, system_permissions) after a random wait\nbelow refetch_within_ms and rebuild the menu and the buttons from it. A user.changed about you or a scope.changed\nmay come at the same time: one refetch serves them all. Never sent at connect: read GET /auth/me as on any page\nload"
+        "description": "Your rights in effect changed, also when no event names you: a permission added to or removed from a role you\nhold, a role you hold archived or restored, a node where you hold a role archived or restored, a post or group\nmoved into or out of a group where you hold a role, your own assignments or user type. Reread GET /auth/me\n(permissions, root_permissions, post_permissions, group_permissions, system_permissions) after a random wait\nbelow refetch_within_ms and rebuild the menu and the buttons from it. A user.changed about you or a scope.changed\nmay come at the same time: one refetch serves them all. Never sent at a first connect (read GET /auth/me as on any\npage load); a stream that reconnects with its position is told of a change it missed while away"
       },
       "SystemAssignmentCreate": {
         "properties": {

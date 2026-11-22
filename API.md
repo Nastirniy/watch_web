@@ -449,7 +449,7 @@ sets it. All are one union, `components["schemas"]["StreamMessage"]`, discrimina
 |---|---|---|
 | `ready` | First message of a connection | none |
 | `heartbeat` | About every 20 s | none |
-| `reload` | The server cannot replay from the position sent (unknown, too old, too far behind, from before a restore): refetch what is on screen | `refetch_within_ms` |
+| `reload` | The server cannot replay from the position sent (unknown, too old, too far behind, from before a restore): refetch what is on screen, your own rights (`GET /auth/me`) included | `refetch_within_ms` |
 | `rights_changed` | Your own rights in effect changed (see "Your own rights" below): reread `GET /auth/me` | `refetch_within_ms` |
 | `close` | The server ends the stream; the connection then ends | `data.reason`: `token_expired`, `session_ended`, `restart` |
 | `move.changed` | A queued move changed state (waiting, done, cancelled, failed) | `data.move_id`, `data.move_status` |
@@ -494,8 +494,10 @@ user type. The client rereads `GET /auth/me` with `X-Activity: background` after
 `refetch_within_ms` and rebuilds the menu and the buttons from it; a page the user can no longer open answers `403` on
 its next request as before.
 
-- It carries no `id` (no event of the outbox) and is never sent at connect: read `GET /auth/me` on every page load as
-  today. While a stream is behind only one waits in its queue.
+- It carries no `id` (no event of the outbox) and is never sent at a first connect: read `GET /auth/me` on every page
+  load as today. A stream that reconnects with its position is told of a change it missed while it was away; a
+  `reload` asks for everything on screen, the menu (`GET /auth/me`) included. While a stream is behind only one waits
+  in its queue.
 - The server compares what is in effect, not what changed: a permission removed from a role that the user still holds
   through another role, or one their user type never put in effect, sends nothing. A rare refetch finds nothing new.
 - A `user.changed` about the user themself or a `scope.changed` may come in the same moment: one refetch of

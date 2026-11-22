@@ -167,7 +167,8 @@ class StreamHeartbeat(BaseModel):
 
 
 class StreamReload(BaseModel):
-    """Too far behind, a position this server cannot answer for, or from before a restore: refetch what is on screen"""
+    """Too far behind, a position this server cannot answer for, or from before a restore: refetch what is on screen,
+    your own rights (GET /auth/me) included"""
     type: Literal["reload"]
     refetch_within_ms: int = REFETCH
 
@@ -178,8 +179,8 @@ class StreamRightsChanged(BaseModel):
     moved into or out of a group where you hold a role, your own assignments or user type. Reread GET /auth/me
     (permissions, root_permissions, post_permissions, group_permissions, system_permissions) after a random wait
     below refetch_within_ms and rebuild the menu and the buttons from it. A user.changed about you or a scope.changed
-    may come at the same time: one refetch serves them all. Never sent at connect: read GET /auth/me as on any page
-    load"""
+    may come at the same time: one refetch serves them all. Never sent at a first connect (read GET /auth/me as on any
+    page load); a stream that reconnects with its position is told of a change it missed while away"""
     type: Literal["rights_changed"]
     refetch_within_ms: int = Field(description="Reread GET /auth/me after a random wait below this many milliseconds, "
                                                "never at once: the server spreads the refetches of every tab told")

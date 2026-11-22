@@ -485,3 +485,77 @@ async def test_a_user_who_left_has_no_fingerprint_left(engine, events_on):
     connection.ended = True
     hub.detach(connection)
     assert hub._fingerprints == {}
+
+
+async def _holder_at_new_post(db):
+    post = await make_post(db)
+    holder = await make_user(db, user_type=UserType.VIEWER)
+    await give(db, holder, [P.POST_VIEW], Node.post(post.id))
+    return post, holder
+
+
+def _leave(hub, connection) -> str:
+    """The stream drops; the client keeps its position for the reconnect"""
+    position = str(hub.position)
+    connection.ended = True
+    hub.detach(connection)
+    return position
+
+
+async def _archive(db, post, archived=True):
+    post.is_deleted = archived
+    db.add(post)
+    await db.commit()
+
+
+async def test_a_tab_that_reconnects_after_a_change_it_missed_is_told(engine, db, events_on):
+    """The only stream of a user drops; its rights change meanwhile (nobody here to tell); the reconnect with its
+    position is told, the baseline of a first connect does not swallow it"""
+    post, holder = await _holder_at_new_post(db)
+    hub = await hub_of(engine)
+    position = _leave(hub, hub.attach(await load_auth_context(db, holder, session_id="s"), later(), None))
+    await _archive(db, post)
+    await hub.refresh_rights()
+    back = hub.attach(await load_auth_context(db, holder, session_id="s"), later(), position)
+    assert events_of(back) == ["ready", "rights_changed"]
+
+
+async def test_a_reconnect_with_nothing_changed_and_a_fresh_connect_are_not_told(engine, db, events_on):
+    post, holder = await _holder_at_new_post(db)
+    hub = await hub_of(engine)
+    position = _leave(hub, hub.attach(await load_auth_context(db, holder, session_id="s"), later(), None))
+    await hub.refresh_rights()
+    back = hub.attach(await load_auth_context(db, holder, session_id="s"), later(), position)
+    assert events_of(back) == ["ready"]
+    _leave(hub, back)
+    await _archive(db, post)
+    await hub.refresh_rights()
+    fresh = hub.attach(await load_auth_context(db, holder, session_id="s"), later(), None)
+    assert events_of(fresh) == ["ready"], "a page load reads GET /auth/me itself"
+
+
+async def test_a_tab_that_missed_the_tell_to_its_other_tabs_is_told_on_reconnect(engine, db, events_on):
+    post, holder = await _holder_at_new_post(db)
+    hub = await hub_of(engine)
+    staying = hub.attach(await load_auth_context(db, holder, session_id="s"), later(), None)
+    position = _leave(hub, hub.attach(await load_auth_context(db, holder, session_id="s"), later(), None))
+    await _archive(db, post)
+    await hub.refresh_rights()
+    assert events_of(staying) == ["ready", "rights_changed"]
+    back = hub.attach(await load_auth_context(db, holder, session_id="s"), later(), position)
+    assert events_of(back) == ["ready", "rights_changed"]
+    assert events_of(staying) == ["ready", "rights_changed"], "the tab already told is not told again"
+
+
+async def test_what_a_departed_user_leaves_is_dropped_once_the_ring_moved_past_it(engine, db, events_on):
+    """A position below the ring gets reload: the hub forgets a departed user's rights once the ring floor passed the
+    moment they left"""
+    post, holder = await _holder_at_new_post(db)
+    hub = await hub_of(engine, ring_rows=1)
+    _leave(hub, hub.attach(await load_auth_context(db, holder, session_id="s"), later(), None))
+    assert holder.id in hub._departed
+    for _ in range(3):
+        await _publish(db, EventType.SCOPE_CHANGED, scope=ROOT, permission=P.POST_VIEW)
+        await hub.tick()
+    await hub.refresh_rights()
+    assert hub._departed == {} and hub._told_at == {}
