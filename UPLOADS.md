@@ -174,6 +174,9 @@ completes after a restore. A session that is already aborted or expired answers 
 - Sessions belong to the user who opened them. `media.manage_any` may inspect and complete any session. Post access is re-checked on every call.
 - Every open, abort and completion is audited once (a repeated `complete` adds no audit row).
 
+Upload progress is never an event of the stream of events (API.md, "Real-time events"): a chunk must not gain a
+write. Read the progress from the session itself (`HEAD`, `GET /api/v1/media/uploads?status=open`).
+
 ## Sizes and timeouts to keep in mind
 
 | Item | Value | Where |

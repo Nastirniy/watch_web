@@ -279,3 +279,41 @@ the token and play a blob URL instead, without seeking before it is loaded.
 nginx keeps the API's permission for a stream 30 seconds (API.md, "Video and audio in a player"): access taken
 away stops a stream within about 30 s. `ETag` is the file's sha256 on `/stream` and `/download`, and `If-None-Match`
 with it answers `304` on both (API.md, "Stored files").
+
+## 11. Events
+
+The stream of events (API.md, "Real-time events") with the starter `src/api/events.ts`: no dependency beyond the
+generated types. It opens only on HTTP/2, reads with `fetch`, parses the blocks, keeps the position, skips repeats,
+reconnects with its back-off and watchdog, and spreads refetches over `refetch_within_ms`. Its tests: `node --test
+api-contract/web-kit/tests/events.test.mjs` (Node 22.18 or later runs the `.ts` file directly).
+
+1. Copy `api-contract/web-kit/src/api/events.ts` next to `schema.ts`.
+2. Start it once per tab after login, stop it at logout:
+
+```ts
+import { BACKGROUND, startEvents, type StreamMessage } from "./api/events";
+
+const events = startEvents({
+  url: "/api/v1/events/stream",
+  token: () => currentAccessToken(),
+  refresh: () => refreshAccessToken({ headers: BACKGROUND }).then(() => true, () => false),   // single-flight, section 10
+  onEvent: (event, refetch) => {
+    switch (event.type) {
+      case "move.changed": refetch(() => reloadMove(event.data.move_id, { headers: BACKGROUND })); break;
+      case "scope.changed": refetch(() => reloadTreeAndMe({ headers: BACKGROUND })); break;
+      default: { const unhandled: never = event; return unhandled; }      // a new event type fails here
+    }
+  },
+  onReload: (refetch) => refetch(() => reloadWhatIsOnScreen({ headers: BACKGROUND })),
+  onVisible: (run) => document.addEventListener("visibilitychange", () => { if (!document.hidden) run(); }),
+});
+// logout: events.stop()
+```
+
+The type of every message is `components["schemas"]["StreamMessage"]`; after `npm run api:all` a new event type in
+the contract is a compile error in that `switch` until it is handled. Send `X-Activity: background` with every request
+an event causes, and with pollers: those requests do not keep the session alive.
+
+Development server: the paths are proxied already (section 8), but a dev server that compresses responses holds
+blocks back (webpack-dev-server `compress: true`, some proxy middlewares): turn compression off for `/api` and check
+in the browser's network panel that a block arrives as it is written (a heartbeat within 20 s).

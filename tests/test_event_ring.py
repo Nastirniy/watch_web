@@ -45,7 +45,7 @@ def test_a_position_ahead_of_the_head_is_none():
     assert ring.after(3, head=2, limit=10) is None
 
 
-@pytest.mark.parametrize("value", [None, "", "abc", "-1", "1.5", " 7", "7 ", "١", "1" * 21, "0x10"])
+@pytest.mark.parametrize("value", [None, "", "abc", "-1", "1.5", " 7", "7 ", "\u0661", "1" * 21, "0x10"])
 def test_a_garbage_position_is_none(value):
     assert parse_position(value) is None
 

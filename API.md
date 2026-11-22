@@ -419,6 +419,94 @@ mover's own rights only.
   datetime parameter or body time whose UTC instant leaves the calendar (`0001-01-01T00:00:00+01:00`) is a field error
   `time_out_of_range` (params `earliest`, `latest`), as for `observed_at` out of its bounds.
 
+## Real-time events
+
+`GET /api/v1/events/stream` tells the web client, within about a second, that something it shows has changed. It is a
+hint to refetch through the REST routes: never data, never history. Everything keeps working without it (a server
+with events off, HTTP/1.1, a lost stream): the client then refetches as it does today.
+
+### The route
+
+Any authenticated user. One stream per tab, read with `fetch` (`Authorization: Bearer`, `Accept: text/event-stream`;
+`EventSource` cannot send the token), and only over HTTP/2: on HTTP/1.1 a browser holds 6 connections per server,
+and at 6 tabs every request of the app hangs. The starter `api-contract/web-kit/src/api/events.ts` does all of the
+below (WEB_TOOLING.md section 11).
+
+| Answer | Meaning | Client does |
+|---|---|---|
+| `200` `text/event-stream` | The stream | Read it |
+| `204` | Events are off on this server | Stop until the page reloads; keep working on refetch |
+| `401` problem | As any request | Stop; the normal authentication flow decides. Never reconnect in a loop on a 401 |
+| `503` problem `event_stream_capacity`, `Retry-After` | This server holds as many streams as it can, or it is stopping | Back off |
+| `429`, `502`, `503`, `504`, no problem body | nginx ("Errors"): too many streams of one client certificate (32), too many connects, the API restarting | Back off by status |
+
+### Messages
+
+Every message is one block: `id:` the position, `event:` the type, `data:` one line of JSON, `retry:` when the server
+sets it. All are one union, `components["schemas"]["StreamMessage"]`, discriminated by `type`.
+
+| `type` | When | Fields |
+|---|---|---|
+| `ready` | First message of a connection | none |
+| `heartbeat` | About every 20 s | none |
+| `reload` | The server cannot replay from the position sent (unknown, too old, too far behind, from before a restore): refetch what is on screen | `refetch_within_ms` |
+| `close` | The server ends the stream; the connection then ends | `data.reason`: `token_expired`, `session_ended`, `restart` |
+| `move.changed` | A queued move changed state (waiting, done, cancelled, failed) | `data.move_id`, `data.move_status` |
+| `scope.changed` | The scope tree changed around this node: a move, an archive, a restore | none |
+
+A domain event (`move.changed`, `scope.changed`) also carries `id`, `v`, `occurred_at`, `scope` (`{kind, id}`; absent
+for an event of one user, `id` absent at the root) and `refetch_within_ms`. A new type is added to the union: the
+exhaustive `switch` of the web client then fails to compile until it handles it.
+
+### Two ids, both opaque
+
+- The `id:` line of a block is a **position**: store what it gives, from every block (heartbeats included), and send
+  it back as `Last-Event-ID` when reconnecting. Never compare, compute or parse it. Keep it in memory per tab and per
+  login, never in `localStorage`; after a new login start without one.
+- The `id` in the JSON is the **identity** of an event: ignore one already seen. It may be lower than a position
+  already seen (a late commit).
+
+A position the server cannot answer for gives `reload`, never an error.
+
+### Delivery
+
+- **At least once**: a repeat is possible; skip an `id` already seen (a bounded set of the last 2,000 is enough).
+- **Order holds within one resource only.** Two changes of one resource arrive in the order they were made; changes
+  of different resources may arrive in any order. A refetch reads the latest state anyway.
+- **A stream may end at any time.** Reconnect with the position after `retry` (sent at the start of each connection,
+  3 to 15 s); after a network error or a `429` / `502` / `503` / `504` wait a random time between `retry` and
+  `min(60 s, retry x 2^n)`. `close` `restart` carries its own `retry` (1 to 60 s): wait that long.
+- **Watchdog**: a connect may take over a minute (nginx delays connects after a deploy): allow 120 s for the answer,
+  and 65 s without a byte once connected, then abort and reconnect.
+
+### `refetch_within_ms`: never refetch at once
+
+A client that refetches because of an event waits a random time below `refetch_within_ms`. The server computes it
+so that one event never asks the API for more than about 30 requests per second, whoever receives it. It is not
+optional: one event to 1,000 clients refetching at once took the normal API to p95 5.6 s; spread over 30 s, 126 ms.
+Refetch only what is on screen; a hidden tab marks itself stale and refetches when it is shown. A user's own action
+is refetched at once by the page that made it.
+
+### Background requests: `X-Activity: background`
+
+Send `X-Activity: background` with every request the user did not cause: the refetches events ask for, pollers
+(`GET /moves/{id}`), the refresh a tab makes for its stream. It is authorized as any other request and does not
+count as activity: the session's idle end does not move. `POST /auth/refresh` with it still rotates the tokens.
+Opening and holding a stream is not activity either. So a session ends when the user leaves, whatever the tab
+receives.
+
+### When what shows
+
+- A right lost stops the events of that place within 30 s (the same bound as `/stream`).
+- A session that ends (logout, idle timeout, a revocation, an account or certificate change) closes its streams with
+  `session_ended` within 10 s: stop and leave the page to the normal flow.
+- The access token's expiry closes the stream with `token_expired`: refresh with `X-Activity: background`, then
+  reconnect.
+- A server stopping closes every stream with `restart`.
+
+What a thin event can tell is no more than REST shows: ids and timing where the permission is in effect. Positions
+rise with every event of the system, so the global event rate is visible, as it is through sequential ids in REST.
+
 ## A move during work
 
 Three requests change where data sits in the scope tree: `PUT /posts/{id}` with `group_id`,
@@ -513,10 +601,13 @@ or the user is moved):
 - **An upload keeps its `upload_id`.** The client goes on sending chunks and completes, also after a pause long enough
   for the move to run without it; the session has no token of its own to renew. Every chunk and `complete` asks for
   `media.view` and `media.create` at the post where it sits now.
-- **The API pushes nothing.** The client learns of a move from an answer: 202 and 409 `move_pending` carry the move id,
-  409 `move_conflict` the place, 200 `already_there`. A move that ran, forced or after waiting, shows only in later
-  answers: a 403 on a post or a 404 on a group the user no longer reaches, or a different `group_id` and unit in the
-  post.
+- **Events tell, polling stays the fallback.** With the stream of events ("Real-time events"), `move.changed` says
+  a move changed state: read `GET /moves/{move_id}` (the requester receives it whatever it lost meanwhile); and
+  `scope.changed` says the tree changed around a node: reread what is listed below. Without events the client learns
+  of a move from an answer: 202 and 409 `move_pending` carry the move id, 409 `move_conflict` the place, 200
+  `already_there`, and a move that ran shows only in later answers: a 403 on a post or a 404 on a group the user no
+  longer reaches, or a different `group_id` and unit in the post. Poll `GET /moves/{id}` with
+  `X-Activity: background`.
 - **What to refresh then:** `GET /auth/me` (permissions per post and group), `GET /scope-groups/tree`, the post and its
   unit shown on the form, and the lists the client holds. A form open during a move holds the old place: after
   `move_conflict` or `already_there` read the record and fill `expected_*` again.
