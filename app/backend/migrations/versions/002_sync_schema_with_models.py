@@ -44,6 +44,7 @@ TABLES_OWNED_BY_LATER_REVISIONS = {
     "user_guide_files",  # 033_user_guides
     "pending_moves",  # 035_queued_moves
     "move_locks",  # 035_queued_moves
+    "outbox_events",  # 037_outbox_events
 }
 down_revision = "001_relativize_media_paths"
 branch_labels = None
