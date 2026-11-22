@@ -194,6 +194,27 @@ class ScopeTree:
         own = (Node.post(post_id),) if valid and post_id not in self.archived_posts else ()
         return (ROOT, *groups, *own)
 
+    @cached_property
+    def _on_path(self) -> Dict[str, Tuple[Node, ...]]:
+        return {}
+
+    def nodes_on_path(self, node: Node) -> Tuple[Node, ...]:
+        """Every node not archived on one path with the node: it, its ancestors and every node below it. A grant at one
+        of them is AuthContext.on_path for the node. Cached per tree (the tree never changes)."""
+        cached = self._on_path.get(node.key)
+        if cached is None:
+            below: Tuple[Node, ...] = ()
+            if node.kind != "post":
+                below = (*(Node.group(group_id) for group_id in sorted(self.groups_under(node))),
+                         *(Node.post(post_id) for post_id in sorted(self.posts_under(node))))
+            seen, nodes = set(), []
+            for candidate in (*self.ancestors(node), *below):
+                if candidate not in seen and not self.is_archived(candidate):
+                    seen.add(candidate)
+                    nodes.append(candidate)
+            cached = self._on_path[node.key] = tuple(nodes)
+        return cached
+
     def posts_in_effect(self, node: Node) -> Optional[FrozenSet[int]]:
         """Posts a grant at the node applies to: None for ROOT (every post), nothing for an archived node"""
         if node.kind == "root":

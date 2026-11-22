@@ -12,7 +12,7 @@ archived post or at an archived group applies nowhere (it is kept: it applies ag
 count as held anywhere either.
 """
 from dataclasses import dataclass, field
-from typing import Dict, FrozenSet, Iterable, Optional, Set, Tuple, Union
+from typing import Dict, FrozenSet, Iterable, List, Optional, Sequence, Set, Tuple, Union
 
 from loguru import logger
 from sqlalchemy import null as sa_null
@@ -166,35 +166,41 @@ class AuthContext:
         return self.has_at_post(permission, user.post_id)
 
 
-def grant_rows(user_id: int, include_archived_roles: bool = False):
-    """The one definition of what a user holds: every role assignment of a role that is not archived, one row per
-    permission of the role (permission None for a role without any): (assignment id, group id, post id, role id,
-    name, display name, builtin_key, permission name). include_archived_roles reads every existing assignment
-    (privileges.check_target_user: what the user would hold again after a role's restore); never for an AuthContext"""
+def _tree_grant_query(lead: tuple, include_archived_roles: bool):
     query = (
-        select(RoleAssignment.id, RoleAssignment.scope_group_id, RoleAssignment.scope_post_id,
+        select(*lead, RoleAssignment.id, RoleAssignment.scope_group_id, RoleAssignment.scope_post_id,
                Role.id, Role.name, Role.display_name, Role.builtin_key, Permission.name, Role.kind)
         .select_from(RoleAssignment)
         .join(Role, Role.id == RoleAssignment.role_id)
         .outerjoin(RolePermission, RolePermission.role_id == Role.id)
         .outerjoin(Permission, Permission.id == RolePermission.permission_id)
-        .where(RoleAssignment.user_id == user_id)
     )
     return query if include_archived_roles else query.where(Role.is_deleted == False)
 
 
-def system_grant_rows(user_id: int, include_archived_roles: bool = False):
-    """grant_rows of the user's system role assignments, in the same shape (both scope ids null: the root)"""
+def _system_grant_query(lead: tuple, include_archived_roles: bool):
     query = (
-        select(SystemRoleAssignment.id, sa_null(), sa_null(),
+        select(*lead, SystemRoleAssignment.id, sa_null(), sa_null(),
                Role.id, Role.name, Role.display_name, Role.builtin_key, Permission.name, Role.kind)
         .select_from(SystemRoleAssignment)
         .join(Role, Role.id == SystemRoleAssignment.role_id)
         .outerjoin(RolePermission, RolePermission.role_id == Role.id)
         .outerjoin(Permission, Permission.id == RolePermission.permission_id)
-        .where(SystemRoleAssignment.user_id == user_id)
     )
     return query if include_archived_roles else query.where(Role.is_deleted == False)
+
+
+def grant_rows(user_id: int, include_archived_roles: bool = False):
+    """The one definition of what a user holds: every role assignment of a role that is not archived, one row per
+    permission of the role (permission None for a role without any): (assignment id, group id, post id, role id,
+    name, display name, builtin_key, permission name). include_archived_roles reads every existing assignment
+    (privileges.check_target_user: what the user would hold again after a role's restore); never for an AuthContext"""
+    return _tree_grant_query((), include_archived_roles).where(RoleAssignment.user_id == user_id)
+
+
+def system_grant_rows(user_id: int, include_archived_roles: bool = False):
+    """grant_rows of the user's system role assignments, in the same shape (both scope ids null: the root)"""
+    return _system_grant_query((), include_archived_roles).where(SystemRoleAssignment.user_id == user_id)
 
 
 # (kind, assignment id) of the grants whose left-out permissions were logged by this process: one line each
@@ -242,6 +248,27 @@ async def load_grants(session: AsyncSession, user: User, include_archived_roles:
     system = grants_of((await session.exec(system_grant_rows(user.id, include_archived_roles))).all(), kind="system",
                        user=user)
     return tree + system
+
+
+async def load_grants_of(session: AsyncSession, users: Sequence[User], chunk: int = 500) -> Dict[int, Tuple[Grant, ...]]:
+    """load_grants for many users (the hub of the event stream): the same queries with the user id in front, one per
+    table and chunk of users, each grant through grants_of(..., user=user), so the boundary of the type applies exactly
+    as on a request. Every user given has an entry, empty when it holds nothing."""
+    by_id = {user.id: user for user in users}
+    tree_rows: Dict[int, List[tuple]] = {user_id: [] for user_id in by_id}
+    system_rows: Dict[int, List[tuple]] = {user_id: [] for user_id in by_id}
+    ids = sorted(by_id)
+    for start in range(0, len(ids), chunk):
+        part = ids[start:start + chunk]
+        for rows, query in (
+                (tree_rows, _tree_grant_query((RoleAssignment.user_id,), False)
+                 .where(RoleAssignment.user_id.in_(part))),
+                (system_rows, _system_grant_query((SystemRoleAssignment.user_id,), False)
+                 .where(SystemRoleAssignment.user_id.in_(part)))):
+            for user_id, *row in (await session.exec(query)).all():
+                rows[user_id].append(tuple(row))
+    return {user_id: grants_of(tree_rows[user_id], user=user) + grants_of(system_rows[user_id], kind="system", user=user)
+            for user_id, user in by_id.items()}
 
 
 async def load_scope_tree(session: AsyncSession) -> ScopeTree:
