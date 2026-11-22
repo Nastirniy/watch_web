@@ -4,7 +4,8 @@ the table outside a migration and the carry-over of a restore). Events are deliv
 clean() takes the boundary first, the first row inside retention (a walk over the old rows only, by the primary key),
 or the newest row when every row is old: that row stays, so AUTO_INCREMENT and any position have a row above them.
 Then batches below the boundary, oldest first, each its own short transaction: the ids of one batch by the primary
-key, then a DELETE of exactly those ids. Never a range to the end of the index and never an open transaction: the
+key, then a DELETE of exactly those ids as the first statement of its own transaction. Never a range to the end of
+the index and never an open transaction: the
 plan of a range DELETE flips between range and full scan with the row count (measured), and a full scan held open
 blocks every insert at the end of the index. Two media workers are safe: a batch the other removed first deletes
 nothing, and the next run tries again.
@@ -36,10 +37,15 @@ async def clean(session_maker: async_sessionmaker, retention_seconds: int, batch
     async with session_maker() as session:
         boundary = await _boundary(session, retention_seconds)
         while True:
+            # occurred_at too: a late commit below the boundary is young, and the hubs may not have read it yet
+            connection = await session.connection()
             ids = [int(row_id) for row_id in (await session.execute(
-                select(T.id).where(T.id < boundary).order_by(T.id).limit(batch))).scalars()]
+                select(T.id).where(T.id < boundary, T.occurred_at < cutoff(connection, retention_seconds))
+                .order_by(T.id).limit(batch))).scalars()]
+            # The read ends before the DELETE: a DELETE after a plain read in one transaction answers 1020 under
+            # snapshot isolation while writers insert (measured, MariaDB 11.8.9); as the first statement it cannot
+            await session.commit()
             if not ids:
-                await session.commit()
                 return removed
             result = await session.execute(delete(OutboxEvent.__table__).where(T.id.in_(ids)))
             await session.commit()

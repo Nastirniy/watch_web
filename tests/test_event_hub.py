@@ -329,3 +329,16 @@ async def test_a_loop_survives_an_error(engine, events_on, monkeypatch):
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+async def test_the_rows_read_at_start_do_not_count_as_lag(engine, db, events_on):
+    from sqlalchemy import insert
+    from app.backend.models.outbox_event import OutboxEvent
+    old = (datetime.now(timezone.utc) - timedelta(seconds=30)).replace(tzinfo=None)
+    async with engine.begin() as raw:
+        await raw.execute(insert(OutboxEvent.__table__), [{"type": "scope.changed", "v": 1, "scope_key": "root",
+                                                           "permission": "post.view", "payload": "{}",
+                                                           "occurred_at": old}])
+    hub = await hub_of(engine)
+    assert len(hub.ring) == 1, "the start fills the ring"
+    assert hub.stats()["lag_ms"] == 0, "filling the ring is no delivery"

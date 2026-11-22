@@ -67,3 +67,20 @@ async def test_the_media_worker_cleans_while_events_are_on(engine, session_maker
     worker._stop.set()
     await asyncio.wait_for(task, 2)
     assert await _ids(engine) == [3]
+
+
+async def test_a_young_row_below_the_boundary_stays(engine, session_maker, monkeypatch):
+    """A late commit: its id lies below the boundary taken before it committed, but it was written just now and the
+    hubs may not have read it yet"""
+    from app.backend.services.events import cleanup
+
+    async def boundary_before_the_late_commit(session, retention_seconds):
+        return 5
+
+    monkeypatch.setattr(cleanup, "_boundary", boundary_before_the_late_commit)
+    await _insert(engine, [1, 2], age_seconds=7200)
+    await _insert(engine, [3], age_seconds=10)       # the late one
+    await _insert(engine, [4], age_seconds=7200)
+    await _insert(engine, [5], age_seconds=10)
+    assert await clean(session_maker, retention_seconds=3600) == 3
+    assert await _ids(engine) == [3, 5]

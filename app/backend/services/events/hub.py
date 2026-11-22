@@ -101,6 +101,7 @@ class EventHub:
         self.position = head
         await self.reload_tree()
         await self.tick()
+        self._lags.clear()                  # filling the ring is no delivery: its rows are old by design
         self.started = True
         if run_tasks:
             await self.report()             # /health sees this worker at once, not after the first interval
