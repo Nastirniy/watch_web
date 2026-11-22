@@ -139,6 +139,75 @@ def audit_params_are_served():
     assert not mismatches, "audit params the read API would serve as legacy.unknown:\n" + "\n".join(sorted(mismatches))
 
 
+_EVENT_GUARD = {"on": True}
+
+
+@pytest.fixture(autouse=True)
+def _event_guard_per_test(request):
+    """A test that writes audit rows by hand (pytest.mark.raw_audit_rows) is no write path: events_follow_audit skips it"""
+    _EVENT_GUARD["on"] = request.node.get_closest_marker("raw_audit_rows") is None
+    yield
+    _EVENT_GUARD["on"] = True
+
+
+@pytest.fixture(scope="session", autouse=True)
+def events_follow_audit():
+    """Every committed transaction holding an audit row of an event mapped in enums/events.AUDIT_EVENT_TYPES must have
+    called publish() with the mapped event type (events on or off): an audited write path of the administration that
+    forgets its event fails the run when the session ends, naming the test.
+
+    Wraps services/events/publish._published (publish() looks it up at every call) and listens to the ORM session:
+    audit rows are seen in session.new at each flush and at the commit, both marks are cleared when the outermost
+    transaction ends."""
+    import importlib
+    from sqlalchemy import event as sa_event
+    from sqlalchemy.orm import Session
+    from app.backend.enums.events import AUDIT_EVENT_TYPES
+    from app.backend.models.audit import AuditLog
+
+    module = importlib.import_module("app.backend.services.events.publish")    # the package exports a function publish
+    mapped = {audit.code: event.value for audit, event in AUDIT_EVENT_TYPES.items() if event is not None}
+    missing = set()
+    original = module._published
+
+    def published(session, event):
+        original(session, event)
+        session.info.setdefault("_events_published", set()).add(event.value)
+
+    def collect(session):
+        if _EVENT_GUARD["on"]:
+            audited = session.info.setdefault("_events_audited", set())
+            audited.update(obj.event for obj in session.new if isinstance(obj, AuditLog) and obj.event in mapped)
+
+    def after_flush(session, flush_context):
+        collect(session)
+
+    def before_commit(session):
+        collect(session)
+        done = session.info.get("_events_published", set())
+        for code in session.info.get("_events_audited", ()):
+            if mapped[code] not in done:
+                test = os.environ.get("PYTEST_CURRENT_TEST", "?").split(" ")[0]
+                missing.add(f"{test}: audit row {code} committed without a {mapped[code]} event")
+
+    def after_transaction_end(session, transaction):
+        if transaction.parent is None:
+            session.info.pop("_events_audited", None)
+            session.info.pop("_events_published", None)
+
+    module._published = published
+    listeners = (("after_flush", after_flush), ("before_commit", before_commit),
+                 ("after_transaction_end", after_transaction_end))
+    for name, listener in listeners:
+        sa_event.listen(Session, name, listener)
+    yield missing
+    for name, listener in listeners:
+        sa_event.remove(Session, name, listener)
+    module._published = original
+    assert not missing, "audited writes without their event (enums/events.py AUDIT_EVENT_TYPES):\n" + \
+        "\n".join(sorted(missing))
+
+
 @pytest.fixture(scope="session", autouse=True)
 def problems_are_declared():
     """Every problem a test makes the app answer must be declared on its operation (responses=problems(...)).

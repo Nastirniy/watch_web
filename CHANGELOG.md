@@ -5,6 +5,41 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Real-time events: the administration
+
+### Added
+
+- Five new event types for the administration pages (union members and data in parentheses; ids and enum values
+  only, never data; one event per operation, in the transaction of the change after its audit row, so a refused or
+  failed write sends nothing). The web translates the new types. API.md, "The administration".
+  - `user.changed` (`UserChanged`, `UserChangedData`: `subject_user_id`): a user created, updated (name, alias, home
+    post, activation, type), archived or restored, a tree or system role assignment added or removed. To the
+    holders of `user.view` in effect at the user's home node (scope: the home post or the root) and to the user; a
+    move of the home also at the old home.
+  - `certificate.changed` (`CertificateChanged`, `CertificateChangedData`: `subject_user_id`, `certificate_id`):
+    issue, upload, revoke (API and CLI); not export. To `certificate.view` over the user and the user.
+  - `session.changed` (`SessionChanged`, `SessionChangedData`: `subject_user_id`): login, logout, a session ended by
+    an administrator, a certificate revocation, a deactivation, archive or type change, a refresh token used again.
+    Not idle or expired ends (computed when read). To `user.view` over the user and the user.
+  - `role.changed` (`RoleChanged`, `RoleChangedData`: `role_id`): create, clone, update, permission added or removed,
+    archive, restore, permanent delete. To the holders of `role.view` at any node in effect; no `scope`.
+  - `dictionary.changed` (`DictionaryChanged`, `DictionaryChangedData`: `dictionary`, new enum schema `Dictionary`:
+    `categories`, `signal_types`, `tags`, `media_formats`, `guides`): any create, update, archive or restore (guide
+    files too). To the holders of the dictionary's view permission at any node in effect; `guides` to every stream.
+- Every new type is conflated by what it names (per user, certificate, role, dictionary): a stream that is behind
+  keeps only the latest of each in its queue.
+
+### Changed
+
+- `scope` of a domain event is also absent for an event about a global object (a role, a dictionary): the
+  description of `EventEnvelope.scope` says so (schemas `MoveChanged`, `ScopeChanged`,
+  `SecurityCertificateMismatch` changed in their description only).
+- A stream's rights follow the user's own changes at once: after a `user.changed` (assignments, a type change) or a
+  `role.changed` the hub reloads the grants of the users concerned before it delivers the events of that tick,
+  instead of at the next 30 s refresh.
+- No database change: an event for holders "at any node" or for every stream is stored with `scope_key` `*`, which
+  is never a node key.
+
 ## Real-time events: follow-ups
 
 ### Added

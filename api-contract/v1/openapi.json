@@ -33884,7 +33884,7 @@
           "EVENTS"
         ],
         "summary": "Stream Events",
-        "description": "The stream of events: a hint that something on screen changed, never data and never history. Everything works\nwithout it; refetch through the REST routes when an event says so. Any authenticated user; one stream per tab,\nread with fetch (Authorization: Bearer, Accept: text/event-stream), only over HTTP/2 (API.md).\n\nMessages (StreamMessage, discriminated by type): ready first; heartbeat about every 20 s; reload when the\nserver cannot replay from the position sent (refetch everything on screen); close with a reason before the\nserver ends the stream; domain events (move.changed, scope.changed, security.certificate_mismatch). A domain\nevent carries refetch_within_ms: refetch after a random wait below it, never at once.\n\nTwo ids, both opaque. The `id:` line of every block is a position: store it (heartbeats included) and send it\nback as Last-Event-ID when reconnecting; never compare or compute it. A position this server cannot answer for\n(unknown, malformed, too old, from before a restore) gives reload, never an error. The `id` in the JSON is the\nidentity of an event: ignore one already seen (delivery is at least once). Order holds within one resource only.\n\nOpening a stream and keeping it open is not activity: the session is not touched, so an idle tab still reaches\nthe idle timeout. The stream closes with token_expired at the expiry of the access token (refresh with\nX-Activity: background, then reconnect), with session_ended within 10 s of a logout, an idle end, a revocation or\nan account change (stop), and with restart when the server stops (reconnect after its retry). A right lost\nstops the events of that place within 30 s.\n\n204: events are off on this server, do not reconnect until the page reloads. 503 event_stream_capacity with\nRetry-After: this server holds as many streams as it can, it is stopping, or its event hub is not running yet\n(it is retried); back off for Retry-After at least. 429, 502, 503 and 504\nwithout a problem body come from nginx (too many streams of one certificate, the API restarting): back off by\nstatus.",
+        "description": "The stream of events: a hint that something on screen changed, never data and never history. Everything works\nwithout it; refetch through the REST routes when an event says so. Any authenticated user; one stream per tab,\nread with fetch (Authorization: Bearer, Accept: text/event-stream), only over HTTP/2 (API.md).\n\nMessages (StreamMessage, discriminated by type): ready first; heartbeat about every 20 s; reload when the\nserver cannot replay from the position sent (refetch everything on screen); close with a reason before the\nserver ends the stream; domain events (move.changed, scope.changed, security.certificate_mismatch, and for the\nadministration user.changed, certificate.changed, session.changed, role.changed, dictionary.changed). A domain\nevent carries refetch_within_ms: refetch after a random wait below it, never at once.\n\nTwo ids, both opaque. The `id:` line of every block is a position: store it (heartbeats included) and send it\nback as Last-Event-ID when reconnecting; never compare or compute it. A position this server cannot answer for\n(unknown, malformed, too old, from before a restore) gives reload, never an error. The `id` in the JSON is the\nidentity of an event: ignore one already seen (delivery is at least once). Order holds within one resource only.\n\nOpening a stream and keeping it open is not activity: the session is not touched, so an idle tab still reaches\nthe idle timeout. The stream closes with token_expired at the expiry of the access token (refresh with\nX-Activity: background, then reconnect), with session_ended within 10 s of a logout, an idle end, a revocation or\nan account change (stop), and with restart when the server stops (reconnect after its retry). A right lost\nstops the events of that place within 30 s.\n\n204: events are off on this server, do not reconnect until the page reloads. 503 event_stream_capacity with\nRetry-After: this server holds as many streams as it can, it is stopping, or its event hub is not running yet\n(it is retried); back off for Retry-After at least. 429, 502, 503 and 504\nwithout a problem body come from nginx (too many streams of one certificate, the API restarting): back off by\nstatus.",
         "operationId": "stream_events",
         "security": [
           {
@@ -37534,6 +37534,73 @@
           }
         ]
       },
+      "CertificateChanged": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Identity of the event, for ignoring a repeat (at-least-once delivery). Opaque: never compare, compute or parse it; it may be lower than a position already seen"
+          },
+          "v": {
+            "type": "integer",
+            "title": "V",
+            "description": "Version of data for this type"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/EventScope",
+            "description": "Where it happened; absent: no place, an event for this user only or about a global object (a role, a dictionary)"
+          },
+          "refetch_within_ms": {
+            "type": "integer",
+            "title": "Refetch Within Ms",
+            "description": "Refetch what this event concerns after a random wait below this many milliseconds, never at once: the server spreads the refetches of everyone who received it. A user's own action is refetched at once by the page that made it"
+          },
+          "type": {
+            "type": "string",
+            "const": "certificate.changed",
+            "title": "Type"
+          },
+          "data": {
+            "$ref": "#/components/schemas/CertificateChangedData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "v",
+          "occurred_at",
+          "refetch_within_ms",
+          "type",
+          "data"
+        ],
+        "title": "CertificateChanged",
+        "description": "A certificate of a user was issued, uploaded or revoked. Sent to the holders of certificate.view in effect at\nthe user's home node and to the user. Ids only, never a certificate value"
+      },
+      "CertificateChangedData": {
+        "properties": {
+          "subject_user_id": {
+            "type": "integer",
+            "title": "Subject User Id",
+            "description": "The user the certificate belongs to: read GET /users/{subject_user_id}/certificates"
+          },
+          "certificate_id": {
+            "type": "integer",
+            "title": "Certificate Id",
+            "description": "The certificate issued, uploaded or revoked"
+          }
+        },
+        "type": "object",
+        "required": [
+          "subject_user_id",
+          "certificate_id"
+        ],
+        "title": "CertificateChangedData"
+      },
       "CertificateDataMissingProblem": {
         "properties": {
           "type": {
@@ -39922,6 +39989,78 @@
         ],
         "title": "DatabaseUndoRestoreAuditParams",
         "description": "Params of database.undo_restore (Database restore undone)"
+      },
+      "Dictionary": {
+        "type": "string",
+        "enum": [
+          "categories",
+          "signal_types",
+          "tags",
+          "media_formats",
+          "guides"
+        ],
+        "title": "Dictionary",
+        "description": "The dictionaries dictionary.changed names: the list pages of the administration and the pickers"
+      },
+      "DictionaryChanged": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Identity of the event, for ignoring a repeat (at-least-once delivery). Opaque: never compare, compute or parse it; it may be lower than a position already seen"
+          },
+          "v": {
+            "type": "integer",
+            "title": "V",
+            "description": "Version of data for this type"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/EventScope",
+            "description": "Where it happened; absent: no place, an event for this user only or about a global object (a role, a dictionary)"
+          },
+          "refetch_within_ms": {
+            "type": "integer",
+            "title": "Refetch Within Ms",
+            "description": "Refetch what this event concerns after a random wait below this many milliseconds, never at once: the server spreads the refetches of everyone who received it. A user's own action is refetched at once by the page that made it"
+          },
+          "type": {
+            "type": "string",
+            "const": "dictionary.changed",
+            "title": "Type"
+          },
+          "data": {
+            "$ref": "#/components/schemas/DictionaryChangedData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "v",
+          "occurred_at",
+          "refetch_within_ms",
+          "type",
+          "data"
+        ],
+        "title": "DictionaryChanged",
+        "description": "An entry of a dictionary was created, updated, archived or restored (a guide's files too). Sent to the holders\nof its view permission at any node (category.view, signal_type.view, tag.view, media_format.view); guides to\nevery stream. No scope"
+      },
+      "DictionaryChangedData": {
+        "properties": {
+          "dictionary": {
+            "$ref": "#/components/schemas/Dictionary",
+            "description": "The list to read again: categories, signal_types, tags, media_formats (GET /media-formats) or guides (GET /guides)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dictionary"
+        ],
+        "title": "DictionaryChangedData"
       },
       "DocumentTextInvalidProblem": {
         "properties": {
@@ -46977,7 +47116,7 @@
           },
           "scope": {
             "$ref": "#/components/schemas/EventScope",
-            "description": "Where it happened; absent: an event for this user only"
+            "description": "Where it happened; absent: no place, an event for this user only or about a global object (a role, a dictionary)"
           },
           "refetch_within_ms": {
             "type": "integer",
@@ -55376,6 +55515,67 @@
         "title": "RoleAssignmentDeleteAuditParams",
         "description": "Params of role_assignment.delete (Role assignment removed from a node)"
       },
+      "RoleChanged": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Identity of the event, for ignoring a repeat (at-least-once delivery). Opaque: never compare, compute or parse it; it may be lower than a position already seen"
+          },
+          "v": {
+            "type": "integer",
+            "title": "V",
+            "description": "Version of data for this type"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/EventScope",
+            "description": "Where it happened; absent: no place, an event for this user only or about a global object (a role, a dictionary)"
+          },
+          "refetch_within_ms": {
+            "type": "integer",
+            "title": "Refetch Within Ms",
+            "description": "Refetch what this event concerns after a random wait below this many milliseconds, never at once: the server spreads the refetches of everyone who received it. A user's own action is refetched at once by the page that made it"
+          },
+          "type": {
+            "type": "string",
+            "const": "role.changed",
+            "title": "Type"
+          },
+          "data": {
+            "$ref": "#/components/schemas/RoleChangedData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "v",
+          "occurred_at",
+          "refetch_within_ms",
+          "type",
+          "data"
+        ],
+        "title": "RoleChanged",
+        "description": "A role was created, cloned, updated, archived, restored, deleted permanently, or its permissions changed. Sent\nto the holders of role.view at any node; no scope"
+      },
+      "RoleChangedData": {
+        "properties": {
+          "role_id": {
+            "type": "integer",
+            "title": "Role Id",
+            "description": "Read GET /roles/{role_id} and its permissions; 404 after a permanent delete"
+          }
+        },
+        "type": "object",
+        "required": [
+          "role_id"
+        ],
+        "title": "RoleChangedData"
+      },
       "RoleClone": {
         "properties": {
           "name": {
@@ -57871,7 +58071,7 @@
           },
           "scope": {
             "$ref": "#/components/schemas/EventScope",
-            "description": "Where it happened; absent: an event for this user only"
+            "description": "Where it happened; absent: no place, an event for this user only or about a global object (a role, a dictionary)"
           },
           "refetch_within_ms": {
             "type": "integer",
@@ -61650,7 +61850,7 @@
           },
           "scope": {
             "$ref": "#/components/schemas/EventScope",
-            "description": "Where it happened; absent: an event for this user only"
+            "description": "Where it happened; absent: no place, an event for this user only or about a global object (a role, a dictionary)"
           },
           "refetch_within_ms": {
             "type": "integer",
@@ -62071,6 +62271,67 @@
         ],
         "title": "SessionCertificateMismatchAuditParams",
         "description": "Params of session.certificate_mismatch (Token presented with another client certificate)"
+      },
+      "SessionChanged": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Identity of the event, for ignoring a repeat (at-least-once delivery). Opaque: never compare, compute or parse it; it may be lower than a position already seen"
+          },
+          "v": {
+            "type": "integer",
+            "title": "V",
+            "description": "Version of data for this type"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/EventScope",
+            "description": "Where it happened; absent: no place, an event for this user only or about a global object (a role, a dictionary)"
+          },
+          "refetch_within_ms": {
+            "type": "integer",
+            "title": "Refetch Within Ms",
+            "description": "Refetch what this event concerns after a random wait below this many milliseconds, never at once: the server spreads the refetches of everyone who received it. A user's own action is refetched at once by the page that made it"
+          },
+          "type": {
+            "type": "string",
+            "const": "session.changed",
+            "title": "Type"
+          },
+          "data": {
+            "$ref": "#/components/schemas/SessionChangedData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "v",
+          "occurred_at",
+          "refetch_within_ms",
+          "type",
+          "data"
+        ],
+        "title": "SessionChanged",
+        "description": "A login, a logout or a session ended by the server (an administrator, a revocation, an account change). Not\nsent for a session that only went idle or expired. Sent to the holders of user.view in effect at the user's home\nnode and to the user (their own devices)"
+      },
+      "SessionChangedData": {
+        "properties": {
+          "subject_user_id": {
+            "type": "integer",
+            "title": "Subject User Id",
+            "description": "The user whose sessions changed: read GET /users/{subject_user_id}/sessions (online state and last login of the user record too)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "subject_user_id"
+        ],
+        "title": "SessionChangedData"
       },
       "SessionEndAuditEntry": {
         "properties": {
@@ -64684,6 +64945,21 @@
             "$ref": "#/components/schemas/SecurityCertificateMismatch"
           },
           {
+            "$ref": "#/components/schemas/UserChanged"
+          },
+          {
+            "$ref": "#/components/schemas/CertificateChanged"
+          },
+          {
+            "$ref": "#/components/schemas/SessionChanged"
+          },
+          {
+            "$ref": "#/components/schemas/RoleChanged"
+          },
+          {
+            "$ref": "#/components/schemas/DictionaryChanged"
+          },
+          {
             "$ref": "#/components/schemas/StreamReady"
           },
           {
@@ -64701,13 +64977,18 @@
         "discriminator": {
           "propertyName": "type",
           "mapping": {
+            "certificate.changed": "#/components/schemas/CertificateChanged",
             "close": "#/components/schemas/StreamClose",
+            "dictionary.changed": "#/components/schemas/DictionaryChanged",
             "heartbeat": "#/components/schemas/StreamHeartbeat",
             "move.changed": "#/components/schemas/MoveChanged",
             "ready": "#/components/schemas/StreamReady",
             "reload": "#/components/schemas/StreamReload",
+            "role.changed": "#/components/schemas/RoleChanged",
             "scope.changed": "#/components/schemas/ScopeChanged",
-            "security.certificate_mismatch": "#/components/schemas/SecurityCertificateMismatch"
+            "security.certificate_mismatch": "#/components/schemas/SecurityCertificateMismatch",
+            "session.changed": "#/components/schemas/SessionChanged",
+            "user.changed": "#/components/schemas/UserChanged"
           }
         }
       },
@@ -69755,6 +70036,67 @@
         ],
         "title": "UserCertificateUploadAuditParams",
         "description": "Params of user_certificate.upload (Certificate uploaded)"
+      },
+      "UserChanged": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Identity of the event, for ignoring a repeat (at-least-once delivery). Opaque: never compare, compute or parse it; it may be lower than a position already seen"
+          },
+          "v": {
+            "type": "integer",
+            "title": "V",
+            "description": "Version of data for this type"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/EventScope",
+            "description": "Where it happened; absent: no place, an event for this user only or about a global object (a role, a dictionary)"
+          },
+          "refetch_within_ms": {
+            "type": "integer",
+            "title": "Refetch Within Ms",
+            "description": "Refetch what this event concerns after a random wait below this many milliseconds, never at once: the server spreads the refetches of everyone who received it. A user's own action is refetched at once by the page that made it"
+          },
+          "type": {
+            "type": "string",
+            "const": "user.changed",
+            "title": "Type"
+          },
+          "data": {
+            "$ref": "#/components/schemas/UserChangedData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "v",
+          "occurred_at",
+          "refetch_within_ms",
+          "type",
+          "data"
+        ],
+        "title": "UserChanged",
+        "description": "A user record changed: created, updated (name, home, activation, type), archived, restored, or a role\nassignment added or removed. Sent to the holders of user.view in effect at the user's home node (scope: the home\npost, or the root) and to the user themself; a move of the home reaches the old home too"
+      },
+      "UserChangedData": {
+        "properties": {
+          "subject_user_id": {
+            "type": "integer",
+            "title": "Subject User Id",
+            "description": "Read GET /users/{subject_user_id} and what the page shows of it (its assignments); your own id: reread GET /auth/me, your rights may have changed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "subject_user_id"
+        ],
+        "title": "UserChangedData"
       },
       "UserCreateAuditEntry": {
         "properties": {

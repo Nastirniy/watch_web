@@ -135,6 +135,7 @@ async def test_a_row_without_params_stores_sql_null(db):
     assert row.id not in {row_id for (row_id,) in found}
 
 
+@pytest.mark.raw_audit_rows       # the writer alone, no write path
 async def test_wrong_params_raise_type_error(db):
     with pytest.raises(TypeError, match="unknown"):
         await create_audit_log(db, AuditEvent.TAG_CREATE, params={"tag_name": "x", "colour": "red"})
@@ -151,6 +152,7 @@ async def test_wrong_params_raise_type_error(db):
     assert stored.params == {"username": "ivan", "cause": "access"}
 
 
+@pytest.mark.raw_audit_rows
 async def test_none_params_are_absent_or_refused(db):
     """An Optional param passed as None is left out (absent, never null); None in a required param or under an
     unknown name is a TypeError"""

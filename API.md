@@ -454,11 +454,37 @@ sets it. All are one union, `components["schemas"]["StreamMessage"]`, discrimina
 | `move.changed` | A queued move changed state (waiting, done, cancelled, failed) | `data.move_id`, `data.move_status` |
 | `scope.changed` | The scope tree changed around this node: a move (the node and its old place), an archive or a restore (the node), a create (the new node's parent: the group of a new post, the parent of a new group, the corps of a new brigade, the root for a new corps or a post or group directly under it) | none |
 | `security.certificate_mismatch` | A valid token of a session came with another client certificate: refused, the session stays, an audit row records it (at most one per session in 5 minutes, this event exactly as often). Only to holders of `audit.view`, never to the user of the session | `data.audit_log_id` (`GET /audit-logs/{audit_log_id}`), `data.session_user_id` |
+| `user.changed` | A user record changed (see "The administration" below) | `data.subject_user_id` |
+| `certificate.changed` | A certificate of a user was issued, uploaded or revoked | `data.subject_user_id`, `data.certificate_id` |
+| `session.changed` | A login, a logout or a session ended by the server | `data.subject_user_id` |
+| `role.changed` | A role, its permissions or its state changed | `data.role_id` |
+| `dictionary.changed` | An entry of a dictionary changed | `data.dictionary`: `categories`, `signal_types`, `tags`, `media_formats`, `guides` |
 
-A domain event (`move.changed`, `scope.changed`, `security.certificate_mismatch`) also carries `id`, `v`,
-`occurred_at`, `scope` (`{kind, id}`; absent for an event of one user, `id` absent at the root) and
-`refetch_within_ms`. A new type is added to the union: the
-exhaustive `switch` of the web client then fails to compile until it handles it.
+A domain event (every type but `ready`, `heartbeat`, `reload`, `close`) also carries `id`, `v`, `occurred_at`,
+`scope` (`{kind, id}`; `id` absent at the root; absent when the event has no place: an event of one user, a role, a
+dictionary) and `refetch_within_ms`. A new type is added to the union: the exhaustive `switch` of the web client then
+fails to compile until it handles it.
+
+### The administration
+
+Every page of the administration (users, their roles, certificates and sessions, roles, dictionaries, guides) is built
+on these events plus a refetch through REST, never on polling alone. An event names ids and enum values only: read
+what it names, if it is on screen, after the random wait of `refetch_within_ms`. One event per operation (a user
+created with its base roles is one `user.changed`), published in the transaction of the change, so a refused or failed
+write sends nothing. Each type is conflated by what it names: while a stream is behind, only the latest event of one
+user, certificate, role or dictionary waits in its queue.
+
+| Type | When | Who receives it | Refetch |
+|---|---|---|---|
+| `user.changed` | A user is created, updated (name, alias, home post, activation, user type), archived or restored; a tree or system role assignment is added or removed (directly, or by a type change) | Holders of `user.view` in effect at the user's home node (`scope`: the home post, or the root for a user without one), as `GET /users/{user_id}` decides; and the user themself. A move of the home post sends a second event at the old home, for those who just lost sight of the user | `GET /users/{subject_user_id}` and what the page shows of it (`/assignments`, `/system-assignments`); your own id: `GET /auth/me` (your rights may have changed) |
+| `certificate.changed` | A certificate is issued, uploaded or revoked (by the API or the CLI); never an export | Holders of `certificate.view` in effect at the user's home node, and the user | `GET /users/{subject_user_id}/certificates` |
+| `session.changed` | A login, a logout, a session ended by an administrator, by a revocation of its certificate, by a deactivation, archive or type change, by a refresh token used again. Never a session that only went idle or expired (computed when read), never a touch | Holders of `user.view` in effect at the user's home node, and the user (their own devices) | `GET /users/{subject_user_id}/sessions`; the online state and last login of the user record |
+| `role.changed` | A role is created, cloned, updated, archived, restored or deleted permanently, or a permission is added to it or removed from it | Holders of `role.view` at any node in effect (no `scope`) | `GET /roles/{role_id}` and `/permissions` (404 after a permanent delete); assignment lists that show the role |
+| `dictionary.changed` | An entry of a dictionary is created, updated, archived or restored (a guide's files too) | `categories`, `signal_types`, `tags`, `media_formats`: holders of `category.view`, `signal_type.view`, `tag.view`, `media_format.view` at any node in effect; `guides`: every stream (reading the guides needs only a login). No `scope` | The list named, and the pickers that use it |
+
+Not on events: audit log rows, backups and the database status, statistics. A database restore sends none of these
+(it is no request of the API): it ends the sessions of the backup (`close` `session_ended`), and a position from
+before it gives `reload`.
 
 ### Two ids, both opaque
 
@@ -500,7 +526,9 @@ receives.
 
 ### When what shows
 
-- A right lost stops the events of that place within 30 s (the same bound as `/stream`).
+- A right lost stops the events of that place within 30 s (the same bound as `/stream`); a right lost or gained
+  through the user's own assignments, user type or a role they hold applies at once, with the `user.changed` or
+  `role.changed` that tells of it.
 - A session that ends (logout, idle timeout, a revocation, an account or certificate change) closes its streams with
   `session_ended` within 10 s: stop and leave the page to the normal flow.
 - The access token's expiry closes the stream with `token_expired`: refresh with `X-Activity: background`, then

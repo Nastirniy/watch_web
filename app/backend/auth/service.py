@@ -28,7 +28,7 @@ from app.backend.enums.general import Permissions
 from app.backend.auth.scope import ROOT
 from app.backend.services.audit import create_audit_log, home_node, home_scope, user_facts
 from app.backend.services.certificates import active_certificate, certificate_state
-from app.backend.services.events import publish
+from app.backend.services.events import publish, publish_session_changed
 from app.backend.utils.row_locks import lock_all
 from app.backend.utils.text import fit_column
 
@@ -222,6 +222,7 @@ class AuthService:
             user_agent=user_agent,
             request_url=request_url,
         )
+        publish_session_changed(session, user.id, home_node(locked.post_id))
 
         await session.commit()
         return user_session
@@ -361,6 +362,7 @@ class AuthService:
             ip_address=ip_address,
             user_agent=user_agent,
         )
+        publish_session_changed(session, user_id, home_scope(user))
         await session.commit()
         return True
 
@@ -378,8 +380,9 @@ class AuthService:
 
         A session already past its absolute end or idle timeout is recorded with that reason, not as revoked.
         commit=False leaves the changes in the caller's transaction so that they land together with
-        the change that caused them (the caller commits). Database errors propagate either way.
-        Returns the number of sessions revoked.
+        the change that caused them (the caller commits): the caller then also publishes session.changed for a count
+        above 0, next to its own audit row, after its last flush (publish_session_changed); with commit it is
+        published here. Database errors propagate either way. Returns the number of sessions revoked.
         """
         result = await session.exec(
             select(UserSession).where(UserSession.user_id == user_id, UserSession.ended_at.is_(None))
@@ -410,6 +413,8 @@ class AuthService:
                 user_agent=user_agent,
             )
             _logger.info(f"Revoked {count} live sessions for user_id={user_id}, cause={cause.value}")
+            if commit:
+                publish_session_changed(session, user_id, home)
         if commit and not_ended:
             await session.commit()
 
@@ -428,8 +433,8 @@ class AuthService:
     ) -> int:
         """Revoke the live sessions of a user bound to one certificate (certificate_fingerprint_hash); the user's
         other sessions stay. Same rules as invalidate_all_user_sessions: a session already past its end is
-        recorded with that reason, commit=False leaves the changes in the caller's transaction.
-        Returns the number of sessions revoked."""
+        recorded with that reason, commit=False leaves the changes in the caller's transaction (and session.changed
+        to the caller, as there). Returns the number of sessions revoked."""
         result = await session.exec(select(UserSession).where(
             UserSession.user_id == user_id,
             UserSession.certificate_fingerprint_hash == fingerprint_hash,
@@ -462,6 +467,8 @@ class AuthService:
             )
             _logger.info(f"Revoked {count} live sessions of one certificate for user_id={user_id}, "
                          f"cause={cause.value}")
+            if commit:
+                publish_session_changed(session, user_id, home)
         if commit and not_ended:
             await session.commit()
 
@@ -530,6 +537,7 @@ class AuthService:
             user_agent=user_agent,
             request_url=request_url,
         )
+        publish_session_changed(session, user.id, home_scope(user))
         await session.commit()
         return True
 
@@ -636,6 +644,7 @@ class AuthService:
                 resource_id=user_id,
                 user_id=user_id,
             )
+            publish_session_changed(session, user_id, home_node(account.post_id))
             _logger.info(f"Revoked {count} live sessions for user_id={user_id}, cause={cause.value}")
         await session.commit()
         return count

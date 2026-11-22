@@ -42,6 +42,7 @@ from app.backend.api.v1.models.response.roles import (
 from app.backend.errors.problems import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.errors.openapi import GUARDED, problems
+from app.backend.services.events import publish_role_changed
 
 router = APIRouter(prefix=RoleRoutes.BASE.value, tags=[RoleRoutes.tag()])
 _logger = get_api_logger()
@@ -134,6 +135,7 @@ async def create_role(
             new_values=role.model_dump(),
             **client_info(request, auth)
         )
+        publish_role_changed(session, role.id)
         await session.commit()
 
     return await _role_response(session, role)
@@ -272,6 +274,7 @@ async def update_role(
             new_values=role.model_dump(),
             **client_info(request, auth)
         )
+        publish_role_changed(session, role.id)
         await session.commit()
 
     return await _role_response(session, role)
@@ -318,6 +321,7 @@ async def archive_role(
         new_values=role.model_dump(),
         **client_info(request, auth),
     )
+    publish_role_changed(session, role.id)
     await session.commit()
     await session.refresh(role)
     _logger.info(f"User {current_user.username} archived role {role.name}")
@@ -360,6 +364,7 @@ async def restore_role(
         new_values=role.model_dump(),
         **client_info(request, auth),
     )
+    publish_role_changed(session, role.id)
     await session.commit()
     await session.refresh(role)
     _logger.info(f"User {current_user.username} restored role {role.name}")
@@ -412,6 +417,7 @@ async def clone_role(
             new_values=role.model_dump(),
             **client_info(request, auth)
         )
+        publish_role_changed(session, role.id)
         await session.commit()
     _logger.info(f"User {current_user.username} cloned role {source_id} as {role.name}")
     return role_to_response(role, names)
@@ -510,6 +516,7 @@ async def delete_role(
         old_values=old_values,
         **client_info(request, auth),
     )
+    publish_role_changed(session, role_id)
     await session.commit()
     _logger.warning(f"User {current_user.username} permanently deleted role {old_values['name']} (id {role_id})")
 
@@ -602,6 +609,7 @@ async def add_role_permission(
                 new_values={"permission_added": permission_name},
                 **client_info(request, auth)
             )
+            publish_role_changed(session, role_id)
             await session.commit()
         except IntegrityError as exc:
             # A concurrent request granted it between the check and the insert: the PUT is idempotent, so answer
@@ -657,6 +665,7 @@ async def remove_role_permission(
         old_values={"permission_removed": permission.name},
         **client_info(request, auth)
     )
+    publish_role_changed(session, role.id)
     await session.commit()
     _logger.info(f"User {current_user.username} revoked {permission.name} from role {role.name}")
 

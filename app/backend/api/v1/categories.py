@@ -26,6 +26,8 @@ from app.backend.filters.category_filter import CategoryFilterService
 from app.backend.errors.problems import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.errors.openapi import GUARDED, problems
+from app.backend.enums.events import Dictionary
+from app.backend.services.events import publish_dictionary_changed
 
 router = APIRouter(prefix=CategoryRoutes.BASE.value, tags=[CategoryRoutes.tag()])
 
@@ -93,6 +95,7 @@ async def create_category(
             new_values=category.model_dump(),
             **client_info(request, auth)
         )
+        publish_dictionary_changed(session, Dictionary.CATEGORIES)
         await session.commit()
 
     return category
@@ -183,6 +186,7 @@ async def update_category(
             new_values=category.model_dump(),
             **client_info(request, auth)
         )
+        publish_dictionary_changed(session, Dictionary.CATEGORIES)
         await session.commit()
 
     return category
@@ -224,6 +228,7 @@ async def archive_category(
         new_values=row.model_dump(),
         **client_info(request, auth),
     )
+    publish_dictionary_changed(session, Dictionary.CATEGORIES)
     await session.commit()
     await session.refresh(row)
     return CategoryResponse.model_validate(row)
@@ -260,6 +265,7 @@ async def restore_category(
         new_values=row.model_dump(),
         **client_info(request, auth),
     )
+    publish_dictionary_changed(session, Dictionary.CATEGORIES)
     await session.commit()
     await session.refresh(row)
     return CategoryResponse.model_validate(row)

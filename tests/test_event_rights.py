@@ -161,3 +161,65 @@ async def test_load_grants_of_is_load_grants_for_each_user(db):
         assert loaded[user.id] == await load_grants(db, user)
     assert P.POST_UPDATE.value not in set().union(*(g.permissions for g in loaded[second.id])), "the viewer boundary"
     assert await load_grants_of(db, []) == {}
+
+
+# ---------------------------------------------------------------- "*": held at some node, every stream
+
+ANYWHERE_CASES = [
+    # grant nodes, archived groups, archived posts
+    (("root",), (), ()),
+    (("g:2",), (), ()),
+    (("p:7",), (), ()),
+    (("p:99",), (), ()),                       # a post the tree does not know: a live node under the root
+    (("p:7",), (), (7,)),                      # a grant on an archived post counts nowhere
+    (("g:2",), (2,), ()),
+    (("g:2", "p:8"), (2,), ()),                # one grant still in effect
+    (("p:7", "g:2"), (2,), (7,)),
+    ((), (), ()),
+]
+
+
+@pytest.mark.parametrize("grant_keys, archived_groups, archived_posts", ANYWHERE_CASES)
+def test_held_anywhere_agrees_with_auth_context(grant_keys, archived_groups, archived_posts):
+    scope_tree = tree(archived_groups, archived_posts)
+    grants = [grant(key, P.ROLE_VIEW.value) for key in grant_keys]
+    auth = AuthContext(user=User(id=5, username="u", username_alias="U"), grants=tuple(grants), tree=scope_tree)
+    index = RightsIndex(scope_tree)
+    index.set_user(5, tuple(grants))
+    expected = auth.has_anywhere(P.ROLE_VIEW)
+    assert (5 in set(index.holders("*", P.ROLE_VIEW.value))) == expected
+    assert index.allows(5, "*", P.ROLE_VIEW.value) == expected
+    assert not index.allows(5, "*", P.TAG_VIEW.value) and 5 not in set(index.holders("*", P.TAG_VIEW.value))
+
+
+def test_held_anywhere_follows_a_tree_change():
+    index = RightsIndex(tree())
+    index.set_user(5, (grant("p:7", P.ROLE_VIEW.value),))
+    index.set_tree(tree(archived_posts=(7,)))
+    assert list(index.holders("*", P.ROLE_VIEW.value)) == []
+    index.set_tree(tree())
+    assert list(index.holders("*", P.ROLE_VIEW.value)) == [5]
+
+
+def test_a_system_grant_is_held_anywhere():
+    index = RightsIndex(tree())
+    index.set_user(5, (grant("root", P.AUDIT_VIEW.value, kind="system"),))
+    assert list(index.holders("*", P.AUDIT_VIEW.value)) == [5]
+
+
+def test_every_stream_is_every_connected_user_whatever_the_grants():
+    index = RightsIndex(tree())
+    index.set_user(5, (grant("p:7"),))
+    index.set_user(6, ())
+    assert sorted(index.holders("*", None)) == [5, 6]
+    assert index.allows(6, "*", None) and not index.allows(7, "*", None)
+    index.drop_user(5)
+    assert list(index.holders("*", None)) == [6]
+    assert index.anywhere == {}, "no empty entries left behind"
+
+
+def test_the_node_modes_are_unchanged_by_the_star_entries():
+    index = RightsIndex(tree())
+    index.set_user(5, (grant("p:8", P.ROLE_VIEW.value),))
+    assert list(index.holders("*", P.ROLE_VIEW.value)) == [5]
+    assert list(index.holders("p:7", P.ROLE_VIEW.value)) == [] and list(index.holders("root", P.ROLE_VIEW.value)) == []

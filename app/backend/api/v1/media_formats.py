@@ -30,6 +30,8 @@ from app.backend.enums.routes import MediaFormatRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.enums.audit import AuditEvent
 from app.backend.services.audit import create_audit_log
+from app.backend.enums.events import Dictionary
+from app.backend.services.events import publish_dictionary_changed
 from app.backend.utils.datetime_utils import get_default_timezone_datetime
 from app.backend.api.v1.models.request.media_formats import MediaFormatCreate, MediaFormatUpdate
 from app.backend.api.v1.models.response.media_formats import MediaFormatResponse
@@ -59,6 +61,7 @@ async def _store_with_audit(session: AsyncSession, row: MediaFormat, content_typ
         await session.flush()
         await session.refresh(row)
         await audit()
+        publish_dictionary_changed(session, Dictionary.MEDIA_FORMATS)
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()
@@ -256,6 +259,7 @@ async def archive_media_format(
         user_id=current_user.id, old_values=old_values, new_values=row.model_dump(),
         **client_info(request, auth),
     )
+    publish_dictionary_changed(session, Dictionary.MEDIA_FORMATS)
     await session.commit()
     await session.refresh(row)
     invalidate_registry_cache()
@@ -293,6 +297,7 @@ async def restore_media_format(
         user_id=current_user.id, old_values=old_values, new_values=row.model_dump(),
         **client_info(request, auth),
     )
+    publish_dictionary_changed(session, Dictionary.MEDIA_FORMATS)
     await session.commit()
     await session.refresh(row)
     invalidate_registry_cache()

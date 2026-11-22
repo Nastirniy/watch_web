@@ -69,6 +69,8 @@ from app.backend.services.files import formats
 from app.backend.services.files import store as file_store
 from app.backend.services.files.formats import FileTooLarge, UnsupportedMediaFormat
 from app.backend.utils.datetime_utils import get_default_timezone_datetime
+from app.backend.enums.events import Dictionary
+from app.backend.services.events import publish_dictionary_changed
 
 router = APIRouter(prefix=GuideRoutes.BASE.value, tags=[GuideRoutes.tag()])
 
@@ -148,6 +150,7 @@ async def create_guide(
         new_values=guide.model_dump(),
         **client_info(request, auth),
     )
+    publish_dictionary_changed(session, Dictionary.GUIDES)
     await session.commit()
     await session.refresh(guide)
     return _response(await guides_service.guide_view(session, guide), version)
@@ -213,6 +216,7 @@ async def update_guide(
         new_values=guide.model_dump(),
         **client_info(request, auth),
     )
+    publish_dictionary_changed(session, Dictionary.GUIDES)
     await session.commit()
     await session.refresh(guide)
     return _response(await guides_service.guide_view(session, guide), version)
@@ -235,6 +239,7 @@ async def _set_archived(request: Request, session: AsyncSession, auth: AuthConte
         new_values=guide.model_dump(),
         **client_info(request, auth),
     )
+    publish_dictionary_changed(session, Dictionary.GUIDES)
     await session.commit()
     await session.refresh(guide)
     return _response(await guides_service.guide_view(session, guide), version)
@@ -349,6 +354,7 @@ async def upload_guide_file(
                 new_values=row.model_dump(),
                 **client_info(request, auth),
             )
+            publish_dictionary_changed(session, Dictionary.GUIDES)
             await session.commit()
         except BaseException:
             await file_store.discard_guide_file(session, row)
@@ -421,6 +427,7 @@ async def _set_file_archived(request: Request, session: AsyncSession, auth: Auth
         new_values=row.model_dump(),
         **client_info(request, auth),
     )
+    publish_dictionary_changed(session, Dictionary.GUIDES)
     await session.commit()
     await session.refresh(row)
     return _file_response(row, version)

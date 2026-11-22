@@ -10,6 +10,10 @@ rights.py    who receives an event: an index over the same grants and tree as a 
 connection.py, hub.py, session_check.py   the streams of one worker
 cleanup.py   rows past retention, removed by the media worker
 """
-from app.backend.services.events.publish import publish, publish_scope_changed
+from app.backend.services.events.publish import (
+    EVERY_STREAM, HELD_ANYWHERE, publish, publish_certificate_changed, publish_dictionary_changed,
+    publish_role_changed, publish_scope_changed, publish_session_changed, publish_user_changed,
+)
 
-__all__ = ["publish", "publish_scope_changed"]
+__all__ = ["EVERY_STREAM", "HELD_ANYWHERE", "publish", "publish_certificate_changed", "publish_dictionary_changed",
+           "publish_role_changed", "publish_scope_changed", "publish_session_changed", "publish_user_changed"]

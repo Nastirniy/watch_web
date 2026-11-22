@@ -26,6 +26,8 @@ from app.backend.filters.signal_type_filter import SignalTypeFilterService
 from app.backend.errors.problems import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.errors.openapi import GUARDED, problems
+from app.backend.enums.events import Dictionary
+from app.backend.services.events import publish_dictionary_changed
 
 router = APIRouter(prefix=SignalTypeRoutes.BASE.value, tags=[SignalTypeRoutes.tag()])
 
@@ -114,6 +116,7 @@ async def create_signal_type(
             new_values=signal_type.model_dump(),
             **client_info(request, auth)
         )
+        publish_dictionary_changed(session, Dictionary.SIGNAL_TYPES)
         await session.commit()
 
     return signal_type
@@ -218,6 +221,7 @@ async def update_signal_type(
             new_values=signal_type.model_dump(),
             **client_info(request, auth)
         )
+        publish_dictionary_changed(session, Dictionary.SIGNAL_TYPES)
         await session.commit()
 
     return signal_type
@@ -259,6 +263,7 @@ async def archive_signal_type(
         new_values=row.model_dump(),
         **client_info(request, auth),
     )
+    publish_dictionary_changed(session, Dictionary.SIGNAL_TYPES)
     await session.commit()
     await session.refresh(row)
     return SignalTypeResponse.model_validate(row)
@@ -303,6 +308,7 @@ async def restore_signal_type(
         new_values=row.model_dump(),
         **client_info(request, auth),
     )
+    publish_dictionary_changed(session, Dictionary.SIGNAL_TYPES)
     await session.commit()
     await session.refresh(row)
     return SignalTypeResponse.model_validate(row)

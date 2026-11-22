@@ -35,6 +35,7 @@ from app.backend.pki.profile import LABEL_MAX_LENGTH, normalize_label
 from app.backend.enums.audit import AuditEvent
 from app.backend.services.audit import create_audit_log, home_scope
 from app.backend.services.certificates import register_certificate
+from app.backend.services.events import publish_user_changed
 
 from sqlmodel import select
 
@@ -146,6 +147,7 @@ async def create_user(
             ip_address="127.0.0.1",
             request_url="CLI"
         )
+        publish_user_changed(session, user.id, home_scope(user))
         await session.commit()
 
         logger.success("User created successfully:")

@@ -43,6 +43,7 @@ from app.backend.enums.media_types import ContentType
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.enums.audit import AuditEvent
 from app.backend.services.audit import create_audit_log, home_scope, node_name, role_name
+from app.backend.services.events import publish_session_changed, publish_user_changed
 from app.backend.services.units import membership_nodes
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.utils.content_type import parse_content_type
@@ -264,6 +265,7 @@ async def create_user(
             },
             **client_info(request, auth)
         )
+        publish_user_changed(session, user.id, home_scope(user))
         await session.commit()
         
         _logger.info(f"User {current_user.username} created user {user_data.username} ({user.user_type}), "
@@ -441,6 +443,7 @@ async def update_user(
 
     # Store old values for auditing
     old_values = user.model_dump()
+    old_home = home_scope(user)
 
     if update_data.username is not None:
         existing_username = await session.exec(_username_taken(update_data.username, exclude_user_id=user_id))
@@ -489,6 +492,7 @@ async def update_user(
         # changes the pages of the web client: a login of the old type must not keep showing them.
         revoke_cause = (SessionRevokeCause.ACCOUNT_DEACTIVATED if deactivating
                         else SessionRevokeCause.USER_TYPE_CHANGED if type_change is not None else None)
+        invalidated_count = 0
         if revoke_cause:
             invalidated_count = await AuthService.invalidate_all_user_sessions(
                 session=session,
@@ -529,6 +533,11 @@ async def update_user(
             new_values=new_values,
             **client_info(request, auth)
         )
+        # One user.changed (at the old home too when it moved: those who lost sight of the user), session.changed
+        # when the update ended sessions
+        publish_user_changed(session, user.id, home_scope(user), old_home)
+        if invalidated_count:
+            publish_session_changed(session, user.id, home_scope(user))
         await session.commit()
         await session.refresh(user)
 
@@ -589,7 +598,7 @@ async def archive_user(
     if target_was_admin:
         await check_an_admin_remains(session)
 
-    await AuthService.invalidate_all_user_sessions(
+    ended = await AuthService.invalidate_all_user_sessions(
         session=session,
         user_id=user_id,
         cause=SessionRevokeCause.ACCOUNT_ARCHIVED,
@@ -608,6 +617,9 @@ async def archive_user(
         old_values=old_values,
         **client_info(request, auth)
     )
+    publish_user_changed(session, user.id, home_scope(user))
+    if ended:
+        publish_session_changed(session, user.id, home_scope(user))
     await session.commit()
     await session.refresh(user)
     _logger.info(f"User {current_user.username} archived user {user.username}")
@@ -653,6 +665,7 @@ async def restore_user(
         old_values=old_values,
         **client_info(request, auth)
     )
+    publish_user_changed(session, user.id, home_scope(user))
     await session.commit()
     await session.refresh(user)
     _logger.info(f"User {current_user.username} restored user {user.username}")
@@ -779,6 +792,7 @@ async def end_user_session(
         user_id=auth.user.id,
         **client_info(request, auth)
     )
+    publish_session_changed(session, user_id, home_scope(target))
     await session.commit()
     await session.refresh(row)
     return build_session_response(row, session_lifetimes.session_state(row), masked=target.id != auth.user.id)
@@ -863,6 +877,7 @@ async def create_user_assignment(
         new_values=assignment.model_dump(),
         **client_info(request, auth)
     )
+    publish_user_changed(session, target.id, home_scope(target))
     await session.commit()
     (view,) = as_seen_by(auth, target.id, await assignment_views(session, target.id, assignment_id=assignment.id))
     return AssignmentResponse.model_validate(view, from_attributes=True)
@@ -913,6 +928,7 @@ async def delete_user_assignment(
         old_values=removed,
         **client_info(request, auth)
     )
+    publish_user_changed(session, target.id, home_scope(target))
     await session.commit()
 
 
@@ -981,6 +997,7 @@ async def create_user_system_assignment(
         new_values=assignment.model_dump(),
         **client_info(request, auth)
     )
+    publish_user_changed(session, target.id, home_scope(target))
     await session.commit()
     view = next(view for view in await system_assignment_views(session, target.id) if view.id == assignment.id)
     return SystemAssignmentResponse.model_validate(view, from_attributes=True)
@@ -1029,4 +1046,5 @@ async def delete_user_system_assignment(
         old_values=removed,
         **client_info(request, auth)
     )
+    publish_user_changed(session, target.id, home_scope(target))
     await session.commit()

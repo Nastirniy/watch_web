@@ -99,6 +99,31 @@ test("every domain event type reaches onEvent with its data", async () => {
   handle.stop();
 });
 
+test("the administration events reach onEvent with their ids, a scope only where there is a place", async () => {
+  const admin = (id, position, type, data, scope) => sse(position, type, {
+    id: String(id), v: 1, occurred_at: "2026-11-22T10:00:00Z", ...(scope ? { scope } : {}), data, refetch_within_ms: 0,
+  });
+  const { fetch } = server([[
+    sse(1, "ready"),
+    admin(50, 2, "user.changed", { subject_user_id: 5 }, { kind: "post", id: 7 }),
+    admin(51, 3, "certificate.changed", { subject_user_id: 5, certificate_id: 9 }, { kind: "post", id: 7 }),
+    admin(52, 4, "session.changed", { subject_user_id: 5 }, { kind: "root" }),
+    admin(53, 5, "role.changed", { role_id: 3 }),
+    admin(54, 6, "dictionary.changed", { dictionary: "guides" }),
+  ]]);
+  const received = [];
+  const { handle } = start(fetch, { onEvent: (message) => received.push([message.type, message.data, message.scope]) });
+  await until(() => received.length === 5);
+  assert.deepEqual(received, [
+    ["user.changed", { subject_user_id: 5 }, { kind: "post", id: 7 }],
+    ["certificate.changed", { subject_user_id: 5, certificate_id: 9 }, { kind: "post", id: 7 }],
+    ["session.changed", { subject_user_id: 5 }, { kind: "root" }],
+    ["role.changed", { role_id: 3 }, undefined],
+    ["dictionary.changed", { dictionary: "guides" }, undefined],
+  ]);
+  handle.stop();
+});
+
 test("a reload refetches what is on screen", async () => {
   const { fetch } = server([[sse(1, "ready"), sse(1, "reload", { refetch_within_ms: 0 })]]);
   const { seen, handle } = start(fetch);

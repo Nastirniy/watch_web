@@ -7,7 +7,8 @@ until revoked. certificate_state() computes it for a row, state_clause() is the 
 
 Issue, upload, export and revoke write their audit row through a callback (WriteAudit) inside their transaction: the route
 adds who asked (client_info), the CLI "via: cli". What the row holds comes from certificate_audit_details: never a
-key, a .p12 or a password.
+key, a .p12 or a password. Issue, upload and revoke publish certificate.changed right after it (ids only), revoke
+session.changed too when it ended sessions; export changes nothing a page shows and publishes nothing.
 
 Services return rows and raise CodedError; the routes convert (ApiError.from_coded).
 """
@@ -37,6 +38,8 @@ from app.backend.pki.profile import LABEL_MAX_LENGTH
 from app.backend.pki.store import (
     CertificateFiles, read_certificate, read_package, remove_certificate_dir, write_certificate_dir,
 )
+from app.backend.services.audit.subjects import home_node, user_facts
+from app.backend.services.events import publish_certificate_changed, publish_session_changed
 from app.backend.services.signer_client import SignerUnavailable, signer_client
 from app.backend.utils.datetime_utils import as_utc, assume_utc
 from app.backend.utils.logging_config import get_security_logger
@@ -334,6 +337,7 @@ async def issue_certificate(
         row.files_dir = files_dir
         session.add(row)
         await write_audit(row, certificate_audit_details(row, certificate))
+        publish_certificate_changed(session, user.id, home_node(user.post_id), row.id)
         await session.commit()
     except BaseException:
         # Cleanup on any failure, then the error goes on (a failed audit row is a 500, never a certificate)
@@ -363,6 +367,7 @@ async def upload_certificate(
     user = await _lock_live_user(session, user)
     row = await register_certificate(session, user, cert_data, label, CertificateSource.UPLOADED, created_by)
     await write_audit(row, certificate_audit_details(row, certificate_values(cert_data).certificate))
+    publish_certificate_changed(session, user.id, home_node(user.post_id), row.id)
     await session.commit()
     return row
 
@@ -447,8 +452,12 @@ async def revoke_certificate(
     ended = await AuthService.invalidate_certificate_sessions(
         session, row.user_id, row.fingerprint_hash, SessionRevokeCause.CERTIFICATE_REVOKED,
         actor_user_id=revoked_by, commit=False)
+    _, home = await user_facts(session, row.user_id)
     await write_audit(row, {**certificate_audit_details(row, _stored_certificate(row)), "reason": reason.value,
                             "session_count": ended})
+    publish_certificate_changed(session, row.user_id, home, row.id)
+    if ended:
+        publish_session_changed(session, row.user_id, home)
     await session.commit()
     _logger.info(f"Certificate revoked: id={row.id}, user_id={row.user_id}, serial={row.serial}, "
                  f"reason={reason.value}, revoked_by={revoked_by}, sessions_ended={ended}")

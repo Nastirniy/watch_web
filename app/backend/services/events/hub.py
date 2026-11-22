@@ -1,7 +1,8 @@
 """The hub of one api worker: every stream this process holds.
 
     pump        every events.poll_seconds (10% jitter): read the outbox (new rows and open gaps), reload the tree when a
-                scope.changed came, deliver each row once to the connections whose user may receive it
+                scope.changed came and the grants of the connected users a user.changed or role.changed concerns,
+                deliver each row once to the connections whose user may receive it
     ticker      every second, one task for every connection: heartbeats due, tokens expired
     sessions    every events.session_check_seconds: one batched query, ended sessions close their streams
     rights      every events.rights_refresh_seconds (jitter): the tree and the grants of the connected users
@@ -23,7 +24,7 @@ import socket
 import time
 from collections import deque
 from datetime import datetime, timezone
-from typing import Callable, Deque, Dict, List, Optional, Protocol, Set
+from typing import Callable, Deque, Dict, Iterable, List, Optional, Protocol, Set
 
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
@@ -45,6 +46,31 @@ from app.backend.services.media import jobs
 REPORT_SECONDS = 15
 HEARTBEAT_KIND = "events"
 READ_BATCH = 1000
+# Rows whose receivers are read on the tree or the grants before the change as well (those who just lost the right)
+RIGHTS_CHANGES = frozenset({EventType.SCOPE_CHANGED.value, EventType.ROLE_CHANGED.value})
+
+
+class EveryUser:
+    """grants_to_reload: every connected user"""
+
+
+EVERY_USER = EveryUser()
+
+
+def grants_to_reload(rows: Iterable[OutboxRow]):
+    """Whose grants a tick reloads before it delivers: EVERY_USER after a role.changed (the holders of a role are not
+    known for a restored one: an archived role has no grant in the index; roles change rarely, one batch is cheap),
+    else the subject of each user.changed (an assignment, a type change, an archive), else nobody (an empty set)"""
+    users: Set[int] = set()
+    for row in rows:
+        if row.type == EventType.ROLE_CHANGED.value:
+            return EVERY_USER
+        if row.type == EventType.USER_CHANGED.value:
+            try:
+                users.add(int(json.loads(row.payload)["subject_user_id"]))
+            except (ValueError, KeyError, TypeError):     # never written by publish(); a bad row must not stop the pump
+                logger.warning(f"Event hub: row {row.id} (user.changed) names no user")
+    return users
 
 
 class Renderer(Protocol):
@@ -84,6 +110,11 @@ class EventHub:
                                max_jump=config.max_gap_jump, max_gaps=config.max_open_gaps)
         self.ring = Ring(config.ring_rows)
         self.rights = RightsIndex()
+        # Loads of the tree and the grants run in two tasks (the pump, the rights refresh) and may overlap: each takes
+        # a number when it starts, and an older load never replaces what a newer one set
+        self._loads = 0
+        self._tree_load = 0
+        self._grant_loads: Dict[int, int] = {}
         self.position = 0
         self.connections: Set[Connection] = set()
         self.by_user: Dict[int, Set[Connection]] = {}
@@ -168,28 +199,43 @@ class EventHub:
             logger.info("Event hub: SIGTERM handler not installed (not the main thread)")
 
     # ------------------------------------------------------------------ the pump
+    def _next_load(self) -> int:
+        self._loads += 1
+        return self._loads
+
+    def _set_tree(self, tree, load: int) -> None:
+        if load > self._tree_load:
+            self._tree_load = load
+            self.rights.set_tree(tree)
+
     async def reload_tree(self) -> None:
+        load = self._next_load()
         async with self.sessions() as session:
             tree = await load_scope_tree(session)
             await session.rollback()
-        self.rights.set_tree(tree)
+        self._set_tree(tree, load)
 
     async def tick(self) -> int:
         """One round of the pump: every row committed since the last one, delivered. The number of rows.
 
-        Every await comes first (the read, the tree): a failure there leaves the head and the position where they
-        were, so the next tick reads the same rows again, and no heartbeat can carry a position past rows not yet
-        delivered. What follows has no await: the rows count as read, enter the ring and are delivered at once."""
+        Every await comes first (the read, the tree, the grants): a failure there leaves the head and the position
+        where they were, so the next tick reads the same rows again, and no heartbeat can carry a position past rows
+        not yet delivered. What follows has no await: the rows count as read, enter the ring and are delivered at
+        once."""
         total = 0
         while True:
             head = self.gaps.head
             rows = await read_tick(self.engine, self.gaps, READ_BATCH)
-            # scope.changed reaches the holders on the tree before the change too: those who just lost the node (an
-            # archive, a move away) are the ones whose tree changed. The tree after it is loaded before any delivery
-            before: Dict[int, Set[Connection]] = {}
+            # scope.changed and role.changed reach the holders on the tree and the grants before the change too:
+            # those who just lost the node (an archive, a move away) or the right are the ones whose view changed.
+            # The tree and the grants after it are loaded before any delivery
+            before: Dict[int, Set[Connection]] = {row.id: set(self._targets(row)) for row in rows
+                                                  if row.type in RIGHTS_CHANGES}
             if any(row.type == EventType.SCOPE_CHANGED.value for row in rows):
-                before = {row.id: set(self._targets(row)) for row in rows if row.type == EventType.SCOPE_CHANGED.value}
                 await self.reload_tree()
+            reload = grants_to_reload(rows)
+            if reload:
+                await self.reload_grants(None if reload is EVERY_USER else reload)
             now = self.clock()
             self.gaps.saw((row.id for row in rows), now)
             self.gaps.expire(now)
@@ -223,12 +269,12 @@ class EventHub:
     def _may_receive(self, user_id: int, row: OutboxRow) -> bool:
         if row.user_id == user_id:
             return True
-        return bool(row.scope_key and row.permission and self.rights.allows(user_id, row.scope_key, row.permission))
+        return bool(row.scope_key and self.rights.allows(user_id, row.scope_key, row.permission))
 
     def _targets(self, row: OutboxRow) -> List[Connection]:
         """Connections of the holders of the permission at the scope, plus those of row.user_id, each once"""
         users: Set[int] = set()
-        if row.scope_key and row.permission:
+        if row.scope_key:
             users.update(self.rights.holders(row.scope_key, row.permission))
         if row.user_id is not None:
             users.add(row.user_id)
@@ -250,6 +296,7 @@ class EventHub:
                                 next_beat=now + random.uniform(0, self.config.heartbeat_seconds), opened_at=now)
         connection.on_end = self.detach
         self.rights.set_user(user_id, auth.grants)
+        self._grant_loads[user_id] = self._next_load()
         retry = random.randint(self.config.retry_min_ms, self.config.retry_max_ms)
         connection.offer(block(self.position, retry_line(retry) + self.render.ready()))
         replay = self._replay(user_id, last_event_id)
@@ -289,6 +336,7 @@ class EventHub:
             if not others:
                 del self.by_user[connection.user_id]
                 self.rights.drop_user(connection.user_id)
+                self._grant_loads.pop(connection.user_id, None)
         if connection.slow:
             self.slow_closed += 1
         reason = "slow" if connection.slow else (connection.closing.value if connection.closing else "client")
@@ -336,14 +384,38 @@ class EventHub:
     async def refresh_rights(self) -> None:
         """The tree, then the grants of the connected users, in one batch on the hub's engine"""
         user_ids = sorted(self.by_user)
+        load = self._next_load()
         async with self.sessions() as session:
             tree = await load_scope_tree(session)
-            users = list((await session.exec(select(User).where(User.id.in_(user_ids)))).all()) if user_ids else []
-            grants = await load_grants_of(session, users)
+            grants = await self._load_grants(session, user_ids)
             await session.rollback()
-        self.rights.set_tree(tree)
+        self._set_tree(tree, load)
+        self._set_grants(user_ids, grants, load)
+
+    async def reload_grants(self, user_ids: Optional[Iterable[int]] = None) -> None:
+        """The grants of these connected users (None: every one) at once, in one batch on the hub's engine: a
+        user.changed (assignments, a type change) or a role.changed (its permissions, archive, restore) moves the
+        rights of a stream before its events are delivered, not at the next rights refresh"""
+        connected = set(self.by_user)
+        wanted = sorted(connected if user_ids is None else connected & set(user_ids))
+        if not wanted:
+            return
+        load = self._next_load()
+        async with self.sessions() as session:
+            grants = await self._load_grants(session, wanted)
+            await session.rollback()
+        self._set_grants(wanted, grants, load)
+
+    @staticmethod
+    async def _load_grants(session: AsyncSession, user_ids: List[int]) -> Dict[int, tuple]:
+        users = list((await session.exec(select(User).where(User.id.in_(user_ids)))).all()) if user_ids else []
+        return await load_grants_of(session, users)
+
+    def _set_grants(self, user_ids: List[int], grants: Dict[int, tuple], load: int) -> None:
         for user_id in user_ids:
-            if user_id in self.by_user:     # still connected after the awaits
+            # still connected after the awaits, and no newer load (a connect, the pump) set them meanwhile
+            if user_id in self.by_user and load > self._grant_loads.get(user_id, 0):
+                self._grant_loads[user_id] = load
                 self.rights.set_user(user_id, grants.get(user_id, ()))
 
     def stats(self) -> Dict[str, int]:

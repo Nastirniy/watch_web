@@ -16,6 +16,8 @@ from app.backend.models.audit import AuditLog
 from app.backend.models.role_assignment import scope_columns
 from tests.helpers import make_admin, make_group, make_post, make_user
 
+pytestmark = pytest.mark.raw_audit_rows      # rows written by hand (tests/conftest.py events_follow_audit)
+
 ENTRIES = V1.path(AuditRoutes.ROOT)
 EVENTS = V1.path(AuditRoutes.EVENTS)
 NOW = datetime.now(timezone.utc).replace(microsecond=0)

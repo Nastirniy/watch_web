@@ -8,6 +8,9 @@ on a request; the walk at delivery is AuthContext's own:
              itself when it is not archived
     g:<id>   the nodes not archived on one path with the group (on_path)
     root     the root only (has_at_root): system grants count there
+    *        with a permission: a grant of it at any node not archived (has_anywhere, the require(all=[X]) of a route:
+             roles and dictionaries); without one: every connected user (the user guides). publish.py HELD_ANYWHERE,
+             EVERY_STREAM
 
 Every grant enters the index, a grant at an archived node too: the walk leaves archived nodes out, so a tree change
 needs no rebuild and a restore puts the grant back in effect at once. tests/test_event_rights.py compares this with
@@ -17,9 +20,11 @@ An unknown post is a live node under the root (the ScopeTree rule). A create pub
 parent in its transaction, and the pump reloads the tree before it delivers anything of that tick: the events of a
 new post reach the holders above it at once. Only a create made with events off is seen at the next rights refresh.
 """
-from typing import Dict, Iterator, Set, Tuple
+from typing import Dict, Iterator, Optional, Set, Tuple
 
 from app.backend.auth.scope import Grant, Node, ROOT, ScopeTree
+
+ANYWHERE_KEY = "*"       # services/events/publish.py: never a node key
 
 
 class RightsIndex:
@@ -27,6 +32,8 @@ class RightsIndex:
         self.tree = tree if tree is not None else ScopeTree.empty()
         self.index: Dict[Tuple[str, str], Set[int]] = {}
         self.grants: Dict[int, Tuple[Grant, ...]] = {}
+        # permission -> user -> the nodes the user holds it at (held anywhere: one of them not archived)
+        self.anywhere: Dict[str, Dict[int, Set[Node]]] = {}
 
     def set_tree(self, tree: ScopeTree) -> None:
         self.tree = tree
@@ -38,6 +45,7 @@ class RightsIndex:
         for grant in grants:
             for permission in grant.permissions:
                 self.index.setdefault((grant.node.key, permission), set()).add(user_id)
+                self.anywhere.setdefault(permission, {}).setdefault(user_id, set()).add(grant.node)
 
     def drop_user(self, user_id: int) -> None:
         for grant in self.grants.pop(user_id, ()):
@@ -47,6 +55,11 @@ class RightsIndex:
                     entry.discard(user_id)
                     if not entry:
                         del self.index[(grant.node.key, permission)]
+                holders = self.anywhere.get(permission)
+                if holders is not None:
+                    holders.pop(user_id, None)
+                    if not holders:
+                        del self.anywhere[permission]
 
     def _nodes(self, scope_key: str) -> Tuple[Node, ...]:
         node = Node.parse(scope_key)
@@ -56,8 +69,19 @@ class RightsIndex:
             return self.tree.nodes_on_path(node)
         return (ROOT,)
 
-    def holders(self, scope_key: str, permission: str) -> Iterator[int]:
-        """The users the permission is in effect for at the scope, each once"""
+    def _held_anywhere(self, nodes: Set[Node]) -> bool:
+        return any(not self.tree.is_archived(node) for node in nodes)
+
+    def holders(self, scope_key: str, permission: Optional[str]) -> Iterator[int]:
+        """The users the permission is in effect for at the scope, each once. "*" with a permission: held at some node
+        in effect; "*" without one: every user of the index (connected, whatever their grants)"""
+        if scope_key == ANYWHERE_KEY:
+            if permission is None:
+                yield from list(self.grants)
+            else:
+                yield from [user_id for user_id, nodes in self.anywhere.get(permission, {}).items()
+                            if self._held_anywhere(nodes)]
+            return
         seen: Set[int] = set()
         for node in self._nodes(scope_key):
             for user_id in self.index.get((node.key, permission), ()):
@@ -65,6 +89,10 @@ class RightsIndex:
                     seen.add(user_id)
                     yield user_id
 
-    def allows(self, user_id: int, scope_key: str, permission: str) -> bool:
+    def allows(self, user_id: int, scope_key: str, permission: Optional[str]) -> bool:
         """The permission is in effect for this user at the scope (a replay filters each row by it)"""
+        if scope_key == ANYWHERE_KEY:
+            if permission is None:
+                return user_id in self.grants
+            return self._held_anywhere(self.anywhere.get(permission, {}).get(user_id, set()))
         return any(user_id in self.index.get((node.key, permission), ()) for node in self._nodes(scope_key))

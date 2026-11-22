@@ -24,6 +24,8 @@ from app.backend.filters.tag_filter import TagFilterService
 from app.backend.errors.problems import ApiError
 from app.backend.enums.errors import AccessErrorCode, ErrorCode
 from app.backend.errors.openapi import GUARDED, problems
+from app.backend.enums.events import Dictionary
+from app.backend.services.events import publish_dictionary_changed
 
 router = APIRouter(prefix=TagRoutes.BASE.value, tags=[TagRoutes.tag()])
 
@@ -88,6 +90,7 @@ async def create_tag(
             new_values=tag.model_dump(),
             **client_info(request, auth)
         )
+        publish_dictionary_changed(session, Dictionary.TAGS)
         await session.commit()
 
     return TagResponse.model_validate(tag)
@@ -178,6 +181,7 @@ async def update_tag(
             new_values=tag.model_dump(),
             **client_info(request, auth)
         )
+        publish_dictionary_changed(session, Dictionary.TAGS)
         await session.commit()
 
     return TagResponse.model_validate(tag)
@@ -213,6 +217,7 @@ async def archive_tag(
         new_values=row.model_dump(),
         **client_info(request, auth),
     )
+    publish_dictionary_changed(session, Dictionary.TAGS)
     await session.commit()
     await session.refresh(row)
     return TagResponse.model_validate(row)
@@ -249,6 +254,7 @@ async def restore_tag(
         new_values=row.model_dump(),
         **client_info(request, auth),
     )
+    publish_dictionary_changed(session, Dictionary.TAGS)
     await session.commit()
     await session.refresh(row)
     return TagResponse.model_validate(row)

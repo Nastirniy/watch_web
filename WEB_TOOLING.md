@@ -302,6 +302,12 @@ const events = startEvents({
       case "move.changed": refetch(() => reloadMove(event.data.move_id, { headers: BACKGROUND })); break;
       case "scope.changed": refetch(() => reloadTreeAndMe({ headers: BACKGROUND })); break;
       case "security.certificate_mismatch": notifySecurity(event.data.audit_log_id); break;     // audit.view holders
+      // the administration (API.md, "The administration"): refetch only what is on screen
+      case "user.changed": refetch(() => reloadUser(event.data.subject_user_id, { headers: BACKGROUND })); break;
+      case "certificate.changed": refetch(() => reloadCertificates(event.data.subject_user_id, { headers: BACKGROUND })); break;
+      case "session.changed": refetch(() => reloadSessions(event.data.subject_user_id, { headers: BACKGROUND })); break;
+      case "role.changed": refetch(() => reloadRole(event.data.role_id, { headers: BACKGROUND })); break;
+      case "dictionary.changed": refetch(() => reloadDictionary(event.data.dictionary, { headers: BACKGROUND })); break;
       default: { const unhandled: never = event; return unhandled; }      // a new event type fails here
     }
   },

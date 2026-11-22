@@ -123,9 +123,10 @@ async def test_only_holders_of_audit_view_receive_it(client, db, engine, product
     tokens = await _tokens(client, own)
     stolen = await client.get(ME, headers={**nginx_headers(other), "Authorization": f"Bearer {tokens['access_token']}"})
     assert stolen.status_code == 401
-    assert await hub.tick() == 1
+    assert await hub.tick() == 2            # the login's session.changed (tests/test_event_admin.py) and the mismatch
 
-    received = {name: [event for _, _, event, _ in queued(connection)] for name, connection in connections.items()}
+    received = {name: [event for _, _, event, _ in queued(connection) if event != "session.changed"]
+                for name, connection in connections.items()}
     assert received == {"system_admin": ["ready", MISMATCH], "auditor": ["ready", MISMATCH],
                         "scoped_auditor": ["ready"], "tree_admin": ["ready"], "owner": ["ready"]}
     (audit,) = await _audit_rows(session_maker)

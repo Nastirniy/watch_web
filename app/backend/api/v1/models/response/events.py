@@ -15,7 +15,7 @@ from typing import Annotated, Literal, Union
 from pydantic import BaseModel, ConfigDict, Field, RootModel, model_serializer
 
 from app.backend.auth.scope import Node
-from app.backend.enums.events import MOVE_STATUSES, StreamCloseReason, StreamMessageType
+from app.backend.enums.events import MOVE_STATUSES, Dictionary, StreamCloseReason, StreamMessageType
 from app.backend.errors.openapi import absent_not_null
 from app.backend.utils.validators import ResponseDatetime
 
@@ -54,6 +54,32 @@ class CertificateMismatchData(BaseModel):
     session_user_id: int = Field(description="The user whose session's token came with another client certificate")
 
 
+class UserChangedData(BaseModel):
+    subject_user_id: int = Field(description="Read GET /users/{subject_user_id} and what the page shows of it (its "
+                                             "assignments); your own id: reread GET /auth/me, your rights may have "
+                                             "changed")
+
+
+class CertificateChangedData(BaseModel):
+    subject_user_id: int = Field(description="The user the certificate belongs to: read GET "
+                                             "/users/{subject_user_id}/certificates")
+    certificate_id: int = Field(description="The certificate issued, uploaded or revoked")
+
+
+class SessionChangedData(BaseModel):
+    subject_user_id: int = Field(description="The user whose sessions changed: read GET /users/{subject_user_id}/sessions "
+                                             "(online state and last login of the user record too)")
+
+
+class RoleChangedData(BaseModel):
+    role_id: int = Field(description="Read GET /roles/{role_id} and its permissions; 404 after a permanent delete")
+
+
+class DictionaryChangedData(BaseModel):
+    dictionary: Dictionary = Field(description="The list to read again: categories, signal_types, tags, media_formats "
+                                               "(GET /media-formats) or guides (GET /guides)")
+
+
 class CloseData(BaseModel):
     reason: StreamCloseReason = Field(description="token_expired: refresh (X-Activity: background) and reconnect; "
                                                   "session_ended: stop; restart: reconnect after the retry it carries")
@@ -65,7 +91,8 @@ class EventEnvelope(_Absent):
                                 "compare, compute or parse it; it may be lower than a position already seen")
     v: int = Field(description="Version of data for this type")
     occurred_at: ResponseDatetime
-    scope: EventScope = Field(default=None, description="Where it happened; absent: an event for this user only")
+    scope: EventScope = Field(default=None, description="Where it happened; absent: no place, an event for this user "
+                                                        "only or about a global object (a role, a dictionary)")
     refetch_within_ms: int = REFETCH
 
 
@@ -90,6 +117,44 @@ class SecurityCertificateMismatch(EventEnvelope):
     data: CertificateMismatchData
 
 
+class UserChanged(EventEnvelope):
+    """A user record changed: created, updated (name, home, activation, type), archived, restored, or a role
+    assignment added or removed. Sent to the holders of user.view in effect at the user's home node (scope: the home
+    post, or the root) and to the user themself; a move of the home reaches the old home too"""
+    type: Literal["user.changed"]
+    data: UserChangedData
+
+
+class CertificateChanged(EventEnvelope):
+    """A certificate of a user was issued, uploaded or revoked. Sent to the holders of certificate.view in effect at
+    the user's home node and to the user. Ids only, never a certificate value"""
+    type: Literal["certificate.changed"]
+    data: CertificateChangedData
+
+
+class SessionChanged(EventEnvelope):
+    """A login, a logout or a session ended by the server (an administrator, a revocation, an account change). Not
+    sent for a session that only went idle or expired. Sent to the holders of user.view in effect at the user's home
+    node and to the user (their own devices)"""
+    type: Literal["session.changed"]
+    data: SessionChangedData
+
+
+class RoleChanged(EventEnvelope):
+    """A role was created, cloned, updated, archived, restored, deleted permanently, or its permissions changed. Sent
+    to the holders of role.view at any node; no scope"""
+    type: Literal["role.changed"]
+    data: RoleChangedData
+
+
+class DictionaryChanged(EventEnvelope):
+    """An entry of a dictionary was created, updated, archived or restored (a guide's files too). Sent to the holders
+    of its view permission at any node (category.view, signal_type.view, tag.view, media_format.view); guides to
+    every stream. No scope"""
+    type: Literal["dictionary.changed"]
+    data: DictionaryChangedData
+
+
 class StreamReady(BaseModel):
     """The first message of a connection"""
     type: Literal["ready"]
@@ -112,8 +177,9 @@ class StreamClose(BaseModel):
     data: CloseData
 
 
-class StreamMessage(RootModel[Annotated[Union[MoveChanged, ScopeChanged, SecurityCertificateMismatch, StreamReady,
-                                              StreamHeartbeat, StreamReload, StreamClose],
+class StreamMessage(RootModel[Annotated[Union[MoveChanged, ScopeChanged, SecurityCertificateMismatch, UserChanged,
+                                              CertificateChanged, SessionChanged, RoleChanged, DictionaryChanged,
+                                              StreamReady, StreamHeartbeat, StreamReload, StreamClose],
                                         Field(discriminator="type")]]):
     """One message of the stream: event: is its type, data: this JSON"""
 
@@ -131,6 +197,9 @@ def _occurred(value: datetime) -> str:
     return value.strftime("%Y-%m-%dT%H:%M:%S.%fZ") if value.microsecond else value.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+ANYWHERE_KEY = "*"       # services/events/publish.py HELD_ANYWHERE, EVERY_STREAM: no place, no scope member
+
+
 def _scope(scope_key) -> dict:
     node = Node.parse(scope_key)
     return {"kind": node.kind} if node.id is None else {"kind": node.kind, "id": node.id}
@@ -141,7 +210,7 @@ class V1Renderer:
 
     def event(self, row, refetch_within_ms: int) -> bytes:
         value = {"id": str(row.id), "type": row.type, "v": row.v, "occurred_at": _occurred(row.occurred_at)}
-        if row.scope_key is not None:
+        if row.scope_key is not None and row.scope_key != ANYWHERE_KEY:
             value["scope"] = _scope(row.scope_key)
         value["data"] = json.loads(row.payload)
         value["refetch_within_ms"] = refetch_within_ms

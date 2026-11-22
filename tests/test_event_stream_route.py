@@ -212,13 +212,19 @@ def _value(body: bytes) -> dict:
     _row(type="scope.changed", payload="{}", scope_key="p:7", occurred_at=datetime(2026, 11, 22, 10, 0, 0)),
     _row(type="security.certificate_mismatch", payload='{"audit_log_id":12,"session_user_id":5}', scope_key="root",
          permission="audit.view"),
+    _row(type="user.changed", payload='{"subject_user_id":5}', scope_key="p:7", permission="user.view", user_id=5),
+    _row(type="certificate.changed", payload='{"subject_user_id":5,"certificate_id":9}', scope_key="root",
+         permission="certificate.view", user_id=5),
+    _row(type="session.changed", payload='{"subject_user_id":5}', scope_key="p:7", permission="user.view", user_id=5),
+    _row(type="role.changed", payload='{"role_id":3}', scope_key="*", permission="role.view"),
+    _row(type="dictionary.changed", payload='{"dictionary":"guides"}', scope_key="*", permission=None),
 ])
 def test_every_rendered_event_validates(row):
     value = _value(render_v1.event(row, 1234))
     message = StreamMessage.model_validate(value).root
     assert message.type == row.type and value["id"] == str(row.id) and value["refetch_within_ms"] == 1234
     assert value["occurred_at"].endswith("Z")
-    assert ("scope" in value) == (row.scope_key is not None), "absent, never null"
+    assert ("scope" in value) == (row.scope_key not in (None, "*")), "absent, never null; no place for a star"
     if row.scope_key == "root":
         assert value["scope"] == {"kind": "root"}
 
