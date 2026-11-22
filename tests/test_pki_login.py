@@ -5,6 +5,7 @@ import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.x509.oid import NameOID
+from loguru import logger
 from sqlmodel import select, update
 
 from app.backend.api.v1 import V1
@@ -281,3 +282,29 @@ async def test_an_access_token_with_another_certificate_is_audited_once_in_the_i
     assert stolen.status_code == 401
     assert len(await mismatch_rows()) == 2
     assert (await client.get(ME, headers={**nginx_headers(own), **bearer})).status_code == 200, "the session stays"
+
+
+
+@pytest.mark.asyncio
+async def test_every_attempt_with_another_certificate_writes_a_warning(client, db, headers, production):
+    """Owner, 2026-11-22: the audit row is written once in the interval, a warning in the log at every attempt
+    (auth/dependencies.py, the refresh route); the token never reaches the log"""
+    own = make_certificate("cn-log-own", 0xAAAA)
+    other = make_certificate("cn-log-other", 0xBBBB)
+    await _create_user(client, db, headers, "logowner", own)
+    await _create_user(client, db, headers, "logother", other)
+    tokens = await _tokens(client, own)
+    bearer = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+    lines = []
+    sink = logger.add(lines.append, level="WARNING", format="{message}")
+    try:
+        for _ in range(2):
+            assert (await client.get(ME, headers={**nginx_headers(other), **bearer})).status_code == 401
+        refused = await client.post(REFRESH, json={"refresh_token": tokens["refresh_token"]}, headers=nginx_headers(other))
+        assert refused.status_code == 401
+    finally:
+        logger.remove(sink)
+    mismatch = [line for line in lines if "presented with another client certificate" in line]
+    assert [line.split(" presented")[0] for line in mismatch] == ["Token", "Token", "Refresh token"]
+    assert not any(tokens["access_token"] in line or tokens["refresh_token"] in line for line in lines)
