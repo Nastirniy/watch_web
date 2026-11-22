@@ -12,6 +12,11 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - Database pool per process lowered from 20 + 40 to 10 + 10 (`database.pool_size`, `database.max_overflow`): four api
   workers could open 240 connections against MariaDB's default `max_connections` of 151. Now 4 x 20 plus the media
   worker's 20 = 100. ENV.md says how to size it.
+- The api runs on uvloop on Linux (`requirements.txt`, picked by uvicorn's `--loop auto`). With `--workers` uvicorn
+  binds the socket itself, and asyncio then leaves `TCP_NODELAY` off on accepted sockets: every response waited for a
+  delayed ACK, about 40 ms (measured in a proof of concept through nginx: p50 46 ms on asyncio, 5 ms on uvloop).
+- A stop of the api waits at most 25 s for open requests (`--timeout-graceful-shutdown 25`, `stop_grace_period: 30s`);
+  the api container's open-file limit is 65536.
 
 ## Owner decisions 2026-10-30
 

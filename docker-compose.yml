@@ -62,6 +62,11 @@ services:
       # media-worker (depends_on service_healthy). The first passing check ends the start period, so a normal start
       # is healthy as soon as it listens (DEPLOYMENT.md, "Audit log (migration 031)").
       start_period: 20m
+    # Above the 25 s of --timeout-graceful-shutdown (Dockerfile): open requests end before Docker kills the process
+    stop_grace_period: 30s
+    # Every open connection is a file descriptor, and a container's soft limit may be 1024
+    ulimits:
+      nofile: { soft: 65536, hard: 65536 }
 
   media-worker:
     <<: *app

@@ -54,5 +54,9 @@ ENV MYSETTINGS_APP__ENVIRONMENT=production \
     MYSETTINGS_SERVER__WORKERS=4
 
 EXPOSE 8000
-# Shell form so host, port and worker count follow the environment (docker-compose.yml binds 127.0.0.1)
-CMD ["sh", "-c", "exec python -m uvicorn app.main:fastapi_app --host \"$MYSETTINGS_SERVER__HOST\" --port \"$MYSETTINGS_SERVER__PORT\" --workers \"$MYSETTINGS_SERVER__WORKERS\" --proxy-headers"]
+# Shell form so host, port and worker count follow the environment (docker-compose.yml binds 127.0.0.1).
+# The loop is uvloop (requirements.txt, picked by --loop auto): with --workers uvicorn binds the socket itself and
+# asyncio then leaves TCP_NODELAY off on accepted sockets, so every response waited for a delayed ACK (about 40 ms).
+# --timeout-graceful-shutdown: a stop waits at most 25 s for open requests (stop_grace_period in docker-compose.yml
+# is 30 s); without it uvicorn waits for them for ever and Docker kills the process.
+CMD ["sh", "-c", "exec python -m uvicorn app.main:fastapi_app --host \"$MYSETTINGS_SERVER__HOST\" --port \"$MYSETTINGS_SERVER__PORT\" --workers \"$MYSETTINGS_SERVER__WORKERS\" --proxy-headers --timeout-graceful-shutdown 25"]
