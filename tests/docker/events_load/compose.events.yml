@@ -1,0 +1,42 @@
+# Local run of the events load generator against the e2e stack (README.md). An override of ../compose.test.yml:
+# its own image tag (a parallel e2e run keeps its own), and a short access token so that close token_expired and the
+# refresh with X-Activity: background happen within a few minutes. Events are already on in compose.test.yml.
+#
+#   docker build -t watch-web-evload .
+#   docker compose -p watch-web-evload -f tests/docker/compose.test.yml -f tests/docker/events_load/compose.events.yml up -d nginx media-worker
+
+x-evload-env: &evload-env
+  MYSETTINGS_EVENTS__ENABLED: "true"
+  MYSETTINGS_SECURITY__ACCESS_TOKEN_EXPIRE_MINUTES: "${EVLOAD_TOKEN_MINUTES:-2}"
+
+services:
+  api:
+    image: watch-web-evload
+    environment: *evload-env
+  api-direct:
+    image: watch-web-evload
+  media-worker:
+    image: watch-web-evload
+    environment: *evload-env
+
+  # Profile tls: the same locations over TLS + HTTP/2 with client certificates (nginx-tls.test.conf, README.md).
+  # Paths are relative to tests/docker (the first compose file). EVLOAD_TLS_DIR holds server.pem and server.key.
+  nginx-tls:
+    image: nginx:1.27
+    profiles: ["tls"]
+    ports:
+      - "127.0.0.1:${EVLOAD_TLS_PORT:-18443}:443"
+    volumes:
+      - ./nginx-http.test.conf:/etc/nginx/conf.d/00-watch-web-http.conf:ro
+      - ./events_load/nginx-tls.test.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../../nginx-app.conf:/etc/nginx/snippets/watch-web-app.conf:ro
+      - ../../nginx-proxy.conf:/etc/nginx/snippets/watch-web-proxy.conf:ro
+      - ${EVLOAD_TLS_DIR:-./events_load/tls}:/etc/nginx/tls:ro
+      - media:/var/www/radio_monitoring/uploads:ro
+      - nginx_uploads:/var/www/nginx_uploads
+      - thumbcache:/var/cache/nginx/thumbs
+    depends_on:
+      api:
+        condition: service_healthy
+      imgproxy:
+        condition: service_healthy

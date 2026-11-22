@@ -8,6 +8,8 @@
 #   venv/Scripts/python tests/docker/formats.py      # every accepted image and video format, edge cases
 #   docker compose -f tests/docker/compose.test.yml down -v
 #
+# Load of the stream of events (Go generator, an override of this file): tests/docker/events_load/README.md
+#
 # Everything that matters in production is kept identical: the media directory is mounted at the
 # same absolute path in every container, the real locations and proxy headers (nginx-app.conf,
 # nginx-proxy.conf) are used unchanged, the app containers run as the nginx worker uid (101) so files
