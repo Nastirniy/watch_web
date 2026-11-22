@@ -64,10 +64,11 @@ def test_sigterm_closes_every_stream_with_restart_and_the_server_exits(tmp_path,
         cwd=ROOT, env=environment)
     try:
         streams = []
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + 120     # each worker builds its SQLite schema first (slow on overlay file systems)
         for _ in range(4):
             sock = _connect(port, deadline)
-            sock.sendall(b"GET /stream HTTP/1.1\r\nHost: test\r\nAccept: text/event-stream\r\n\r\n")
+            path = V1.path(EventRoutes.STREAM).encode()
+            sock.sendall(b"GET " + path + b" HTTP/1.1\r\nHost: test\r\nAccept: text/event-stream\r\n\r\n")
             assert b"event: ready" in _read_until(sock, b"event: ready", deadline)
             streams.append(sock)
         stopped_at = time.monotonic()
