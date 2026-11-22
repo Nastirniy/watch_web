@@ -18,6 +18,8 @@ from app.backend.models.role import Permission
 from tests.helpers import assign, builtin_role, make_admin, make_group, make_post, make_user
 from tests.test_audit_read import add_row
 
+pytestmark = pytest.mark.raw_audit_rows      # rows written by hand (tests/conftest.py events_follow_audit)
+
 ENTRIES = V1.path(AuditRoutes.ROOT)
 EVENTS = V1.path(AuditRoutes.EVENTS)
 DEVICE = ("ip_address", "user_agent", "session_id", "request_url")

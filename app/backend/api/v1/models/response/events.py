@@ -67,8 +67,9 @@ class CertificateChangedData(BaseModel):
 
 
 class SessionChangedData(BaseModel):
-    subject_user_id: int = Field(description="The user whose sessions changed: read GET /users/{subject_user_id}/sessions "
-                                             "(online state and last login of the user record too)")
+    subject_user_id: int = Field(description="The user whose sessions changed: read GET "
+                                             "/users/{subject_user_id}/sessions (online state and last login of the "
+                                             "user record too)")
 
 
 class RoleChangedData(BaseModel):

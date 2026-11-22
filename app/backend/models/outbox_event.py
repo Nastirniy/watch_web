@@ -18,8 +18,8 @@ class OutboxEvent(SQLModel, table=True):
         BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True))
     type: str = Field(max_length=48)                        # EventType
     v: int = Field(default=1)                               # payload version of the type
-    scope_key: Optional[str] = Field(default=None, max_length=24)     # root, g:<id>, p:<id>; null: personal only
-    permission: Optional[str] = Field(default=None, max_length=48)    # who may receive it at the scope
+    scope_key: Optional[str] = Field(default=None, max_length=24)  # root, g:<id>, p:<id>, "*" no place; null: personal
+    permission: Optional[str] = Field(default=None, max_length=48)  # who receives it there; "*" without: every stream
     user_id: Optional[int] = Field(default=None)            # also this user, whatever their rights
     conflate_key: Optional[str] = Field(default=None, max_length=48)  # only the latest of a key waits in a queue
     payload: str = Field(max_length=512)                    # JSON of the catalog's typed params

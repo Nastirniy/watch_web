@@ -1,7 +1,7 @@
 """The seam for a broker. Routes and services know publish() and the hub; only this module knows that today the bus is
 the outbox table. A relay to Redis Streams or NATS (stage 2) is another EventBus: publish stays in the transaction of
 the change, subscribe gives the hub its rows. Two methods, on purpose."""
-from typing import Any, List, Optional, Protocol
+from typing import Any, List, Optional, Protocol, Union
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -9,13 +9,13 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.auth.scope import Node
 from app.backend.enums.events import EventType
 from app.backend.enums.general import Permissions
-from app.backend.services.events.publish import publish as publish_event
+from app.backend.services.events.publish import Audience, publish as publish_event
 from app.backend.services.events.gaps import GapTracker
 from app.backend.services.events.reader import OutboxRow, read_tick
 
 
 class EventBus(Protocol):
-    def publish(self, session: AsyncSession, event: EventType, *, scope: Optional[Node] = None,
+    def publish(self, session: AsyncSession, event: EventType, *, scope: Union[Node, Audience, None] = None,
                 permission: Optional[Permissions] = None, user_id: Optional[int] = None,
                 conflate_key: Optional[str] = None, **params: Any) -> None:
         """Add the event to the transaction of the change"""
