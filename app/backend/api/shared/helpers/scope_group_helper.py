@@ -33,6 +33,7 @@ from app.backend.models.observation import Observation
 from app.backend.models.scope_group import ScopeGroup
 from app.backend.services import moves
 from app.backend.services import scope_groups as groups_service
+from app.backend.services.events import publish_scope_changed
 from app.backend.services.scope_groups import lock_groups, name_taken  # noqa: F401  the routes import them from here
 from app.backend.services.audit import create_audit_log
 from app.backend.services.observation_counts import ObservationStats, observation_stats
@@ -185,6 +186,7 @@ async def archive_unit(request: Request, session: AsyncSession, auth: AuthContex
     cancelled = await cancel_pending_uploads(request, session, auth, changes.pending_uploads, ErrorCode.POST_ARCHIVED)
     await moves.cancel_locked(session, changes.waiting_moves, MoveCancelCause.NODE_ARCHIVED, auth.user.id,
                               client_info(request, auth))
+    publish_scope_changed(session, (Node.group(unit.id),))     # once, for the top node: never per row
     await session.commit()
     await remove_cancelled_parts(session, cancelled)
     await session.refresh(unit)
@@ -214,6 +216,7 @@ async def restore_unit(request: Request, session: AsyncSession, auth: AuthContex
     unit.updated_at = datetime.now(timezone.utc)
     session.add(unit)
     await audit_group(request, session, auth, "restore", unit, old_values)
+    publish_scope_changed(session, (Node.group(unit.id),))
     await session.commit()
     await session.refresh(unit)
     return unit

@@ -36,6 +36,7 @@ from app.backend.models.post import Post
 from app.backend.models.scope_group import ScopeGroup
 from app.backend.services import move_queue, moves
 from app.backend.services import scope_groups as groups_service
+from app.backend.services.events import publish_scope_changed
 
 router = APIRouter(prefix=ScopeGroupRoutes.BASE.value, tags=[ScopeGroupRoutes.tag()])
 
@@ -315,6 +316,8 @@ async def update_scope_group(
         await session.flush()
         await session.refresh(group)
         await audit_group(request, session, auth, "update", group, old_values)
+        if is_move:     # an immediate move: to the new place and the old one
+            publish_scope_changed(session, (Node.group(group.id), parent_location(old_values["parent_id"])))
         await session.commit()
     return ScopeGroupResponse.model_validate(group)
 
@@ -354,6 +357,7 @@ async def archive_scope_group(
     await audit_group(request, session, auth, "archive", group, old_values)
     await moves.cancel_locked(session, waiting_moves, MoveCancelCause.NODE_ARCHIVED, auth.user.id,
                               client_info(request, auth))
+    publish_scope_changed(session, (Node.group(group.id),))
     await session.commit()
     await session.refresh(group)
     return ScopeGroupResponse.model_validate(group)
@@ -391,6 +395,7 @@ async def restore_scope_group(
     group.updated_at = datetime.now(timezone.utc)
     session.add(group)
     await audit_group(request, session, auth, "restore", group, old_values)
+    publish_scope_changed(session, (Node.group(group.id),))
     async with unique_violation_as(session, ErrorCode.SCOPE_GROUP_NAME_TAKEN):
         await session.commit()
     await session.refresh(group)

@@ -29,6 +29,7 @@ from app.backend.config import settings
 from app.backend.enums.routes import PostRoutes
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.services.audit import create_audit_log
+from app.backend.services.events import publish_scope_changed
 from app.backend.api.v1.models.query.posts import PostFilterParams
 from app.backend.filters.post_filter import PostFilterService
 from app.backend.api.v1.models.response.moves import MOVE_ACCEPTED, move_accepted
@@ -330,14 +331,20 @@ async def update_post(
     post.updated_at = datetime.now(timezone.utc)
 
     session.add(post)
-    await _store_post(session, post, audit=lambda: create_audit_log(
-        session, AuditEvent.POST_UPDATE, scope=Node.post(post.id), resource_id=post.id,
-        params={"post_name": post.name, "post_code": post.code},
-        user_id=current_user.id,
-        old_values=old_values,
-        new_values=post.model_dump(),
-        **client_info(request, auth)
-    ))
+
+    async def audit() -> None:
+        await create_audit_log(
+            session, AuditEvent.POST_UPDATE, scope=Node.post(post.id), resource_id=post.id,
+            params={"post_name": post.name, "post_code": post.code},
+            user_id=current_user.id,
+            old_values=old_values,
+            new_values=post.model_dump(),
+            **client_info(request, auth)
+        )
+        if is_move:     # an immediate move (nothing held it, or force): to the new place and the old one
+            publish_scope_changed(session, (Node.post(post.id), _location(old_values["group_id"])))
+
+    await _store_post(session, post, audit=audit)
 
     return await _post_response(session, auth, post)
 
@@ -394,6 +401,7 @@ async def _set_post_archived(
     cancelled = await cancel_pending_uploads(request, session, auth, pending, ErrorCode.POST_ARCHIVED)
     await moves.cancel_locked(session, waiting_moves, MoveCancelCause.NODE_ARCHIVED, current_user.id,
                               client_info(request, auth))
+    publish_scope_changed(session, (Node.post(post.id),))
     await session.commit()
     await remove_cancelled_parts(session, cancelled)
     await session.refresh(post)

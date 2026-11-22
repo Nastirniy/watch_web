@@ -48,6 +48,7 @@ from app.backend.models.post import Post
 from app.backend.models.scope_group import ScopeGroup
 from app.backend.services import moves
 from app.backend.services import scope_groups as groups_service
+from app.backend.services.events import publish_scope_changed
 from app.backend.services.units import posts_within
 from app.backend.utils.validators import UtcDatetime
 
@@ -261,6 +262,8 @@ async def update_brigade(
         await session.flush()
         await session.refresh(brigade)
         await audit_group(request, session, auth, "update", brigade, old_values)
+        if moving:      # an immediate move: to the new corps and the old one
+            publish_scope_changed(session, (Node.group(brigade.id), parent_location(old_values["parent_id"])))
         await session.commit()
     return brigade_to_response(brigade, await _fresh(session, auth))   # a move changed what the brigade holds
 

@@ -52,7 +52,8 @@ from app.backend.auth.move_access import move_requirements, ungrantable_by_move
 from app.backend.auth.scope import Node, ROOT, ScopeTree
 from app.backend.enums.audit import AuditEvent
 from app.backend.enums.errors import AccessErrorCode, ErrorCode, ProblemType
-from app.backend.enums.general import MoveCancelCause, MoveNodeKind, MoveStatus, ScopeGroupKind
+from app.backend.enums.events import EventType
+from app.backend.enums.general import MoveCancelCause, MoveNodeKind, MoveStatus, Permissions, ScopeGroupKind
 from app.backend.errors.coded import CodedError
 from app.backend.models.pending_move import PendingMove
 from app.backend.models.post import Post
@@ -61,6 +62,7 @@ from app.backend.models.upload_session import UploadSession
 from app.backend.models.user import User
 from app.backend.services import scope_groups as groups_service
 from app.backend.services.audit import create_audit_log
+from app.backend.services.events import publish, publish_scope_changed
 from app.backend.services.media import uploads
 from app.backend.services.move_queue import kind_of, lock_moves, node_of, waiting_moves
 from app.backend.utils.datetime_utils import assume_utc
@@ -247,6 +249,13 @@ async def _audit(session: AsyncSession, event: AuditEvent, move: PendingMove, us
                            scope=node_of(move), resource_id=move.id, user_id=user_id, **(client or {}))
 
 
+def _publish_status(session: AsyncSession, move: PendingMove, status: MoveStatus) -> None:
+    """move.changed, after the audit row of the change: to post.update holders at the node, and to the requester, who
+    must learn how the move ended whatever they lost meanwhile (the rule of GET /moves/{id})"""
+    publish(session, EventType.MOVE_CHANGED, scope=node_of(move), permission=Permissions.POST_UPDATE,
+            user_id=move.requested_by, move_id=move.id, move_status=status.value)
+
+
 def _in_the_way(tree: ScopeTree, waiting: PendingMove, moved: Node, target_group_id: Optional[int]) -> bool:
     """A node on the way is busy (owner, fix round): a move of the waiting node, of anything in its subtree or above
     it, a move of anything into its subtree, and a move of its target or of a group that holds the target. So nothing
@@ -290,6 +299,7 @@ async def admit(session: AsyncSession, node: Node, target_group_id: Optional[int
         session.add(move)
         await session.flush()
         await _audit(session, AuditEvent.MOVE_COMPLETED, move, user_id, client, forced=True)
+        _publish_status(session, move, MoveStatus.DONE)     # the route moves the node and publishes scope.changed
         return None
     if changed_fields:
         raise CodedError(ErrorCode.MOVE_NOT_ALONE, changed_fields=sorted(changed_fields))
@@ -298,6 +308,7 @@ async def admit(session: AsyncSession, node: Node, target_group_id: Optional[int
     session.add(move)
     await session.flush()
     await _audit(session, AuditEvent.MOVE_REQUESTED, move, user_id, client)
+    _publish_status(session, move, MoveStatus.WAITING)
     await session.commit()
     _logger.info(f"move {move.id} of {node.key} to {target_group_id} waits for {len(locks.pending)} upload(s)")
     return move
@@ -326,6 +337,7 @@ async def cancel(session: AsyncSession, move_id: int, user_id: int,
         await session.commit()
         raise CodedError(ErrorCode.MOVE_NOT_WAITING, move_status=move.status)
     await _audit(session, AuditEvent.MOVE_CANCELLED, move, user_id, client, cause=MoveCancelCause.REQUESTED.value)
+    _publish_status(session, move, MoveStatus.CANCELLED)
     await session.commit()
     _logger.info(f"move {move_id} cancelled by user {user_id}")
     return move
@@ -340,6 +352,7 @@ async def cancel_locked(session: AsyncSession, moves: Iterable[PendingMove], cau
         move.finished_at = now
         session.add(move)
         await _audit(session, AuditEvent.MOVE_CANCELLED, move, user_id, client, cause=cause.value)
+        _publish_status(session, move, MoveStatus.CANCELLED)
         _logger.info(f"move {move.id} cancelled: {cause.value}")
 
 
@@ -362,12 +375,13 @@ async def _check_mover(session: AsyncSession, auth: AuthContext, kind: MoveNodeK
         raise CodedError(AccessErrorCode.GRANT_EXCEEDS_OWN_PERMISSIONS)
 
 
-async def _apply_post(session: AsyncSession, move: PendingMove, auth: AuthContext) -> None:
+async def _apply_post(session: AsyncSession, move: PendingMove, auth: AuthContext) -> Optional[Node]:
+    """The post moved: where it was (None: it was at the target already)"""
     post = await lock(session, select(Post).where(Post.id == move.node_id))
     if post is None or post.is_deleted:
         raise CodedError(ErrorCode.POST_NOT_FOUND)
     if post.group_id == move.target_group_id:
-        return
+        return None
     if move.target_group_id is not None:
         await groups_service.get_group(session, move.target_group_id)
     await _check_mover(session, auth, MoveNodeKind.POST, _location(post.group_id), _location(move.target_group_id),
@@ -382,15 +396,17 @@ async def _apply_post(session: AsyncSession, move: PendingMove, auth: AuthContex
         params={"post_name": post.name, "post_code": post.code}, user_id=move.requested_by,
         old_values=old_values, new_values=post.model_dump(),
     )
+    return _location(old_values["group_id"])
 
 
-async def _apply_group(session: AsyncSession, move: PendingMove, auth: AuthContext) -> None:
+async def _apply_group(session: AsyncSession, move: PendingMove, auth: AuthContext) -> Optional[Node]:
+    """The group moved: where it was (None: it was at the target already)"""
     group = await lock(session, select(ScopeGroup).where(ScopeGroup.id == move.node_id))
     if group is None or group.is_deleted:
         raise CodedError(ErrorCode.SCOPE_GROUP_NOT_FOUND)
     target = move.target_group_id
     if group.parent_id == target:
-        return
+        return None
     await groups_service.check_placement(session, ScopeGroupKind(group.kind), target)
     await groups_service.check_new_parent(session, group.id, target)
     await _check_mover(session, auth, MoveNodeKind.GROUP, _location(group.parent_id), _location(target),
@@ -408,6 +424,7 @@ async def _apply_group(session: AsyncSession, move: PendingMove, auth: AuthConte
         params={"group_name": group.name, "group_kind": group.kind}, user_id=move.requested_by,
         old_values=old_values, new_values=group.model_dump(),
     )
+    return _location(old_values["parent_id"])
 
 
 async def _fail(session: AsyncSession, move_id: int, code: ProblemType) -> None:
@@ -416,6 +433,7 @@ async def _fail(session: AsyncSession, move_id: int, code: ProblemType) -> None:
     if await _end_waiting(session, move_id, MoveStatus.FAILED, code.value):
         move = await get_move(session, move_id)
         await _audit(session, AuditEvent.MOVE_FAILED, move, move.requested_by, failure_code=code.value)
+        _publish_status(session, move, MoveStatus.FAILED)
         _logger.warning(f"move {move_id} failed: {code.value}")
     await session.commit()
 
@@ -434,10 +452,13 @@ async def run_move(session: AsyncSession, move_id: int) -> Optional[MoveStatus]:
         return None
     try:
         if move.node_kind == MoveNodeKind.POST.value:
-            await _apply_post(session, move, await _mover(session, move))
+            old_place = await _apply_post(session, move, await _mover(session, move))
         else:
-            await _apply_group(session, move, await _mover(session, move))
+            old_place = await _apply_group(session, move, await _mover(session, move))
         await _audit(session, AuditEvent.MOVE_COMPLETED, move, move.requested_by)
+        _publish_status(session, move, MoveStatus.DONE)
+        if old_place is not None:
+            publish_scope_changed(session, (node_of(move), old_place))
         await session.commit()
     except CodedError as exc:
         await _fail(session, move_id, exc.code)
