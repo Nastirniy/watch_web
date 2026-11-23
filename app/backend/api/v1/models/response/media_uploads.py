@@ -1,12 +1,12 @@
 from typing import Dict, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from app.backend.api.shared.openapi_docs import header
-from app.backend.utils.validators import ResponseDatetime
+from app.backend.utils.validators import ResponseDatetime, ResponseModel
 
 
-class UploadSessionResponse(BaseModel):
+class UploadSessionResponse(ResponseModel):
     """State of a resumable upload; received_bytes is the offset to continue from"""
     id: str
     status: str                                   # open | completing | completed | aborted | expired

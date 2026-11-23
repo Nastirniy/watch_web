@@ -17,13 +17,13 @@ from app.backend.enums.audit import AuditCategory, AuditEvent, audit_event
 from app.backend.errors.coded import is_optional
 from app.backend.errors.openapi import absent_not_null
 from app.backend.services.audit.query import AuditEntry
-from app.backend.utils.validators import ResponseDatetime
+from app.backend.utils.validators import ResponseDatetime, ResponseModel
 
 _CODE_DOC = "Key of exactly this message in the localization package"
 _DEVICE = "null without audit.view (it identifies a device)"
 
 
-class AuditModel(BaseModel):
+class AuditModel(ResponseModel):
     """Base of the audit response models: values as stored (no strip, no unescape: a record is never rewritten)"""
     model_config = ConfigDict(extra="forbid", from_attributes=True)
 

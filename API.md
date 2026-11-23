@@ -17,8 +17,12 @@ name is unique within a version, so a new version never renames a type of v1.
 Setup, contract checks and translation checks step by step: `WEB_TOOLING.md` (starter files in `api-contract/web-kit/`).
 
 ```bash
-npx openapi-typescript https://<api-origin>/api/v1/openapi.json -o src/api/schema.ts
+npx openapi-typescript https://<api-origin>/api/v1/openapi.json --default-non-nullable false -o src/api/schema.ts
 ```
+
+`--default-non-nullable false` is required: openapi-typescript 7 otherwise makes every request field with a default
+(`force` of `PUT /posts/{id}`) a field the body must send. A response field with a default is listed in `required` by
+the API itself, so it stays typed as present.
 
 With [openapi-fetch](https://openapi-ts.dev/openapi-fetch/) the paths, bodies, success responses and errors are typed:
 

@@ -126,6 +126,46 @@ def test_catalog_components(schema):
     assert post_not_found["additionalProperties"] is False
 
 
+def _reachable(schema, node, found: set) -> set:
+    """Names of the components `node` refers to, directly or through other components"""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "$ref":
+                name = value.rsplit("/", 1)[-1]
+                if name not in found:
+                    found.add(name)
+                    _reachable(schema, schema["components"]["schemas"][name], found)
+            else:
+                _reachable(schema, value, found)
+    elif isinstance(node, list):
+        for value in node:
+            _reachable(schema, value, found)
+    return found
+
+
+def test_response_fields_with_a_default_are_required(schema):
+    """The web generates its types with openapi-typescript --default-non-nullable false (WEB_TOOLING.md): a response
+    field with a default must be in `required` or the client types it as maybe missing. Optional in a response means
+    left out of the body (absent_not_null: no default, no null variant). A new response model takes a base with
+    utils/validators.SERIALIZED_DEFAULTS_REQUIRED (ResponseModel, PlainTextModel, SecureBaseModel)"""
+    names = set()
+    for _, operation in _operations(schema):
+        _reachable(schema, operation["responses"], names)
+    wrong = []
+    for name in sorted(names):
+        component = schema["components"]["schemas"][name]
+        required = set(component.get("required", ()))
+        for field, prop in component.get("properties", {}).items():
+            if field not in required and ("default" in prop or {"type": "null"} in prop.get("anyOf", [])):
+                wrong.append(f"{name}.{field}")
+    assert wrong == []
+    # The setting acts in responses only: a request field with a default stays optional, and no model is split into
+    # an -Input and an -Output component
+    post_update = schema["components"]["schemas"]["PostUpdate"]
+    assert "force" not in post_update.get("required", ())
+    assert [name for name in schema["components"]["schemas"] if name.endswith(("-Input", "-Output"))] == []
+
+
 # ------------------------------------------------------------------ real bodies match their schema
 
 def test_operation_ids_are_unique_function_names(schema):

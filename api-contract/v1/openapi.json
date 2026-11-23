@@ -35128,7 +35128,8 @@
         "type": "object",
         "required": [
           "outcome",
-          "at"
+          "at",
+          "error_code"
         ],
         "title": "BackupLastRunResponse"
       },
@@ -35194,7 +35195,9 @@
           "started_at",
           "duration_seconds",
           "size_bytes",
-          "sha256"
+          "sha256",
+          "migration_revision",
+          "copied"
         ],
         "title": "BackupResponse"
       },
@@ -35277,8 +35280,12 @@
         },
         "type": "object",
         "required": [
+          "last_success_at",
+          "last_success_id",
+          "age_seconds",
           "stale",
           "stale_after_hours",
+          "last_run",
           "count",
           "total_size_bytes",
           "free_bytes",
@@ -35327,7 +35334,9 @@
         "type": "object",
         "required": [
           "status",
-          "stale"
+          "last_success_at",
+          "stale",
+          "last_run_outcome"
         ],
         "title": "BackupsHealthModel",
         "description": "Database backups (only when settings.backup is configured)"
@@ -35565,6 +35574,7 @@
           "id",
           "corps_id",
           "name",
+          "description",
           "is_deleted",
           "created_at",
           "updated_at",
@@ -35695,10 +35705,12 @@
           "id",
           "corps_id",
           "name",
+          "description",
           "is_deleted",
           "created_at",
           "updated_at",
-          "post_count"
+          "post_count",
+          "already_there"
         ],
         "title": "BrigadeUpdateResponse",
         "description": "The brigade after PATCH /brigades/{brigade_id}"
@@ -38412,10 +38424,16 @@
           "label",
           "subject_cn",
           "serial",
+          "not_before",
+          "not_after",
           "ca_issued",
           "state",
           "has_package",
+          "revoked_at",
+          "revoked_by",
+          "revocation_reason",
           "export_count",
+          "last_exported_at",
           "created_at",
           "created_by"
         ],
@@ -38832,6 +38850,7 @@
         "required": [
           "id",
           "name",
+          "description",
           "is_deleted",
           "created_at",
           "updated_at",
@@ -39086,7 +39105,10 @@
         },
         "type": "object",
         "required": [
-          "status"
+          "status",
+          "response_time",
+          "stats",
+          "error"
         ],
         "title": "DatabaseHealthModel",
         "description": "Database health check response model"
@@ -39592,8 +39614,10 @@
         "type": "object",
         "required": [
           "name",
+          "migration_revision",
           "code_revision",
           "up_to_date",
+          "size_bytes",
           "tables"
         ],
         "title": "DatabaseSchemaResponse"
@@ -39662,7 +39686,11 @@
         "type": "object",
         "required": [
           "product",
-          "version"
+          "version",
+          "uptime_seconds",
+          "threads_connected",
+          "max_used_connections",
+          "max_connections"
         ],
         "title": "DatabaseServerResponse"
       },
@@ -39760,7 +39788,10 @@
         },
         "type": "object",
         "required": [
-          "name"
+          "name",
+          "rows_estimate",
+          "data_bytes",
+          "index_bytes"
         ],
         "title": "DatabaseTableResponse"
       },
@@ -40319,7 +40350,8 @@
           "lag_ms",
           "gaps",
           "slow_closed",
-          "reloads"
+          "reloads",
+          "oldest_row_age_seconds"
         ],
         "title": "EventsHealthModel",
         "description": "Real-time events (only when settings.events.enabled): the sum of the hubs that reported within 60 s"
@@ -41665,7 +41697,12 @@
           "environment",
           "timezone",
           "database",
-          "services"
+          "services",
+          "pki",
+          "backups",
+          "authorization",
+          "moves",
+          "events"
         ],
         "title": "HealthResponse",
         "description": "Main health check response model"
@@ -41704,7 +41741,8 @@
         "required": [
           "kind",
           "id",
-          "name"
+          "name",
+          "group_kind"
         ],
         "title": "HomeRefResponse",
         "description": "The node a user belongs to: a post today (a scope group joins later)"
@@ -42785,6 +42823,7 @@
           "group_permissions",
           "access_token",
           "refresh_token",
+          "token_type",
           "expires_in",
           "user_id",
           "username"
@@ -43827,7 +43866,18 @@
           "media_type",
           "width",
           "height",
-          "uploaded_at"
+          "uploaded_at",
+          "observation_id",
+          "is_deleted",
+          "thumbnail_status",
+          "thumbnail_urls",
+          "poster_generated_at",
+          "storyboard_status",
+          "duration_seconds",
+          "video_codec",
+          "audio_codec",
+          "playback_type",
+          "user"
         ],
         "title": "MediaFileInfo"
       },
@@ -44781,9 +44831,11 @@
         },
         "type": "object",
         "required": [
+          "id",
           "content_type",
           "extensions",
           "label",
+          "aliases",
           "max_file_size_bytes"
         ],
         "title": "MediaFormatInfo"
@@ -46572,7 +46624,8 @@
         "type": "object",
         "required": [
           "count",
-          "total_size_bytes"
+          "total_size_bytes",
+          "posters"
         ],
         "title": "MediaStatistics"
       },
@@ -48355,7 +48408,8 @@
         },
         "type": "object",
         "required": [
-          "waiting"
+          "waiting",
+          "oldest_waiting_seconds"
         ],
         "title": "MovesHealthModel",
         "description": "Moves that wait for the uploads below them (services/moves.py), counts only"
@@ -48904,7 +48958,8 @@
         },
         "type": "object",
         "required": [
-          "not_archived"
+          "not_archived",
+          "archived"
         ],
         "title": "ObservationCount",
         "description": "Observations by created_at. The two figures never overlap: all = not_archived + archived."
@@ -49938,9 +49993,11 @@
           "id",
           "observation_id",
           "kind",
+          "link_group",
           "frequency_min",
           "frequency_max",
           "frequency_center",
+          "bandwidth",
           "is_deleted",
           "created_at",
           "updated_at"
@@ -51329,6 +51386,7 @@
         "type": "object",
         "required": [
           "not_archived",
+          "archived",
           "start",
           "end"
         ],
@@ -51383,6 +51441,7 @@
         "type": "object",
         "required": [
           "not_archived",
+          "archived",
           "date_from",
           "date_to",
           "group_by",
@@ -52045,12 +52104,23 @@
           "post_id",
           "signal_type_id",
           "observed_at",
+          "duration_seconds",
+          "comment",
           "status",
           "confidence_level",
           "is_deleted",
           "created_at",
           "updated_at",
-          "user"
+          "disappeared_at",
+          "disappeared_by",
+          "media_ids",
+          "tag_ids",
+          "frequencies",
+          "tags",
+          "user",
+          "disappeared_by_user",
+          "corps",
+          "brigade"
         ],
         "title": "ObservationWithMedia",
         "description": "Observation with attached media file IDs"
@@ -52273,7 +52343,8 @@
         },
         "type": "object",
         "required": [
-          "allowed"
+          "allowed",
+          "missing"
         ],
         "title": "PermissionCheckResponse"
       },
@@ -52657,6 +52728,7 @@
         "required": [
           "status",
           "ca_expires_in_days",
+          "crl_next_update_in_days",
           "crl_stale",
           "signer_available"
         ],
@@ -53529,6 +53601,8 @@
         "type": "object",
         "required": [
           "generated_at",
+          "last_observation_at",
+          "days_without_observations",
           "all_time",
           "last_24h",
           "period",
@@ -53692,7 +53766,17 @@
           "id",
           "name",
           "code",
+          "description",
+          "region",
+          "city",
           "is_active",
+          "group_id",
+          "corps",
+          "brigade",
+          "is_deleted",
+          "online_user_count",
+          "last_user_activity_at",
+          "user_count",
           "created_at",
           "updated_at"
         ],
@@ -54370,9 +54454,20 @@
           "id",
           "name",
           "code",
+          "description",
+          "region",
+          "city",
           "is_active",
+          "group_id",
+          "corps",
+          "brigade",
+          "is_deleted",
+          "online_user_count",
+          "last_user_activity_at",
+          "user_count",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "already_there"
         ],
         "title": "PostUpdateResponse",
         "description": "The post after PUT /posts/{post_id}"
@@ -54902,6 +54997,11 @@
           }
         },
         "type": "object",
+        "required": [
+          "all",
+          "any",
+          "at_root"
+        ],
         "title": "RequiredPermissions",
         "description": "Permission requirement of a route, mirrors auth.require.Require"
       },
@@ -57528,6 +57628,7 @@
           "description",
           "created_at",
           "updated_at",
+          "is_deleted",
           "builtin_key",
           "is_builtin",
           "kind"
@@ -58032,6 +58133,7 @@
           "method",
           "path",
           "name",
+          "tags",
           "required"
         ],
         "title": "RouteAccessEntryResponse"
@@ -59059,6 +59161,8 @@
           "id",
           "name",
           "kind",
+          "parent_id",
+          "description",
           "is_deleted",
           "created_at",
           "updated_at"
@@ -59586,9 +59690,12 @@
           "id",
           "name",
           "kind",
+          "parent_id",
+          "description",
           "is_deleted",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "already_there"
         ],
         "title": "ScopeGroupUpdateResponse",
         "description": "The group after PATCH /scope-groups/{group_id}"
@@ -59713,6 +59820,7 @@
           "id",
           "name",
           "kind",
+          "description",
           "groups",
           "posts"
         ],
@@ -62667,8 +62775,11 @@
         "required": [
           "id",
           "status",
+          "ip_address",
+          "user_agent",
           "created_at",
-          "expires_at"
+          "expires_at",
+          "last_activity_at"
         ],
         "title": "SessionInfoResponse",
         "description": "A login session; times are ISO 8601 in UTC with the offset"
@@ -64603,6 +64714,7 @@
         "required": [
           "generated_at",
           "period",
+          "post_ids",
           "posts",
           "users",
           "observations",
@@ -64746,7 +64858,9 @@
           "active_size_bytes",
           "deleted_count",
           "deleted_size_bytes",
-          "media_types"
+          "media_types",
+          "filesystem_files",
+          "filesystem_size_bytes"
         ],
         "title": "StorageStatisticsResponse",
         "description": "Counts and sizes of the stored media (administration)"
@@ -67117,6 +67231,8 @@
         "type": "object",
         "required": [
           "generated_at",
+          "last_observation_at",
+          "days_without_observations",
           "all_time",
           "last_24h",
           "period",
@@ -68010,7 +68126,13 @@
         "type": "object",
         "required": [
           "message",
-          "media_file_id"
+          "media_file_id",
+          "original_filename",
+          "file_size",
+          "mime_type",
+          "thumbnail_status",
+          "thumbnail_urls",
+          "upload_id"
         ],
         "title": "UploadResultResponse",
         "description": "Result of every upload route (multipart, nginx offload, resumable complete)"
@@ -68918,9 +69040,12 @@
           "received_bytes",
           "remaining_bytes",
           "max_chunk_bytes",
+          "media_file_id",
+          "error",
           "created_at",
           "last_activity_at",
           "expires_at",
+          "completed_at",
           "urls"
         ],
         "title": "UploadSessionResponse",
@@ -71940,8 +72065,16 @@
           "group_permissions",
           "id",
           "username",
+          "username_alias",
           "is_active",
-          "online_threshold_seconds"
+          "last_login_at",
+          "last_activity_at",
+          "online_threshold_seconds",
+          "certificate",
+          "home",
+          "post",
+          "brigade",
+          "corps"
         ],
         "title": "UserInfoResponse"
       },
@@ -72300,7 +72433,10 @@
         "required": [
           "id",
           "username",
-          "username_alias"
+          "username_alias",
+          "is_online",
+          "last_activity_at",
+          "is_deleted"
         ],
         "title": "UserPublicResponse",
         "description": "Public projection of a user, used as nested creator info (observation.user, media.user)"
@@ -72463,7 +72599,14 @@
           "is_active",
           "created_at",
           "updated_at",
-          "last_login_at"
+          "last_login_at",
+          "is_online",
+          "last_activity_at",
+          "is_deleted",
+          "home",
+          "post",
+          "brigade",
+          "corps"
         ],
         "title": "UserResponse"
       },
@@ -72828,9 +72971,15 @@
         "required": [
           "id",
           "status",
+          "ip_address",
+          "user_agent",
           "created_at",
           "expires_at",
-          "device_masked"
+          "last_activity_at",
+          "device_masked",
+          "ended_at",
+          "end_reason",
+          "revoke_cause"
         ],
         "title": "UserSessionResponse",
         "description": "A session as the session routes of a user list it, ended ones included. Only the user themself sees the device\nof their sessions in clear; for anyone else ip_address is masked to its network and user_agent is null\n(device_masked true): the session's id, status and times stay, enough to end it."
@@ -73600,7 +73749,8 @@
           "last_seen_at",
           "jobs_done",
           "jobs_failed",
-          "stale"
+          "stale",
+          "details"
         ],
         "title": "WorkerInfo"
       },

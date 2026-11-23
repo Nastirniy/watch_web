@@ -1,12 +1,12 @@
 from typing import Dict, List, Mapping, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.auth.scope import ScopeTree
 from app.backend.enums.general import ScopeGroupKind
 from app.backend.models.post import Post
 from app.backend.services.units import post_unit_names, post_units
-from app.backend.utils.validators import PlainTextModel, ResponseDatetime
+from app.backend.utils.validators import PlainTextModel, ResponseDatetime, ResponseModel
 
 
 class UnitRefResponse(PlainTextModel):
@@ -79,7 +79,7 @@ async def posts_to_response(session: AsyncSession, tree: ScopeTree, posts: List[
 
 
 
-class ObservationCount(BaseModel):
+class ObservationCount(ResponseModel):
     """Observations by created_at. The two figures never overlap: all = not_archived + archived."""
     not_archived: int = Field(description="Observations that are not archived")
     archived: Optional[int] = Field(default=None, description="Archived observations; null unless include_archived")
@@ -98,7 +98,7 @@ class ObservationStatsPeriod(ObservationCount):
     buckets: List[ObservationStatsBucket] = Field(description="Every bucket of the period in order, empty ones included")
 
 
-class ObservationStatsFigures(BaseModel):
+class ObservationStatsFigures(ResponseModel):
     """The counters of a set of observations (a post, a corps, a brigade)"""
     generated_at: ResponseDatetime
     last_observation_at: Optional[ResponseDatetime] = Field(default=None, description="created_at of the latest not archived observation; null when there is none")

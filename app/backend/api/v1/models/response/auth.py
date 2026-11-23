@@ -1,6 +1,6 @@
 import ipaddress
 from typing import Dict, Iterable, Optional, List
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from app.backend.enums.errors import RequiredPermissions
 from app.backend.enums.general import SessionEndReason, SessionRevokeCause, SessionStatus, UserType
@@ -16,7 +16,7 @@ from app.backend.auth.assignments import AssignmentView
 from app.backend.auth.context import AuthContext
 from app.backend.auth.presence import online_threshold_seconds
 from app.backend.auth.sessions import SessionState
-from app.backend.utils.validators import PlainTextModel, ResponseDatetime
+from app.backend.utils.validators import PlainTextModel, ResponseDatetime, ResponseModel
 
 
 class AuthorizationInfo(PlainTextModel):
@@ -56,7 +56,7 @@ class LoginResponse(AuthorizationInfo):
     username: str
 
 
-class LogoutResponse(BaseModel):
+class LogoutResponse(ResponseModel):
     message: str
 
 
@@ -77,7 +77,7 @@ class UserInfoResponse(AuthorizationInfo):
     corps: Optional[UnitRefResponse] = Field(default=None, description="Corps the home sits in now (directly or through a brigade); null: outside any corps")
 
 
-class SessionInfoResponse(BaseModel):
+class SessionInfoResponse(ResponseModel):
     """A login session; times are ISO 8601 in UTC with the offset"""
     id: str
     status: SessionStatus = Field(description="Computed when read: online, idle (live, client quiet) or ended")
@@ -116,20 +116,20 @@ class UserSessionResponse(SessionInfoResponse):
         default=None, description="Revoked sessions: what made the server end it; the account may be unchanged")
 
 
-class UserSessionsResponse(BaseModel):
+class UserSessionsResponse(ResponseModel):
     sessions: list[SessionInfoResponse]
 
 
-class SessionsEndedResponse(BaseModel):
+class SessionsEndedResponse(ResponseModel):
     ended_count: int = Field(description="Live sessions that were revoked")
 
 
-class PermissionCheckResponse(BaseModel):
+class PermissionCheckResponse(ResponseModel):
     allowed: bool
     missing: List[str] = Field(default_factory=list, description="Permissions the caller lacks")
 
 
-class RouteAccessEntryResponse(BaseModel):
+class RouteAccessEntryResponse(ResponseModel):
     method: str
     path: str
     name: str
@@ -137,7 +137,7 @@ class RouteAccessEntryResponse(BaseModel):
     required: RequiredPermissions
 
 
-class RouteAccessResponse(BaseModel):
+class RouteAccessResponse(ResponseModel):
     routes: List[RouteAccessEntryResponse]
 
 

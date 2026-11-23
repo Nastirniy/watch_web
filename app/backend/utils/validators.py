@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated
 from app.backend.utils.text import unescape_html, unescape_deep
 from app.backend.utils.datetime_utils import as_utc, assume_utc
-from pydantic import AfterValidator, BaseModel, WrapSerializer, field_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, WrapSerializer, field_validator
 from email_validator import validate_email, EmailNotValidError
 from app.backend.errors.coded import invalid
 from app.backend.enums.errors import FieldErrorCode
@@ -214,6 +214,17 @@ class SecurityValidators:
         return float(lat), float(lon)
 
 
+#: A field with a default is always in a serialized model, so its response schema lists it in `required`: generators
+#: type it as present (openapi-typescript with --default-non-nullable false, WEB_TOOLING.md) while the same default in a
+#: request model stays optional. Every model base sets it, except those that leave members out (absent_not_null).
+SERIALIZED_DEFAULTS_REQUIRED = ConfigDict(json_schema_serialization_defaults_required=True)
+
+
+class ResponseModel(BaseModel):
+    """Base of a response model that needs neither PlainTextModel nor SecureBaseModel"""
+    model_config = SERIALIZED_DEFAULTS_REQUIRED
+
+
 class PlainTextModel(BaseModel):
     """Base for models whose string fields must reach the client as plain text.
 
@@ -222,6 +233,7 @@ class PlainTextModel(BaseModel):
     time the API escaped its input is returned as "O'Brien". Nested models clean
     themselves when they inherit this class as well.
     """
+    model_config = SERIALIZED_DEFAULTS_REQUIRED
 
     @field_validator("*", mode="after")
     @classmethod

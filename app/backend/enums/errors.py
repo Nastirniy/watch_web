@@ -21,13 +21,16 @@ import string
 from enum import Enum
 from typing import Any, Dict, List, Literal, NamedTuple, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.backend.enums.general import RoleKind, UserType
 
 
 class RequiredPermissions(BaseModel):
     """Permission requirement of a route, mirrors auth.require.Require"""
+    # Every list is in the body, so required in the schema (utils/validators.SERIALIZED_DEFAULTS_REQUIRED; not imported:
+    # utils/validators imports this module)
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
     all: List[str] = Field(default_factory=list, description="Every permission in this list is required")
     any: List[str] = Field(default_factory=list, description="At least one permission in this list is required")
     at_root: List[str] = Field(

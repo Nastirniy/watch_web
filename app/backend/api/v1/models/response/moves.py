@@ -1,7 +1,7 @@
 from typing import List, Optional
 
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from app.backend.api.shared.helpers.move_helper import retry_after
 from app.backend.api.shared.openapi_docs import header
@@ -9,10 +9,10 @@ from app.backend.api.versioning import PublishedVersion
 from app.backend.enums.general import MoveNodeKind, MoveStatus
 from app.backend.enums.routes import MoveRoutes
 from app.backend.services.moves import MoveView
-from app.backend.utils.validators import ResponseDatetime
+from app.backend.utils.validators import ResponseDatetime, ResponseModel
 
 
-class MoveUploadResponse(BaseModel):
+class MoveUploadResponse(ResponseModel):
     """An upload the move waits for"""
     upload_id: str
     post_id: int
@@ -22,7 +22,7 @@ class MoveUploadResponse(BaseModel):
     holding: bool = Field(description="false: no bytes for too long, or past its expiry: it no longer keeps the move waiting and is left alone")
 
 
-class MoveResponse(BaseModel):
+class MoveResponse(ResponseModel):
     """A move that waits, or waited, for the uploads below its node"""
     id: int
     status: MoveStatus

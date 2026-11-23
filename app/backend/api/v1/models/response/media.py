@@ -1,12 +1,12 @@
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 from sqlalchemy import inspect as sa_inspect
 
 from app.backend.enums.general import TIMED_MEDIA_TYPES, UploadTransport
 from app.backend.models.media import MediaFile
 from app.backend.api.v1.models.response.users import UserPublicResponse
-from app.backend.utils.validators import PlainTextModel, ResponseDatetime
+from app.backend.utils.validators import PlainTextModel, ResponseDatetime, ResponseModel
 from app.backend.config import settings
 from app.backend.services.media.storyboards import client_status
 from app.backend.services.media.urls import thumbnail_urls
@@ -14,7 +14,7 @@ from app.backend.api.shared.openapi_docs import header
 from app.backend.enums.media_types import Disposition
 
 
-class ThumbnailUrls(BaseModel):
+class ThumbnailUrls(ResponseModel):
     """Signed, expiring URLs a browser can load directly (no bearer token)"""
     small: str
     medium: str
@@ -98,7 +98,7 @@ class MediaFileInfo(PlainTextModel):
         return data
 
 
-class ShareLinkResponse(BaseModel):
+class ShareLinkResponse(ResponseModel):
     media_id: int
     size: str
     format: str
@@ -106,7 +106,7 @@ class ShareLinkResponse(BaseModel):
     expires_at: ResponseDatetime
 
 
-class WorkerInfo(BaseModel):
+class WorkerInfo(ResponseModel):
     name: str
     kind: str
     hostname: str
@@ -119,14 +119,14 @@ class WorkerInfo(BaseModel):
     details: Optional[str] = None
 
 
-class PosterStatusResponse(BaseModel):
+class PosterStatusResponse(ResponseModel):
     """Queue depth by poster status plus every worker's last heartbeat"""
     posters: Dict[str, int]
     workers: List[WorkerInfo]
     worker_alive: bool
 
 
-class PosterReconcileResponse(BaseModel):
+class PosterReconcileResponse(ResponseModel):
     # Expired claims on their last attempt (the worker stopped during processing), now failed
     failed_abandoned: int
     queued_untracked: int
@@ -134,13 +134,13 @@ class PosterReconcileResponse(BaseModel):
     retried_failed: int
 
 
-class ThumbnailRegenerateResponse(BaseModel):
+class ThumbnailRegenerateResponse(ResponseModel):
     media_id: int
     thumbnail_status: str
     message: str
 
 
-class UploadResultResponse(BaseModel):
+class UploadResultResponse(ResponseModel):
     """Result of every upload route (multipart, nginx offload, resumable complete)"""
     message: str
     media_file_id: int
@@ -170,7 +170,7 @@ def upload_result(media_file: MediaFile, transport: UploadTransport, upload_id: 
     )
 
 
-class StorageStatisticsResponse(BaseModel):
+class StorageStatisticsResponse(ResponseModel):
     """Counts and sizes of the stored media (administration)"""
     total_files: int
     total_file_size_bytes: int
@@ -185,7 +185,7 @@ class StorageStatisticsResponse(BaseModel):
     filesystem_size_bytes: Optional[int] = None
 
 
-class MediaFormatInfo(BaseModel):
+class MediaFormatInfo(ResponseModel):
     id: Optional[int] = None
     content_type: str
     extensions: List[str]
@@ -194,7 +194,7 @@ class MediaFormatInfo(BaseModel):
     max_file_size_bytes: int
 
 
-class MediaFormatsResponse(BaseModel):
+class MediaFormatsResponse(ResponseModel):
     """Accepted upload formats grouped by media type; the same list is sent as Accept-Post on 415 answers"""
     media_types: List[str]
     formats: Dict[str, List[MediaFormatInfo]]

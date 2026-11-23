@@ -23,7 +23,7 @@ Commit it in the web project too: a diff of `openapi.json` in a pull request is 
 adopts. To rewrite it in this repository without a server: `python -m app.backend.cli.api_contract`.
 
 When the web client starts using v2 for some resources, generate its types into a second file
-(`openapi-typescript ./api-contract/v2/openapi.json -o ./src/api/schema-v2.ts`) and create a second
+(`openapi-typescript ./api-contract/v2/openapi.json --default-non-nullable false -o ./src/api/schema-v2.ts`) and create a second
 openapi-fetch client from it; the calls that stay on v1 keep the first client.
 
 ## 2. Set up the web project once
@@ -47,12 +47,18 @@ Copy from `api-contract/web-kit/` of this repository:
 ```json
 {
   "scripts": {
-    "api:types": "openapi-typescript ./api-contract/v1/openapi.json -o ./src/api/schema.ts",
+    "api:types": "openapi-typescript ./api-contract/v1/openapi.json --default-non-nullable false -o ./src/api/schema.ts",
     "api:check": "tsc --noEmit -p tsconfig.json",
     "api:all": "npm run api:types && npm run api:check"
   }
 }
 ```
+
+`--default-non-nullable false` is required. openapi-typescript 7 makes every field with a default non-optional, so a
+request body would have to send `force` of `PUT /posts/{id}` and every other defaulted field. The API lists every
+response field with a default in `required` itself, so with the flag responses stay typed as present and request
+fields with a default stay optional. Only members that are left out of a body (`scope` of an event, audit `params`)
+are optional in a response.
 
 ## 3. Every time the API changes
 

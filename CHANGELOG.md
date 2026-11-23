@@ -5,6 +5,20 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Web types: response fields with a default are required
+
+### Changed
+
+- OpenAPI document: every response field with a default is listed in `required` (145 fields, among them
+  `PostResponse.is_deleted`, `MediaFileInfo.thumbnail_urls`, `UserResponse.is_online`, the lists of
+  `RequiredPermissions`); nothing else changed and the bodies are the same. Request fields with a default stay
+  optional. The web generates its types with `openapi-typescript --default-non-nullable false` now (WEB_TOOLING.md,
+  API.md "Typed client"): without the flag every request field with a default (`force` of `PUT /posts/{id}`) had to be
+  sent and `tsc` failed on the web kit's own example. Only members that a body leaves out (`scope` of an event, audit
+  `params`) stay optional in a response. Model bases set `json_schema_serialization_defaults_required`
+  (`utils/validators.SERIALIZED_DEFAULTS_REQUIRED`: `ResponseModel`, `PlainTextModel`, `SecureBaseModel`);
+  `tests/test_openapi.py` keeps it so.
+
 ## Real-time events: rights_changed
 
 ### Added

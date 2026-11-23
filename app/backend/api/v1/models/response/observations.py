@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import Field, ConfigDict
 from typing import Iterable, List, Optional
 from decimal import Decimal
 
@@ -7,26 +7,26 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.backend.enums.general import ScopeGroupKind
 from app.backend.models.observation import Observation
 from app.backend.services.units import recorded_units
-from app.backend.utils.validators import PlainTextModel, ResponseDatetime
+from app.backend.utils.validators import PlainTextModel, ResponseDatetime, ResponseModel
 from app.backend.api.v1.models.response.posts import UnitRefResponse
 from app.backend.api.v1.models.response.users import UserPublicResponse
 from app.backend.api.v1.models.response.tags import TagBriefResponse
 
 
-class ReportTypeChoice(BaseModel):
+class ReportTypeChoice(ResponseModel):
     """One observation report type, for a select in the web UI"""
     value: str = Field(description="Value to send as report_type")
     label: str = Field(description="Ukrainian name")
     description: str = Field(description="Ukrainian description")
 
 
-class MessageResponse(BaseModel):  # TODO: i think we need make it global accessible to other routes and use it
+class MessageResponse(ResponseModel):  # TODO: i think we need make it global accessible to other routes and use it
     """Generic message response"""
 
     message: str = Field(description="Response message")
 
 
-class ObservationFrequencyResponse(BaseModel):
+class ObservationFrequencyResponse(ResponseModel):
     """One frequency band of an observation (MHz)"""
     model_config = ConfigDict(from_attributes=True)
 

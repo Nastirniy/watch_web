@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import Field
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select, func
 import time
@@ -21,7 +21,7 @@ from app.backend.services.events.health import hub_reports
 from app.backend.services.move_queue import waiting_report
 from app.backend.services.signer_client import SignerRefused, SignerUnavailable, signer_client
 from app.backend.utils.datetime_utils import assume_utc
-from app.backend.utils.validators import ResponseDatetime
+from app.backend.utils.validators import ResponseDatetime, ResponseModel
 from app.backend.auth.integrity import authorization_report
 
 _logger = get_api_logger()
@@ -29,7 +29,7 @@ _logger = get_api_logger()
 
 # Pydantic v2 Models for Prepare Health Check Responses
 
-class DatabaseStatsModel(BaseModel):
+class DatabaseStatsModel(ResponseModel):
     """Database statistics model"""
     active_users: int = Field(..., description="Number of active users")
     active_posts: int = Field(..., description="Number of active posts")
@@ -37,7 +37,7 @@ class DatabaseStatsModel(BaseModel):
     active_observations: int = Field(..., description="Number of active observations")
 
 
-class DatabaseHealthModel(BaseModel):
+class DatabaseHealthModel(ResponseModel):
     """Database health check response model"""
     status: str = Field(..., description="Database health status (healthy/unhealthy)")
     response_time: Optional[float] = Field(None, description="Response time in seconds")
@@ -45,18 +45,18 @@ class DatabaseHealthModel(BaseModel):
     error: Optional[str] = Field(None, description="Error message if unhealthy")
 
 
-class ServiceStatusModel(BaseModel):
+class ServiceStatusModel(ResponseModel):
     """Individual service status model"""
     status: str = Field(..., description="Service status (healthy/unhealthy)")
     uptime: str = Field(..., description="Service uptime information")
 
 
-class ServicesHealthModel(BaseModel):
+class ServicesHealthModel(ResponseModel):
     """Services health check response model"""
     system: ServiceStatusModel = Field(..., description="System service status")
 
 
-class PkiHealthModel(BaseModel):
+class PkiHealthModel(ResponseModel):
     """Client certificate authority health (only when settings.pki is configured)"""
     status: str = Field(..., description="healthy, or degraded: less than 2 days left on the CA or a CRL, a CRL "
                                          "never published, a stale CRL or no signer")
@@ -68,7 +68,7 @@ class PkiHealthModel(BaseModel):
     signer_available: bool = Field(..., description="The signing service answers")
 
 
-class BackupsHealthModel(BaseModel):
+class BackupsHealthModel(ResponseModel):
     """Database backups (only when settings.backup is configured)"""
     status: str = Field(..., description="healthy, or degraded: no good backup for backup.stale_after_hours, the last "
                                          "run failed, the newest backup has no off-host copy (with a copy "
@@ -78,7 +78,7 @@ class BackupsHealthModel(BaseModel):
     last_run_outcome: Optional[str] = Field(None, description="ok or failed: the last backup run")
 
 
-class AuthorizationHealthModel(BaseModel):
+class AuthorizationHealthModel(ResponseModel):
     """Authorization (auth/integrity.py), counts only"""
     status: str = Field(..., description="healthy, or degraded: a grant puts less in effect than its role holds, or "
                                          "no effective administrator")
@@ -90,13 +90,13 @@ class AuthorizationHealthModel(BaseModel):
                          "development), with an active certificate")
 
 
-class MovesHealthModel(BaseModel):
+class MovesHealthModel(ResponseModel):
     """Moves that wait for the uploads below them (services/moves.py), counts only"""
     waiting: int = Field(..., description="Moves waiting now")
     oldest_waiting_seconds: Optional[int] = Field(None, description="Seconds the oldest of them has waited; null: none")
 
 
-class EventsHealthModel(BaseModel):
+class EventsHealthModel(ResponseModel):
     """Real-time events (only when settings.events.enabled): the sum of the hubs that reported within 60 s"""
     status: str = Field(..., description="healthy, or degraded: no hub running reported within 60 s, a worker's "
                                          "hub is down, or the event lag is above 30 s")
@@ -113,7 +113,7 @@ class EventsHealthModel(BaseModel):
                                                                     "when the table is empty")
 
 
-class HealthResponse(BaseModel):
+class HealthResponse(ResponseModel):
     """Main health check response model"""
     status: str = Field(..., description="Overall system status")
     timestamp: ResponseDatetime = Field(..., description="Current server timestamp")

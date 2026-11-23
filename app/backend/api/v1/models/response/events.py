@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel, model_serializer
 from app.backend.auth.scope import Node
 from app.backend.enums.events import MOVE_STATUSES, Dictionary, StreamCloseReason, StreamMessageType
 from app.backend.errors.openapi import absent_not_null
-from app.backend.utils.validators import ResponseDatetime
+from app.backend.utils.validators import ResponseDatetime, ResponseModel
 
 REFETCH = Field(description="Refetch what this event concerns after a random wait below this many milliseconds, never "
                             "at once: the server spreads the refetches of everyone who received it. A user's own action "
@@ -39,49 +39,49 @@ class EventScope(_Absent):
     id: int = Field(default=None, description="Id of the group or the post; absent at the root")
 
 
-class EmptyData(BaseModel):
+class EmptyData(ResponseModel):
     """No data: the type says everything"""
     model_config = ConfigDict(extra="forbid")
 
 
-class MoveChangedData(BaseModel):
+class MoveChangedData(ResponseModel):
     move_id: int = Field(description="Read GET /moves/{move_id}")
     move_status: MOVE_STATUSES
 
 
-class CertificateMismatchData(BaseModel):
+class CertificateMismatchData(ResponseModel):
     audit_log_id: int = Field(description="Read GET /audit-logs/{audit_log_id}")
     session_user_id: int = Field(description="The user whose session's token came with another client certificate")
 
 
-class UserChangedData(BaseModel):
+class UserChangedData(ResponseModel):
     subject_user_id: int = Field(description="Read GET /users/{subject_user_id} and what the page shows of it (its "
                                              "assignments); your own id: reread GET /auth/me, your rights may have "
                                              "changed")
 
 
-class CertificateChangedData(BaseModel):
+class CertificateChangedData(ResponseModel):
     subject_user_id: int = Field(description="The user the certificate belongs to: read GET "
                                              "/users/{subject_user_id}/certificates")
     certificate_id: int = Field(description="The certificate issued, uploaded or revoked")
 
 
-class SessionChangedData(BaseModel):
+class SessionChangedData(ResponseModel):
     subject_user_id: int = Field(description="The user whose sessions changed: read GET "
                                              "/users/{subject_user_id}/sessions (online state and last login of the "
                                              "user record too)")
 
 
-class RoleChangedData(BaseModel):
+class RoleChangedData(ResponseModel):
     role_id: int = Field(description="Read GET /roles/{role_id} and its permissions; 404 after a permanent delete")
 
 
-class DictionaryChangedData(BaseModel):
+class DictionaryChangedData(ResponseModel):
     dictionary: Dictionary = Field(description="The list to read again: categories, signal_types, tags, media_formats "
                                                "(GET /media-formats/list-all) or guides (GET /guides)")
 
 
-class CloseData(BaseModel):
+class CloseData(ResponseModel):
     reason: StreamCloseReason = Field(description="token_expired: refresh (X-Activity: background) and reconnect; "
                                                   "session_ended: stop; restart: reconnect after the retry it carries")
 
@@ -156,24 +156,24 @@ class DictionaryChanged(EventEnvelope):
     data: DictionaryChangedData
 
 
-class StreamReady(BaseModel):
+class StreamReady(ResponseModel):
     """The first message of a connection"""
     type: Literal["ready"]
 
 
-class StreamHeartbeat(BaseModel):
+class StreamHeartbeat(ResponseModel):
     """About every 20 s. It carries the position too: store its id"""
     type: Literal["heartbeat"]
 
 
-class StreamReload(BaseModel):
+class StreamReload(ResponseModel):
     """Too far behind, a position this server cannot answer for, or from before a restore: refetch what is on screen,
     your own rights (GET /auth/me) included"""
     type: Literal["reload"]
     refetch_within_ms: int = REFETCH
 
 
-class StreamRightsChanged(BaseModel):
+class StreamRightsChanged(ResponseModel):
     """Your rights in effect changed, also when no event names you: a permission added to or removed from a role you
     hold, a role you hold archived or restored, a node where you hold a role archived or restored, a post or group
     moved into or out of a group where you hold a role, your own assignments or user type. Reread GET /auth/me
@@ -186,7 +186,7 @@ class StreamRightsChanged(BaseModel):
                                                "never at once: the server spreads the refetches of every tab told")
 
 
-class StreamClose(BaseModel):
+class StreamClose(ResponseModel):
     """The server ends the stream; the connection then ends"""
     type: Literal["close"]
     data: CloseData
