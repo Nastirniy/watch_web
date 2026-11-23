@@ -1219,17 +1219,70 @@ async def test_an_empty_folder_left_at_the_file_id_is_reused(client, db, headers
     assert [p.name for p in leftover.iterdir()] == [row.stored_name]
 
 
-async def test_a_folder_with_something_in_it_at_the_file_id_is_refused(client, db, headers, storage):
-    """A folder of the new file's id that holds anything is never touched: 500 media_store_failed, no row, the
-    folder as it was"""
+def _set_aside(storage: Path) -> list:
+    """Every file under <upload_path>/_orphaned/<time>/, relative to its time folder"""
+    orphaned = storage / "media" / "_orphaned"
+    if not orphaned.exists():
+        return []
+    return sorted(path.relative_to(stamp).as_posix() for stamp in orphaned.iterdir() for path in stamp.rglob("*")
+                  if path.is_file())
+
+
+async def test_a_folder_with_something_in_it_at_the_file_id_is_moved_aside(client, db, headers, storage):
+    """A folder of the new file's id that holds anything (a file no row names, a NAS index folder such as @eaDir
+    that a reconcile leaves in place) cannot be anyone's: no row has the new id. It moves to _orphaned/<time>/ as it
+    is, never deleted, and the upload lands"""
     admin = await make_admin(db)
     guide = await _create(client, headers, admin)
     leftover = storage / "media" / "_guides" / str(guide["id"]) / "1"
-    leftover.mkdir(parents=True)
+    (leftover / "@eaDir").mkdir(parents=True)
+    (leftover / "@eaDir" / "thumb.jpg").write_bytes(b"nas index")
     (leftover / "someone-else.pdf").write_bytes(b"not ours")
-    response = await _upload(client, headers, admin, guide["id"])
-    assert response.status_code == 500 and response.json()["code"] == "media_store_failed", response.text
-    assert (await db.exec(select(UserGuideFile))).all() == []
-    assert [p.name for p in leftover.iterdir()] == ["someone-else.pdf"]
-    assert (leftover / "someone-else.pdf").read_bytes() == b"not ours"
+    body = await _uploaded(client, headers, admin, guide["id"])
+    assert body["id"] == 1
+    row = await db.get(UserGuideFile, body["id"])
+    assert (storage / "media" / row.file_path).read_bytes() == PDF
+    assert [p.name for p in leftover.iterdir()] == [row.stored_name]
+    moved = f"_guides/{guide['id']}/1"
+    assert _set_aside(storage) == [f"{moved}/@eaDir/thumb.jpg", f"{moved}/someone-else.pdf"]
+    stamp = next((storage / "media" / "_orphaned").iterdir())
+    assert (stamp / moved / "someone-else.pdf").read_bytes() == b"not ours"
     assert [p.name for p in leftover.parent.iterdir()] == ["1"], "no .tmp- folder left"
+
+
+async def test_a_file_at_the_guide_folder_is_moved_aside(client, db, headers, storage):
+    """A file where the guide's folder belongs (nothing the store makes) moves aside as well"""
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    stray = storage / "media" / "_guides" / str(guide["id"])
+    stray.parent.mkdir(parents=True)
+    stray.write_bytes(b"a file, not a folder")
+    body = await _uploaded(client, headers, admin, guide["id"])
+    row = await db.get(UserGuideFile, body["id"])
+    assert (storage / "media" / row.file_path).read_bytes() == PDF
+    assert _set_aside(storage) == [f"_guides/{guide['id']}"]
+
+
+async def test_a_nas_folder_left_by_reconcile_does_not_stop_a_reused_id(client, db, headers, storage):
+    """After a restore restarts the guide ids: reconcile --apply moves the files no row names but leaves a file's
+    folder holding a NAS index folder (@eaDir) where it is; the next file of that id still lands (the store moves
+    the folder aside)"""
+    from datetime import datetime, timezone
+    from app.backend.cli.restore_reconcile import run
+
+    media = storage / "media"
+    (media / "_guides/1/1/@eaDir").mkdir(parents=True)
+    (media / "_guides/1/1/@eaDir/old.pdf@SynoEAStream").write_bytes(b"nas")
+    (media / "_guides/1/1/old.pdf").write_bytes(b"uploaded after the backup")
+    _age_tree(media / "_guides")
+    assert await run(db, apply=True, upload_path=media, store_dir=None, now=datetime.now(timezone.utc)) == 0
+    assert (media / "_guides/1/1/@eaDir").is_dir() and not (media / "_guides/1/1/old.pdf").exists()
+
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    body = await _uploaded(client, headers, admin, guide["id"])
+    assert (guide["id"], body["id"]) == (1, 1)
+    row = await db.get(UserGuideFile, body["id"])
+    assert (media / row.file_path).read_bytes() == PDF
+    assert "_guides/1/1/old.pdf" in _set_aside(storage)
+    assert "_guides/1/1/@eaDir/old.pdf@SynoEAStream" in _set_aside(storage)

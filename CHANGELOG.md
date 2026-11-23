@@ -9,6 +9,12 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ### Fixed
 
+- `POST /guides/{guide_id}/files` after a restore that restarted the guide ids: a folder left at the new file's
+  place that holds anything (a NAS index folder such as `@eaDir`, which `restore_reconcile` leaves in place, or a
+  stray file) answered 500 `media_store_failed` until removed by hand. The store moves it to
+  `MEDIA_ROOT/_orphaned/<time>/_guides/<same path>` (logged, never deleted) and the upload lands; so is a file or a
+  symlink where the guide's folder belongs. `restore_reconcile` also leaves `Thumbs.db` and `desktop.ini` (any case)
+  alone, as it does hidden and NAS names. BACKUPS.md, "What a rollback does not bring back".
 - `POST /guides/{guide_id}/files`: a 413 the store answers (its own size check, against the registry it reads
   again) names the limit the file was held to in `max_file_size_bytes`, not the one the route saw before the body
   arrived. The file is checked and hashed before the guide row is locked, so the lock is held only for the insert,

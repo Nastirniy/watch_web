@@ -249,9 +249,14 @@ Refusals (exit 3):
   archived (archiving a file never removes it). A file no row names by its guide, file id and stored name (uploaded
   after the backup) moves, with `--apply`, to `MEDIA_ROOT/_orphaned/<time>/_guides/<same path>`. A file's folder
   (`_guides/<guide_id>/<file_id>`) no row names moves there as a whole, even empty, and so does a guide's folder
-  no row names, so a new row with the same id never meets an old folder (an upload also takes over an empty folder
-  of its id, and refuses one with anything in it: 500 `media_store_failed`). A folder holding a hidden or NAS name
-  (`.x`, `@eaDir`, `#recycle`) is not moved whole: those names stay, as in the media walk. A `.tmp-` folder
+  no row names, so a new row with the same id never meets an old folder. So does a folder whose name is no id (a
+  copy made by hand). Hidden and NAS names (`.x`, `.snapshot`, `.AppleDouble`, `@eaDir`, `#recycle`, `lost+found`)
+  and Windows folder metadata (`Thumbs.db`, `desktop.ini`) are never listed nor moved, as in the media walk, and a
+  folder holding one is not moved whole: its own files move one by one and the folder stays with the NAS name in
+  it. That folder does not block a new row of its id: an upload takes over an empty folder at its place and moves
+  anything else there (such a folder, a stray file) to `MEDIA_ROOT/_orphaned/<time>/_guides/<same path>` itself,
+  logged as a warning, never deleted. On a NAS that keeps per-folder index folders (Synology `@eaDir`), delete the
+  index folders under `_orphaned` with the rest once checked. A `.tmp-` folder
   of an interrupted upload (`_guides/<guide_id>/.tmp-...`) moves there as a whole once it and everything in it is
   older than 10 minutes (younger: an upload on its way, left alone). A guide file counts as old only when its folder
   is old too. A row whose file is missing is listed (`guide <id> file <id>: <file name>`); one whose file sits under

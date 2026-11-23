@@ -50,6 +50,8 @@ GUIDES_DIR = "_guides"
 GUIDE_FILE_MODE = 0o640
 GUIDE_DIR_MODE = 0o750
 TEMP_PREFIX = ".tmp-"
+# Where an entry in the way of the store is moved (restore_reconcile moves what no row names there too)
+ORPHANED_DIR = "_orphaned"
 
 
 # ------------------------------------------------------------------ spool and move
@@ -175,13 +177,51 @@ def _place(temporary: Path, target: Path) -> None:
     os.rename(temporary, target)
 
 
+def _set_aside(root: Path, path: Path) -> None:
+    """Move an entry the store finds where its own folder belongs to <root>/_orphaned/<time>/<same path>, as it is,
+    never deleted (as restore_reconcile moves what no row names). Raises FileExistsError when it cannot, so the
+    caller's cleanup leaves the entry alone."""
+    relative = path.relative_to(root)
+    stamp = f"{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}"
+    destination = root / ORPHANED_DIR / stamp / relative
+    if destination.exists() or destination.is_symlink():
+        destination = root / ORPHANED_DIR / f"{stamp}-{secrets.token_hex(4)}" / relative
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(path, destination)
+    except FileNotFoundError:
+        if path.exists() or path.is_symlink():      # the destination's side failed, not a source already gone
+            raise FileExistsError(f"{relative.as_posix()} not moved aside")
+        return
+    except OSError as exc:
+        raise FileExistsError(f"{relative.as_posix()} not moved aside") from exc
+    _logger.warning(f"User guide store: {relative.as_posix()} was in the way, moved to "
+                    f"{destination.relative_to(root).as_posix()}")
+
+
+def _clear_place(root: Path, target: Path) -> None:
+    """The file's folder place free: an empty folder is removed (reused), anything else (a folder holding files or
+    a NAS index folder such as @eaDir, a file, a symlink) moved aside. No row has the new file's id, so nothing
+    there belongs to a live file: it is a leftover (after a restore the id counter of a table the backup lacks
+    starts again at 1, and restore_reconcile leaves folders holding hidden or NAS names in place)."""
+    if not (target.exists() or target.is_symlink()):
+        return
+    if target.is_dir() and not target.is_symlink():
+        try:
+            target.rmdir()          # only an empty folder goes
+            return
+        except OSError:
+            pass
+    _set_aside(root, target)
+
+
 def _write_guide_folder(root: Path, guide_id: int, file_id: int, stored_name: str, source: Path) -> None:
     """<root>/_guides/<guide_id>/<file_id>/<stored_name> through a .tmp- folder renamed into place (blocking).
 
-    An empty folder already at the file's place is reused (removed, then the new one renamed there): after a restore
-    the id counter of a table the backup lacks starts again at 1 and an old folder of the id may be left. Any other
-    entry there (a folder with something in it, a file) is never touched: FileExistsError. On any failure the .tmp-
-    folder is removed and the error raised. The source is moved, not copied, when it is on the same filesystem."""
+    Whatever is already at the file's place is not this file's (_clear_place): an empty folder is reused, anything
+    else moved to _orphaned/<time>/; so is a file or a symlink where the guide's folder belongs. An entry that cannot
+    be moved is FileExistsError and left as it is. On any failure the .tmp- folder is removed and the error raised.
+    The source is moved, not copied, when it is on the same filesystem."""
     root.mkdir(parents=True, exist_ok=True)
     guides = root / GUIDES_DIR
     guide_dir = guides / str(guide_id)
@@ -189,14 +229,10 @@ def _write_guide_folder(root: Path, guide_id: int, file_id: int, stored_name: st
     temporary = guide_dir / f"{TEMP_PREFIX}{file_id}-{secrets.token_hex(4)}"
     for attempt in range(3):
         _make_dir(guides)
+        if guide_dir.is_symlink() or (guide_dir.exists() and not guide_dir.is_dir()):
+            _set_aside(root, guide_dir)
         _make_dir(guide_dir)
-        if target.exists() or target.is_symlink():
-            try:
-                if target.is_symlink():
-                    raise NotADirectoryError(str(target))
-                target.rmdir()          # only an empty folder goes
-            except OSError as exc:
-                raise FileExistsError(f"guide file folder {guide_id}/{file_id} exists") from exc
+        _clear_place(root, target)
         try:
             temporary.mkdir(mode=GUIDE_DIR_MODE)
             break

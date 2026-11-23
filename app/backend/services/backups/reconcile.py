@@ -14,12 +14,14 @@ _orphaned/<time>/_guides/<same path>; a .tmp- folder of an interrupted upload (_
 there as a whole once it and everything in it is older than MIN_AGE_SECONDS (younger: an upload on its way). A
 guide file counts as old only when its folder is old too: the upload renames the folder into place just before it
 commits the row, and the file keeps the older time of the spooled copy. A file's folder (_guides/<guide_id>/
-<file_id>) no row names moves as a whole, empty or not, and so does a guide's folder no row names: after a restore
-the id counters of tables the backup lacks start again at 1, and a new row must not meet an old folder of its id
-(store.py reuses an empty one and refuses any other). A folder moves whole only when it and everything in it is old
-and it holds no hidden or NAS name (those stay where they are, as in the media walk; its files then move one by
-one). A row whose file is nowhere is listed (MissingGuideFile); one whose file sits under _orphaned gets it back, as
-a media original does, with the folders it needs made 0750 as the store makes them.
+<file_id>) no row names moves as a whole, empty or not, and so does a guide's folder no row names (a folder whose
+name is no id included): after a restore the id counters of tables the backup lacks start again at 1, and a new row
+should not meet an old folder of its id. A folder moves whole only when it and everything in it is old and it holds
+no hidden, NAS or Windows metadata name (_ours: those stay where they are, as in the media walk; its files then move
+one by one). Such a folder left in place never blocks an upload: the store reuses an empty folder at a new file's
+place and moves anything else there to _orphaned/<time>/ itself (store._clear_place). A row whose file is nowhere is
+listed (MissingGuideFile); one whose file sits under _orphaned gets it back, as a media original does, with the
+folders it needs made 0750 as the store makes them.
 """
 import os
 import shutil
@@ -36,21 +38,21 @@ from app.backend.models.media import POSTER_DIR, MediaFile
 from app.backend.models.storyboard import STORYBOARD_DIR
 from app.backend.models.user_certificate import UserCertificate
 from app.backend.models.user_guide import UserGuideFile
-from app.backend.services.files.store import GUIDE_DIR_MODE, GUIDES_DIR, TEMP_PREFIX, guide_file_path
+from app.backend.services.files.store import GUIDE_DIR_MODE, GUIDES_DIR, ORPHANED_DIR, TEMP_PREFIX, guide_file_path
 
-ORPHANED_DIR = "_orphaned"
 QUARANTINE_DIR = ".quarantine"
 SKIPPED_TOP = frozenset({"_derived", "_tmp", ORPHANED_DIR, GUIDES_DIR})   # _guides has a walk of its own
 # Never ours at any level: hidden files and in-flight copies (.tmp-...), NAS snapshot / index / recycle folders
+# (.snapshot, @eaDir, #recycle, .AppleDouble), and the folder metadata of file systems and Windows Explorer (any case)
 SKIPPED_PREFIXES = (".", "@", "#")
-SKIPPED_NAMES = frozenset({"lost+found"})
+SKIPPED_NAMES = frozenset({"lost+found", "thumbs.db", "desktop.ini"})
 
 
 MIN_AGE_SECONDS = 600
 
 
 def _ours(name: str) -> bool:
-    return not name.startswith(SKIPPED_PREFIXES) and name not in SKIPPED_NAMES
+    return not name.startswith(SKIPPED_PREFIXES) and name.lower() not in SKIPPED_NAMES
 
 _logger = logger.bind(module="backups")
 

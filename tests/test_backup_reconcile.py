@@ -434,6 +434,42 @@ async def test_hidden_and_nas_names_under_guides_are_left_alone(db, media):
         assert (media / rel).exists(), rel
 
 
+async def test_folders_of_names_no_id_has_move_whole(db, media):
+    """A folder under _guides or a guide's folder whose name is no id (a copy made by hand, a stray folder) is not a
+    NAS name: no row names it, so it moves whole once old, like a folder of an id no row has"""
+    await guide_file_row(db, 1, 10, "aa.pdf")
+    touch(media / "_guides/1/10/aa.pdf")
+    touch(media / "_guides/1/notes/n.txt")
+    (media / "_guides/1/10 (copy)").mkdir()
+    touch(media / "_guides/manual/m.pdf")
+    age(media / "_guides/1/10", media / "_guides/1/notes", media / "_guides/1/10 (copy)", media / "_guides/manual")
+    report = await plan_reconcile(db, media, None, NOW)
+    assert report.orphan_guide_files == ("_guides/1/10 (copy)", "_guides/1/notes", "_guides/manual")
+    done = apply_reconcile(report, media, None, NOW)
+    assert done.failed == () and done.orphan_guide_files == report.orphan_guide_files
+    assert (media / "_orphaned" / STAMP / "_guides/1/notes/n.txt").exists()
+    assert (media / "_orphaned" / STAMP / "_guides/manual/m.pdf").exists()
+    assert sorted(p.name for p in (media / "_guides/1").iterdir()) == ["10"]
+
+
+async def test_windows_folder_metadata_is_left_alone(db, media):
+    """Thumbs.db and desktop.ini (written by Windows Explorer over SMB, any case) are not ours: never listed nor
+    moved, in the media walk and under _guides; a folder holding one does not move whole (the store moves it aside if
+    a new file of its id needs the place)"""
+    await guide_file_row(db, 1, 10, "aa.pdf")
+    for rel in ("2026/10/Thumbs.db", "2026/10/desktop.ini", "_guides/1/10/aa.pdf", "_guides/1/10/thumbs.db",
+                "_guides/1/11/Desktop.ini", "_guides/1/11/old.pdf"):
+        touch(media / rel)
+    age(media / "2026/10", media / "_guides/1/10", media / "_guides/1/11")
+    report = await plan_reconcile(db, media, None, NOW)
+    assert report.orphan_files == ()
+    assert report.orphan_guide_files == ("_guides/1/11/old.pdf",)
+    done = apply_reconcile(report, media, None, NOW)
+    assert done.failed == ()
+    for rel in ("2026/10/Thumbs.db", "2026/10/desktop.ini", "_guides/1/10/thumbs.db", "_guides/1/11/Desktop.ini"):
+        assert (media / rel).exists(), rel
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX permissions")
 async def test_folders_made_for_a_returned_guide_file_are_0750(db, media):
     """A guide file moved back from _orphaned gets the folders it needs as the store makes them, whatever the
