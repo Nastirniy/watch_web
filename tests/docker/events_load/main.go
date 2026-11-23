@@ -87,6 +87,8 @@ const (
 	pathSignalTypesList  = "/api/v1/signal-types/list-all" // SignalTypeRoutes.LIST_ALL
 	pathMediaFormatsList = "/api/v1/media-formats/list-all"
 	pathObservationsList = "/api/v1/observations/list-all" // ObservationRoutes.LIST_ALL
+	pathObservationByID  = "/api/v1/observations/%d"       // ObservationRoutes.OBSERVATION_BY_ID
+	pathMediaInfo        = "/api/v1/media/%d/info"         // MediaRoutes.MEDIA_INFO
 )
 
 // The default open-loop REST mix: pages every built-in user type may read (post.view, observation.view, tag.view,
@@ -975,6 +977,8 @@ type message struct {
 		RoleID        int64  `json:"role_id"`
 		Dictionary    string `json:"dictionary"`
 		AuditLogID    int64  `json:"audit_log_id"`
+		ObservationID int64  `json:"observation_id"`
+		MediaID       int64  `json:"media_id"`
 	} `json:"data"`
 }
 
@@ -1315,10 +1319,12 @@ const (
 	rkSignalTypes
 	rkMediaFormats
 	rkGuides
+	rkObservation
+	rkMediaInfo
 )
 
 var rkNames = [...]string{"me", "posts", "user", "user_certificates", "user_sessions", "my_sessions", "role", "move",
-	"audit_log", "tags", "categories", "signal_types", "media_formats", "guides"}
+	"audit_log", "tags", "categories", "signal_types", "media_formats", "guides", "observation", "media_info"}
 
 func (k rkind) path(id int64) string {
 	switch k {
@@ -1348,11 +1354,16 @@ func (k rkind) path(id int64) string {
 		return pathMediaFormatsList
 	case rkGuides:
 		return pathGuides
+	case rkObservation:
+		return fmt.Sprintf(pathObservationByID, id)
+	case rkMediaInfo:
+		return fmt.Sprintf(pathMediaInfo, id)
 	}
 	return pathMe
 }
 
-// refetchFor: the GET a page showing what the event names would make (API.md, "The administration")
+// refetchFor: the GET a page showing what the event names would make (API.md, "The administration",
+// "Observations and media")
 func refetchFor(msg *message, self int64) (rkind, int64, bool) {
 	d := msg.Data
 	switch msg.Type {
@@ -1389,6 +1400,10 @@ func refetchFor(msg *message, self int64) (rkind, int64, bool) {
 		case "guides":
 			return rkGuides, 0, true
 		}
+	case "observation.changed":
+		return rkObservation, d.ObservationID, true
+	case "media.changed":
+		return rkMediaInfo, d.MediaID, true
 	}
 	return 0, 0, false
 }

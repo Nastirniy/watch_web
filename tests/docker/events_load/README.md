@@ -20,6 +20,7 @@ places in the ramp. Each stream behaves as the web kit's starter (`api-contract/
 - every domain event: one REST GET after a random wait below `refetch_within_ms`, with `X-Activity: background`,
   chosen by type as a page would (`scope.changed` -> `GET /posts/`, `user.changed` -> `GET /users/{id}` or
   `GET /auth/me` for yourself, `role.changed` -> `GET /roles/{id}`, `dictionary.changed` -> the list it names,
+  `observation.changed` -> `GET /observations/{id}`, `media.changed` -> `GET /media/{id}/info`,
   `certificate.changed`, `session.changed`, `move.changed`, `security.certificate_mismatch` likewise). Paths follow
   `app/backend/enums/routes.py` (constants at the top of `main.go`).
 
