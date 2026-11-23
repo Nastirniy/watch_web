@@ -1060,6 +1060,39 @@ async def test_discard_removes_the_folder_even_when_the_rollback_fails(storage):
     assert session.rolled_back and not folder.exists()
 
 
+async def test_the_file_is_checked_and_hashed_before_the_guide_is_locked(client, db, headers, storage, monkeypatch):
+    """The slow file work (the sniff, the text rule, the sha256 over the whole file) runs before the write takes the
+    guide's lock, on the same spooled file the store then moves: the lock is held only for the insert, the folder and
+    the commit"""
+    from app.backend.services import guides as guides_service
+
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    order = []
+    real_sha256, real_detect, real_lock_first = file_store._sha256, file_store.detect_content_type, \
+        guides_service.lock_first
+
+    def sha256(path):
+        order.append(("sha256", path))
+        return real_sha256(path)
+
+    def detect(path):
+        order.append(("sniff", path))
+        return real_detect(path)
+
+    async def lock_first(session, query):
+        order.append(("lock", None))
+        return await real_lock_first(session, query)
+
+    monkeypatch.setattr(file_store, "_sha256", sha256)
+    monkeypatch.setattr(file_store, "detect_content_type", detect)
+    monkeypatch.setattr(guides_service, "lock_first", lock_first)
+    body = await _uploaded(client, headers, admin, guide["id"])
+    assert [step for step, _ in order] == ["sniff", "sha256", "lock"], order
+    assert order[0][1] == order[1][1], "one spooled file"
+    assert body["sha256"] == hashlib.sha256(PDF).hexdigest()
+
+
 async def test_two_uploads_to_one_guide_at_once_both_land(client, db, headers, storage):
     """Both requests run at once on the event loop; each locks the guide row first (lock_first), then inserts its
     row and writes its own folder. SQLite has no row locks (FOR UPDATE is left out) and the test engine has one

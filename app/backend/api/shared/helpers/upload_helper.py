@@ -64,11 +64,13 @@ def store_rejected(exc: CodedError, headers: dict = None) -> ApiError:
     return ApiError.from_coded(exc, headers=headers)
 
 
-def too_large(spec: formats.FormatSpec, actual: int = None) -> ApiError:
+def too_large(spec: formats.FormatSpec, actual: int = None, limit: Optional[int] = None) -> ApiError:
+    """413 of a file of the format: the format's limit, or the limit the store held the file to (FileTooLarge
+    limit_bytes: the store reads the registry again)"""
     return ApiError(
         ErrorCode.MEDIA_FILE_TOO_LARGE,
         content_type=spec.content_type,
-        max_file_size_bytes=spec.effective_limit_bytes,
+        max_file_size_bytes=spec.effective_limit_bytes if limit is None else limit,
         file_size_bytes=actual,
     )
 

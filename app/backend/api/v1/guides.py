@@ -292,6 +292,16 @@ async def _file_or_404(session: AsyncSession, guide_id: int, file_id: int, inclu
         raise ApiError.from_coded(exc)
 
 
+def _file_problem(exc: Exception, registry: formats.FormatRegistry, spec: formats.FormatSpec) -> ApiError:
+    """The problem of a file the store refused: 413 with the limit the store held it to, 415 with Accept-Post, or the
+    store's own code"""
+    if isinstance(exc, FileTooLarge):
+        return too_large(spec, exc.actual_bytes, limit=exc.limit_bytes)
+    if isinstance(exc, UnsupportedMediaFormat):
+        return format_rejected(registry, exc)
+    return store_rejected(exc)
+
+
 def _file_params(guide: UserGuide, row: UserGuideFile) -> dict:
     return {"guide_title": guide.title, "file_name": row.file_name, "size_bytes": row.size_bytes,
             "sha256": row.sha256}
@@ -332,17 +342,17 @@ async def upload_guide_file(
 
     spooled = await file_store.spool_upload(file, Path(settings.storage.temp_path))
     try:
+        # The slow file work first (sniff, text rule, sha256), outside the write: no lock is held meanwhile
+        try:
+            vetted = await file_store.vet_guide_file(session, spooled, file.filename or "")
+        except (FileTooLarge, CodedError) as exc:
+            raise _file_problem(exc, registry, spec)
         # The write: the guide row first (an archive of the guide waits, or this answers 404), then the file row
         guide = await _guide_or_404(session, guide_id, auth, lock=True)
         try:
-            row = await file_store.store_guide_file(session, guide, spooled, file.filename or "", language,
-                                                    auth.user.id)
-        except FileTooLarge as exc:
-            raise too_large(spec, exc.actual_bytes)
-        except UnsupportedMediaFormat as exc:
-            raise format_rejected(registry, exc)
+            row = await file_store.store_guide_file(session, guide, vetted, language, auth.user.id)
         except CodedError as exc:
-            raise store_rejected(exc)
+            raise _file_problem(exc, registry, spec)
         # One transaction: the row, its audit row, one commit; when it fails the folder goes too
         try:
             await create_audit_log(

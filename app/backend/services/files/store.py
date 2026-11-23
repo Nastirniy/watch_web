@@ -5,10 +5,10 @@ and the guide upload use it: one implementation). move_into_place moves a file i
 file systems a copy to a temporary name replaced into place.
 
 A guide file lives at <upload_path>/_guides/<guide_id>/<file_id>/<stored_name> (stored_name: uuid hex plus the
-extension). store_guide_file holds the spooled file to its document format (the extension, the size against
+extension). vet_guide_file holds the spooled file to its document format (the extension, the size against
 max_file_size_bytes capped by storage.max_file_size_gb, the sniffed type against the format's content type and
-aliases, the text rule of a text/* format), inserts the row, and writes its folder through a .tmp- directory renamed
-into place (files 0640, folders 0750). The row is flushed but not committed: the caller adds its audit row and
+aliases, the text rule of a text/* format) and hashes it, before the caller locks the guide; store_guide_file then
+inserts the row and writes its folder through a .tmp- directory renamed into place (files 0640, folders 0750). The row is flushed but not committed: the caller adds its audit row and
 commits, and calls discard_guide_file when that fails, so a file on disk always has its row. On any failure here
 the folder written so far is removed (with the guide's folder when that leaves it empty) and the transaction rolled
 back. The files sit in the media directory, so
@@ -110,7 +110,9 @@ def _sha256(path: Path) -> str:
 # ------------------------------------------------------------------ guide files
 
 @dataclass(frozen=True)
-class _Vetted:
+class VettedGuideFile:
+    """A spooled file that passed the checks of a guide file (vet_guide_file), with its sha256"""
+    path: Path              # the spooled file the checks and the hash read: the one store_guide_file moves
     spec: FormatSpec
     file_name: str          # sanitised original name (names.sanitize_filename)
     extension: str
@@ -128,10 +130,12 @@ def guide_file_location(row: UserGuideFile) -> Path:
     return upload_root() / row.file_path
 
 
-async def _vet(session: AsyncSession, source: Path, original_name: str) -> _Vetted:
+async def vet_guide_file(session: AsyncSession, source: Path, original_name: str) -> VettedGuideFile:
     """The checks of a guide file, in order: the extension (dangerous, then a document format), the size, the
     sniffed type against the format's content type and aliases, the text rule; then the sha256. Reads the file in
-    chunks, in threads."""
+    chunks, in threads. The slow part of an upload: the caller runs it before its write takes the guide's lock, on
+    the spooled file it then passes to store_guide_file (a file of the spool directory under a random name: nothing
+    else writes it). A refused file raises UnsupportedMediaFormat, FileTooLarge or CodedError media_file_empty."""
     document = MediaType.DOCUMENT.value
     file_name = sanitize_filename(original_name)
     extension = extension_of(file_name)
@@ -153,8 +157,8 @@ async def _vet(session: AsyncSession, source: Path, original_name: str) -> _Vett
         raise UnsupportedMediaFormat(ErrorCode.MEDIA_CONTENT_TYPE_NOT_ACCEPTED, document, content_type=sniffed)
     if is_text_format(spec.content_type):
         await asyncio.to_thread(check_text, source, spec.content_type)
-    return _Vetted(spec=spec, file_name=file_name, extension=extension, size_bytes=size,
-                   sha256=await asyncio.to_thread(_sha256, source))
+    return VettedGuideFile(path=source, spec=spec, file_name=file_name, extension=extension, size_bytes=size,
+                           sha256=await asyncio.to_thread(_sha256, source))
 
 
 def _make_dir(path: Path) -> None:
@@ -220,18 +224,17 @@ def _remove_guide_folder(root: Path, guide_id: int, file_id: int) -> None:
         pass
 
 
-async def store_guide_file(session: AsyncSession, guide: UserGuide, spooled: Path, original_name: str,
+async def store_guide_file(session: AsyncSession, guide: UserGuide, vetted: VettedGuideFile,
                            language: Optional[str], user_id: int) -> UserGuideFile:
-    """Store a spooled file as a file of the guide; the guide row is locked by the caller (lock_first), so this is
-    part of its write.
+    """Store a vetted spooled file (vet_guide_file) as a file of the guide; the guide row is locked by the caller
+    (lock_first), so this is part of its write.
 
     Returns the row, flushed (its id set) with its file in place, NOT committed: the caller adds its audit row and
-    commits, and calls discard_guide_file(session, row) when either fails. A refused file raises before any row
-    (UnsupportedMediaFormat, FileTooLarge, CodedError media_file_empty); a filesystem error while writing is
-    CodedError media_store_failed (logged); either way nothing written stays and the transaction is rolled back.
-    The row stores the format's canonical content type, never the sniffed alias."""
+    commits, and calls discard_guide_file(session, row) when either fails. A filesystem error while writing is
+    CodedError media_store_failed (logged); nothing written stays and the transaction is rolled back. The row
+    stores the format's canonical content type, never the sniffed alias."""
     guide_id = guide.id      # read before any rollback below expires the row
-    vetted = await _vet(session, spooled, original_name)
+    spooled = vetted.path
     stored_name = f"{uuid.uuid4().hex}{vetted.extension}"
     row = UserGuideFile(
         guide_id=guide_id, file_name=vetted.file_name, stored_name=stored_name, file_path="",
