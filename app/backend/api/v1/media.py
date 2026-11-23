@@ -29,6 +29,7 @@ from app.backend.services.files import formats
 from app.backend.services.media import jobs, renderer, uploads, urls as thumb_urls
 from app.backend.services.media.storyboards import build_vtt, layout_usable, status_for
 from app.backend.services.files.formats import UnsupportedMediaFormat, FileTooLarge
+from app.backend.services.files.names import header_filename
 from app.backend.enums.general import Permissions, UploadTransport, PosterStatus, StoryboardStatus, ThumbnailFormat, ThumbnailSize, ThumbnailStatus
 from app.backend.enums.media_types import ContentType, Disposition
 from app.backend.enums.routes import MediaRoutes
@@ -448,7 +449,8 @@ async def nginx_upload_file(
 ):
     """
     Upload via nginx offloading (client_body_in_file_only): nginx writes the raw body to a temp
-    file and forwards its path in X-File-Name; the original filename comes in X-Original-Filename. A move waiting
+    file and forwards its path in X-File-Name; the original filename comes in X-Original-Filename (its UTF-8 bytes,
+    or ASCII). A move waiting
     above the post: 409 move_pending with Retry-After.
     """
     if not settings.storage.enable_nginx:
@@ -463,7 +465,7 @@ async def nginx_upload_file(
         raise ApiError(ErrorCode.NGINX_FILE_NAME_INVALID)
 
     try:
-        original_filename = x_original_filename or "uploaded_file"
+        original_filename = header_filename(x_original_filename) or "uploaded_file"
         registry = await formats.observation_registry(session)
         spec = check_declared_format(registry, media_type, original_filename, request.headers.get("content-type"))
         media_type = spec.media_type

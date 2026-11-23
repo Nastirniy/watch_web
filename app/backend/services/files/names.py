@@ -23,6 +23,19 @@ def extension_of(filename: Optional[str]) -> str:
     return ext if len(ext) > 1 else ""
 
 
+def header_filename(value: Optional[str]) -> Optional[str]:
+    """A file name from a request header (X-Original-Filename). The ASGI server hands header bytes over as Latin-1
+    text; a client sends a name as its UTF-8 bytes, so they are read again as UTF-8 (strict: bytes that are no UTF-8,
+    the encoding of a lone surrogate included, stay Latin-1). The name then goes through sanitize_filename as a
+    multipart file name does, which Starlette also reads as UTF-8 with a Latin-1 fallback."""
+    if not value:
+        return value
+    try:
+        return value.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return value
+
+
 def sanitize_filename(filename: str) -> str:
     """The one file-name sanitiser: cross-platform safe, ASCII stem, extension kept"""
     if not filename:

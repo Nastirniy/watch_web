@@ -9,6 +9,12 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ### Fixed
 
+- `POST /media/nginx-upload`: `X-Original-Filename` is read as UTF-8 (the server hands header bytes over as
+  Latin-1), so a name lands as it does through `POST /media/upload`: a bidi override or a joiner in the name no longer
+  leaves letters of its UTF-8 bytes in the stored name. Bytes that are no UTF-8 are read as Latin-1, as before. Tests
+  pin that no file name answers 500 on any upload path: invalid UTF-8 and the encoding of a lone surrogate in a
+  multipart or header name, names outside the BMP, format characters, 5000 characters; a lone surrogate in the JSON
+  of `POST /media/uploads` is 422 `string_unicode`.
 - `Content-Disposition` of a name longer than the budget whose extension changes length in lower case (`.İ`,
   capital I with dot): the cut kept one character of the stem with the extension; it keeps the extension as written.
 

@@ -266,3 +266,91 @@ async def test_nginx_upload_audit_row_names_the_transport(client, db, headers, s
     assert row.scope_key == f"p:{observation.post_id}"
     assert row.params == {"observation_id": observation.id, "file_name": "photo.png", "media_type": "image",
                           "via": "nginx_offload"}
+
+
+# ----------------------------------------------------------------- names a client cannot spell in UTF-8
+
+BOUNDARY = b"filename-probe"
+# The UTF-8 bytes of a lone surrogate (invalid UTF-8), stray high bytes, a name outside the BMP, a bidi override with a
+# zero width joiner, and a name far over the 255 characters of a file name: a file name, never a 500
+RAW_NAMES = {
+    "surrogate-bytes": (b"a\xed\xb2\x80.png", ".png"),
+    "invalid-utf8": (b"a\x80\xff.png", ".png"),
+    "non-bmp": ("radio \U0001f4fb.png".encode("utf-8"), ".png"),
+    "format-chars": ("‮abc‍.png".encode("utf-8"), ".png"),
+    "very-long": (b"x" * 5000 + b".png", ".png"),
+}
+MULTIPART = {"Content-Type": "multipart/form-data; boundary=" + BOUNDARY.decode()}
+
+
+def _raw_multipart(fields: dict, filename: bytes, data: bytes, content_type: bytes) -> bytes:
+    """A multipart body written by hand: httpx cannot send a file name that is not valid UTF-8"""
+    parts = [b"--" + BOUNDARY + b'\r\nContent-Disposition: form-data; name="' + name.encode() + b'"\r\n\r\n'
+             + str(value).encode() + b"\r\n" for name, value in fields.items()]
+    parts.append(b"--" + BOUNDARY + b'\r\nContent-Disposition: form-data; name="file"; filename="' + filename
+                 + b'"\r\nContent-Type: ' + content_type + b"\r\n\r\n" + data + b"\r\n")
+    return b"".join(parts) + b"--" + BOUNDARY + b"--\r\n"
+
+
+@pytest.mark.parametrize("name", [
+    "a\udc80.png", "\udcff\ud800.png", "radio \U0001f4fb.png", "‮abc‍⁦.png", "x" * 5000 + ".png",
+    "İstanbul.PNG", "​‌‍.png",
+], ids=["lone-surrogate", "only-surrogates", "non-bmp", "format-chars", "very-long", "dotted-capital-i",
+        "only-format-chars"])
+def test_the_sanitiser_never_fails_and_keeps_the_extension(name):
+    """Whatever reaches Python (a surrogate from a decoder with surrogateescape included): an ASCII name within the
+    limit, its extension kept, a generated stem when nothing of the stem is left"""
+    from app.backend.services.files.names import sanitize_filename
+    safe = sanitize_filename(name)
+    safe.encode("ascii")
+    assert safe.lower().endswith(".png") and 4 < len(safe) <= 200
+    assert not any(ch in safe for ch in '<>:"/\\|?* ')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key", RAW_NAMES)
+async def test_a_raw_file_name_through_the_multipart_upload(client, db, headers, storage, key):
+    """Starlette decodes a part's file name as UTF-8 and falls back to Latin-1: no surrogate reaches the store, every
+    name lands as the sanitiser leaves it"""
+    from app.backend.services.files.names import sanitize_filename
+    post, user, observation = await _scene(db)
+    filename, extension = RAW_NAMES[key]
+    body = _raw_multipart({"observation_id": observation.id, "media_type": "image"}, filename, make_png(), b"image/png")
+    response = await client.post(UPLOAD, content=body, headers={**MULTIPART, **headers(user)})
+    assert response.status_code == 200, response.text
+    media = await db.get(MediaFile, response.json()["media_file_id"])
+    assert media.original_filename.endswith(extension) and len(media.original_filename) <= 200
+    if key in ("non-bmp", "format-chars"):
+        assert media.original_filename == sanitize_filename(filename.decode("utf-8"))
+
+
+@pytest.mark.asyncio
+async def test_a_lone_surrogate_in_a_resumable_upload_is_422(client, db, headers, storage):
+    """JSON may escape a lone surrogate: pydantic refuses it as string_unicode before anything is stored"""
+    import json
+    post, user, observation = await _scene(db)
+    body = json.dumps(_create_body(observation.id, make_png(), original_filename="PLACEHOLDER")).encode()
+    for raw in (b'"a\\udc80.png"', b'"a\xed\xb2\x80.png"'):
+        response = await client.post(CREATE, content=body.replace(b'"PLACEHOLDER"', raw),
+                                     headers={"Content-Type": "application/json", **headers(user)})
+        assert response.status_code == 422, response.text
+        assert [e["code"] for e in response.json()["errors"]] == ["string_unicode"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key", RAW_NAMES)
+async def test_a_raw_file_name_through_the_nginx_upload(client, db, headers, storage, temp_dir, key):
+    """X-Original-Filename carries the name's UTF-8 bytes (nginx passes the client's header on as it is): read as
+    UTF-8, so a name lands as it does through the multipart upload; bytes that are no UTF-8 are read as Latin-1"""
+    from app.backend.services.files.names import sanitize_filename
+    post, user, observation = await _scene(db)
+    filename, extension = RAW_NAMES[key]
+    response = await _nginx_post(client, headers, user, observation, _temp_file(temp_dir), filename=filename)
+    assert response.status_code == 200, response.text
+    media = await db.get(MediaFile, response.json()["media_file_id"])
+    assert media.original_filename.endswith(extension) and len(media.original_filename) <= 200
+    try:
+        expected = filename.decode("utf-8")
+    except UnicodeDecodeError:
+        expected = filename.decode("latin-1")
+    assert media.original_filename == sanitize_filename(expected)
