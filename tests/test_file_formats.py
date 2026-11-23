@@ -20,6 +20,14 @@ ARCHIVE = V1.path(MediaFormatRoutes.FORMAT_ARCHIVE)
 RESTORE = V1.path(MediaFormatRoutes.FORMAT_RESTORE)
 BACKEND = Path(__file__).resolve().parent.parent / "app" / "backend"
 
+
+@pytest.fixture(autouse=True)
+def fresh_refused_log(monkeypatch):
+    """Each test starts with no row logged as holding refused types (the module keeps the set for the process, keyed
+    by row id, and every test database starts its ids at 1): a test that counts the warnings never depends on the
+    tests that ran before it"""
+    monkeypatch.setattr(formats, "_logged_refused", set())
+
 # Aliases are what Debian's libmagic (the api image, 5.46) reports for real samples (tests/test_file_sniff.py):
 # OOXML, ODF and Word 97 files by their own types, Markdown as text/plain, short CSV files as text/plain, RTF as text/rtf
 DOCUMENTS = {

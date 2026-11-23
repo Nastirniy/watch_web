@@ -7,6 +7,12 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## Part 2 follow-ups
 
+### Changed
+
+- OpenAPI descriptions only (`api-contract/v1/openapi.json` rewritten, no schema changed): the `mime_type` filter of
+  the media lists (matches the canonical name and the value itself), the `content_type` filter of
+  `GET /media-formats/list-all` (any case), and `POST /media/nginx-upload` (`X-Original-Filename` as UTF-8 bytes).
+
 ### Fixed
 
 - `POST /guides/{guide_id}/files` after a restore that restarted the guide ids: a folder left at the new file's

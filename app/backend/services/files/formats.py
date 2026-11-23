@@ -1,15 +1,17 @@
 """Accepted file formats (media and documents): the registry read from media_formats and the checks built on it.
 
-Every upload is checked against the active rows four times: the declared
-Content-Type, the file extension, the MIME type detected from the bytes
-(services/files/sniff.py, the one sniffer), and the size against the format's
-max_file_size_bytes; a text/* format also holds the file to UTF-8. Anything outside is
-answered with 415 (format) or 413 (size), with an Accept-Post header naming
-what is accepted. GET /media/formats returns the same list for clients;
-administrators manage the rows through /media-formats.
+The registry (load_registry, cached REGISTRY_CACHE_TTL_SECONDS) holds the active, non-archived rows that accept some
+type: a format's content type and aliases without opaque and forbidden types (FormatSpec.all_mimes); a legacy row
+left with none is no accepted format. Each upload purpose sees its media types (PURPOSE_MEDIA_TYPES: observation
+media are image, video and audio, user guide files document). Every upload is checked four times: the declared
+Content-Type, the file extension, the type detected from the bytes (services/files/sniff.py, the one sniffer) and the
+size against the format's max_file_size_bytes capped by storage.max_file_size_gb; a text/* format also holds the file
+to UTF-8. Anything outside is answered with 415 (format) or 413 (size), with an Accept-Post header naming what the
+purpose accepts. GET /media/formats lists the observation media formats for clients; administrators manage every row,
+as it is, through /media-formats.
 
-DEFAULT_FORMATS seeds a fresh database and is the reference for what
-imgproxy renders, ffmpeg decodes and browsers play.
+default_formats() seeds the rows a database lacks (seed_media_formats, never touching an existing row) and is the
+reference for what imgproxy renders, ffmpeg decodes and browsers play.
 """
 from __future__ import annotations
 

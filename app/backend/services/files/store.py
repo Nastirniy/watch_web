@@ -9,7 +9,9 @@ extension). vet_guide_file holds the spooled file to its document format (the ex
 max_file_size_bytes capped by storage.max_file_size_gb, the sniffed type against the format's content type and
 aliases, the text rule of a text/* format) and hashes it, before the caller locks the guide; store_guide_file then
 inserts the row and writes its folder through a .tmp- directory renamed into place (files 0640, folders 0750). The row is flushed but not committed: the caller adds its audit row and
-commits, and calls discard_guide_file when that fails, so a file on disk always has its row. On any failure here
+commits, and calls discard_guide_file when that fails, so a file on disk always has its row. Whatever already sits
+at a new file's place is a leftover (no row has the new id): an empty folder is reused, anything else moved to
+<upload_path>/_orphaned/<time>/ (_clear_place), never deleted. On any failure here
 the folder written so far is removed (with the guide's folder when that leaves it empty) and the transaction rolled
 back. The files sit in the media directory, so
 nginx serves them from /protected_uploads/ like the media originals.

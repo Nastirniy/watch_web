@@ -7,10 +7,12 @@ Usage:
     python -m app.backend.cli.restore_reconcile            # dry run: what it would do
     python -m app.backend.cli.restore_reconcile --apply    # do it (one audit row)
 
-Media files no row names go to <upload_path>/_orphaned/<time>/, user guide files and folders no user_guide_files row
-names (and .tmp- folders of interrupted guide uploads) to <upload_path>/_orphaned/<time>/_guides/, certificate packages no row
-names (private keys) to <store_dir>/.quarantine/<time>/; nothing is deleted but derived posters and storyboards of
-ids without a row.
+The work is services/backups/reconcile.py. Media files no row names go to <upload_path>/_orphaned/<time>/, user guide
+files and folders no user_guide_files row names (and .tmp- folders of interrupted guide uploads) to
+<upload_path>/_orphaned/<time>/_guides/, certificate packages no row names (private keys) to
+<store_dir>/.quarantine/<time>/. A file a row names again that sits under _orphaned (an undo after an --apply) moves
+back; rows whose file is nowhere are listed. Nothing younger than 10 minutes is moved, hidden, NAS and Windows
+metadata names are left alone, and nothing is deleted but derived posters and storyboards of ids without a row.
 Exit code 1: something could not be moved (logged).
 """
 import argparse

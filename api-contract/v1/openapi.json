@@ -20305,10 +20305,10 @@
                   "type": "null"
                 }
               ],
-              "description": "MIME type, any case, parameters ignored; an alias finds the stored canonical name (video/x-matroska finds video/matroska)",
+              "description": "Content type of the stored file, any case, parameters ignored. Files are stored under their format's canonical name: a value matches that name and itself (video/x-matroska finds files stored as video/matroska and any file still stored as video/x-matroska)",
               "title": "Mime Type"
             },
-            "description": "MIME type, any case, parameters ignored; an alias finds the stored canonical name (video/x-matroska finds video/matroska)"
+            "description": "Content type of the stored file, any case, parameters ignored. Files are stored under their format's canonical name: a value matches that name and itself (video/x-matroska finds files stored as video/matroska and any file still stored as video/x-matroska)"
           },
           {
             "name": "file_extension",
@@ -22294,7 +22294,7 @@
           "MEDIA"
         ],
         "summary": "Nginx Upload File",
-        "description": "Upload via nginx offloading (client_body_in_file_only): nginx writes the raw body to a temp\nfile and forwards its path in X-File-Name; the original filename comes in X-Original-Filename. A move waiting\nabove the post: 409 move_pending with Retry-After.",
+        "description": "Upload via nginx offloading (client_body_in_file_only): nginx writes the raw body to a temp\nfile and forwards its path in X-File-Name; the original filename comes in X-Original-Filename (its UTF-8 bytes,\nor ASCII). A move waiting\nabove the post: 409 move_pending with Retry-After.",
         "operationId": "nginx_upload_file",
         "security": [
           {
@@ -25138,10 +25138,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Exact Content-Type, e.g. image/jpeg",
+              "description": "Exact canonical Content-Type of the format, any case, e.g. image/jpeg",
               "title": "Content Type"
             },
-            "description": "Exact Content-Type, e.g. image/jpeg"
+            "description": "Exact canonical Content-Type of the format, any case, e.g. image/jpeg"
           },
           {
             "name": "content_type_contains",
@@ -29335,10 +29335,10 @@
                   "type": "null"
                 }
               ],
-              "description": "MIME type, any case, parameters ignored; an alias finds the stored canonical name (video/x-matroska finds video/matroska)",
+              "description": "Content type of the stored file, any case, parameters ignored. Files are stored under their format's canonical name: a value matches that name and itself (video/x-matroska finds files stored as video/matroska and any file still stored as video/x-matroska)",
               "title": "Mime Type"
             },
-            "description": "MIME type, any case, parameters ignored; an alias finds the stored canonical name (video/x-matroska finds video/matroska)"
+            "description": "Content type of the stored file, any case, parameters ignored. Files are stored under their format's canonical name: a value matches that name and itself (video/x-matroska finds files stored as video/matroska and any file still stored as video/x-matroska)"
           },
           {
             "name": "file_extension",
@@ -29773,10 +29773,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Exact Content-Type, e.g. image/jpeg",
+              "description": "Exact canonical Content-Type of the format, any case, e.g. image/jpeg",
               "title": "Content Type"
             },
-            "description": "Exact Content-Type, e.g. image/jpeg"
+            "description": "Exact canonical Content-Type of the format, any case, e.g. image/jpeg"
           },
           {
             "name": "content_type_contains",

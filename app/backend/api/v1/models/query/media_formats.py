@@ -19,7 +19,7 @@ class MediaFormatFilterParams(BaseFilterParams):
 
     id: Optional[int] = Field(default=None, description="Exact format ID")
     media_type: Optional[MediaType] = Field(default=None, description="Media type (formats exist for image, video and audio)")
-    content_type: Optional[str] = Field(default=None, description="Exact Content-Type, e.g. image/jpeg")
+    content_type: Optional[str] = Field(default=None, description="Exact canonical Content-Type of the format, any case, e.g. image/jpeg")
     content_type_contains: Optional[str] = Field(default=None, max_length=50, description="Content-Type contains text")
     label_contains: Optional[str] = Field(default=None, max_length=50, description="Label contains text")
     is_active: Optional[bool] = Field(default=None, description="Only active (accepted) or only disabled formats")
