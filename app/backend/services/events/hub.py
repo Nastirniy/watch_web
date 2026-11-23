@@ -51,7 +51,7 @@ from app.backend.services.events.connection import Connection
 from app.backend.services.events.gaps import GapTracker
 from app.backend.services.events.reader import OutboxRow, first_head, new_rows_of, read_tick
 from app.backend.services.events.rights import RightsIndex
-from app.backend.services.events.ring import Ring, block, parse_position
+from app.backend.services.events.ring import MAX_LATE, Ring, block, cursor_token, parse_cursor, parse_position
 from app.backend.services.events.session_check import live_sessions
 from app.backend.services.media import jobs
 
@@ -137,6 +137,7 @@ class EventHub:
         self._departed: Dict[int, Tuple[Hashable, int]] = {}
         self._told_at: Dict[int, int] = {}
         self.position = 0
+        self.cursor = "0"     # what blocks carry: the position plus the late ids (ring.py)
         self.connections: Set[Connection] = set()
         self.by_user: Dict[int, Set[Connection]] = {}
         self.stopping = False
@@ -156,6 +157,7 @@ class EventHub:
         self.gaps.head = head
         self.ring = Ring(self.config.ring_rows, floor=head)
         self.position = head
+        self.cursor = str(head)
         await self.reload_tree()
         await self.tick()
         self._lags.clear()                  # filling the ring is no delivery: its rows are old by design
@@ -261,7 +263,8 @@ class EventHub:
             now = self.clock()
             self.gaps.saw((row.id for row in rows), now)
             self.gaps.expire(now)
-            self.position = self.gaps.position(now)
+            self.position, late = self.gaps.cursor(now, MAX_LATE)
+            self.cursor = cursor_token(self.position, late)
             for row in rows:
                 self._deliver(row, before.get(row.id, set()))
             if tree_changed or reload is EVERY_USER:
@@ -280,7 +283,7 @@ class EventHub:
             targets = set(self._targets(row)) | {connection for connection in also if connection.open}
             body = self.render.event(row, self._refetch_window(len(targets)))
             self.ring.add(row, body)
-            frame = block(self.position, body)      # built once, shared by every connection
+            frame = block(self.cursor, body)      # built once, shared by every connection
             for connection in targets:
                 connection.offer(frame, row.conflate_key)
         except Exception:
@@ -332,20 +335,20 @@ class EventHub:
         else:
             self._fingerprints[user_id] = fingerprint
         retry = random.randint(self.config.retry_min_ms, self.config.retry_max_ms)
-        connection.offer(block(self.position, retry_line(retry) + self.render.ready()))
+        connection.offer(block(self.cursor, retry_line(retry) + self.render.ready()))
         replay = self._replay(user_id, last_event_id)
         if replay is None:
             self.reloads += 1
-            connection.offer(block(self.position, self.render.reload(self._refetch_window(len(self.connections) + 1))))
+            connection.offer(block(self.cursor, self.render.reload(self._refetch_window(len(self.connections) + 1))))
         else:
             for body in replay:
-                connection.offer(block(self.position, body))
+                connection.offer(block(self.cursor, body))
             # A tab back with its position: told when its rights moved while it was away (since the user's last tab
             # here left, or since the open tabs were last told) or when the other tabs were told after its position
             if last_event_id is not None and known is not None and (
                     known != fingerprint or (told_at is not None and told_at >= parse_position(last_event_id))):
                 self._told_at[user_id] = self.position
-                connection.offer(block(self.position, self.render.rights_changed(self._refetch_window(1))),
+                connection.offer(block(self.cursor, self.render.rights_changed(self._refetch_window(1))),
                                  RIGHTS_CHANGED_KEY)
         self.connections.add(connection)
         self.by_user.setdefault(user_id, set()).add(connection)
@@ -357,14 +360,19 @@ class EventHub:
         by that client already, and what comes after reaches it live (at least once)"""
         if last_event_id is None:
             return []
-        position = parse_position(last_event_id)
-        if position is None:
+        cursor = parse_cursor(last_event_id)
+        if cursor is None:
             return None
         head = self.gaps.head
-        if head < position <= head + self.config.max_gap_jump:
-            return []
-        frames = self.ring.after(position, head, self.config.replay_max,
-                                 match=lambda row: self._may_receive(user_id, row))
+
+        def match(row: OutboxRow) -> bool:
+            return self._may_receive(user_id, row)
+
+        if head < cursor.position <= head + self.config.max_gap_jump:
+            # a worker that read further gave it: only the late ids that already arrived here, the rest comes live
+            frames = self.ring.after(head, head, self.config.replay_max, match=match, late=cursor.late)
+        else:
+            frames = self.ring.after(cursor.position, head, self.config.replay_max, match=match, late=cursor.late)
         return None if frames is None else [body for _, body in frames]
 
     def detach(self, connection: Connection) -> None:
@@ -390,7 +398,7 @@ class EventHub:
         body = self.render.close(reason)
         if retry_ms is not None:
             body = retry_line(retry_ms) + body
-        connection.close(reason, block(self.position, body), retry_ms)
+        connection.close(reason, block(self.cursor, body), retry_ms)
 
     # ------------------------------------------------------------------ periodic work
     async def beat(self) -> None:
@@ -407,7 +415,7 @@ class EventHub:
                 self._close(connection, StreamCloseReason.TOKEN_EXPIRED)
             elif now >= connection.next_beat:
                 if heartbeat is None:
-                    heartbeat = block(self.position, self.render.heartbeat())
+                    heartbeat = block(self.cursor, self.render.heartbeat())
                 connection.offer(heartbeat)
                 connection.next_beat = now + self.config.heartbeat_seconds
 
@@ -481,7 +489,7 @@ class EventHub:
             self._told_at[user_id] = self.position
             told.extend(connection for connection in connections if connection.open)
         if told:
-            frame = block(self.position, self.render.rights_changed(self._refetch_window(len(told))))
+            frame = block(self.cursor, self.render.rights_changed(self._refetch_window(len(told))))
             for connection in told:
                 connection.offer(frame, RIGHTS_CHANGED_KEY)
 

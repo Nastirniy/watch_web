@@ -41,6 +41,14 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ### Fixed
 
+- A tab that reconnected after a late commit never got that event: the position in `id:` passes an uncommitted id
+  after `events.position_hold_seconds` (8 s), and a replay gave only rows after the position. Measured on the test
+  server (plan test 6: an event committed 20 s after its insert, every connection dropped meanwhile): 49 of 60
+  reconnected streams missed it. The `id:` now also names such late ids (`<position>.<d1>.<d2>`, each a distance below
+  the position, at most 16; with more the position stays below the lowest), and a replay sends every late id that
+  arrived since. Still opaque to the client (API.md "Two ids, both opaque"): the web kit and any client that stores and
+  sends back the string need no change; an old plain position is still accepted.
+
 - A stream opened while its worker's session check was waiting for the database was closed with `session_ended`
   although its session was live (the check judged every stream, also those it had not asked about). Seen on the test
   server: 2 of 200 browsers right after their login.

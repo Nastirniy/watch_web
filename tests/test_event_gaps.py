@@ -80,3 +80,38 @@ def test_a_row_at_or_below_the_head_that_was_no_gap_changes_nothing():
     t = tracker(head=10)
     t.saw([4], now=0)
     assert t.head == 10 and t.open_ids() == [] and t.position(now=0) == 10
+
+
+# ------------------------------------------------------------------ late ids in the cursor
+
+def test_a_position_past_a_gap_names_it_as_late():
+    """After the hold the position passes a gap; the cursor then names the gap, so a reconnect after the late commit
+    still gets the row (test 6 of the plan: a transaction held 20 s, a reconnect during it)"""
+    t = tracker()
+    t.saw([1, 3], now=0)
+    assert t.cursor(now=1, max_late=16) == (1, [])
+    assert t.cursor(now=9, max_late=16) == (3, [2])
+
+
+def test_a_closed_or_expired_gap_is_no_longer_late():
+    t = tracker()
+    t.saw([1, 3, 5], now=0)
+    t.saw([2], now=10)
+    assert t.cursor(now=10, max_late=16) == (5, [4])
+    t.expire(now=61)
+    assert t.cursor(now=61, max_late=16) == (5, [])
+
+
+def test_more_late_ids_than_the_cursor_carries_hold_the_position_below_the_lowest():
+    t = tracker()
+    t.saw([1, 3, 5, 7], now=0)
+    assert t.cursor(now=9, max_late=3) == (7, [2, 4, 6])
+    assert t.cursor(now=9, max_late=2) == (1, [])
+
+
+def test_a_fresh_gap_still_holds_the_position_and_older_gaps_below_it_are_late():
+    t = tracker()
+    t.saw([1, 3], now=0)
+    t.saw([5], now=5)
+    assert t.cursor(now=9, max_late=16) == (3, [2])
+

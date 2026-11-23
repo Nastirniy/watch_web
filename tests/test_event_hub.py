@@ -247,6 +247,38 @@ async def test_a_position_older_than_the_ring_is_reload(engine, db, events_on):
     assert [event for _, _, event, _ in queued(connection)] == ["ready", "reload"]
 
 
+async def test_a_reconnect_after_a_late_commit_gets_the_row(engine, db, events_on):
+    """Plan test 6, found on the test server (2026-11-23): an event committed 20 s after its insert, a client that
+    reconnects after the commit with a position taken during the hold. The position alone had passed the gap after
+    position_hold_seconds, so 49 of 60 reconnected streams never got the event; the cursor names the late id now"""
+    from app.backend.models.outbox_event import OutboxEvent
+    now = [1000.0]
+    hub = EventHub(engine, TextRenderer(), config(position_hold_seconds=8), workers=4, clock=lambda: now[0])
+    await hub.start(run_tasks=False)
+    holder = auth_of(1, grant(ROOT, P.POST_VIEW))
+    publish(db, EventType.SCOPE_CHANGED, scope=ROOT, permission=P.POST_VIEW)
+    await db.commit()
+    await hub.tick()
+    late_id = hub.gaps.head + 1
+    db.add(OutboxEvent(id=late_id + 1, type=EventType.SCOPE_CHANGED.value, scope_key="root",
+                       permission=P.POST_VIEW.value, payload="{}"))     # a later transaction commits first
+    await db.commit()
+    await hub.tick()
+    now[0] += 9                                                         # the hold is over, the gap still watched
+    await hub.tick()
+    first = hub.attach(holder, later(), None)
+    token = first.queue[0][0].split(b"\n", 1)[0].decode()[len("id: "):]
+    assert token == f"{late_id + 1}.1", "the position passed the gap and names it"
+    db.add(OutboxEvent(id=late_id, type=EventType.SCOPE_CHANGED.value, scope_key="root",
+                       permission=P.POST_VIEW.value, payload="{}"))     # the held transaction commits
+    await db.commit()
+    await hub.tick()
+    assert any(b"\"id\": %d" % late_id in block for block, _ in first.queue), "an open stream gets it live"
+    back = hub.attach(auth_of(2, grant(ROOT, P.POST_VIEW)), later(), token)
+    replayed = [block for block, _ in back.queue]
+    assert any(b"\"id\": %d" % late_id in block for block in replayed), "a reconnect with the old cursor gets it"
+
+
 async def test_a_position_a_little_ahead_is_no_reload(engine, events_on):
     """A client that read the last second on another worker: nothing to replay, the rest comes live"""
     hub = await hub_of(engine)

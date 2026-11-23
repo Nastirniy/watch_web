@@ -4,7 +4,7 @@ from datetime import datetime
 import pytest
 
 from app.backend.services.events.reader import OutboxRow
-from app.backend.services.events.ring import Ring, block, parse_position
+from app.backend.services.events.ring import Ring, block, cursor_token, parse_cursor, parse_position
 
 
 def row(row_id: int, scope_key: str = "root") -> OutboxRow:
@@ -80,3 +80,41 @@ def test_the_frames_of_a_replay_carry_the_current_position():
     frames = ring.after(1, head=3, limit=10)
     blocks = [block(3, frame_body) for _, frame_body in frames]
     assert blocks[0].startswith(b"id: 3\nevent: scope.changed\n") and all(b.startswith(b"id: 3\n") for b in blocks)
+
+
+# ------------------------------------------------------------------ cursors with late ids
+
+def test_a_cursor_without_late_ids_is_the_plain_position():
+    assert cursor_token(42, []) == "42"
+    assert parse_cursor("42") == (42, frozenset())
+
+
+def test_late_ids_travel_as_distances_below_the_position():
+    token = cursor_token(1000, [990, 997])
+    assert token == "1000.10.3"
+    assert parse_cursor(token) == (1000, frozenset({990, 997}))
+    assert parse_position(token) == 1000
+
+
+@pytest.mark.parametrize("value", ["1000.", "1000.0", "5.6", "1000.x", "." , "1000." + ".".join(["1"] * 40),
+                                   "1000.-3", "1000.1.1e3"])
+def test_a_cursor_that_is_not_ours_is_none(value):
+    assert parse_cursor(value) is None and parse_position(value) is None
+
+
+def test_a_late_row_that_arrived_is_replayed_with_the_rows_after_the_position():
+    ring = ring_of(1, 3, 4)
+    ring.add(row(2), body(2))                       # committed late, after the client got position 3
+    assert ids(ring.after(3, head=4, limit=10, late=frozenset({2}))) == [2, 4]
+    assert ids(ring.after(3, head=4, limit=10)) == [4]
+
+
+def test_a_late_id_that_never_arrived_replays_nothing_for_it():
+    ring = ring_of(1, 3, 4)
+    assert ids(ring.after(3, head=4, limit=10, late=frozenset({2}))) == [4]
+
+
+def test_a_late_id_at_or_below_the_floor_cannot_be_answered_for():
+    ring = ring_of(5, 6, floor=4)
+    assert ring.after(6, head=6, limit=10, late=frozenset({4})) is None
+

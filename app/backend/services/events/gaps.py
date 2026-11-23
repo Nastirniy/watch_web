@@ -1,10 +1,11 @@
 """Late commits. An auto-increment id is taken at insert and visible at commit, so id 8 can appear after id 9, and a
 reader that keeps only id > 9 never sees 8 (proved: 23% lost under a harsh load). Every id skipped is watched here
 until it arrives or ttl passes (then it was a rollback). The resume position stays below a gap only for hold, so a
-rollback does not pin every reconnecting client to a minute of duplicates. A jump above max_jump is no gap: a restore
+rollback does not pin every reconnecting client to a minute of duplicates; after that the cursor names the gap as a
+late id (cursor(), ring.py), so a reconnect after a late commit still gets the row. A jump above max_jump is no gap: a restore
 raised AUTO_INCREMENT. Never a fixed number of slots in the query: dead gaps would fill them and stop the search."""
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Tuple
 
 
 @dataclass
@@ -41,3 +42,12 @@ class GapTracker:
         """Every committed row up to here was read: the head, or just below the lowest gap younger than hold"""
         fresh = [row_id for row_id, seen in self._open.items() if now - seen < self.hold]
         return min(fresh) - 1 if fresh else self.head
+
+    def cursor(self, now: float, max_late: int) -> Tuple[int, List[int]]:
+        """The position and the late ids: gaps the position passed after hold, still watched (ring.py). With more
+        than max_late of them the position stays below the lowest: duplicates, never a lost row"""
+        position = self.position(now)
+        late = sorted(row_id for row_id in self._open if row_id <= position)
+        if len(late) > max_late:
+            return late[0] - 1, []
+        return position, late
