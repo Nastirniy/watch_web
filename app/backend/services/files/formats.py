@@ -236,10 +236,13 @@ def normalise_content_type(value: Optional[str]) -> Optional[str]:
 
 
 class FormatRegistry:
-    """The accepted formats at one point in time (active, non-deleted rows)"""
+    """The accepted formats at one point in time: active, non-deleted rows that accept some type. A row left with
+    nothing it accepts (a legacy image/svg+xml format: its content type and aliases all forbidden or opaque) is no
+    accepted format: left out of uploads, GET /media/formats and Accept-Post (its file is refused as an extension
+    of no format); the administration list (/media-formats) shows the row as it is."""
 
     def __init__(self, specs: List[FormatSpec]):
-        self.specs = [spec for spec in specs if spec.is_active]
+        self.specs = [spec for spec in specs if spec.is_active and spec.all_mimes]
 
     # ---- queries -------------------------------------------------------
 

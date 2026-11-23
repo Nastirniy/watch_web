@@ -240,8 +240,10 @@ async def test_a_forbidden_type_written_before_the_rule_never_accepts(client, db
             registry = await formats.load_registry(db, use_cache=False)
     finally:
         logger.remove(sink)
-    svg = next(spec for spec in registry.formats_for("image") if spec.extensions == (".svg",))
-    assert svg.all_mimes == () and svg.aliases == ()
+    # a format left with nothing it accepts is no accepted format: not in the registry at all
+    assert all(".svg" not in spec.extensions for spec in registry.specs)
+    svg_row = (await db.exec(select(MediaFormat).where(MediaFormat.content_type == "image/svg+xml"))).one()
+    assert formats.FormatSpec.from_row(svg_row).all_mimes == ()
     old = next(spec for spec in registry.formats_for("document") if spec.content_type == "application/x-old")
     assert old.all_mimes == ("application/x-old", "application/x-old2")
     assert "image/svg+xml" not in registry.mime_set() and "text/html" not in registry.mime_set()
@@ -256,4 +258,30 @@ async def test_a_forbidden_type_written_before_the_rule_never_accepts(client, db
         response = await client.post(V1.path(MediaRoutes.UPLOAD), data=data, headers=headers(user),
                                      files={"file": ("drawing.svg", SVG, declared)})
         assert response.status_code == 415, response.text
-        assert response.json()["code"] == "media_content_type_not_accepted"
+        assert response.json()["code"] == "media_extension_not_accepted"
+        assert "image/svg+xml" not in response.headers["Accept-Post"]
+
+
+@pytest.mark.asyncio
+async def test_a_format_that_accepts_nothing_is_left_out_of_the_public_list(client, db, headers):
+    """A legacy image/svg+xml row (forbidden content type, forbidden alias): GET /media/formats and Accept-Post leave
+    it out, the administration list shows the row as it is"""
+    from app.backend.enums.routes import MediaRoutes
+    from tests.test_media_formats import _scene
+
+    db.add(MediaFormat(media_type="image", content_type="image/svg+xml", label="SVG", extensions=[".svg"],
+                       aliases=["text/html"], max_file_size_bytes=formats.MB))
+    await db.commit()
+    formats.invalidate_registry_cache()
+    user, _ = await _scene(db)
+    listed = await client.get(V1.path(MediaRoutes.FORMATS), headers=headers(user))
+    assert listed.status_code == 200, listed.text
+    assert all(item["content_type"] != "image/svg+xml" for item in listed.json()["formats"]["image"])
+    assert "image/svg+xml" not in listed.headers["Accept-Post"]
+    assert "image/png" in listed.headers["Accept-Post"]
+
+    admin = await make_admin(db)
+    rows = await client.get(V1.path(MediaFormatRoutes.LIST_ALL), headers=headers(admin))
+    assert rows.status_code == 200, rows.text
+    svg = next(row for row in rows.json() if row["content_type"] == "image/svg+xml")
+    assert (svg["extensions"], svg["aliases"], svg["is_active"]) == ([".svg"], ["text/html"], True)

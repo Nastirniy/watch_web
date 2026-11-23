@@ -9,6 +9,11 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ### Fixed
 
+- `GET /media/formats` and every `Accept-Post` no longer list a format that accepts nothing (a legacy
+  `image/svg+xml` row: its content type and aliases all forbidden or opaque, so the registry already refused every
+  file of it). Its extension is now answered 415 `media_extension_not_accepted` instead of
+  `media_content_type_not_accepted`. `GET /media-formats/list-all` (administration) shows the row as it is; edit or
+  archive it there.
 - `POST /media/nginx-upload`: `X-Original-Filename` is read as UTF-8 (the server hands header bytes over as
   Latin-1), so a name lands as it does through `POST /media/upload`: a bidi override or a joiner in the name no longer
   leaves letters of its UTF-8 bytes in the stored name. Bytes that are no UTF-8 are read as Latin-1, as before. Tests
