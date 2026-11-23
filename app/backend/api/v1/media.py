@@ -490,8 +490,9 @@ async def nginx_upload_file(
             _logger.warning(f"Nginx upload rejected: {e}")
             raise store_rejected(e)
     finally:
-        # nginx never deletes the body file; a successful store moved it, every other outcome leaves it here.
-        # A failed unlink never replaces the outcome: it is logged and sweep-nginx-temp removes the file later.
+        # A successful store moved the body file; every other outcome deletes it here at once (nginx deletes it too
+        # when the request ends, client_body_in_file_only clean, and a missing file is fine for both). A failed
+        # unlink never replaces the outcome: it is logged and nginx or sweep-nginx-temp removes the file later.
         try:
             temp_file.unlink(missing_ok=True)
         except OSError as exc:

@@ -144,7 +144,7 @@ Filling the unit history of old observations: observations created before their 
 
 Upgrading to sizes as displayed (vertical phone videos, EXIF-rotated photos): rows stored before keep the stored frame size until probed again. `docker compose exec media-worker python -m app.backend.cli.media_tools probe-missing --all` probes every video and audio file again and re-reads every image size (headers only; `--limit N` per run, default 1000). Video uploads that failed only because they have no video stream become `unsupported` after `media_tools reconcile-posters --retry-failed`: the worker sees the probed metadata and stops trying.
 
-Offloaded uploads (`/api/v1/media/nginx-upload`): nginx keeps the request body in `NGINX_UPLOAD_TEMP` (`client_body_in_file_only` never deletes it). The API accepts `X-File-Name` only for a regular file inside that directory (`storage.nginx_upload_temp_path`, same path as `client_body_temp_path`), moves it on success and deletes it on every other outcome once the path is checked. A request refused before the handler runs (an expired token, 401) leaves its file, so sweep the directory from cron (see "Scheduled cleanup" below): `docker compose exec api python -m app.backend.cli.media_tools sweep-nginx-temp` deletes files older than `storage.nginx_upload_temp_max_age_hours` (24 by default; `--max-age-hours N` overrides it). Keep the age above the longest upload, nginx may still be writing a younger file. A file the command cannot read or delete (permissions) is logged, left in place and counted (`skipped N file(s)` in its output); the sweep goes on with the others.
+Offloaded uploads (`/api/v1/media/nginx-upload`): nginx keeps the request body in `NGINX_UPLOAD_TEMP` and deletes it when the request ends (`client_body_in_file_only clean`; it waits for the API's answer even when the client leaves, `proxy_ignore_client_abort on`). The API accepts `X-File-Name` only for a regular file inside that directory (`storage.nginx_upload_temp_path`, same path as `client_body_temp_path`), moves it on success and deletes it on every other outcome once the path is checked. A request refused before the handler runs (an expired token, 401) is deleted by nginx. Only a worker that stops in the middle of a request (killed, out of memory, the host goes down) leaves its file, so keep sweeping the directory from cron as a backstop (see "Scheduled cleanup" below): `docker compose exec api python -m app.backend.cli.media_tools sweep-nginx-temp` deletes files older than `storage.nginx_upload_temp_max_age_hours` (24 by default; `--max-age-hours N` overrides it). Keep the age above the longest upload, nginx may still be writing a younger file. A file the command cannot read or delete (permissions) is logged, left in place and counted (`skipped N file(s)` in its output); the sweep goes on with the others.
 
 ### Upgrading to authorization v2 (user types, scope groups, role assignments)
 
@@ -395,8 +395,9 @@ document uploads as observation media: see the CHANGELOG rollback note before ru
 
 ### Scheduled cleanup (cron)
 
-Every installation that accepts offloaded uploads needs this job; without it rejected upload bodies (up to the format
-limit each, 10 GB by default) pile up in `NGINX_UPLOAD_TEMP` until the disk is full. Add a cron entry on the host, for
+Every installation that accepts offloaded uploads needs this job. nginx deletes every upload body when its request
+ends (`client_body_in_file_only clean`), but a worker that stops in the middle of a request leaves the body (up to the
+format limit, 10 GB by default) in `NGINX_UPLOAD_TEMP`; the job removes such leftovers. Add a cron entry on the host, for
 example `/etc/cron.d/watch-web` (run as root or as a user in the `docker` group; `/srv/watch_web` stands for the
 directory that holds `docker-compose.yml`):
 

@@ -230,6 +230,14 @@ def test_the_access_log_records_the_request_id():
     assert re.search(r"access_log \S+ watch_web;", _without_blocks(APP, "location"))
 
 
+def test_offloaded_upload_bodies_are_deleted_by_nginx_after_the_api_answered():
+    """A body refused before the handler runs (401, 422, API down) is deleted by nginx (`clean`), never left for a
+    sweep; nginx waits for the API's answer even when the client leaves, so a running store keeps its file"""
+    [(_, body)] = [b for b in _blocks(APP, "location") if b[0].endswith("/api/v1/media/nginx-upload")]
+    assert re.search(r"client_body_in_file_only clean;", body)
+    assert re.search(r"proxy_ignore_client_abort on;", body)
+
+
 def test_upload_temp_path_agrees_with_the_api_setting():
     """The API accepts X-File-Name only inside storage.nginx_upload_temp_path: nginx must write there"""
     declared = re.findall(r"client_body_temp_path\s+(\S+)", _directives(APP))

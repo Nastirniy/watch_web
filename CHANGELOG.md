@@ -35,6 +35,12 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - nginx closes idle upstream connections before uvicorn (4 s, uvicorn 5 s) and imgproxy (8 s, imgproxy 10 s) do: a
   request sent on a connection the server was closing failed with a reset, a 502 on a POST (seen once under load on
   the test server). Hosts: copy `nginx-http.conf` again and reload.
+- `POST /media/nginx-upload`: a body refused before the handler ran (no or expired token, 422, API down) stayed in
+  `NGINX_UPLOAD_TEMP` until the hourly sweep removed it a day later, so anyone with a valid client certificate could
+  fill the disk without logging in. nginx deletes every body when its request ends now (`client_body_in_file_only
+  clean`) and waits for the API's answer even when the client leaves (`proxy_ignore_client_abort on`), so a running
+  store keeps its file. The `sweep-nginx-temp` cron job stays as a backstop for a worker stopped mid-request.
+  Hosts: copy `nginx-app.conf` again and reload.
 
 ## Real-time events: the administration
 
