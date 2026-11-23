@@ -771,6 +771,60 @@ async def test_an_upload_above_the_format_limit_is_413(client, db, headers, stor
     assert _stored_files(storage) == []
 
 
+@pytest.mark.parametrize("raw", [b"a\xed\xb2\x80.pdf", b"a\x80\xff.pdf", "\U0001f4fb guide.pdf".encode("utf-8"),
+                                 "‮guide‍.pdf".encode("utf-8"), b"g" * 5000 + b".pdf"],
+                         ids=["surrogate-bytes", "invalid-utf8", "non-bmp", "format-chars", "very-long"])
+async def test_a_raw_file_name_of_a_guide_file(client, db, headers, storage, raw):
+    """Any bytes in the part's file name: 201 with the name the sanitiser leaves, never a 500"""
+    from app.backend.services.files.names import sanitize_filename
+    from tests.test_upload_filenames_and_temp import MULTIPART, _raw_multipart
+
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    response = await client.post(files_path(guide["id"]), content=_raw_multipart({}, raw, PDF, b"application/pdf"),
+                                 headers={**MULTIPART, **headers(admin)})
+    assert response.status_code == 201, response.text
+    name = response.json()["file_name"]
+    assert name.endswith(".pdf") and len(name) <= 200
+    try:
+        decoded = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        decoded = raw.decode("latin-1")
+    assert name == sanitize_filename(decoded) or name.startswith("upload_")
+    download = await client.get(download_path(guide["id"], response.json()["id"]), headers=headers(admin))
+    assert download.status_code == 200 and download.content == PDF
+
+
+async def test_an_upload_above_the_limit_the_store_reads_is_413(client, db, headers, storage, monkeypatch):
+    """The store checks the size again against the registry it reads itself (a limit lowered while the body was
+    arriving): 413 with that limit, no row, nothing left in the spool or the guide tree"""
+    import dataclasses
+    from app.backend.api.v1 import guides as guide_routes
+
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    pdf = (await db.exec(select(MediaFormat).where(MediaFormat.content_type == "application/pdf"))).one()
+    pdf.max_file_size_bytes = 100
+    db.add(pdf)
+    await db.commit()
+    file_formats.invalidate_registry_cache()
+    real_check = guide_routes.check_guide_format
+
+    def check_before_the_change(registry, filename, content_type=None):
+        """What the route saw before the limit was lowered"""
+        return dataclasses.replace(real_check(registry, filename, content_type), max_file_size_bytes=10 * len(PDF))
+
+    monkeypatch.setattr(guide_routes, "check_guide_format", check_before_the_change)
+    response = await _upload(client, headers, admin, guide["id"])
+    assert response.status_code == 413, response.text
+    problem = response.json()
+    assert problem["code"] == "media_file_too_large"
+    assert (problem["max_file_size_bytes"], problem["file_size_bytes"], problem["content_type"]) == \
+        (100, len(PDF), "application/pdf")
+    assert (await db.exec(select(UserGuideFile))).all() == []
+    assert _stored_files(storage) == []
+
+
 @pytest.mark.parametrize("name, content_type, code", [
     ("setup.exe", "application/octet-stream", "media_extension_dangerous"),
     ("photo.png", "image/png", "media_extension_not_accepted"),

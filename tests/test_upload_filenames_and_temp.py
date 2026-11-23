@@ -161,6 +161,30 @@ async def test_rejected_nginx_upload_removes_the_temp_file(client, db, headers, 
 
 
 @pytest.mark.asyncio
+async def test_a_file_above_the_format_limit_is_413_from_the_store(client, db, headers, storage, temp_dir):
+    """The nginx upload has no size to check before the store (the body is already on disk): the store's own size
+    check answers 413 with the format's limit, no row, the temp file removed"""
+    from sqlmodel import select
+    from app.backend.models.media_format import MediaFormat
+    from app.backend.services.files import formats
+    post, user, observation = await _scene(db)
+    png = (await db.exec(select(MediaFormat).where(MediaFormat.content_type == "image/png"))).one()
+    png.max_file_size_bytes = 10
+    db.add(png)
+    await db.commit()
+    formats.invalidate_registry_cache()
+    path = _temp_file(temp_dir)
+    response = await _nginx_post(client, headers, user, observation, path)
+    assert response.status_code == 413, response.text
+    problem = response.json()
+    assert problem["code"] == "media_file_too_large"
+    assert (problem["max_file_size_bytes"], problem["file_size_bytes"], problem["content_type"]) == \
+        (10, len(make_png()), "image/png")
+    assert (await db.exec(select(MediaFile))).all() == []
+    assert not path.exists()
+
+
+@pytest.mark.asyncio
 async def test_a_failing_temp_cleanup_never_replaces_the_outcome(client, db, headers, storage, temp_dir, monkeypatch):
     """An OSError of the unlink in the finally is logged; the answer stays the one the upload earned"""
     post, user, observation = await _scene(db)

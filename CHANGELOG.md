@@ -9,6 +9,10 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ### Fixed
 
+- `POST /guides/{guide_id}/files`: a 413 the store answers (its own size check, against the registry it reads
+  again) names the limit the file was held to in `max_file_size_bytes`, not the one the route saw before the body
+  arrived. The file is checked and hashed before the guide row is locked, so the lock is held only for the insert,
+  the folder and the commit. Tests of the store-side 413 for guide files and for media (`POST /media/nginx-upload`).
 - `GET /media/formats` and every `Accept-Post` no longer list a format that accepts nothing (a legacy
   `image/svg+xml` row: its content type and aliases all forbidden or opaque, so the registry already refused every
   file of it). Its extension is now answered 415 `media_extension_not_accepted` instead of
