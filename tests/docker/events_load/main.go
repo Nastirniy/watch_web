@@ -173,6 +173,7 @@ type account struct {
 	name  string
 	cert  *tls.Certificate // mtls: presented to nginx
 	login []byte           // json login: the request body; nil: empty body (cert login)
+	busy  atomic.Bool      // the emitter is changing this user (shared by the browsers of the account: its devices)
 }
 
 // loadAccount reads one account directory: cert.pem + key.pem (mTLS), and for a json login either login.json or the
@@ -584,7 +585,6 @@ type browser struct {
 	tracker *connTracker
 	streams []*stream
 	uid     atomic.Int64
-	busy    atomic.Bool // the emitter is changing this user
 
 	mu      sync.Mutex
 	access  string
@@ -1859,11 +1859,17 @@ func (r *runner) expectedAll() []uint64 {
 	return set
 }
 
+// expectedOf: the streams of every browser of b's account (with -reuse-accounts one user's devices)
 func (r *runner) expectedOf(b *browser) []uint64 {
 	set := make([]uint64, (len(r.streams)+63)/64)
-	for _, s := range b.streams {
-		if s.openedOnce.Load() {
-			set[s.id/64] |= 1 << (uint(s.id) % 64)
+	for _, other := range r.browsers {
+		if other.acct != b.acct {
+			continue
+		}
+		for _, s := range other.streams {
+			if s.openedOnce.Load() {
+				set[s.id/64] |= 1 << (uint(s.id) % 64)
+			}
 		}
 	}
 	return set
@@ -1918,7 +1924,7 @@ func (e *emitter) tick(ctx context.Context) {
 		var b *browser
 		for try := 0; try < 10 && len(e.r.browsers) > 0; try++ {
 			c := e.r.browsers[mrand.IntN(len(e.r.browsers))]
-			if c.uid.Load() > 0 && c.busy.CompareAndSwap(false, true) {
+			if c.uid.Load() > 0 && c.acct.busy.CompareAndSwap(false, true) {
 				b = c
 				break
 			}
@@ -1928,7 +1934,7 @@ func (e *emitter) tick(ctx context.Context) {
 			return
 		}
 		go func() {
-			defer b.busy.Store(false)
+			defer b.acct.busy.Store(false)
 			uid := b.uid.Load()
 			form := url.Values{"username_alias": {fmt.Sprintf("Load user %s %d", b.acct.name, e.n.Add(1))}}
 			e.gate(ctx, e.write(ctx, "user", fmt.Sprintf("user:%d", uid), e.expected("user", b), http.MethodPatch,

@@ -70,7 +70,9 @@ was away), `deliveries` (`missed` within the window, `missed_then_late` the part
 ## Accounts
 
 `-accounts DIR` holds one subdirectory per account (sorted by name; browser i uses account i, `-reuse-accounts`
-cycles them when there are fewer, but nginx allows 32 streams per client certificate):
+cycles them when there are fewer, but nginx allows 32 streams per client certificate). Browsers of one account are
+one user's devices: each logs in with its own session, and a `user` write expects its event on the streams of all of
+them:
 
 | File | Mode | Content |
 |---|---|---|
