@@ -10,7 +10,8 @@ max_file_size_bytes capped by storage.max_file_size_gb, the sniffed type against
 aliases, the text rule of a text/* format), inserts the row, and writes its folder through a .tmp- directory renamed
 into place (files 0640, folders 0750). The row is flushed but not committed: the caller adds its audit row and
 commits, and calls discard_guide_file when that fails, so a file on disk always has its row. On any failure here
-the folder written so far is removed and the transaction rolled back. The files sit in the media directory, so
+the folder written so far is removed (with the guide's folder when that leaves it empty) and the transaction rolled
+back. The files sit in the media directory, so
 nginx serves them from /protected_uploads/ like the media originals.
 
 No FastAPI: errors are CodedError (UnsupportedMediaFormat 415, FileTooLarge 413 through the route); the route
@@ -179,19 +180,27 @@ def _write_guide_folder(root: Path, guide_id: int, file_id: int, stored_name: st
     folder is removed and the error raised. The source is moved, not copied, when it is on the same filesystem."""
     root.mkdir(parents=True, exist_ok=True)
     guides = root / GUIDES_DIR
-    _make_dir(guides)
     guide_dir = guides / str(guide_id)
-    _make_dir(guide_dir)
     target = guide_dir / str(file_id)
-    if target.exists() or target.is_symlink():
-        try:
-            if target.is_symlink():
-                raise NotADirectoryError(str(target))
-            target.rmdir()          # only an empty folder goes
-        except OSError as exc:
-            raise FileExistsError(f"guide file folder {guide_id}/{file_id} exists") from exc
     temporary = guide_dir / f"{TEMP_PREFIX}{file_id}-{secrets.token_hex(4)}"
-    temporary.mkdir(mode=GUIDE_DIR_MODE)
+    for attempt in range(3):
+        _make_dir(guides)
+        _make_dir(guide_dir)
+        if target.exists() or target.is_symlink():
+            try:
+                if target.is_symlink():
+                    raise NotADirectoryError(str(target))
+                target.rmdir()          # only an empty folder goes
+            except OSError as exc:
+                raise FileExistsError(f"guide file folder {guide_id}/{file_id} exists") from exc
+        try:
+            temporary.mkdir(mode=GUIDE_DIR_MODE)
+            break
+        except FileNotFoundError:
+            # the guide's folder, empty, removed meanwhile by the cleanup of another upload that failed
+            # (_remove_guide_folder): made again
+            if attempt == 2:
+                raise
     try:
         os.chmod(temporary, GUIDE_DIR_MODE)
         move_into_place(source, temporary / stored_name, GUIDE_FILE_MODE)
@@ -202,7 +211,13 @@ def _write_guide_folder(root: Path, guide_id: int, file_id: int, stored_name: st
 
 
 def _remove_guide_folder(root: Path, guide_id: int, file_id: int) -> None:
-    shutil.rmtree(root / GUIDES_DIR / str(guide_id) / str(file_id), ignore_errors=True)
+    """The file's folder, and the guide's folder when that leaves it empty (a failed first upload of the guide)"""
+    guide_dir = root / GUIDES_DIR / str(guide_id)
+    shutil.rmtree(guide_dir / str(file_id), ignore_errors=True)
+    try:
+        guide_dir.rmdir()           # only an empty folder goes: another file, or an upload's .tmp- folder, keeps it
+    except OSError:
+        pass
 
 
 async def store_guide_file(session: AsyncSession, guide: UserGuide, spooled: Path, original_name: str,

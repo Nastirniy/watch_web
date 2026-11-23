@@ -981,6 +981,60 @@ async def test_a_failed_audit_row_leaves_no_file_and_no_row(client, db, headers,
     assert _stored_files(storage) == []
 
 
+@pytest.mark.parametrize("failure", ["store", "audit"])
+async def test_a_failed_first_upload_leaves_no_empty_guide_folder(client, db, headers, storage, monkeypatch, failure):
+    """The guide's folder made for its first file goes with the file's folder when the upload fails; a guide folder
+    that holds another file stays"""
+    from sqlalchemy.exc import OperationalError
+    from app.backend.api.v1 import guides as guide_routes
+
+    admin = await make_admin(db)
+    guide = await _create(client, headers, admin)
+    guide_dir = storage / "media" / "_guides" / str(guide["id"])
+
+    def storage_full(temporary: Path, target: Path) -> None:
+        raise OSError(28, "No space left on device")
+
+    async def audit_fails(*args, **kwargs):
+        raise OperationalError("INSERT INTO audit_logs ...", {}, Exception("(1020, 'Record has changed')"))
+
+    with monkeypatch.context() as patched:
+        if failure == "store":
+            patched.setattr(file_store, "_place", storage_full)
+        else:
+            patched.setattr(guide_routes, "create_audit_log", audit_fails)
+        response = await _upload(client, headers, admin, guide["id"])
+        assert response.status_code == 500, response.text
+    assert (storage / "media" / "_guides").is_dir() and not guide_dir.exists()
+
+    kept = await _uploaded(client, headers, admin, guide["id"])
+    with monkeypatch.context() as patched:
+        patched.setattr(file_store, "_place", storage_full)
+        assert (await _upload(client, headers, admin, guide["id"], name="second.pdf")).status_code == 500
+    row = await db.get(UserGuideFile, kept["id"])
+    assert (storage / "media" / row.file_path).read_bytes() == PDF
+    assert [p.name for p in guide_dir.iterdir()] == [str(row.id)]
+
+
+def test_a_guide_folder_removed_by_another_cleanup_meanwhile_is_made_again(storage, monkeypatch):
+    """The cleanup of a failed upload removes the guide's folder when empty: an upload that made it a moment before
+    makes it again instead of failing"""
+    real_make_dir = file_store._make_dir
+    removed = []
+
+    def make_dir_then_lose_it(path: Path) -> None:
+        real_make_dir(path)
+        if path.name == "5" and not removed:
+            path.rmdir()                        # another upload's cleanup, between mkdir and the .tmp- folder
+            removed.append(path)
+
+    monkeypatch.setattr(file_store, "_make_dir", make_dir_then_lose_it)
+    source = storage / "spooled.pdf"
+    source.write_bytes(PDF)
+    file_store._write_guide_folder(storage / "media", 5, 9, "stored.pdf", source)
+    assert removed and (storage / "media" / "_guides" / "5" / "9" / "stored.pdf").read_bytes() == PDF
+
+
 async def test_discard_removes_the_folder_even_when_the_rollback_fails(storage):
     """A lost connection fails the rollback: the folder is gone all the same (removed before it), the error
     propagates"""
