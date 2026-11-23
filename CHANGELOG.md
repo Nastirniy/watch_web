@@ -39,6 +39,37 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - `Content-Disposition` of a name longer than the budget whose extension changes length in lower case (`.İ`,
   capital I with dot): the cut kept one character of the stem with the extension; it keeps the extension as written.
 
+## Real-time events: observations and media
+
+### Added
+
+- Two new event types for the work screens (union members and data in parentheses; ids and enum values only, never
+  data; one event per operation, in the transaction of the change after its audit row, so a refused or failed write
+  sends nothing). Both are delivered at the post (`scope` `{kind: "post", id}`) and conflated per observation / per
+  media. API.md, "Observations and media".
+  - `observation.changed` (`ObservationChanged`, `ObservationChangedData`: `observation_id`, `observation_change`, new
+    enum schema `ObservationChange`: `created`, `updated`, `archived`, `restored`): `POST /observations/create`,
+    `PUT /observations/{id}` (tags included), `POST /observations/{id}/disappeared` (updated), archive, restore, and
+    every band change under `/observations/{id}/frequencies...` (updated). To the holders of `observation.view` in
+    effect at the post.
+  - `media.changed` (`MediaChanged`, `MediaChangedData`: `media_id`, `observation_id`, `media_change`, new enum schema
+    `MediaChange`: `created`, `archived`, `restored`, `processed`): a file stored by any upload (multipart, nginx,
+    resumable complete: once, never upload progress), archive, restore, and `processed` from the media worker when a
+    poster or storyboard ends ready, failed or unsupported (`thumbnail_status` / `storyboard_status` changed). To the
+    holders of `media.view` in effect at the post of the observation. Media of old data without an observation
+    (listed nowhere, `GET /media/{id}/info` 404) sends it at the root with `observation_id` absent, never null.
+- Not on events: share links (`POST /media/{id}/share`), upload sessions (create, chunks, abort), a poster that goes
+  back to pending for a retry, `POST /media/{id}/thumbnail/regenerate` (the page that asked refetches; the worker's
+  outcome comes as `processed`), and the observations of an archived post or unit (its `scope.changed`).
+- The event catalog takes an optional id param (`Optional[int]`): `None` leaves it out of `data`, never `null`
+  (`observation_id` of `media.changed`).
+
+### Changed
+
+- The media worker fails expired last-attempt claims (posters and storyboards) by locking those rows first and then
+  updating them by id, so its event names exactly the rows it failed. Same outcome as before.
+- No database change.
+
 ## Web types: response fields with a default are required
 
 ### Changed

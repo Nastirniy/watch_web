@@ -26,6 +26,8 @@ from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.auth.scope import Node
 from app.backend.enums.audit import AuditEvent
 from app.backend.services.audit import create_audit_log
+from app.backend.enums.events import MediaChange
+from app.backend.services.events import publish_media_changed
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.config import settings
 from app.backend.api.shared.helpers.media_helper import storage_root
@@ -254,6 +256,8 @@ async def record_upload(
         user_id=auth.user.id, new_values=media_file.model_dump(),
         **client_info(request, auth),
     )
+    # One event per stored file (any transport), never per chunk: a duplicate of a stored file names that file again
+    publish_media_changed(session, media_file_id, observation_id, post_id, MediaChange.CREATED)
     await session.commit()
 
     if media_file.is_image and settings.storage.thumbnail.prewarm and settings.storage.enable_nginx:

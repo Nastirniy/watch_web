@@ -314,6 +314,9 @@ const events = startEvents({
       case "session.changed": refetch(() => reloadSessions(event.data.subject_user_id, { headers: BACKGROUND })); break;
       case "role.changed": refetch(() => reloadRole(event.data.role_id, { headers: BACKGROUND })); break;
       case "dictionary.changed": refetch(() => reloadDictionary(event.data.dictionary, { headers: BACKGROUND })); break;
+      // the work screens (API.md, "Observations and media"): an id the list does not show is new
+      case "observation.changed": refetch(() => reloadObservation(event.data.observation_id, { headers: BACKGROUND })); break;
+      case "media.changed": refetch(() => reloadMedia(event.data.media_id, event.data.observation_id, { headers: BACKGROUND })); break;   // observation_id may be absent
       default: { const unhandled: never = event; return unhandled; }      // a new event type fails here
     }
   },

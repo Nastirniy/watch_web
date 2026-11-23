@@ -218,6 +218,12 @@ def _value(body: bytes) -> dict:
     _row(type="session.changed", payload='{"subject_user_id":5}', scope_key="p:7", permission="user.view", user_id=5),
     _row(type="role.changed", payload='{"role_id":3}', scope_key="*", permission="role.view"),
     _row(type="dictionary.changed", payload='{"dictionary":"guides"}', scope_key="*", permission=None),
+    _row(type="observation.changed", payload='{"observation_id":4,"observation_change":"created"}', scope_key="p:7",
+         permission="observation.view"),
+    _row(type="media.changed", payload='{"media_id":9,"observation_id":4,"media_change":"processed"}',
+         scope_key="p:7", permission="media.view"),
+    _row(type="media.changed", payload='{"media_id":9,"media_change":"archived"}', scope_key="root",
+         permission="media.view"),
 ])
 def test_every_rendered_event_validates(row):
     value = _value(render_v1.event(row, 1234))

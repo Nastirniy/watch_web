@@ -15,7 +15,8 @@ from typing import Annotated, Literal, Union
 from pydantic import BaseModel, ConfigDict, Field, RootModel, model_serializer
 
 from app.backend.auth.scope import Node
-from app.backend.enums.events import MOVE_STATUSES, Dictionary, StreamCloseReason, StreamMessageType
+from app.backend.enums.events import (MOVE_STATUSES, Dictionary, MediaChange, ObservationChange, StreamCloseReason,
+                                      StreamMessageType)
 from app.backend.errors.openapi import absent_not_null
 from app.backend.utils.validators import ResponseDatetime, ResponseModel
 
@@ -79,6 +80,26 @@ class RoleChangedData(ResponseModel):
 class DictionaryChangedData(ResponseModel):
     dictionary: Dictionary = Field(description="The list to read again: categories, signal_types, tags, media_formats "
                                                "(GET /media-formats/list-all) or guides (GET /guides)")
+
+
+class ObservationChangedData(ResponseModel):
+    observation_id: int = Field(description="Read GET /observations/{observation_id} where the observation is on "
+                                            "screen; a list that does not show this id treats it as new (a created "
+                                            "may have been conflated into a later change)")
+    observation_change: ObservationChange = Field(description="created, updated (any field, its tags, a band, a "
+                                                              "disappearance), archived or restored")
+
+
+class MediaChangedData(_Absent):
+    media_id: int = Field(description="Read GET /media/{media_id}/info where the media is on screen; a list that does "
+                                      "not show this id treats it as new")
+    observation_id: int = Field(default=None, description="The observation the media belongs to: its media list (and "
+                                                          "the media_ids of GET /observations/{observation_id}) "
+                                                          "changed on created, archived and restored. Absent for "
+                                                          "media of old data without an observation (scope: the root)")
+    media_change: MediaChange = Field(description="created (stored, by any upload), archived, restored, or processed "
+                                                  "(thumbnail_status or storyboard_status reached ready, failed or "
+                                                  "unsupported)")
 
 
 class CloseData(ResponseModel):
@@ -156,6 +177,23 @@ class DictionaryChanged(EventEnvelope):
     data: DictionaryChangedData
 
 
+class ObservationChanged(EventEnvelope):
+    """An observation was created, updated (any field, its tags, a frequency band, marked as disappeared), archived or
+    restored. Sent to the holders of observation.view in effect at its post (scope: the post). An archive of the post
+    or of a unit above it sends none per observation (a scope.changed tells the tree)"""
+    type: Literal["observation.changed"]
+    data: ObservationChangedData
+
+
+class MediaChanged(EventEnvelope):
+    """A media file was stored (multipart, nginx or resumable upload: once, at the end, never upload progress),
+    archived or restored, or the media worker ended its poster or storyboard in a state a page shows (processed:
+    thumbnail_status or storyboard_status is ready, failed or unsupported now). Sent to the holders of media.view in
+    effect at the post of its observation (scope: the post)"""
+    type: Literal["media.changed"]
+    data: MediaChangedData
+
+
 class StreamReady(ResponseModel):
     """The first message of a connection"""
     type: Literal["ready"]
@@ -194,8 +232,8 @@ class StreamClose(ResponseModel):
 
 class StreamMessage(RootModel[Annotated[Union[MoveChanged, ScopeChanged, SecurityCertificateMismatch, UserChanged,
                                               CertificateChanged, SessionChanged, RoleChanged, DictionaryChanged,
-                                              StreamReady, StreamHeartbeat, StreamReload, StreamRightsChanged,
-                                              StreamClose],
+                                              ObservationChanged, MediaChanged, StreamReady, StreamHeartbeat,
+                                              StreamReload, StreamRightsChanged, StreamClose],
                                         Field(discriminator="type")]]):
     """One message of the stream: event: is its type, data: this JSON"""
 

@@ -1,6 +1,6 @@
 """The event catalog: every event fits its column and carries no free text"""
 import json
-from typing import get_args
+from typing import Optional, get_args
 
 import pytest
 
@@ -10,7 +10,7 @@ from app.backend.enums.general import MoveStatus
 
 
 def _largest(annotation):
-    if annotation is int:
+    if annotation is int or annotation == Optional[int]:
         return 2 ** 63
     if annotation is str:
         pytest.fail("an event param is never a plain str: use an enum's values as a Literal")

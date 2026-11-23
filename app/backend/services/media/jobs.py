@@ -14,6 +14,9 @@ poster_status = processing, so a worker whose lease expired cannot overwrite
 a newer result. An expired claim is taken again only while attempts are left:
 a video whose extraction takes the worker down (out of memory, a crash) is
 failed by fail_exhausted_posters, never run forever.
+
+An outcome a page shows (ready, failed, unsupported: thumbnail_status) publishes media.changed processed in its
+own transaction (publish_processed); a failure that goes back to pending, a claim and a lease publish nothing.
 """
 from __future__ import annotations
 
@@ -26,10 +29,12 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.backend.config import settings
+from app.backend.enums.events import MediaChange
 from app.backend.enums.general import MediaType, PosterStatus
 from app.backend.models.media import MediaFile
 from app.backend.models.observation import Observation
 from app.backend.models.worker import WorkerHeartbeat
+from app.backend.services.events import publish_media_changed
 
 # Longer than any move of an upload into storage (a rename, or a copy across filesystems of the largest file).
 # Released in the upload's last transaction, after the move, with its audit row (record_upload in
@@ -40,6 +45,22 @@ UPLOAD_HOLD = timedelta(hours=1)
 # Error of a job whose last attempt ended with its worker (killed, out of memory, the host restarted); posters and
 # storyboards
 WORKER_STOPPED_ERROR = "the worker stopped during processing on the last attempt"
+
+
+async def publish_processed(session: AsyncSession, media_ids: Iterable[int]) -> None:
+    """media.changed processed for each of these media (of an observation), last in the transaction that changed
+    their poster or storyboard: one read of where they are (the post of the observation), after the change's
+    locks. Media of old data without an observation: at the root. Nothing to read while events are off."""
+    ids = sorted(set(media_ids))
+    if not ids or not settings.events.enabled:
+        return
+    places = (await session.exec(
+        select(MediaFile.id, MediaFile.observation_id, Observation.post_id)
+        .outerjoin(Observation, Observation.id == MediaFile.observation_id)
+        .where(MediaFile.id.in_(ids))
+    )).all()
+    for media_id, observation_id, post_id in places:
+        publish_media_changed(session, media_id, observation_id, post_id, MediaChange.PROCESSED)
 
 
 def utcnow() -> datetime:
@@ -109,14 +130,22 @@ async def fail_exhausted_posters(session: AsyncSession, now: Optional[datetime] 
     _claimable never takes such a row again; this records why. The worker calls it before it claims, reconcile too.
     """
     now = now or utcnow()
-    result = await session.execute(
-        update(MediaFile)
-        .execution_options(synchronize_session=False)
-        .where(_expired(now), MediaFile.poster_attempts >= settings.storage.poster.max_attempts)
-        .values(poster_status=PosterStatus.FAILED.value, poster_locked_until=None, poster_error=WORKER_STOPPED_ERROR)
-    )
+    exhausted = (_expired(now), MediaFile.poster_attempts >= settings.storage.poster.max_attempts)
+    # Locked first (a current read, no snapshot), so the event names exactly the rows this update fails; bounded by
+    # the claims of workers that stopped. A second worker waits here and then finds nothing
+    ids = list((await session.exec(select(MediaFile.id).where(*exhausted).with_for_update())).all())
+    count = 0
+    if ids:
+        result = await session.execute(
+            update(MediaFile)
+            .execution_options(synchronize_session=False)
+            .where(MediaFile.id.in_(ids), *exhausted)
+            .values(poster_status=PosterStatus.FAILED.value, poster_locked_until=None, poster_error=WORKER_STOPPED_ERROR)
+        )
+        count = result.rowcount
+        await publish_processed(session, ids)
     await session.commit()
-    return result.rowcount
+    return count
 
 
 async def claim_next_poster(
@@ -191,6 +220,8 @@ async def complete_poster(
             **(metadata or {}),
         )
     )
+    if result.rowcount == 1:
+        await publish_processed(session, [media_id])
     await session.commit()
     return result.rowcount == 1
 
@@ -215,6 +246,9 @@ async def mark_poster_unsupported(
         .where(MediaFile.id == media_id, *owned)
         .values(poster_status=PosterStatus.UNSUPPORTED.value, poster_locked_until=None, poster_error=None, **(metadata or {}))
     )
+    if worker is not None and result.rowcount == 1:
+        # The worker's outcome; the upload's probe (no worker) is part of the upload, which publishes created
+        await publish_processed(session, [media_id])
     if commit:
         await session.commit()
     return result.rowcount == 1
@@ -260,6 +294,8 @@ async def fail_poster(
         )
         .values(poster_status=new_status, poster_locked_until=locked_until, poster_error=error[:500])
     )
+    if result.rowcount == 1 and new_status == PosterStatus.FAILED.value:
+        await publish_processed(session, [media_id])     # back to pending: a page sees nothing new
     await session.commit()
     return new_status if result.rowcount == 1 else None
 

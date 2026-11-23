@@ -1,7 +1,8 @@
 """Events to the web client: the catalog of what the outbox may carry.
 
 A code is the key of exactly one kind of event. Params are ids and values of an enum, never free text: an event
-cannot leak content because it has no field for it. The web refetches through REST (API.md, "Real-time events").
+cannot leak content because it has no field for it. An Optional[int] param may be None: it is then absent from the
+data, never null. The web refetches through REST (API.md, "Real-time events").
 A new type goes here, into the union of api/v1/models/response/events.py and into the web's switch.
 """
 from enum import Enum
@@ -23,6 +24,29 @@ class Dictionary(str, Enum):
 
 
 DICTIONARIES = Literal["categories", "signal_types", "tags", "media_formats", "guides"]   # Dictionary (catalog test)
+
+
+class ObservationChange(str, Enum):
+    """What happened to the observation observation.changed names (a band change, a disappearance: updated)"""
+    CREATED = "created"
+    UPDATED = "updated"
+    ARCHIVED = "archived"
+    RESTORED = "restored"
+
+
+OBSERVATION_CHANGES = Literal["created", "updated", "archived", "restored"]   # ObservationChange (catalog test)
+
+
+class MediaChange(str, Enum):
+    """What happened to the media media.changed names. processed: the media worker ended its poster or storyboard
+    in a state a page shows (ready, failed, unsupported): thumbnail_status or storyboard_status changed"""
+    CREATED = "created"
+    ARCHIVED = "archived"
+    RESTORED = "restored"
+    PROCESSED = "processed"
+
+
+MEDIA_CHANGES = Literal["created", "archived", "restored", "processed"]   # MediaChange (catalog test)
 
 
 class EventSpec(NamedTuple):
@@ -49,6 +73,15 @@ class EventType(str, Enum):
     ROLE_CHANGED = ("role.changed", EventSpec(1, {"role_id": int}))
     # Any change of a dictionary: to the holders of its view permission anywhere (guides: every stream)
     DICTIONARY_CHANGED = ("dictionary.changed", EventSpec(1, {"dictionary": DICTIONARIES}))
+    # The work screens (owner, 2026-11-23): at the post of the observation, to the holders of the view permission in
+    # effect there. Conflated per observation / per media.
+    # An observation created, updated (any field, its tags, a band, a disappearance), archived or restored
+    OBSERVATION_CHANGED = ("observation.changed", EventSpec(1, {"observation_id": int,
+                                                                "observation_change": OBSERVATION_CHANGES}))
+    # A media file stored (any upload transport), archived, restored, or its poster / storyboard processed.
+    # observation_id None (absent): media of old data without an observation, at the root
+    MEDIA_CHANGED = ("media.changed", EventSpec(1, {"media_id": int, "observation_id": Optional[int],
+                                                    "media_change": MEDIA_CHANGES}))
 
     def __new__(cls, code: str, spec: EventSpec):
         member = str.__new__(cls, code)
@@ -73,9 +106,9 @@ class StreamMessageType(str, Enum):
     CLOSE = "close"
 
 
-# The event each audited write of the administration publishes in the transaction of its audit row (None: no event,
-# with the reason). tests/test_event_audit_map.py keeps every event of the categories authentication, access and
-# dictionaries in this map, and tests/conftest.py (events_follow_audit) fails any committed transaction whose audit
+# The event each audited write publishes in the transaction of its audit row (None: no event, with the reason).
+# tests/test_event_admin.py and tests/test_event_data.py keep every event of the categories authentication, access,
+# dictionaries and data in this map, and tests/conftest.py (events_follow_audit) fails any committed transaction whose audit
 # row of a mapped event comes without a publish() of its type: a new audited write path cannot forget its event.
 AUDIT_EVENT_TYPES: Dict[AuditEvent, Optional[EventType]] = {
     # authentication
@@ -108,4 +141,20 @@ AUDIT_EVENT_TYPES: Dict[AuditEvent, Optional[EventType]] = {
     # dictionaries
     **{event: EventType.DICTIONARY_CHANGED for event in AuditEvent
        if event.category is AuditCategory.DICTIONARIES},
+    # data
+    AuditEvent.OBSERVATION_CREATE: EventType.OBSERVATION_CHANGED,
+    AuditEvent.OBSERVATION_UPDATE: EventType.OBSERVATION_CHANGED,
+    AuditEvent.OBSERVATION_DISAPPEAR: EventType.OBSERVATION_CHANGED,
+    AuditEvent.OBSERVATION_ARCHIVE: EventType.OBSERVATION_CHANGED,
+    AuditEvent.OBSERVATION_RESTORE: EventType.OBSERVATION_CHANGED,
+    AuditEvent.OBSERVATION_FREQUENCY_CREATE: EventType.OBSERVATION_CHANGED,
+    AuditEvent.OBSERVATION_FREQUENCY_UPDATE: EventType.OBSERVATION_CHANGED,
+    AuditEvent.OBSERVATION_FREQUENCY_ARCHIVE: EventType.OBSERVATION_CHANGED,
+    AuditEvent.OBSERVATION_FREQUENCY_RESTORE: EventType.OBSERVATION_CHANGED,
+    AuditEvent.MEDIA_CREATE: EventType.MEDIA_CHANGED,
+    AuditEvent.MEDIA_ARCHIVE: EventType.MEDIA_CHANGED,
+    AuditEvent.MEDIA_RESTORE: EventType.MEDIA_CHANGED,
+    AuditEvent.MEDIA_SHARE: None,                   # a signed link handed out: the media stays as it was
+    AuditEvent.UPLOAD_SESSION_CREATE: None,         # an upload in progress: no media yet, the completion publishes
+    AuditEvent.UPLOAD_SESSION_ABORT: None,          # no media made; an archive that cancels it publishes its own
 }

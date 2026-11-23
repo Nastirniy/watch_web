@@ -36,6 +36,8 @@ from app.backend.enums.routes import MediaRoutes
 from app.backend.utils.content_type import served_content_type
 from app.backend.api.shared.helpers.audit_helper import client_info
 from app.backend.services.audit import create_audit_log
+from app.backend.enums.events import MediaChange
+from app.backend.services.events import publish_media_changed
 from app.backend.utils.logging_config import get_api_logger
 from app.backend.config import settings
 from app.backend.api.v1.models.request.media import ListAttachedMediaRequest, ShareLinkRequest, PosterReconcileRequest
@@ -303,6 +305,10 @@ async def _set_media_archived(request: Request, session: AsyncSession, auth: Aut
         user_id=current_user.id, old_values=old_values, new_values=media_file.model_dump(),
         **client_info(request, auth),
     )
+    # Media of old data without an observation: at the root, as its audit row
+    publish_media_changed(session, media_id, media_file.observation_id,
+                          observation.post_id if observation is not None else None,
+                          MediaChange.ARCHIVED if archived else MediaChange.RESTORED)
     await session.commit()
     await session.refresh(media_file)
     return MediaFileInfo.model_validate(media_file)

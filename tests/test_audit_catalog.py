@@ -126,6 +126,7 @@ async def test_search_events_keep_action_search_with_the_singular_entity(db):
             assert f"{resource_type}.{action}" == member.code
 
 
+@pytest.mark.raw_audit_rows       # the writer alone, no write path (media.archive is mapped to media.changed)
 async def test_a_row_without_params_stores_sql_null(db):
     row = await create_audit_log(db, AuditEvent.SEARCH_TAGS, params={"result_count": 1})
     empty = await create_audit_log(db, AuditEvent.MEDIA_ARCHIVE)

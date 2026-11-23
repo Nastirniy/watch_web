@@ -33884,7 +33884,7 @@
           "EVENTS"
         ],
         "summary": "Stream Events",
-        "description": "The stream of events: a hint that something on screen changed, never data and never history. Everything works\nwithout it; refetch through the REST routes when an event says so. Any authenticated user; one stream per tab,\nread with fetch (Authorization: Bearer, Accept: text/event-stream), only over HTTP/2 (API.md).\n\nMessages (StreamMessage, discriminated by type): ready first; heartbeat about every 20 s; reload when the\nserver cannot replay from the position sent (refetch everything on screen); close with a reason before the\nserver ends the stream; domain events (move.changed, scope.changed, security.certificate_mismatch, and for the\nadministration user.changed, certificate.changed, session.changed, role.changed, dictionary.changed). A domain\nevent carries refetch_within_ms: refetch after a random wait below it, never at once.\n\nTwo ids, both opaque. The `id:` line of every block is a position: store it (heartbeats included) and send it\nback as Last-Event-ID when reconnecting; never compare or compute it. A position this server cannot answer for\n(unknown, malformed, too old, from before a restore) gives reload, never an error. The `id` in the JSON is the\nidentity of an event: ignore one already seen (delivery is at least once). Order holds within one resource only.\n\nOpening a stream and keeping it open is not activity: the session is not touched, so an idle tab still reaches\nthe idle timeout. The stream closes with token_expired at the expiry of the access token (refresh with\nX-Activity: background, then reconnect), with session_ended within 10 s of a logout, an idle end, a revocation or\nan account change (stop), and with restart when the server stops (reconnect after its retry). A right lost\nstops the events of that place within 30 s.\n\n204: events are off on this server, do not reconnect until the page reloads. 503 event_stream_capacity with\nRetry-After: this server holds as many streams as it can, it is stopping, or its event hub is not running yet\n(it is retried); back off for Retry-After at least. 429, 502, 503 and 504\nwithout a problem body come from nginx (too many streams of one certificate, the API restarting): back off by\nstatus.",
+        "description": "The stream of events: a hint that something on screen changed, never data and never history. Everything works\nwithout it; refetch through the REST routes when an event says so. Any authenticated user; one stream per tab,\nread with fetch (Authorization: Bearer, Accept: text/event-stream), only over HTTP/2 (API.md).\n\nMessages (StreamMessage, discriminated by type): ready first; heartbeat about every 20 s; reload when the\nserver cannot replay from the position sent (refetch everything on screen); close with a reason before the\nserver ends the stream; domain events (move.changed, scope.changed, security.certificate_mismatch, and for the\nadministration user.changed, certificate.changed, session.changed, role.changed, dictionary.changed, and for the\nwork screens observation.changed, media.changed). A domain event carries refetch_within_ms: refetch after a random\nwait below it, never at once.\n\nTwo ids, both opaque. The `id:` line of every block is a position: store it (heartbeats included) and send it\nback as Last-Event-ID when reconnecting; never compare or compute it. A position this server cannot answer for\n(unknown, malformed, too old, from before a restore) gives reload, never an error. The `id` in the JSON is the\nidentity of an event: ignore one already seen (delivery is at least once). Order holds within one resource only.\n\nOpening a stream and keeping it open is not activity: the session is not touched, so an idle tab still reaches\nthe idle timeout. The stream closes with token_expired at the expiry of the access token (refresh with\nX-Activity: background, then reconnect), with session_ended within 10 s of a logout, an idle end, a revocation or\nan account change (stop), and with restart when the server stops (reconnect after its retry). A right lost\nstops the events of that place within 30 s.\n\n204: events are off on this server, do not reconnect until the page reloads. 503 event_stream_capacity with\nRetry-After: this server holds as many streams as it can, it is stopping, or its event hub is not running yet\n(it is retried); back off for Retry-After at least. 429, 502, 503 and 504\nwithout a problem body come from nginx (too many streams of one certificate, the API restarting): back off by\nstatus.",
         "operationId": "stream_events",
         "security": [
           {
@@ -43031,6 +43031,88 @@
         "title": "MediaArchiveAuditParams",
         "description": "Params of media.archive (Media archived)"
       },
+      "MediaChange": {
+        "type": "string",
+        "enum": [
+          "created",
+          "archived",
+          "restored",
+          "processed"
+        ],
+        "title": "MediaChange",
+        "description": "What happened to the media media.changed names. processed: the media worker ended its poster or storyboard\nin a state a page shows (ready, failed, unsupported): thumbnail_status or storyboard_status changed"
+      },
+      "MediaChanged": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Identity of the event, for ignoring a repeat (at-least-once delivery). Opaque: never compare, compute or parse it; it may be lower than a position already seen"
+          },
+          "v": {
+            "type": "integer",
+            "title": "V",
+            "description": "Version of data for this type"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/EventScope",
+            "description": "Where it happened; absent: no place, an event for this user only or about a global object (a role, a dictionary)"
+          },
+          "refetch_within_ms": {
+            "type": "integer",
+            "title": "Refetch Within Ms",
+            "description": "Refetch what this event concerns after a random wait below this many milliseconds, never at once: the server spreads the refetches of everyone who received it. A user's own action is refetched at once by the page that made it"
+          },
+          "type": {
+            "type": "string",
+            "const": "media.changed",
+            "title": "Type"
+          },
+          "data": {
+            "$ref": "#/components/schemas/MediaChangedData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "v",
+          "occurred_at",
+          "refetch_within_ms",
+          "type",
+          "data"
+        ],
+        "title": "MediaChanged",
+        "description": "A media file was stored (multipart, nginx or resumable upload: once, at the end, never upload progress),\narchived or restored, or the media worker ended its poster or storyboard in a state a page shows (processed:\nthumbnail_status or storyboard_status is ready, failed or unsupported now). Sent to the holders of media.view in\neffect at the post of its observation (scope: the post)"
+      },
+      "MediaChangedData": {
+        "properties": {
+          "media_id": {
+            "type": "integer",
+            "title": "Media Id",
+            "description": "Read GET /media/{media_id}/info where the media is on screen; a list that does not show this id treats it as new"
+          },
+          "observation_id": {
+            "type": "integer",
+            "title": "Observation Id",
+            "description": "The observation the media belongs to: its media list (and the media_ids of GET /observations/{observation_id}) changed on created, archived and restored. Absent for media of old data without an observation (scope: the root)"
+          },
+          "media_change": {
+            "$ref": "#/components/schemas/MediaChange",
+            "description": "created (stored, by any upload), archived, restored, or processed (thumbnail_status or storyboard_status reached ready, failed or unsupported)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "media_id",
+          "media_change"
+        ],
+        "title": "MediaChangedData"
+      },
       "MediaContentTypeExtensionMismatchProblem": {
         "properties": {
           "type": {
@@ -48935,6 +49017,83 @@
         ],
         "title": "ObservationArchiveAuditParams",
         "description": "Params of observation.archive (Observation archived)"
+      },
+      "ObservationChange": {
+        "type": "string",
+        "enum": [
+          "created",
+          "updated",
+          "archived",
+          "restored"
+        ],
+        "title": "ObservationChange",
+        "description": "What happened to the observation observation.changed names (a band change, a disappearance: updated)"
+      },
+      "ObservationChanged": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Identity of the event, for ignoring a repeat (at-least-once delivery). Opaque: never compare, compute or parse it; it may be lower than a position already seen"
+          },
+          "v": {
+            "type": "integer",
+            "title": "V",
+            "description": "Version of data for this type"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/EventScope",
+            "description": "Where it happened; absent: no place, an event for this user only or about a global object (a role, a dictionary)"
+          },
+          "refetch_within_ms": {
+            "type": "integer",
+            "title": "Refetch Within Ms",
+            "description": "Refetch what this event concerns after a random wait below this many milliseconds, never at once: the server spreads the refetches of everyone who received it. A user's own action is refetched at once by the page that made it"
+          },
+          "type": {
+            "type": "string",
+            "const": "observation.changed",
+            "title": "Type"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ObservationChangedData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "v",
+          "occurred_at",
+          "refetch_within_ms",
+          "type",
+          "data"
+        ],
+        "title": "ObservationChanged",
+        "description": "An observation was created, updated (any field, its tags, a frequency band, marked as disappeared), archived or\nrestored. Sent to the holders of observation.view in effect at its post (scope: the post). An archive of the post\nor of a unit above it sends none per observation (a scope.changed tells the tree)"
+      },
+      "ObservationChangedData": {
+        "properties": {
+          "observation_id": {
+            "type": "integer",
+            "title": "Observation Id",
+            "description": "Read GET /observations/{observation_id} where the observation is on screen; a list that does not show this id treats it as new (a created may have been conflated into a later change)"
+          },
+          "observation_change": {
+            "$ref": "#/components/schemas/ObservationChange",
+            "description": "created, updated (any field, its tags, a band, a disappearance), archived or restored"
+          }
+        },
+        "type": "object",
+        "required": [
+          "observation_id",
+          "observation_change"
+        ],
+        "title": "ObservationChangedData"
       },
       "ObservationCount": {
         "properties": {
@@ -65074,6 +65233,12 @@
             "$ref": "#/components/schemas/DictionaryChanged"
           },
           {
+            "$ref": "#/components/schemas/ObservationChanged"
+          },
+          {
+            "$ref": "#/components/schemas/MediaChanged"
+          },
+          {
             "$ref": "#/components/schemas/StreamReady"
           },
           {
@@ -65098,7 +65263,9 @@
             "close": "#/components/schemas/StreamClose",
             "dictionary.changed": "#/components/schemas/DictionaryChanged",
             "heartbeat": "#/components/schemas/StreamHeartbeat",
+            "media.changed": "#/components/schemas/MediaChanged",
             "move.changed": "#/components/schemas/MoveChanged",
+            "observation.changed": "#/components/schemas/ObservationChanged",
             "ready": "#/components/schemas/StreamReady",
             "reload": "#/components/schemas/StreamReload",
             "rights_changed": "#/components/schemas/StreamRightsChanged",

@@ -28,6 +28,8 @@ from app.backend.services.units import (current_units_of_group, observation_unit
 from app.backend.auth.scope import Node
 from app.backend.enums.audit import AuditEvent
 from app.backend.services.audit import create_audit_log
+from app.backend.enums.events import ObservationChange
+from app.backend.services.events import publish_observation_changed
 from app.backend.api.v1.models.request.observations import (
     ObservationCreate,
     ObservationUpdate,
@@ -242,6 +244,7 @@ async def create_observation(
             new_values=observation_audit_values(observation),
             **audit_client
         )
+        publish_observation_changed(session, observation.id, observation_data.post_id, ObservationChange.CREATED)
         await session.commit()
         return observation.id
 
@@ -352,6 +355,7 @@ async def update_observation(
         new_values=observation_audit_values(observation),
         **client_info(request, auth)
     )
+    publish_observation_changed(session, observation.id, observation.post_id, ObservationChange.UPDATED)
     await session.commit()
 
     return await _load_observation_response(session, observation.id)
@@ -416,7 +420,7 @@ async def mark_observation_disappeared(
         new_values=observation.model_dump(),
         **client_info(request, auth)
     )
-    
+    publish_observation_changed(session, observation.id, observation.post_id, ObservationChange.UPDATED)
     await session.commit()
 
     return MessageResponse(message="Observation marked as disappeared")
@@ -590,6 +594,9 @@ async def _set_observation_archived(
         **client_info(request, auth)
     )
     cancelled = await cancel_pending_uploads(request, session, auth, pending, ErrorCode.OBSERVATION_NOT_FOUND)
+    # After the last write of the archive (the cancelled uploads): one event for the observation, none per upload
+    publish_observation_changed(session, observation.id, observation.post_id,
+                                ObservationChange.ARCHIVED if archived else ObservationChange.RESTORED)
     await session.commit()
     await remove_cancelled_parts(session, cancelled)
     logger.info(f"User {current_user.username} {action}d observation {observation.id}"
@@ -656,6 +663,7 @@ async def _audit_frequency(
         frequency: ObservationFrequency,
         old_values: Optional[dict] = None,
 ) -> None:
+    """The audit row of a band change and its observation.changed, after the change's last flush"""
     await create_audit_log(
         session, event,
         params={"observation_id": observation.id, "frequency_kind": frequency.kind},
@@ -666,6 +674,8 @@ async def _audit_frequency(
         new_values=frequency_audit_values(frequency),
         **client_info(request, auth)
     )
+    # A band is part of the observation (GET /observations/{id}): its change is an update of the observation
+    publish_observation_changed(session, observation.id, observation.post_id, ObservationChange.UPDATED)
 
 
 @router.get(

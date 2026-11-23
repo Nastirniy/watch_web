@@ -464,6 +464,8 @@ sets it. All are one union, `components["schemas"]["StreamMessage"]`, discrimina
 | `session.changed` | A login, a logout or a session ended by the server | `data.subject_user_id` |
 | `role.changed` | A role, its permissions or its state changed | `data.role_id` |
 | `dictionary.changed` | An entry of a dictionary changed | `data.dictionary`: `categories`, `signal_types`, `tags`, `media_formats`, `guides` |
+| `observation.changed` | An observation was created, updated, archived or restored (see "Observations and media" below) | `data.observation_id`, `data.observation_change`: `created`, `updated`, `archived`, `restored` |
+| `media.changed` | A media file was stored, archived, restored, or its poster or storyboard was processed | `data.media_id`, `data.observation_id`, `data.media_change`: `created`, `archived`, `restored`, `processed` |
 
 A domain event (every type but `ready`, `heartbeat`, `reload`, `rights_changed`, `close`) also carries `id`, `v`, `occurred_at`,
 `scope` (`{kind, id}`; `id` absent at the root; absent when the event has no place: an event of one user, a role, a
@@ -486,6 +488,35 @@ user, certificate, role or dictionary waits in its queue.
 | `session.changed` | A login, a logout, a session ended by an administrator, by a revocation of its certificate, by a deactivation, archive or type change, by a refresh token used again. Never a session that only went idle or expired (computed when read), never a touch | Holders of `user.view` in effect at the user's home node, and the user (their own devices) | `GET /users/{subject_user_id}/sessions`; the online state and last login of the user record |
 | `role.changed` | A role is created, cloned, updated, archived, restored or deleted permanently, or a permission is added to it or removed from it | Holders of `role.view` at any node in effect (no `scope`) | `GET /roles/{role_id}` and `/permissions` (404 after a permanent delete); assignment lists that show the role |
 | `dictionary.changed` | An entry of a dictionary is created, updated, archived or restored (a guide's files too) | `categories`, `signal_types`, `tags`, `media_formats`: holders of `category.view`, `signal_type.view`, `tag.view`, `media_format.view` at any node in effect; `guides`: every stream (reading the guides needs only a login). No `scope` | The list named, and the pickers that use it |
+
+### Observations and media
+
+The work screens that show observations or media of a post (lists, an observation with its bands and media, a media
+viewer) are built on these events plus a refetch through REST, never on polling alone. The same rules as for the
+administration: ids and enum values only, one event per operation in the transaction of the change (a refused or
+failed write sends nothing), read what it names if it is on screen after the random wait of `refetch_within_ms`.
+Both types come at the post (`scope`: `{kind: "post", id}`) and go to the holders of the view permission in effect
+there, exactly as the REST read decides (inherited from a group or the root; a grant on an archived post no longer
+counts).
+
+| Type | When | Who receives it | Refetch |
+|---|---|---|---|
+| `observation.changed` | `created`: `POST /observations/create`. `updated`: `PUT /observations/{id}` (any field, its tags), `POST /observations/{id}/disappeared`, and every band change (`/observations/{id}/frequencies`: add, update, archive, restore). `archived` / `restored`: those routes | Holders of `observation.view` in effect at the post | The observation: `GET /observations/{observation_id}`. A list: refetch the page it shows (an `archived` one leaves a list without `include_deleted`) |
+| `media.changed` | `created`: a file stored by any upload (`POST /media/upload`, `/media/nginx-upload`, the `complete` of a resumable upload), once, at the end. `archived` / `restored`: those routes. `processed`: the media worker ended a video's poster or storyboard ready, failed or unsupported (`thumbnail_status` / `storyboard_status` changed) | Holders of `media.view` in effect at the post of the media's observation; media of old data without an observation (listed nowhere): at the root, `observation_id` absent | The media: `GET /media/{media_id}/info`. On `created`, `archived`, `restored` also the media list of `observation_id` (and `media_ids` of `GET /observations/{observation_id}`, if shown) |
+
+- **Conflated per observation and per media.** While a stream is behind only the latest event of one observation or
+  one media waits in its queue, so a `created` may arrive as the `updated` (or `processed`) that followed it. A list
+  that receives an event for an id it does not show treats it as new: refetch the list, never drop the event.
+- **Coarse, never progress.** No event per chunk, per upload session (create, abort) or per percent: a page that shows
+  an upload in progress reads `GET /media/uploads/{upload_id}` as it does today. A poster that failed and waits for a
+  retry is still `pending` and sends nothing; `processing` sends nothing either.
+- **Not on events:** a share link (`POST /media/{id}/share`, nothing on the media changes), `POST
+  /media/{id}/thumbnail/regenerate` (the page that asked refetches itself; the worker's outcome comes as
+  `processed`), the observation counters (`observation-stats`: refetch
+  them on an `observation.changed` of a post on screen if the page shows them). An archive of a post or of a unit
+  above it sends no event per observation: its `scope.changed` tells the tree, and the page reloads what it shows.
+- A user's own write is refetched at once by the page that made it (its answer already holds the new state); the
+  event of it arrives too and may be skipped by `id` or refetched once more, harmless either way.
 
 ### Your own rights: `rights_changed`
 

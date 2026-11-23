@@ -6,7 +6,8 @@ other selects again), which needs no SKIP LOCKED and works on MySQL, MariaDB and
 the sqlite of the test suite. Every completion or failure is guarded by
 worker = <claimant> and status = processing, so a worker whose lease expired
 cannot overwrite a newer result. An expired claim is taken again only while
-attempts are left; fail_exhausted_storyboards fails the others.
+attempts are left; fail_exhausted_storyboards fails the others. Ready and failed (storyboard_status of the media)
+publish media.changed processed in their transaction (jobs.publish_processed).
 """
 from __future__ import annotations
 
@@ -26,7 +27,7 @@ from app.backend.config import settings
 from app.backend.enums.general import MediaType, PosterStatus, StoryboardJobStatus
 from app.backend.models.media import MediaFile
 from app.backend.models.storyboard import STORYBOARD_DIR, VideoStoryboard, storyboard_relative_dir
-from app.backend.services.media.jobs import WORKER_STOPPED_ERROR, utcnow
+from app.backend.services.media.jobs import WORKER_STOPPED_ERROR, publish_processed, utcnow
 from app.backend.services.media.storyboards import StoryboardPlan, StoryboardResult
 
 DEFAULT_BACKOFF_SECONDS = 60
@@ -87,14 +88,21 @@ async def fail_exhausted_storyboards(session: AsyncSession, now: Optional[dateti
     _claimable never takes such a row again; this records why. The worker calls it before it claims, reconcile too.
     """
     now = now or utcnow()
-    result = await session.execute(
-        update(VideoStoryboard)
-        .execution_options(synchronize_session=False)
-        .where(_expired(now), VideoStoryboard.attempts >= settings.storage.storyboard.max_attempts)
-        .values(status=StoryboardJobStatus.FAILED.value, locked_until=None, error=WORKER_STOPPED_ERROR)
-    )
+    exhausted = (_expired(now), VideoStoryboard.attempts >= settings.storage.storyboard.max_attempts)
+    # Locked first, as jobs.fail_exhausted_posters: the event names exactly the rows this update fails
+    ids = list((await session.exec(select(VideoStoryboard.media_id).where(*exhausted).with_for_update())).all())
+    count = 0
+    if ids:
+        result = await session.execute(
+            update(VideoStoryboard)
+            .execution_options(synchronize_session=False)
+            .where(VideoStoryboard.media_id.in_(ids), *exhausted)
+            .values(status=StoryboardJobStatus.FAILED.value, locked_until=None, error=WORKER_STOPPED_ERROR)
+        )
+        count = result.rowcount
+        await publish_processed(session, ids)
     await session.commit()
-    return result.rowcount
+    return count
 
 
 async def claim_next_storyboard(
@@ -191,6 +199,8 @@ async def complete_storyboard(
             sheet_count=result.sheet_count,
         )
     )
+    if outcome.rowcount == 1:
+        await publish_processed(session, [media_id])
     await session.commit()
     return outcome.rowcount == 1
 
@@ -230,6 +240,8 @@ async def fail_storyboard(
         .where(_owned(media_id, worker))
         .values(status=new_status, locked_until=locked_until, error=error[:500])
     )
+    if result.rowcount == 1 and new_status == StoryboardJobStatus.FAILED.value:
+        await publish_processed(session, [media_id])     # back to pending: a page sees nothing new
     await session.commit()
     return new_status if result.rowcount == 1 else None
 

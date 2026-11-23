@@ -26,9 +26,9 @@ from typing import Any, Dict, Iterable, Literal, Optional, Union, get_args, get_
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.backend.auth.scope import Node
+from app.backend.auth.scope import ROOT, Node
 from app.backend.config import settings
-from app.backend.enums.events import PAYLOAD_LIMIT, Dictionary, EventType
+from app.backend.enums.events import PAYLOAD_LIMIT, Dictionary, EventType, MediaChange, ObservationChange
 from app.backend.enums.general import Permissions
 from app.backend.models.outbox_event import OutboxEvent
 
@@ -69,9 +69,11 @@ def _check(event: EventType, params: dict) -> None:
         if get_origin(annotation) is Literal:
             if value not in get_args(annotation):
                 raise TypeError(f"{event.value}: {name}={value!r} is not one of {get_args(annotation)}")
-        elif annotation is int:
+        elif annotation is int or (annotation == Optional[int] and value is not None):
             if not isinstance(value, int) or isinstance(value, bool):
                 raise TypeError(f"{event.value}: {name} must be an int, not {type(value).__name__}")
+        elif annotation == Optional[int]:
+            pass                                    # None: absent from the data, never null
         else:
             raise TypeError(f"{event.value}: param {name} has a type the catalog does not allow")
 
@@ -106,7 +108,7 @@ def publish(session: AsyncSession, event: EventType, *, scope: Union[Node, Audie
     _published(session, event)
     if not settings.events.enabled:
         return
-    payload = json.dumps(params, separators=(",", ":"))
+    payload = json.dumps({name: value for name, value in params.items() if value is not None}, separators=(",", ":"))
     if len(payload) > PAYLOAD_LIMIT:      # the catalog test keeps every event below it; never reached
         raise TypeError(f"{event.value}: payload longer than {PAYLOAD_LIMIT}")
     session.add(OutboxEvent(
@@ -166,3 +168,27 @@ def publish_dictionary_changed(session: AsyncSession, dictionary: Dictionary) ->
     permission = DICTIONARY_VIEW[dictionary]
     publish(session, EventType.DICTIONARY_CHANGED, scope=HELD_ANYWHERE if permission is not None else EVERY_STREAM,
             permission=permission, conflate_key=f"dictionary:{dictionary.value}", dictionary=dictionary.value)
+
+
+# ---------------------------------------------------------------- the work screens: one event per operation
+
+def publish_observation_changed(session: AsyncSession, observation_id: int, post_id: int,
+                                change: ObservationChange) -> None:
+    """observation.changed: to observation.view in effect at the observation's post (as GET /observations/{id}
+    decides), conflated per observation. A band change and a disappearance are updated; an archive of the post or of a
+    unit above it sends none per observation (its scope.changed tells the tree)."""
+    publish(session, EventType.OBSERVATION_CHANGED, scope=Node.post(post_id), permission=Permissions.OBSERVATION_VIEW,
+            conflate_key=f"observation:{observation_id}", observation_id=observation_id,
+            observation_change=ObservationChange(change).value)
+
+
+def publish_media_changed(session: AsyncSession, media_id: int, observation_id: Optional[int],
+                          post_id: Optional[int], change: MediaChange) -> None:
+    """media.changed: to media.view in effect at the post of the media's observation, conflated per media. Never per
+    chunk or upload session: created once the file is stored (the transaction of its audit row). Media of old data
+    without an observation (observation_id and post_id None): at the root, where its audit row goes, observation_id
+    absent."""
+    scope = Node.post(post_id) if post_id is not None else ROOT
+    publish(session, EventType.MEDIA_CHANGED, scope=scope, permission=Permissions.MEDIA_VIEW,
+            conflate_key=f"media:{media_id}", media_id=media_id, observation_id=observation_id,
+            media_change=MediaChange(change).value)

@@ -125,6 +125,26 @@ test("the administration events reach onEvent with their ids, a scope only where
   handle.stop();
 });
 
+test("the events of the work screens reach onEvent with their ids and their post", async () => {
+  const data = (id, position, type, payload) => sse(position, type, {
+    id: String(id), v: 1, occurred_at: "2026-11-23T10:00:00Z", scope: { kind: "post", id: 7 }, data: payload,
+    refetch_within_ms: 0,
+  });
+  const { fetch } = server([[
+    sse(1, "ready"),
+    data(60, 2, "observation.changed", { observation_id: 4, observation_change: "created" }),
+    data(61, 3, "media.changed", { media_id: 9, observation_id: 4, media_change: "processed" }),
+  ]]);
+  const received = [];
+  const { handle } = start(fetch, { onEvent: (message) => received.push([message.type, message.data, message.scope]) });
+  await until(() => received.length === 2);
+  assert.deepEqual(received, [
+    ["observation.changed", { observation_id: 4, observation_change: "created" }, { kind: "post", id: 7 }],
+    ["media.changed", { media_id: 9, observation_id: 4, media_change: "processed" }, { kind: "post", id: 7 }],
+  ]);
+  handle.stop();
+});
+
 test("a reload refetches what is on screen", async () => {
   const { fetch } = server([[sse(1, "ready"), sse(1, "reload", { refetch_within_ms: 0 })]]);
   const { seen, handle } = start(fetch);

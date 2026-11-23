@@ -62,9 +62,12 @@ def _pem(common_name: str, serial: int) -> bytes:
 
 def test_every_audited_event_of_the_administration_is_mapped():
     administration = {AuditCategory.AUTHENTICATION, AuditCategory.ACCESS, AuditCategory.DICTIONARIES}
-    assert {event for event in AuditEvent if event.category in administration} == set(AUDIT_EVENT_TYPES)
-    assert {value for value in AUDIT_EVENT_TYPES.values() if value is not None} == ADMIN_TYPES | {
+    mapped = {event for event in AUDIT_EVENT_TYPES if event.category in administration}
+    assert {event for event in AuditEvent if event.category in administration} == mapped
+    assert {AUDIT_EVENT_TYPES[event] for event in mapped} - {None} == ADMIN_TYPES | {
         EventType.SECURITY_CERTIFICATE_MISMATCH}
+    # the work screens (data) are mapped too: tests/test_event_data.py; nothing else
+    assert {event.category for event in AUDIT_EVENT_TYPES} == administration | {AuditCategory.DATA}
 
 
 @pytest.mark.parametrize("event", sorted(ADMIN_TYPES, key=lambda e: e.value))
