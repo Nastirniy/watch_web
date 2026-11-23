@@ -114,6 +114,15 @@ def test_a_long_name_is_cut_to_the_budget_keeping_its_extension(name):
         assert decoded == name
 
 
+def test_a_long_name_keeps_an_extension_whose_lower_case_is_longer():
+    """"İ" (capital I with dot) lower-cases to two code points: the cut keeps the original extension, never a
+    character of the stem with it"""
+    name = "b" * 600 + "c.İ"
+    fallback, decoded = _names(content_disposition("attachment", name))
+    assert decoded.endswith(".İ") and set(decoded[:-2]) == {"b"}, decoded[-5:]
+    assert fallback.endswith(".I") and set(fallback[:-2]) == {"b"}, fallback[-5:]     # NFKD: I + a combining dot
+
+
 def test_a_name_inside_the_budget_is_not_cut():
     name = "\u0436" * 250 + ".md"                               # 503 bytes
     assert _names(content_disposition("attachment", name))[1] == name

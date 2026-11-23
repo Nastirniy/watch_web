@@ -5,6 +5,13 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Part 2 follow-ups
+
+### Fixed
+
+- `Content-Disposition` of a name longer than the budget whose extension changes length in lower case (`.İ`,
+  capital I with dot): the cut kept one character of the stem with the extension; it keeps the extension as written.
+
 ## Web types: response fields with a default are required
 
 ### Changed

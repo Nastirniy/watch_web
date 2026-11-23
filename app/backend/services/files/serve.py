@@ -77,8 +77,8 @@ def _cut(name: str, size: Callable[[str], int]) -> str:
     takes half the budget is not an extension worth keeping)"""
     if size(name) <= FILENAME_BYTE_BUDGET:
         return name
-    extension = extension_of(name)
-    suffix = name[len(name) - len(extension):] if extension else ""
+    # the extension as written: its lower case (extension_of) may have another length ("İ" lower-cases to two)
+    suffix = name[name.rfind("."):] if extension_of(name) else ""
     if size(suffix) > FILENAME_BYTE_BUDGET // 2:
         suffix = ""
     room, kept = FILENAME_BYTE_BUDGET - size(suffix), []
