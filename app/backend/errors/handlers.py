@@ -16,8 +16,10 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from sqlalchemy.exc import TimeoutError as PoolTimeout
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from app.backend.config import settings
 from app.backend.enums.errors import ErrorCode, ProblemType
 from app.backend.request_id import current_request_id
 from app.backend.errors.problems import PROBLEM_JSON, ApiError, about_blank_body, field_item, problem_body
@@ -83,9 +85,15 @@ async def http_error_handler(request: Request, exc: StarletteHTTPException) -> R
                            headers=_headers(exc.status_code, headers))
 
 
+# Retry-After of database_busy: the pool frees connections in milliseconds once the burst is over
+DATABASE_BUSY_RETRY_AFTER_SECONDS = 5
+
+
 class UnhandledErrorMiddleware:
     """500 internal_error for any exception the routes and the other middleware let through, logged once with
-    the error_id the body carries.
+    the error_id the body carries. One failure is not internal: no free connection of the request pool within
+    database.pool_timeout_seconds (sqlalchemy.exc.TimeoutError, an overload) is 503 database_busy with Retry-After
+    and one warning line, never a traceback.
 
     Not app.add_exception_handler(Exception): Starlette calls that handler from ServerErrorMiddleware and then
     re-raises, so the server logged every error a second time, without the error_id. This middleware answers and
@@ -112,6 +120,12 @@ class UnhandledErrorMiddleware:
             if started:
                 raise
             request = Request(scope)
+            if isinstance(exc, PoolTimeout):
+                _logger.warning(f"Database busy on {request.method} {request.url.path}: no free connection of the "
+                                f"request pool within {settings.database.pool_timeout_seconds} s")
+                await problem_response(request, ErrorCode.DATABASE_BUSY, {},
+                                       {"Retry-After": str(DATABASE_BUSY_RETRY_AFTER_SECONDS)})(scope, receive, send)
+                return
             # The request id (X-Request-ID, nginx's $request_id behind nginx): one id for the user to quote
             error_id = current_request_id() or uuid.uuid4().hex
             _logger.opt(exception=exc).error(f"Unhandled error {error_id} on {request.method} {request.url.path}: {exc!r}")

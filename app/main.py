@@ -141,7 +141,7 @@ fastapi_app = FastAPI(
     docs_url=None,
     redoc_url=None,
     # Any route may fail unexpectedly: 500 internal_error is documented once for all of them
-    responses=problems(ErrorCode.INTERNAL_ERROR),
+    responses=problems(ErrorCode.INTERNAL_ERROR, ErrorCode.DATABASE_BUSY),
     # operationId = the endpoint function name (update_post), what client generators name their functions after;
     # tests/test_openapi.py keeps them unique within a version
     generate_unique_id_function=lambda route: route.name,

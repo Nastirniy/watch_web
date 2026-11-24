@@ -58,7 +58,7 @@ async def get_engine() -> AsyncEngine:
             echo=settings.database.echo,
             pool_size=settings.database.pool_size,
             max_overflow=settings.database.max_overflow,
-            pool_timeout=30,  # Wait up to 30 seconds for a connection
+            pool_timeout=settings.database.pool_timeout_seconds,  # then 503 database_busy (errors/handlers.py)
             pool_recycle=3600,  # Recycle connections after 1 hour
             pool_pre_ping=True,  # Verify connections before use
             connect_args={

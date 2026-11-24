@@ -154,8 +154,8 @@ AUTHENTICATED = (AuthErrorCode.CREDENTIALS_REQUIRED, AuthErrorCode.INVALID_TOKEN
 GUARDED = (AccessErrorCode.PERMISSION_DENIED,)
 
 # FastAPI merges responses per status by replacement (app, version router, route): a route that declares
-# its own 500 or 422 keeps the generic member of that status
-_KEPT_IN_STATUS = {500: ErrorCode.INTERNAL_ERROR, 422: ErrorCode.VALIDATION_ERROR}
+# its own 500, 503 or 422 keeps the generic member of that status
+_KEPT_IN_STATUS = {500: ErrorCode.INTERNAL_ERROR, 503: ErrorCode.DATABASE_BUSY, 422: ErrorCode.VALIDATION_ERROR}
 
 
 def problems(*codes: ProblemType) -> Dict[int, Dict[str, Any]]:

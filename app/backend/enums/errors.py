@@ -221,6 +221,10 @@ class ErrorCode(ProblemType):
     BODY_PARSE_ERROR = ("body_parse_error", problem(400, "The request body could not be parsed"))
     INTERNAL_ERROR = ("internal_error", problem(
         500, "Internal server error", "Internal server error; quote {error_id} when reporting it", error_id=str))
+    # No free connection of the request pool within database.pool_timeout_seconds (an overload): any route, with
+    # Retry-After; the client backs off and repeats, nothing was done
+    DATABASE_BUSY = ("database_busy", problem(
+        503, "Database busy", "The server has no free database connection now; try again after Retry-After"))
     DATA_TOO_LONG = ("data_too_long", problem(422, "Data too long for one or more fields"))
     FORM_CONTENT_TYPE_REQUIRED = ("form_content_type_required", problem(
         415, "Form fields required",

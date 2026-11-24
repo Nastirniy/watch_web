@@ -187,6 +187,13 @@ The body adds `required` (`{all, any, at_root}`) and `missing` (permissions the 
 
 The body carries `error_id`, the request id of the response (`X-Request-ID`); the server log has it once, with the details. Show it to the user so a report can be matched.
 
+### Overload (503 `database_busy`)
+
+Any route may answer `503` `database_busy` with `Retry-After` (seconds) when the server had no free database
+connection within a few seconds: nothing was done. Wait at least `Retry-After` (plus a random part, so the tabs
+of many users do not come back together) and repeat; a write is safe to repeat. Show a short "busy, retrying"
+note rather than an error after the second try.
+
 ## Authorization: pages, buttons, scope
 
 Access is role assignments: a user holds a role at one node of the scope tree, the root (`/`, the whole system), a

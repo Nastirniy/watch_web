@@ -5,6 +5,17 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Overload: 503 database_busy
+
+### Added
+
+- Problem type `database_busy` (503, `Retry-After: 5`), declared on every operation (next to a route's own 503
+  too): the request found no free connection of the database pool within `database.pool_timeout_seconds`
+  (`MYSETTINGS_DATABASE__POOL_TIMEOUT_SECONDS`, default 10, was a fixed 30). Nothing was done; the client backs off
+  and repeats (API.md "Overload"). Before, such a request waited 30 s and answered 500 `internal_error` with a
+  traceback in the log; now one warning line. Measured on the test server (plan Task 14 test 5: one event, 2,000
+  refetches at once): 430 answers 500 after 30 s. The web translates the new code.
+
 ## Part 2 follow-ups
 
 ### Changed

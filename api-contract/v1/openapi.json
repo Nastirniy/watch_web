@@ -35,6 +35,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "403": {
             "description": "`health_host_not_allowed`: This host is not allowed to access the health endpoint",
             "content": {
@@ -100,6 +110,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -206,6 +226,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `invalid_refresh_token`: Invalid refresh token; `refresh_token_reused`: Refresh token used again; the session has ended; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -288,6 +318,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -393,6 +433,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -480,6 +530,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -585,6 +645,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -672,6 +742,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -1150,6 +1230,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -1277,6 +1367,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -1492,6 +1592,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -1633,6 +1743,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -1869,6 +1989,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -2025,6 +2155,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -2210,6 +2350,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -2343,6 +2493,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -2494,6 +2654,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -2667,6 +2837,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -2808,6 +2988,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -3010,6 +3200,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -3201,6 +3401,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -3342,6 +3552,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -3532,6 +3752,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -3745,6 +3975,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -3898,6 +4138,34 @@
               }
             }
           },
+          "503": {
+            "description": "`certificate_authority_not_configured`: Certificate authority not configured; `certificate_authority_unavailable`: Certificate authority unavailable; `database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CertificateAuthorityNotConfiguredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CertificateAuthorityUnavailableProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DatabaseBusyProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "certificate_authority_not_configured": "#/components/schemas/CertificateAuthorityNotConfiguredProblem",
+                      "certificate_authority_unavailable": "#/components/schemas/CertificateAuthorityUnavailableProblem",
+                      "database_busy": "#/components/schemas/DatabaseBusyProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -3989,30 +4257,6 @@
                 }
               }
             }
-          },
-          "503": {
-            "description": "`certificate_authority_not_configured`: Certificate authority not configured; `certificate_authority_unavailable`: Certificate authority unavailable",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/CertificateAuthorityNotConfiguredProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CertificateAuthorityUnavailableProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "certificate_authority_not_configured": "#/components/schemas/CertificateAuthorityNotConfiguredProblem",
-                      "certificate_authority_unavailable": "#/components/schemas/CertificateAuthorityUnavailableProblem"
-                    }
-                  }
-                }
-              }
-            }
           }
         }
       }
@@ -4069,6 +4313,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -4262,6 +4516,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -4431,6 +4695,30 @@
               }
             }
           },
+          "503": {
+            "description": "`certificate_authority_not_configured`: Certificate authority not configured; `database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CertificateAuthorityNotConfiguredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DatabaseBusyProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "certificate_authority_not_configured": "#/components/schemas/CertificateAuthorityNotConfiguredProblem",
+                      "database_busy": "#/components/schemas/DatabaseBusyProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -4570,16 +4858,6 @@
                 }
               }
             }
-          },
-          "503": {
-            "description": "`certificate_authority_not_configured`: Certificate authority not configured",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CertificateAuthorityNotConfiguredProblem"
-                }
-              }
-            }
           }
         }
       }
@@ -4653,6 +4931,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -4987,6 +5275,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -5101,6 +5399,30 @@
               }
             }
           },
+          "503": {
+            "description": "`certificate_authority_not_configured`: Certificate authority not configured; `database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CertificateAuthorityNotConfiguredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DatabaseBusyProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "certificate_authority_not_configured": "#/components/schemas/CertificateAuthorityNotConfiguredProblem",
+                      "database_busy": "#/components/schemas/DatabaseBusyProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -5151,16 +5473,6 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ValidationErrorProblem"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "`certificate_authority_not_configured`: Certificate authority not configured",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CertificateAuthorityNotConfiguredProblem"
                 }
               }
             }
@@ -5474,6 +5786,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -5593,6 +5915,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -5755,6 +6087,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -5869,6 +6211,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -6000,6 +6352,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -6192,6 +6554,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -6347,6 +6719,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -6490,6 +6872,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -6647,6 +7039,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -6812,6 +7214,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -6945,6 +7357,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -7136,6 +7558,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -7464,6 +7896,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -7579,6 +8021,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -7723,6 +8175,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -7848,6 +8310,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -7998,6 +8470,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -8126,6 +8608,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -8299,6 +8791,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -8719,6 +9221,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -8834,6 +9346,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -8988,6 +9510,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -9113,6 +9645,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -9277,6 +9819,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -9405,6 +9957,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -9716,6 +10278,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -9831,6 +10403,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -9975,6 +10557,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -10100,6 +10692,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -10250,6 +10852,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -10368,6 +10980,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -11076,6 +11698,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -11200,6 +11832,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -11401,6 +12043,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -11597,6 +12249,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -11743,6 +12405,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -11871,6 +12543,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -12028,6 +12710,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -12200,6 +12892,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -12394,6 +13096,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -12542,6 +13254,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -12723,6 +13445,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -12900,6 +13632,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -13099,6 +13841,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -13702,6 +14454,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -13821,6 +14583,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -13971,6 +14743,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -14115,6 +14897,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -14437,6 +15229,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -14619,6 +15421,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -14759,6 +15571,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -15078,6 +15900,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -15197,6 +16029,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -15353,6 +16195,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -15485,6 +16337,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -15612,6 +16474,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -15835,6 +16707,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -15978,6 +16860,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -16265,6 +17157,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -16384,6 +17286,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -16525,6 +17437,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -16652,6 +17574,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -16815,6 +17747,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -16958,6 +17900,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -17225,6 +18177,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -17784,6 +18746,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -18008,6 +18980,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -18301,6 +19283,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -18420,6 +19412,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -18585,6 +19587,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -18712,6 +19724,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -18939,6 +19961,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -19072,6 +20104,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -19645,6 +20687,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -19873,6 +20925,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -20017,6 +21079,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -20537,6 +21609,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -20647,6 +21729,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -20744,6 +21836,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -20855,6 +21957,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -20972,6 +22084,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -21191,6 +22313,16 @@
                       "media_path_unresolved": "#/components/schemas/MediaPathUnresolvedProblem"
                     }
                   }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -21476,6 +22608,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -21692,6 +22834,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -21878,6 +23030,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -22080,6 +23242,30 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy; `media_uploads_busy`: Too many concurrent uploads, try again later",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/DatabaseBusyProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MediaUploadsBusyProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "database_busy": "#/components/schemas/DatabaseBusyProblem",
+                      "media_uploads_busy": "#/components/schemas/MediaUploadsBusyProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -22269,16 +23455,6 @@
                 }
               }
             }
-          },
-          "503": {
-            "description": "`media_uploads_busy`: Too many concurrent uploads, try again later",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MediaUploadsBusyProblem"
-                }
-              }
-            }
           }
         },
         "security": [
@@ -22354,6 +23530,30 @@
                     "mapping": {
                       "internal_error": "#/components/schemas/InternalErrorProblem",
                       "media_store_failed": "#/components/schemas/MediaStoreFailedProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy; `media_uploads_busy`: Too many concurrent uploads, try again later",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/DatabaseBusyProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MediaUploadsBusyProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "database_busy": "#/components/schemas/DatabaseBusyProblem",
+                      "media_uploads_busy": "#/components/schemas/MediaUploadsBusyProblem"
                     }
                   }
                 }
@@ -22567,16 +23767,6 @@
                 }
               }
             }
-          },
-          "503": {
-            "description": "`media_uploads_busy`: Too many concurrent uploads, try again later",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MediaUploadsBusyProblem"
-                }
-              }
-            }
           }
         }
       }
@@ -22620,6 +23810,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -22818,6 +24018,30 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy; `thumbnail_renderer_unavailable`: Thumbnail renderer unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/DatabaseBusyProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ThumbnailRendererUnavailableProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "database_busy": "#/components/schemas/DatabaseBusyProblem",
+                      "thumbnail_renderer_unavailable": "#/components/schemas/ThumbnailRendererUnavailableProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -22992,16 +24216,6 @@
                 }
               }
             }
-          },
-          "503": {
-            "description": "`thumbnail_renderer_unavailable`: Thumbnail renderer unavailable",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ThumbnailRendererUnavailableProblem"
-                }
-              }
-            }
           }
         }
       }
@@ -23056,6 +24270,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -23275,6 +24499,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -23480,6 +24714,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -23699,6 +24943,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -23843,6 +25097,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -24090,6 +25354,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -24276,6 +25550,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -24570,6 +25854,30 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy; `media_uploads_busy`: Too many concurrent uploads, try again later",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/DatabaseBusyProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MediaUploadsBusyProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "database_busy": "#/components/schemas/DatabaseBusyProblem",
+                      "media_uploads_busy": "#/components/schemas/MediaUploadsBusyProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -24823,16 +26131,6 @@
                 }
               }
             }
-          },
-          "503": {
-            "description": "`media_uploads_busy`: Too many concurrent uploads, try again later",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MediaUploadsBusyProblem"
-                }
-              }
-            }
           }
         }
       }
@@ -24878,6 +26176,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -25237,6 +26545,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -25353,6 +26671,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -25506,6 +26834,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -25632,6 +26970,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -25798,6 +27146,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -25916,6 +27274,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -26644,6 +28012,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -27137,6 +28515,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -27680,6 +29068,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -28058,6 +29456,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -28337,6 +29745,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -28758,6 +30176,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -29038,6 +30466,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -29563,6 +31001,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -29868,6 +31316,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -30023,6 +31481,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -30147,6 +31615,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -30234,6 +31712,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -30339,6 +31827,34 @@
               }
             }
           },
+          "503": {
+            "description": "`backup_directory_unavailable`: Backup directory unavailable; `backups_not_configured`: Backups not configured; `database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/BackupDirectoryUnavailableProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BackupsNotConfiguredProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DatabaseBusyProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "backup_directory_unavailable": "#/components/schemas/BackupDirectoryUnavailableProblem",
+                      "backups_not_configured": "#/components/schemas/BackupsNotConfiguredProblem",
+                      "database_busy": "#/components/schemas/DatabaseBusyProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -30399,30 +31915,6 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/PermissionDeniedProblem"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "`backup_directory_unavailable`: Backup directory unavailable; `backups_not_configured`: Backups not configured",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/BackupDirectoryUnavailableProblem"
-                    },
-                    {
-                      "$ref": "#/components/schemas/BackupsNotConfiguredProblem"
-                    }
-                  ],
-                  "discriminator": {
-                    "propertyName": "code",
-                    "mapping": {
-                      "backup_directory_unavailable": "#/components/schemas/BackupDirectoryUnavailableProblem",
-                      "backups_not_configured": "#/components/schemas/BackupsNotConfiguredProblem"
-                    }
-                  }
                 }
               }
             }
@@ -31282,6 +32774,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -31400,6 +32902,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -31893,6 +33405,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -32116,6 +33638,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -32221,6 +33753,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -32373,6 +33915,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -32499,6 +34051,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -32643,6 +34205,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -32761,6 +34333,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -32917,6 +34499,16 @@
                       "media_store_failed": "#/components/schemas/MediaStoreFailedProblem"
                     }
                   }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -33185,6 +34777,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -33388,6 +34990,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -33529,6 +35141,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -33679,6 +35301,16 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -33787,6 +35419,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseBusyProblem"
                 }
               }
             }
@@ -33930,6 +35572,30 @@
               }
             }
           },
+          "503": {
+            "description": "`database_busy`: Database busy; `event_stream_capacity`: Event stream unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/DatabaseBusyProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/EventStreamCapacityProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "database_busy": "#/components/schemas/DatabaseBusyProblem",
+                      "event_stream_capacity": "#/components/schemas/EventStreamCapacityProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "401": {
             "description": "`account_deactivated`: Account deactivated; `account_deleted`: Account deleted; `account_not_found`: Account not found; `credentials_required`: Authentication credentials required; `invalid_token`: Invalid authentication token; `session_expired`: Session expired or invalidated; `token_certificate_mismatch`: Token belongs to another client certificate",
             "content": {
@@ -33986,16 +35652,6 @@
           },
           "204": {
             "description": "Events are off on this server: do not reconnect"
-          },
-          "503": {
-            "description": "`event_stream_capacity`: Event stream unavailable",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EventStreamCapacityProblem"
-                }
-              }
-            }
           }
         }
       }
@@ -39057,6 +40713,69 @@
             "status": 422,
             "title": "Data too long for one or more fields",
             "type": "https://example.org/problems/data_too_long"
+          }
+        ]
+      },
+      "DatabaseBusyProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Database busy",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 503,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "The server has no free database connection now; try again after Retry-After"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "database_busy",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code"
+        ],
+        "title": "DatabaseBusyProblem",
+        "description": "Database busy (HTTP 503). Problem type database_busy.",
+        "examples": [
+          {
+            "code": "database_busy",
+            "detail": "The server has no free database connection now; try again after Retry-After",
+            "instance": "/api/v1/...",
+            "status": 503,
+            "title": "Database busy",
+            "type": "https://example.org/problems/database_busy"
           }
         ]
       },

@@ -28,6 +28,8 @@ class DatabaseConfig(BaseModel):
     # Per process: 4 api workers x 20 plus the media worker stay under MariaDB's default max_connections 151
     pool_size: int = 10
     max_overflow: int = 10
+    # How long a request waits for a free connection; then 503 database_busy with Retry-After (errors/handlers.py)
+    pool_timeout_seconds: float = Field(default=10, ge=1)
 
     @property
     def url(self) -> str:
