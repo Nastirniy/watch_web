@@ -523,8 +523,26 @@ def _install_signal_handlers(loop: asyncio.AbstractEventLoop, worker: MediaWorke
             signal.signal(sig, lambda *_: loop.call_soon_threadsafe(worker.request_stop))
 
 
+async def check_schema_or_exit() -> Optional[int]:
+    """None when this release runs on the database's schema, else 3 after the one SCHEMA CHECK FAILED line (the
+    worker never migrates: the api does; the restart policy starts the worker again, RELEASE.md)"""
+    from app.backend.bootstrap.schema_range import SchemaOutOfRange, check_schema
+    try:
+        verdict = await check_schema("worker")
+    except SchemaOutOfRange as refused:
+        _logger.error(str(refused))
+        return 3
+    _logger.info(verdict.message)
+    return None
+
+
 async def main() -> int:
     from app.backend.database import get_session_maker, close_db
+
+    refused = await check_schema_or_exit()
+    if refused is not None:
+        await close_db()
+        return refused
 
     storage_root = Path(settings.storage.upload_path)
     if not storage_root.is_absolute():

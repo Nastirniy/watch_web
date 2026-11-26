@@ -19,6 +19,15 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - `info.version` of the OpenAPI document stays `1.0.0`: it is the contract version (`API_DOCUMENT_VERSION` in
   `app/main.py`), changed only with a new API version. The setting `app.version` is removed
   (`MYSETTINGS_APP__VERSION` is reported as an unknown setting and ignored).
+- Schema compatibility (RELEASE.md): every migration after `037_outbox_events` declares `CONTRACT = True | False`
+  (`tests/migrations/test_migration_policy.py`); a contract migration stores the oldest code head that still runs in
+  `schema_compat.min_code_head` (a one-row table without a model, created by the first contract migration). The api,
+  `migrations_manager migrate`, the media worker and `python -m app.backend.cli.schema_check` decide at start
+  (`bootstrap/schema_range.py`): on a schema newer than the code the previous release runs without migrating or
+  seeding; on a schema that admits only newer code, or (worker) a schema behind the code, the process logs one
+  `SCHEMA CHECK FAILED (<role>): ... Fix: ...` line and exits 3. The api image runs the check before uvicorn.
+- `migrations_manager migrate` now takes the api's path: schema check, the schema lock, upgrade, seeding, the start
+  checks (exit 3 on a refused schema). With `WATCH_WEB_ALEMBIC_URL` set it stays a plain alembic upgrade.
 
 ## media.changed always names its observation
 

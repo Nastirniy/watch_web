@@ -4,7 +4,9 @@ Database Migration Management Utility
 
 Usage:
     python -m app.backend.cli.migrations_manager init       - Initialize migrations (create first migration)
-    python -m app.backend.cli.migrations_manager migrate    - Apply all pending migrations
+    python -m app.backend.cli.migrations_manager migrate    - Apply all pending migrations the way the api's start
+                                                              does: schema check, schema lock, upgrade, seeding
+                                                              (exit 3 when this release must not run on the schema)
     python -m app.backend.cli.migrations_manager revision   - Create new migration from model changes
     python -m app.backend.cli.migrations_manager downgrade  - Downgrade to previous migration
     python -m app.backend.cli.migrations_manager current    - Show current migration
@@ -13,6 +15,7 @@ Usage:
 """
 
 import asyncio
+import os
 import sys
 import argparse
 from pathlib import Path
@@ -58,18 +61,31 @@ async def init_migrations():
         raise
 
 
-def migrate():
-    """Apply all pending migrations"""
-    _logger.info("Applying migrations...")
-    
-    alembic_cfg = get_alembic_config()
-    
+async def migrate_locked():
+    """The api's start without the api (bootstrap/startup.run_locked_start, role migrate): the schema check, the
+    schema lock every api worker takes, upgrade to this release's head, seeding and the start checks. A starting
+    api and this command therefore never run alembic at once (RELEASE.md, deploy step 2)."""
+    from app.backend.bootstrap.startup import run_locked_start
     try:
-        command.upgrade(alembic_cfg, "head")
+        return await run_locked_start("migrate")
+    finally:
+        await close_db()
+
+
+def migrate():
+    """Apply all pending migrations (exit 3: this release must not run on the database's schema)"""
+    if os.environ.get("WATCH_WEB_ALEMBIC_URL"):
+        # A one-off database named by URL (tests, checks; migrations/env.py): plain alembic, no schema check, lock or
+        # seeding, which work on the configured database only
+        _logger.info("WATCH_WEB_ALEMBIC_URL set: plain alembic upgrade of that database")
+        command.upgrade(get_alembic_config(), "head")
         _logger.info("Migrations applied successfully")
-    except Exception as e:
-        _logger.error(f"Failed to apply migrations: {e}")
-        raise
+        return
+    from app.backend.bootstrap.schema_range import SchemaOutOfRange
+    try:
+        asyncio.run(migrate_locked())
+    except SchemaOutOfRange:
+        sys.exit(3)  # the one line is logged already
 
 
 def create_revision(message: str = None):

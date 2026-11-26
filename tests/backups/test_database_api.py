@@ -9,7 +9,7 @@ from app.backend.config import settings
 from app.backend.enums.general import BackupLabel, PermissionLevel
 from app.backend.enums.routes import DatabaseRoutes
 from app.backend.services.backups.manifest import FORMAT_VERSION, Manifest, backup_id, write_manifest
-from app.backend.services.backups.restore import code_head
+from app.backend.utils.alembic_history import code_head
 from app.backend.auth.scope import Node
 from app.backend.enums.general import UserType
 from tests.helpers import assign, make_admin, make_role, make_user

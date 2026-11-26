@@ -20,8 +20,13 @@ from app.backend.utils.logging_config import get_database_logger
 _logger = get_database_logger()
 
 
-async def check_authorization_catalog(session: AsyncSession) -> None:
-    """RuntimeError naming every difference between the stored catalog and the code"""
+async def check_authorization_catalog(session: AsyncSession, allow_extra: bool = False) -> None:
+    """RuntimeError naming every difference between the stored catalog and the code.
+
+    allow_extra: the schema is newer than this code (a rollback by tag, bootstrap/schema_range.py) and was not seeded
+    by it: a built-in role may hold permissions a newer release added. They are logged, left as they are, and put in
+    effect by nobody that this code does not know (auth/integrity.effective_permissions). Missing ones still stop it.
+    """
     problems = []
     for name, level in (await session.exec(select(Permission.name, Permission.level))).all():
         expected = PERMISSION_LEVELS.get(name)
@@ -36,6 +41,11 @@ async def check_authorization_catalog(session: AsyncSession) -> None:
         held = set((await session.exec(
             select(Permission.name).join(RolePermission, RolePermission.permission_id == Permission.id)
             .where(RolePermission.role_id == role.id))).all())
+        extra = held - spec.permissions
+        if allow_extra and extra and role.kind == spec.kind.value and held >= spec.permissions:
+            _logger.info(f"Built-in role {key.value} holds permissions this release does not grant it: "
+                         f"{sorted(extra)} (a newer release added them; left as they are)")
+            continue
         if role.kind != spec.kind.value or held != spec.permissions:
             problems.append(f"built-in role {key.value} differs from the code (kind {role.kind}, "
                             f"{len(held ^ spec.permissions)} permissions differ)")

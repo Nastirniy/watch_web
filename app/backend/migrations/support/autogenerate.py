@@ -9,6 +9,7 @@ UNMODELLED_TABLES = frozenset({
     "builtin_roles_migration_log",  # 022: what its downgrade restores from
     "user_roles_v1",                # 023: the legacy user_roles, kept for the downgrade
     "user_post_access_v1",          # 023: the legacy user_post_access, kept for the downgrade
+    "schema_compat",                # the schema contract's min_code_head (support/compat.py), no model
 })
 
 

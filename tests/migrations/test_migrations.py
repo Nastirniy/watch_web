@@ -332,6 +332,9 @@ def test_autogenerate_leaves_out_the_tables_the_migrations_own(tmp_path):
     conn = sqlite3.connect(db_file)   # a fresh install never had user_roles; an upgraded database keeps it as *_v1
     conn.execute("create table user_roles_v1 (id integer primary key, user_id integer not null,"
                  " role_id integer not null, assigned_at datetime not null)")
+    # the first contract migration creates it (migrations/support/compat.py)
+    conn.execute("create table schema_compat (id integer primary key, min_code_head varchar(64) not null,"
+                 " updated_at datetime not null)")
     conn.commit()
     conn.close()
     engine = create_engine(f"sqlite:///{db_file.as_posix()}")

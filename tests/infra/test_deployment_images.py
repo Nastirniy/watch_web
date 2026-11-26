@@ -81,7 +81,7 @@ def test_graceful_stop_values():
     """Q1.3 a: uvicorn is PID 1 (exec) and ends open requests within 25 s, below the api's 30 s grace; the worker
     gives back its claims within 90 s"""
     cmd = json.loads(re.search(r"^CMD (\[.*\])$", DOCKERFILE, re.M).group(1))
-    assert cmd[:2] == ["sh", "-c"] and cmd[2].startswith("exec python -m uvicorn ")
+    assert cmd[:2] == ["sh", "-c"] and " && exec python -m uvicorn " in cmd[2]
     graceful = int(re.search(r"--timeout-graceful-shutdown (\d+)", cmd[2]).group(1))
     main = services("docker-compose.yml")
     assert graceful == 25

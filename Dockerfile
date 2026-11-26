@@ -76,4 +76,7 @@ EXPOSE 8000
 # asyncio then leaves TCP_NODELAY off on accepted sockets, so every response waited for a delayed ACK (about 40 ms).
 # --timeout-graceful-shutdown: a stop waits at most 25 s for open requests (stop_grace_period in docker-compose.yml
 # is 30 s); without it uvicorn waits for them for ever and Docker kills the process.
-CMD ["sh", "-c", "exec python -m uvicorn app.main:fastapi_app --host \"$MYSETTINGS_SERVER__HOST\" --port \"$MYSETTINGS_SERVER__PORT\" --workers \"$MYSETTINGS_SERVER__WORKERS\" --proxy-headers --timeout-graceful-shutdown 25"]
+# The schema check first (RELEASE.md): with --workers uvicorn restarts a worker whose start failed, for ever, so a
+# release that must not run on the database's schema would never exit. The check prints its one line and exits 3;
+# Docker's restart policy tries again with a growing delay. uvicorn is then exec'd: PID 1, it gets SIGTERM itself.
+CMD ["sh", "-c", "python -m app.backend.cli.schema_check check --role api && exec python -m uvicorn app.main:fastapi_app --host \"$MYSETTINGS_SERVER__HOST\" --port \"$MYSETTINGS_SERVER__PORT\" --workers \"$MYSETTINGS_SERVER__WORKERS\" --proxy-headers --timeout-graceful-shutdown 25"]

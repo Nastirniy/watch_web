@@ -49,7 +49,7 @@ def edge(tmp_path):
     """A fresh radio_monitoring_edge from the models, stamped at the head, a few rows; dropped afterwards"""
     import app.backend.models  # noqa: F401
     from app.backend.config import settings
-    from app.backend.services.backups.restore import code_head
+    from app.backend.utils.alembic_history import code_head
     server = _engine(settings.database.name)
     with server.begin() as conn:
         for schema in conn.execute(sa.text("SHOW DATABASES LIKE 'radio\\_monitoring\\_edge%'")).scalars():

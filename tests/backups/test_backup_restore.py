@@ -14,9 +14,10 @@ from app.backend.services.backups.failures import BackupFailure
 from app.backend.services.backups.locking import writer_lock
 from app.backend.services.backups.manifest import FORMAT_VERSION, Manifest, backup_id, write_manifest
 from app.backend.services.backups.restore import (
-    RestoreRefused, code_head, known_revisions, plan_restore, prune_kept_schemas, restore_backup, undo_restore,
+    RestoreRefused, plan_restore, prune_kept_schemas, restore_backup, undo_restore,
     verify_backup,
 )
+from app.backend.utils.alembic_history import code_head, known_revisions
 from app.backend.services.backups.schemas import KeptSchema, kept_name, parse_kept, raise_statements, rename_statement
 
 UTC = timezone.utc

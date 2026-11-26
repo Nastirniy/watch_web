@@ -21,7 +21,6 @@ import time
 import zlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Optional, Protocol
 
@@ -40,6 +39,7 @@ from app.backend.services.backups.client_tools import ClientTools, child_env, de
 from app.backend.services.backups.failures import BackupFailure
 from app.backend.services.backups.locking import writer_lock
 from app.backend.services.backups.manifest import Manifest, ManifestError, read_manifest, require_dump
+from app.backend.utils.alembic_history import known_revisions
 from app.backend.services.backups.schemas import (
     AUTO_INCREMENTS, LIST_TABLES, OTHER_CONNECTIONS, SCHEMA_CHARSET, SCHEMA_SIZE, UNSUPPORTED_OBJECTS, KeptSchema,
     is_droppable,
@@ -47,7 +47,6 @@ from app.backend.services.backups.schemas import (
     staging_name, verify_name,
 )
 
-ALEMBIC_INI = Path(__file__).resolve().parents[4] / "alembic.ini"
 # A line of a dump that would leave the schema it is loaded into, or run a client command (shell, files, another
 # connection). mariadb-dump never writes one for a single database (values are escaped onto one line), so such a
 # line means a dump made with --databases or by hand: the load stops (unsafe_dump)
@@ -120,13 +119,6 @@ class RestoreBackend(Protocol):
     def kept_schemas(self, db: str) -> list[KeptSchema]: ...
 
 
-@lru_cache(maxsize=1)
-def _script():
-    from alembic.config import Config
-    from alembic.script import ScriptDirectory
-    return ScriptDirectory.from_config(Config(str(ALEMBIC_INI)))
-
-
 def unsafe_statement(text: str) -> Optional[str]:
     """The first line of text that would leave the staging schema or run a client command, None when there is none"""
     match = _UNSAFE.search(text)
@@ -160,14 +152,6 @@ class _CheckedLines:
         if self.unsafe is None and lines:
             self.unsafe = unsafe_statement(lines.decode("utf-8", errors="replace"))
         return b"" if self.unsafe is not None else lines
-
-
-def known_revisions() -> set[str]:
-    return {revision.revision for revision in _script().walk_revisions()}
-
-
-def code_head() -> str:
-    return _script().get_current_head()
 
 
 def sync_engine(db: DatabaseConfig) -> sa.Engine:

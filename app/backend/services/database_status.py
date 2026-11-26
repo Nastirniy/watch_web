@@ -9,7 +9,7 @@ from typing import Optional
 import sqlalchemy as sa
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.backend.services.backups.restore import code_head
+from app.backend.utils.alembic_history import code_head
 
 TABLES = sa.text(
     "SELECT TABLE_NAME, TABLE_ROWS, DATA_LENGTH, INDEX_LENGTH FROM information_schema.TABLES "

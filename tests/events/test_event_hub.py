@@ -617,3 +617,29 @@ async def test_what_a_departed_user_leaves_is_dropped_once_the_ring_moved_past_i
         await hub.tick()
     await hub.refresh_rights()
     assert hub._departed == {} and hub._told_at == {}
+
+
+# ---------------------------------------------------------------- rows of a newer release (rollback by tag)
+
+async def test_old_hub_forwards_a_row_of_an_unknown_type(engine, db, events_on):
+    """After a rollback the previous release reads rows the newer one wrote (RELEASE.md): a type it does not know is
+    passed on as it is, a permission it does not know is held by nobody, so that row reaches only its user_id"""
+    from app.backend.api.v1.models.response.events import render_v1
+    from app.backend.models.outbox_event import OutboxEvent
+    hub = await hub_of(engine)
+    holder = hub.attach(auth_of(1, grant(ROOT, P.POST_VIEW)), later(), None)
+    other = hub.attach(auth_of(2, grant(ROOT, P.POST_VIEW)), later(), None)
+    db.add(OutboxEvent(type="future.changed", v=1, scope_key="root", permission=P.POST_VIEW.value,
+                       payload=json.dumps({"future_id": 5})))
+    db.add(OutboxEvent(type="future.personal", v=1, scope_key="root", permission="future.view", user_id=2,
+                       payload=json.dumps({"future_id": 6})))
+    await db.commit()
+    assert await hub.tick() == 2
+    assert [(event, data.get("future_id")) for _, _, event, data in queued(holder)] == [
+        ("ready", None), ("future.changed", 5)]
+    assert [(event, data.get("future_id")) for _, _, event, data in queued(other)] == [
+        ("ready", None), ("future.changed", 5), ("future.personal", 6)]
+    row = OutboxEvent(id=1, type="future.changed", v=1, scope_key="root", permission=P.POST_VIEW.value,
+                      occurred_at=datetime(2026, 11, 26, 12, 0, 0),
+                      payload=json.dumps({"future_id": 5}))
+    assert b"event: future.changed" in render_v1.event(row, 0), "the v1 renderer copies an unknown type"

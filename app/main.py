@@ -7,6 +7,7 @@ from app.backend.utils.logging_config import setup_logging, get_logger, get_main
 from app.backend.bootstrap.backups import check_backup_config
 from app.backend.bootstrap.deployment import check_deployment
 from app.backend.bootstrap.pki import check_pki_settings, publish_crl_at_startup
+from app.backend.bootstrap.schema_range import SchemaOutOfRange
 from app.backend.bootstrap.startup import initialize_database_with_migrations
 from app.backend.errors.handlers import register_error_handlers
 from app.backend.request_id import RequestIdMiddleware
@@ -127,6 +128,8 @@ async def lifespan(app: FastAPI):
         yield
         _logger.info("Shutting down application...")
         await stop_event_hub(app)
+    except SchemaOutOfRange:
+        raise  # its one line is logged already (bootstrap/startup.py); a traceback would only bury it
     except Exception as e:
         _logger.error(f"Startup failed: {e}")
         import traceback

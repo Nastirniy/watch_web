@@ -1,8 +1,13 @@
-"""Startup of the API: migrate and seed once, serialised across the uvicorn workers."""
+"""Startup of the API: schema check, migrate and seed once, serialised across the uvicorn workers."""
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
 from sqlalchemy import text
 
+from app.backend.bootstrap.schema_range import Role, SchemaOutOfRange, SchemaVerdict, check_schema
 from app.backend.bootstrap.seed import seed_database
-from app.backend.database import create_database_if_not_exists, get_engine
+from app.backend.database import create_database_if_not_exists, get_engine, get_session_maker
+from app.backend.utils.alembic_history import ALEMBIC_INI
 from app.backend.utils.logging_config import get_database_logger
 
 _logger = get_database_logger()
@@ -72,60 +77,67 @@ class _SchemaLock:
             _logger.info("Schema lock released")
 
 
-async def initialize_database_with_migrations():
-    """Initialize database using migrations and then seed data, serialised across processes"""
-    await create_database_if_not_exists()
-    async with _SchemaLock():
-        await _migrate_and_seed()
-
-
-async def _migrate_and_seed():
-    import asyncio
-    from concurrent.futures import ThreadPoolExecutor
-    from alembic.config import Config
+def run_alembic_upgrade() -> None:
+    """alembic upgrade head of this code (blocking; run in a thread)"""
     from alembic import command
+    from alembic.config import Config
+    command.upgrade(Config(str(ALEMBIC_INI)), "head")
 
-    _logger.info("Initializing database with migrations...")
 
+async def initialize_database_with_migrations():
+    """The start of the api: schema check, then migrate and seed once, serialised across processes"""
+    await run_locked_start("api")
+
+
+async def run_locked_start(role: Role) -> SchemaVerdict:
+    """Schema check (bootstrap/schema_range.py) before the lock, again inside it (another process may have migrated
+    while this one waited), then what the verdict allows: upgrade, seeding, the start checks. Shared by the api's
+    lifespan and `migrations_manager migrate`, so the two never run alembic at once. SchemaOutOfRange: the one line
+    is logged and raised."""
+    await create_database_if_not_exists()
+    engine = await get_engine()
+    await _checked(role, engine)
+    async with _SchemaLock():
+        verdict = await _checked(role, engine)
+        _logger.info(verdict.message)
+        try:
+            if verdict.migrate:
+                # A migration that fails stops the startup: no create_all fallback, which would create the missing
+                # tables only and leave the schema half migrated (CLAUDE.md, "Database Migrations")
+                loop = asyncio.get_running_loop()
+                with ThreadPoolExecutor() as executor:
+                    await loop.run_in_executor(executor, run_alembic_upgrade)
+                _logger.info("Migrations applied successfully")
+                await seed_database()
+            await _check_unit_structure()
+            await _check_authorization(newer_schema=not verdict.known)
+            _logger.info("Database initialization completed successfully")
+        except Exception as e:
+            _logger.error(f"Failed to initialize database: {e}")
+            raise
+    return verdict
+
+
+async def _checked(role: Role, engine) -> SchemaVerdict:
     try:
-
-        # A migration that fails stops the startup: no create_all fallback, which would create the missing
-        # tables only and leave the schema half migrated (CLAUDE.md, "Database Migrations")
-        def run_migrations():
-            from pathlib import Path
-            project_root = Path(__file__).resolve().parents[3]  # where alembic.ini is
-            command.upgrade(Config(str(project_root / "alembic.ini")), "head")
-
-        # Run migrations in a thread to avoid event loop issues
-        loop = asyncio.get_running_loop()
-        with ThreadPoolExecutor() as executor:
-            await loop.run_in_executor(executor, run_migrations)
-        _logger.info("Migrations applied successfully")
-        
-        # Always seed initial data
-        await seed_database()
-        await _check_unit_structure()
-        await _check_authorization()
-        _logger.info("Database initialization completed successfully")
-        
-    except Exception as e:
-        _logger.error(f"Failed to initialize database: {e}")
+        return await check_schema(role, engine)
+    except SchemaOutOfRange as refused:
+        _logger.error(str(refused))
         raise
 
 
-async def _check_authorization():
+async def _check_authorization(newer_schema: bool = False):
     """Permission levels or built-in roles out of step with the code stop the start; grants that leave permissions
-    out and a missing system administrator are logged (bootstrap/authorization.py)"""
+    out and a missing system administrator are logged (bootstrap/authorization.py). On a schema newer than this
+    code (no seeding), built-in roles may hold permissions a newer release added."""
     from app.backend.bootstrap.authorization import check_authorization_catalog, log_authorization_report
-    from app.backend.database import get_session_maker
     async with (await get_session_maker())() as session:
-        await check_authorization_catalog(session)
+        await check_authorization_catalog(session, allow_extra=newer_schema)
         await log_authorization_report(session)
 
 
 async def _check_unit_structure():
     """A corps or brigade in the wrong place stops the start (bootstrap/structure.py)"""
     from app.backend.bootstrap.structure import check_unit_structure
-    from app.backend.database import get_session_maker
     async with (await get_session_maker())() as session:
         await check_unit_structure(session)
