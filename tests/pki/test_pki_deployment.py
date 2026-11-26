@@ -26,7 +26,7 @@ def test_signer_has_no_network_and_its_own_env():
     assert signer["network_mode"] == "none"
     assert signer["env_file"] == "signer.env"
     assert signer["command"][-1] == "serve"
-    assert signer["image"] == "watch-web"
+    assert signer["image"] == "watch-web:${WATCH_WEB_TAG:?set WATCH_WEB_TAG in .env (see RELEASE.md)}"
     assert signer["pull_policy"] == "never"
     assert "PKI_SIGNER_UID" in signer["user"]
     assert signer["restart"] == "unless-stopped"

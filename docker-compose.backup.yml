@@ -16,8 +16,9 @@
 
 services:
   db-backup:
-    image: watch-web
-    # built by the api service (or loaded with `docker load` on air-gapped servers): never pulled from a registry
+    # the one release image of every watch-web service (RELEASE.md): never built or pulled by compose. Restoring a
+    # backup a newer release took: WATCH_WEB_TAG=<that release> docker compose run --rm db-backup restore <id>
+    image: watch-web:${WATCH_WEB_TAG:?set WATCH_WEB_TAG in .env (see RELEASE.md)}
     pull_policy: never
     profiles: ["tools"]
     network_mode: host

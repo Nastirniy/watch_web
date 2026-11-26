@@ -17,7 +17,8 @@ SYSTEMD = ROOT / "deploy" / "systemd"
 def test_tool_service_only_on_demand():
     tool = BACKUP["db-backup"]
     assert tool["profiles"] == ["tools"]
-    assert tool["image"] == "watch-web" and tool["pull_policy"] == "never"
+    assert tool["image"] == "watch-web:${WATCH_WEB_TAG:?set WATCH_WEB_TAG in .env (see RELEASE.md)}"
+    assert tool["pull_policy"] == "never"
     assert tool["network_mode"] == "host"
     assert "ports" not in tool and "restart" not in tool
     assert tool["entrypoint"][-1] == "app.backend.cli.db_backup"

@@ -499,7 +499,7 @@ no stream by itself (it checks the protocol).
 `tests/docker/compose.test.yml` runs the whole pipeline on a developer machine, including Docker Desktop on Windows: MySQL and nginx are containers there too (a bridge network, not the production layout), but the media path, the real locations and proxy headers (`nginx-app.conf`, `nginx-proxy.conf`) and the uid handling are the same as in production. Only the server block differs (`tests/docker/nginx-server.test.conf`: plain http, no client certificates, the API in development mode).
 
 ```bash
-docker build -t watch-web .
+docker build -t watch-web:e2e .
 docker compose -f tests/docker/compose.test.yml up -d
 venv/Scripts/python tests/docker/e2e.py        # login, uploads, cache MISS/HIT, signed URLs, worker, Range
 venv/Scripts/python tests/docker/formats.py    # every accepted image and video format, rotation, odd sizes, broken files

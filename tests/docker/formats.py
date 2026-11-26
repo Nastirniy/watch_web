@@ -1,6 +1,6 @@
 """Format matrix against the compose.test.yml stack: every accepted image, video and audio format through nginx.
 
-    docker build -t watch-web .
+    docker build -t watch-web:e2e .
     docker compose -f tests/docker/compose.test.yml up -d
     venv/Scripts/python tests/docker/formats.py
     docker compose -f tests/docker/compose.test.yml down -v

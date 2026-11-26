@@ -2,7 +2,7 @@
 # here MySQL and nginx also run as containers on a bridge network so the whole pipeline can be
 # exercised on a developer machine, including Docker Desktop on Windows.
 #
-#   docker build -t watch-web .
+#   docker build -t watch-web:e2e .
 #   docker compose -f tests/docker/compose.test.yml up -d
 #   venv/Scripts/python tests/docker/e2e.py
 #   venv/Scripts/python tests/docker/formats.py      # every accepted image and video format, edge cases
@@ -40,7 +40,7 @@ x-app-env: &app-env
   MYSETTINGS_EVENTS__ENABLED: "true"           # e2e.py: a stream through nginx, an event, a replay
 
 x-app: &app
-  image: watch-web
+  image: watch-web:${WATCH_WEB_TAG:-e2e}
   user: "101:101"          # nginx worker uid in the nginx image; files must cross between nginx and the API
 
 services:
@@ -128,7 +128,7 @@ services:
     stop_grace_period: 30s
 
   imgproxy:
-    image: ghcr.io/imgproxy/imgproxy:v3
+    image: ${IMGPROXY_IMAGE:-ghcr.io/imgproxy/imgproxy:v3.31.4}
     user: "101:101"
     environment:
       IMGPROXY_BIND: ":8080"

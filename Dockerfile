@@ -1,11 +1,17 @@
 # Application image for both the API and the media worker.
 #
-#   docker build -t watch-web .
-#   API:    docker run watch-web                       (default command)
-#   worker: docker run watch-web python -m app.backend.workers.media_worker
+#   deploy/release.sh build                            (the release image watch-web:<tag>, RELEASE.md)
+#   docker build -t watch-web:e2e .                    (the e2e stack, tests/docker/compose.test.yml)
+#   API:    docker run watch-web:<tag>                 (default command)
+#   worker: docker run watch-web:<tag> python -m app.backend.workers.media_worker
 #
 # imgproxy (thumbnail rendering) is a separate official image, see docker-compose.yml.
-FROM python:3.13-slim
+
+# The base image, pinned by the digest of its multi-platform index (python:3.13-slim on 2026-11-26). To move to a
+# newer base: docker pull python:3.13-slim, then docker image inspect python:3.13-slim --format
+# '{{index .RepoDigests 0}}', put the digest here and commit (RELEASE.md, "Release rules for developers").
+ARG PYTHON_BASE_IMAGE=python:3.13-slim@sha256:7249d5587b78209a006dc4a3b5340678f84ea729239193aa559962cd8c1fce50
+FROM ${PYTHON_BASE_IMAGE}
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

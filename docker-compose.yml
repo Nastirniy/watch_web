@@ -12,18 +12,25 @@
 # Docker Desktop or hosts where host networking is not wanted.
 #
 #   cp .env.example .env            # database, secret key, imgproxy key/salt, MEDIA_ROOT, MEDIA_UID/GID
-#   docker compose up -d --build
+#   deploy/release.sh build         # on a machine with the source and internet: builds watch-web:<tag>
+#   deploy/release.sh deploy <tag>  # on the server: backup, migrate, WATCH_WEB_TAG in .env, up -d (RELEASE.md)
+#
+# Releases (RELEASE.md): every watch-web service runs the ONE image watch-web:${WATCH_WEB_TAG}, a tag
+# <YYYY.MM.DD>-<sha7> per commit. Compose never builds or pulls it (pull_policy: never, no build:): an image is made
+# by deploy/release.sh build and brought to the server with docker load. imgproxy is pinned in .env (IMGPROXY_IMAGE,
+# IMGPROXY_IMAGE_ID, checked by release.sh).
 #
 # PKI client certificates (signer container, API mounts): docker-compose.pki.yml, enabled through COMPOSE_FILE in
 # .env (see .env.example and PKI.md). Without it this file runs as it is.
 # Database backups (db-backup tool service, read-only mounts on the API): docker-compose.backup.yml and, for an
 # off-host copy, docker-compose.backup-copy.yml, also through COMPOSE_FILE (BACKUPS.md).
 #
-# Air-gapped servers: `docker save watch-web ghcr.io/imgproxy/imgproxy:v3 | gzip > images.tgz`, then `docker load`.
+# Air-gapped servers: `deploy/release.sh save <tag> images.tgz` on the build machine, `deploy/release.sh load
+# images.tgz` on the server (RELEASE.md, "Move images to an air-gapped server").
 
 x-app: &app
-  image: watch-web
-  build: .
+  image: watch-web:${WATCH_WEB_TAG:?set WATCH_WEB_TAG in .env (see RELEASE.md)}
+  pull_policy: never
   env_file: .env
   network_mode: host
   # Run as the owner of MEDIA_ROOT so files written by the containers stay readable by host nginx
@@ -89,8 +96,26 @@ services:
           memory: ${WORKER_MEMORY_LIMIT:-1g}
     stop_grace_period: 90s
 
+  # One-off: migrate the database with the release in WATCH_WEB_TAG, under the api's schema lock, then exit.
+  # deploy/release.sh deploy runs it with the NEW tag while the old services keep serving (RELEASE.md):
+  #   WATCH_WEB_TAG=<tag> docker compose run --rm -T migrate
+  # The api still migrates at its start too; both take the same lock, so they never run alembic at once.
+  migrate:
+    image: watch-web:${WATCH_WEB_TAG:?set WATCH_WEB_TAG in .env (see RELEASE.md)}
+    pull_policy: never
+    profiles: ["tools"]
+    env_file: .env
+    network_mode: host
+    user: "${MEDIA_UID:-10001}:${MEDIA_GID:-10001}"
+    entrypoint: ["python", "-m", "app.backend.cli.migrations_manager", "migrate"]
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "5" }
+
   imgproxy:
-    image: ghcr.io/imgproxy/imgproxy:v3
+    # Pinned in .env: the exact version tag (ghcr.io/imgproxy/imgproxy:v3.31.4), with @sha256:<digest> where the
+    # server's image store resolves it after docker load; release.sh compares the image id with IMGPROXY_IMAGE_ID
+    image: ${IMGPROXY_IMAGE:?set IMGPROXY_IMAGE in .env (see RELEASE.md)}
     network_mode: host
     user: "${MEDIA_UID:-10001}:${MEDIA_GID:-10001}"
     environment:

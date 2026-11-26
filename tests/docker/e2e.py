@@ -1,6 +1,6 @@
 """End-to-end check of the media pipeline against the compose.test.yml stack.
 
-    docker build -t watch-web .
+    docker build -t watch-web:e2e .
     docker compose -f tests/docker/compose.test.yml up -d
     venv/Scripts/python tests/docker/e2e.py
     docker compose -f tests/docker/compose.test.yml down -v
