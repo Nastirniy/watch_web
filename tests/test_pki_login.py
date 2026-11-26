@@ -56,7 +56,8 @@ async def _login(client, cert: x509.Certificate) -> dict:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("serial", [0x0A1B2C, 0x01, 0x1000, x509.random_serial_number()])
+# A fixed 159-bit serial like the profile makes (pytest-xdist: every worker must collect the same parameters)
+@pytest.mark.parametrize("serial", [0x0A1B2C, 0x01, 0x1000, 0x3A0F5C2E7B19D4486A2B0C9E1F7D3A5B6C8E0F12])
 async def test_login_with_the_serial_as_nginx_writes_it(client, db, headers, production, serial):
     """nginx sends 0x0A1B2C as "0A1B2C", the certificate upload stored "a1b2c": the login matches both forms"""
     cert = make_certificate("cn-serial", serial)
