@@ -16,7 +16,7 @@ from fastapi.routing import APIRoute
 from loguru import logger
 
 from app.backend.enums.general import RevocationReason
-from app.backend.enums.routes import SignerRoutes
+from app.backend.enums.routes import SIGNER_PROTOCOL_HEADER, SignerProtocol, SignerRoutes
 from app.backend.pki.authority import CaCheckError, sha256_fingerprint
 from app.backend.signer.__main__ import bind_unix_socket, main
 from app.backend.signer.app import create_app
@@ -54,14 +54,17 @@ def settings_for(tmp_path, **extra) -> SignerSettings:
 @pytest.fixture
 async def signer(tmp_path):
     app = create_app(settings_for(tmp_path))
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://signer") as client:
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://signer",
+                                 headers={SIGNER_PROTOCOL_HEADER: str(SignerProtocol.V1.value)}) as client:
         yield client
 
 
 async def test_sign_client_uses_the_fixed_profile(signer):
     body = {**valid_body(), "extensions": [{"oid": "2.5.29.19", "ca": True}],
             "issuer": "CN=Evil", "subject": "CN=bank.example"}
-    r = await signer.post(SignerRoutes.SIGN_CLIENT.value, json=body)
+    assert (await signer.post(SignerRoutes.SIGN_CLIENT.value, json=body)).status_code == 422, \
+        "a name or an extension in the request is refused"
+    r = await signer.post(SignerRoutes.SIGN_CLIENT.value, json=valid_body())
     assert r.status_code == 200
     cert = x509.load_pem_x509_certificate(r.json()["certificate_pem"].encode())
     assert cert.issuer == client_ca()[0].subject and r.json()["serial"] == format(cert.serial_number, "x")

@@ -8,7 +8,7 @@ import sys
 
 import httpx
 
-from app.backend.enums.routes import SignerRoutes
+from app.backend.enums.routes import SIGNER_PROTOCOL_HEADER, SignerProtocol, SignerRoutes
 
 TIMEOUT_SECONDS = 5
 
@@ -20,7 +20,8 @@ def _transport() -> httpx.BaseTransport:
 def main() -> int:
     try:
         with httpx.Client(transport=_transport(), base_url="http://signer", timeout=TIMEOUT_SECONDS) as client:
-            response = client.get(SignerRoutes.HEALTH.value)
+            response = client.get(SignerRoutes.HEALTH.value,
+                                  headers={SIGNER_PROTOCOL_HEADER: str(SignerProtocol.V1.value)})
     except (httpx.HTTPError, OSError) as exc:
         print(f"signer health: no answer ({type(exc).__name__})", file=sys.stderr)
         return 1

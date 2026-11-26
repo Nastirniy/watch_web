@@ -8,7 +8,7 @@
   (V1.path(DocsRoutes.OPENAPI_JSON) is /api/v1/openapi.json); every version serves its own.
 - SystemRoutes: outside any version, the values are full paths.
 """
-from enum import Enum
+from enum import Enum, IntEnum
 
 
 class APIVersionRoutes(str, Enum):
@@ -418,3 +418,13 @@ class Routes:
     DATABASE = DatabaseRoutes
     AUDIT = AuditRoutes
     EVENTS = EventRoutes
+
+
+# The protocol between the api and the signer (services/signer_client.py, signer/app.py): every request names its
+# version in this header; the signer refuses a missing or unknown one (409 protocol_unsupported). api and
+# pki-signer run one release tag (RELEASE.md); a new version is a new member, kept while releases speak it.
+SIGNER_PROTOCOL_HEADER = "X-Signer-Protocol"
+
+
+class SignerProtocol(IntEnum):
+    V1 = 1

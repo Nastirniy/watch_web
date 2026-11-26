@@ -37,6 +37,12 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   on an alive file it touches after every heartbeat (`app/backend/workers/alive.py`), the signer on `GET /health`
   over its socket (`app/backend/signer/health.py`); both run only where the image has the module, so a rollback to
   an older image is not reported unhealthy.
+- Signer protocol: every request of the api to pki-signer sends `X-Signer-Protocol: 1`; the signer refuses a
+  missing or other version with 409 `{"reason": "protocol_unsupported", "supported": [1]}` and lists `protocols`
+  in its `/health`; its request bodies refuse unknown fields (422). The api maps the refusal to 503
+  `certificate_authority_unavailable` with one log line naming both versions. `python -m app.backend.signer check`
+  (and the container's health check) asks the signer's `/health` over its socket. A deployment always runs one
+  release for both (RELEASE.md); a mismatch means a container was started by hand.
 - `migrations_manager migrate` now takes the api's path: schema check, the schema lock, upgrade, seeding, the start
   checks (exit 3 on a refused schema). With `WATCH_WEB_ALEMBIC_URL` set it stays a plain alembic upgrade.
 

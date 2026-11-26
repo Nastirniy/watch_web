@@ -157,7 +157,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     sign.add_argument("--out", required=True)
     sign.add_argument("--number", type=int, default=1)
     sign.add_argument("--serial", nargs="*", default=[], help="hex serials to list as revoked")
+    commands.add_parser("check", help="exit 0 when the signer on SIGNER_SOCKET_PATH answers (signer/health.py)")
     args = parser.parse_args(argv)
+    if args.command == "check":
+        from app.backend.signer import health
+        return health.main()
     if args.command == "serve":
         return _serve()
     if args.command == "init":

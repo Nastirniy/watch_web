@@ -333,6 +333,7 @@ Every error of release.sh is one line on stderr: `release.sh: <what failed>. Fix
 | `SCHEMA CHECK FAILED (api): the database is at R, which release T (code head H) does not know, and the database admits only code at M or newer.` (api log, container restarting) | an older release started on a contract schema | `deploy/release.sh deploy <newer tag>` or restore the pre-upgrade backup |
 | `SCHEMA CHECK FAILED (worker): the database is at R, release T needs H.` | worker started before the api migrated | wait; it retries. If it stays: `docker compose up -d api` |
 | `SCHEMA CHECK FAILED (api): the database is unreachable` | MariaDB down or wrong credentials | start MariaDB; check `.env` |
+| `Signer protocol mismatch: the api speaks 1, the signer supports [2]. Fix: run one release tag for api and pki-signer (deploy/release.sh status).` (api log; issue answers 503) | api and pki-signer run different images (one started by hand) | `deploy/release.sh status`; `docker compose up -d` puts every service on `WATCH_WEB_TAG` (PKI.md, Troubleshooting) |
 
 ## How long each step takes
 

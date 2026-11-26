@@ -2,7 +2,7 @@
 import re
 from datetime import datetime
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.backend.enums.general import RevocationReason
 
@@ -10,6 +10,9 @@ _HEX = re.compile(r"[0-9a-fA-F]{1,40}")
 
 
 class SignClientRequest(BaseModel):
+    # a request never adds a name or an extension (pki/profile.py): any other field is refused, not ignored
+    model_config = ConfigDict(extra="forbid")
+
     public_key_pem: str
     label: str
     validity_days: int
@@ -21,6 +24,8 @@ class SignClientResponse(BaseModel):
 
 
 class CrlEntryIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     serial: str
     revoked_at: datetime
     reason: RevocationReason
@@ -34,6 +39,8 @@ class CrlEntryIn(BaseModel):
 
 
 class SignCrlRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     crl_number: int
     this_update: datetime
     next_update: datetime
@@ -48,3 +55,4 @@ class SignerHealthResponse(BaseModel):
     subject: str
     not_after: datetime
     fingerprint_sha256: str
+    protocols: list[int]

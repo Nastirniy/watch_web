@@ -9,13 +9,15 @@ from datetime import datetime
 from typing import Optional, Sequence
 
 import httpx
+from loguru import logger
 
 from app.backend.config import settings
-from app.backend.enums.routes import SignerRoutes
+from app.backend.enums.routes import SIGNER_PROTOCOL_HEADER, SignerProtocol, SignerRoutes
 from app.backend.pki.crl import CrlEntry
 from app.backend.utils.datetime_utils import as_utc
 
 SIGNER_TIMEOUT_SECONDS = 10
+PROTOCOL = SignerProtocol.V1
 _BASE_URL = "http://signer"
 
 # Tests install an in-process signer here (httpx.ASGITransport); None means the Unix socket of settings.pki
@@ -24,6 +26,11 @@ _transport_override: Optional[httpx.AsyncBaseTransport] = None
 
 class SignerUnavailable(Exception):
     """The signer does not answer (socket missing, connection refused, timeout)"""
+
+
+class SignerProtocolMismatch(SignerUnavailable):
+    """The signer speaks another protocol version: api and pki-signer run different releases (503 like a signer
+    that does not answer; the log line names both versions)"""
 
 
 class SignerRefused(RuntimeError):
@@ -51,15 +58,22 @@ class SignerClient:
         try:
             async with httpx.AsyncClient(
                     transport=self._transport, base_url=_BASE_URL, timeout=SIGNER_TIMEOUT_SECONDS) as client:
-                response = await client.request(method, path, json=body)
+                response = await client.request(method, path, json=body,
+                                                headers={SIGNER_PROTOCOL_HEADER: str(PROTOCOL.value)})
         except httpx.TransportError as exc:
             raise SignerUnavailable(type(exc).__name__) from None
         if response.status_code >= 400:
-            reason = ""
+            answer = {}
             try:
-                reason = str(response.json().get("reason", ""))
-            except (ValueError, AttributeError):
+                answer = response.json()
+            except ValueError:
                 pass
+            reason = str(answer.get("reason", "")) if isinstance(answer, dict) else ""
+            if response.status_code == 409 and reason == "protocol_unsupported":
+                logger.error(f"Signer protocol mismatch: the api speaks {PROTOCOL.value}, the signer supports "
+                             f"{answer.get('supported')}. Fix: run one release tag for api and pki-signer "
+                             f"(deploy/release.sh status).")
+                raise SignerProtocolMismatch("protocol_unsupported")
             raise SignerRefused(f"signer answered {response.status_code} for {path}: {reason}")
         return response.json()
 

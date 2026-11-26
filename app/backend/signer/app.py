@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 from app.backend.enums.media_types import ContentType
-from app.backend.enums.routes import SignerRoutes
+from app.backend.enums.routes import SIGNER_PROTOCOL_HEADER, SignerProtocol, SignerRoutes
 from app.backend.pki.authority import load_ca, sha256_fingerprint
 from app.backend.pki.crl import CrlEntry, build_crl
 from app.backend.pki.profile import build_client_certificate, normalize_label
@@ -17,6 +17,7 @@ from app.backend.signer.models import (
 )
 from app.backend.signer.settings import SignerSettings
 
+SUPPORTED_PROTOCOLS = [member.value for member in SignerProtocol]
 MIN_KEY_BITS = 2048
 MAX_KEY_BITS = 4096
 
@@ -47,6 +48,20 @@ def create_app(settings: SignerSettings) -> FastAPI:
     """Load the CA now: a bad CA raises CaCheckError before anything is served"""
     ca_cert, ca_key = load_ca(settings.ca_cert_path, settings.ca_key_path, settings.ca_key_password)
     app = FastAPI(title="watch_web signer", openapi_url=None, docs_url=None, redoc_url=None)
+
+    @app.middleware("http")
+    async def protocol(request: Request, call_next):
+        """Strict: a request without X-Signer-Protocol, or with a version this signer does not speak, is refused
+        before anything else (RELEASE.md: api and pki-signer run one release tag)"""
+        if request.headers.get(SIGNER_PROTOCOL_HEADER, "") not in {str(v) for v in SUPPORTED_PROTOCOLS}:
+            logger.warning("refused a request with protocol {!r}; supported {}",
+                           request.headers.get(SIGNER_PROTOCOL_HEADER), SUPPORTED_PROTOCOLS)
+            return JSONResponse(
+                status_code=409, media_type=ContentType.PROBLEM_JSON.value,
+                content={"type": "about:blank", "title": "Protocol not supported", "status": 409,
+                         "reason": "protocol_unsupported", "supported": SUPPORTED_PROTOCOLS},
+            )
+        return await call_next(request)
 
     @app.exception_handler(SigningRefused)
     async def refused(_: Request, exc: SigningRefused) -> JSONResponse:
@@ -86,6 +101,6 @@ def create_app(settings: SignerSettings) -> FastAPI:
     def health() -> SignerHealthResponse:
         return SignerHealthResponse(
             subject=ca_cert.subject.rfc4514_string(), not_after=ca_cert.not_valid_after_utc,
-            fingerprint_sha256=sha256_fingerprint(ca_cert))
+            fingerprint_sha256=sha256_fingerprint(ca_cert), protocols=SUPPORTED_PROTOCOLS)
 
     return app
