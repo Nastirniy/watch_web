@@ -2,7 +2,8 @@
 
 This is the one runbook for putting a new version of watch-web on a server and taking it back. Every step is a
 plain command; nothing here needs anything but `docker`, `docker compose`, `sh` and the project's own commands.
-Database backups in depth: BACKUPS.md. Server setup (nginx, MariaDB, PKI): DEPLOYMENT.md and PKI.md.
+Database backups in depth: BACKUPS.md. Server setup (nginx, MariaDB, PKI): DEPLOYMENT.md and PKI.md. The web team's
+side of a release (local testing against a release, publishing the web client): WEB_DEV_AND_RELEASE.md.
 
 ## What a release is
 

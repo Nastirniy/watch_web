@@ -41,6 +41,7 @@ x-app-env: &app-env
 
 x-app: &app
   image: watch-web:${WATCH_WEB_TAG:-e2e}
+  pull_policy: never       # built or loaded here (WEB_DEV_AND_RELEASE.md), never on a registry
   user: "101:101"          # nginx worker uid in the nginx image; files must cross between nginx and the API
 
 services:
@@ -95,7 +96,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 30
-      start_period: 20s
+      start_period: 5m        # the first start migrates an empty database: about 3 minutes on MySQL in Docker Desktop
 
   # Same API without nginx: exercises the httpx proxy path to imgproxy and FileResponse downloads
   api-direct:

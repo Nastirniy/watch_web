@@ -94,5 +94,6 @@ def test_e2e_stack_uses_a_tag_and_the_imgproxy_variable():
     text = (ROOT / "tests" / "docker" / "compose.test.yml").read_text(encoding="utf-8")
     for service in ("api", "media-worker"):
         assert e2e[service]["image"] == "watch-web:${WATCH_WEB_TAG:-e2e}", service
+        assert e2e[service]["pull_policy"] == "never", service
     assert e2e["imgproxy"]["image"].startswith("${IMGPROXY_IMAGE:-ghcr.io/imgproxy/imgproxy:v3")
     assert "docker build -t watch-web:e2e ." in text

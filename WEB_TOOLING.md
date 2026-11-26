@@ -185,6 +185,10 @@ web team; the web project's `npm run api:all` then shows exactly what it has to 
 
 ## 8. Development server: one origin through its proxy
 
+The whole backend of a given release on your machine (API, worker, imgproxy, nginx, database in Docker), and the
+checklist for publishing to production: WEB_DEV_AND_RELEASE.md. Its stack listens on `http://127.0.0.1:18089`;
+use that as the proxy target below instead of a venv API on port 60800.
+
 The API sends no CORS headers: in production the web client comes from the same nginx and origin as the API.
 In development do the same with the dev server that `npm run dev` (or `npm start`) starts: let it proxy the API
 paths, and call the API with relative URLs (`/api/v1/...`), never `http://localhost:8000/...`.
