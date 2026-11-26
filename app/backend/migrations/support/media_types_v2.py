@@ -1,5 +1,5 @@
 """The names revision 036_webm_media_types rewrites. FROZEN once 036 has shipped: never import enums/media_types.py or
-services/files/formats.py here (they move on; this map must not). tests/test_migration_036_webm_media_types.py checks
+services/files/formats.py here (they move on; this map must not). tests/migrations/test_migration_036_webm_media_types.py checks
 it against the defaults of 036.
 
 A row of a file with an extension of WEBM_EXTENSIONS (lower case, with the dot) holding OLD_NAME is a WebM file: libmagic

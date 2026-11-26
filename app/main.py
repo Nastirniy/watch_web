@@ -143,7 +143,7 @@ fastapi_app = FastAPI(
     # Any route may fail unexpectedly: 500 internal_error is documented once for all of them
     responses=problems(ErrorCode.INTERNAL_ERROR, ErrorCode.DATABASE_BUSY),
     # operationId = the endpoint function name (update_post), what client generators name their functions after;
-    # tests/test_openapi.py keeps them unique within a version
+    # tests/api/test_openapi.py keeps them unique within a version
     generate_unique_id_function=lambda route: route.name,
 )
 
@@ -171,6 +171,6 @@ if __name__ == "__main__":
         reload=settings.server.reload,
         log_level=settings.logging.level.lower(),
         # Logging is already set up above (uvicorn's loggers go to loguru); uvicorn's default LOGGING_CONFIG would
-        # drop the handler of uvicorn.error and its startup messages (tests/test_server_logging.py)
+        # drop the handler of uvicorn.error and its startup messages (tests/api/test_server_logging.py)
         log_config=None,
     )

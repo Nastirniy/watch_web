@@ -17,7 +17,7 @@ config = context.config
 
 if config.config_file_name is not None:
     # The app runs migrations in its own process at startup: keep the loggers it already has (uvicorn's), or the
-    # console goes silent after the last migration and the server looks hung (tests/test_migrations.py)
+    # console goes silent after the last migration and the server looks hung (tests/migrations/test_migrations.py)
     fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = SQLModel.metadata

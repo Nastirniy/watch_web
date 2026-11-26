@@ -1,4 +1,4 @@
-"""A small app for tests/test_event_drain.py (and a live nginx check of the events location): the real hub, the real response class and the v1 renderer behind
+"""A small app for tests/events/test_event_drain.py (and a live nginx check of the events location): the real hub, the real response class and the v1 renderer behind
 uvicorn, over a SQLite file (WW_DRAIN_DB). Every stream belongs to user 1; nothing else of the API is here."""
 import asyncio
 import os

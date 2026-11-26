@@ -79,7 +79,7 @@ async def http_error_handler(request: Request, exc: StarletteHTTPException) -> R
     code = _FRAMEWORK_PROBLEMS.get(exc.status_code)
     if code is not None:
         return problem_response(request, code, {}, headers)
-    # Only framework errors get here: routes raise ApiError (tests/test_error_contract.py)
+    # Only framework errors get here: routes raise ApiError (tests/api/test_error_contract.py)
     _logger.warning(f"HTTP {exc.status_code} without a problem type on {request.method} {request.url.path}: {exc.detail!r}")
     return ProblemResponse(status_code=exc.status_code, content=about_blank_body(request, exc.status_code),
                            headers=_headers(exc.status_code, headers))

@@ -6,7 +6,7 @@ has none, the de facto name is (audio/wav, video/webm, audio/webm). Other spelli
 detector may send: an upload is accepted by its format's content type and aliases, and stored under the format's
 canonical name (services/files/formats.py). Every member that is not an IANA registration says why it is used.
 
-Values are written only here (tests/test_media_type_literals.py): code imports the member; migrations keep frozen
+Values are written only here (tests/media/test_media_type_literals.py): code imports the member; migrations keep frozen
 copies of their own (migrations/support/media_types_v1.py). Parsing and formatting Content-Type values is
 utils/content_type.py.
 """

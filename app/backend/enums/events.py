@@ -10,8 +10,8 @@ from typing import Any, Dict, Literal, NamedTuple, Optional
 
 from app.backend.enums.audit import AuditCategory, AuditEvent
 
-PAYLOAD_LIMIT = 512          # outbox_events.payload: tests/test_event_catalog.py keeps every event below it
-MOVE_STATUSES = Literal["waiting", "done", "cancelled", "failed"]   # MoveStatus (tests/test_event_catalog.py)
+PAYLOAD_LIMIT = 512          # outbox_events.payload: tests/events/test_event_catalog.py keeps every event below it
+MOVE_STATUSES = Literal["waiting", "done", "cancelled", "failed"]   # MoveStatus (tests/events/test_event_catalog.py)
 
 
 class Dictionary(str, Enum):
@@ -107,7 +107,7 @@ class StreamMessageType(str, Enum):
 
 
 # The event each audited write publishes in the transaction of its audit row (None: no event, with the reason).
-# tests/test_event_admin.py and tests/test_event_data.py keep every event of the categories authentication, access,
+# tests/events/test_event_admin.py and tests/events/test_event_data.py keep every event of the categories authentication, access,
 # dictionaries and data in this map, and tests/conftest.py (events_follow_audit) fails any committed transaction whose audit
 # row of a mapped event comes without a publish() of its type: a new audited write path cannot forget its event.
 AUDIT_EVENT_TYPES: Dict[AuditEvent, Optional[EventType]] = {

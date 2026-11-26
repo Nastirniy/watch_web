@@ -12,7 +12,7 @@
   of the problems no operation can declare (framework errors: unknown route, wrong method, unparsable body,
   unknown problem page).
 
-tests/test_openapi.py checks the document; tests/conftest.py checks that every problem the test suite makes
+tests/api/test_openapi.py checks the document; tests/conftest.py checks that every problem the test suite makes
 the app answer is declared on its operation.
 """
 from functools import lru_cache

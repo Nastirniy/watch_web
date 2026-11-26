@@ -2,7 +2,7 @@
 
     python -m app.backend.cli.api_contract [directory]      write every version's document (default: api-contract/)
 
-The files are committed. tests/test_api_contract.py fails while the code and a file differ, so every change of
+The files are committed. tests/api/test_api_contract.py fails while the code and a file differ, so every change of
 the API (paths, bodies, problem codes and their params) is a reviewable diff of these files. An intended change
 is accepted by writing the files again (and a CHANGELOG.md entry); the web project regenerates its types from
 them with openapi-typescript and its tsc shows what the change breaks there (WEB_TOOLING.md).

@@ -3,7 +3,7 @@
 Every message is one text/event-stream block: `id:` the position (send it back as Last-Event-ID), `event:` the type,
 `data:` one line of this JSON, `retry:` when the server sets it. StreamMessage is the union of every message,
 discriminated by `type`: openapi-typescript gives an exact type, and a new event type is a compile error in an
-exhaustive switch. A new EventType needs its member here (tests/test_event_stream_route.py).
+exhaustive switch. A new EventType needs its member here (tests/events/test_event_stream_route.py).
 
 V1Renderer builds the bytes from a row once per event (never per subscriber) without a pydantic round trip; a test
 validates its output against StreamMessage.

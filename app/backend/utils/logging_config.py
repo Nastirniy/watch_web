@@ -80,7 +80,7 @@ class LoggingConfig:
             )
         
         # Add stdout handler. Every sink has diagnose=False: loguru's default prints the value of every variable in
-        # a traceback, request bodies with their tokens included, which never belong in a log (tests/test_server_logging.py)
+        # a traceback, request bodies with their tokens included, which never belong in a log (tests/api/test_server_logging.py)
         logger.add(
             sys.stdout,
             format=format_string,

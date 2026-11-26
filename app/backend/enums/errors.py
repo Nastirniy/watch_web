@@ -11,7 +11,7 @@ Every error answers Content-Type application/problem+json with
 
 A code names exactly one message, never a category: a new message is a new code. Every problem type
 defines its status, title and params here (RFC 9457 section 4), so /problems/<code>, the OpenAPI schemas
-and the checks in tests/test_error_contract.py all come from this file.
+and the checks in tests/api/test_error_contract.py all come from this file.
 
 Raise with ApiError(ErrorCode.X, **params) (errors/problems.py), access_denied() for 403, and
 invalid(FieldErrorCode.X, **params) inside request model validators (items of a validation_error);

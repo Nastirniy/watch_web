@@ -390,7 +390,7 @@ class SignerRoutes(str, Enum):
 
 
 class Routes:
-    """Every route group (tests/test_route_registry.py checks none is missing)"""
+    """Every route group (tests/api/test_route_registry.py checks none is missing)"""
     API_VERSION = APIVersionRoutes
     DOCS = DocsRoutes
     SYSTEM = SystemRoutes

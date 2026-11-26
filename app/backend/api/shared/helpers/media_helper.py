@@ -111,7 +111,7 @@ def stored_file_response(path: Path, *, content_type: str, filename: str, dispos
     streams it and answers a single byte range itself (parse_byte_range); a 206 keeps every header.
 
     The API decides whether the file is there, also before handing it to nginx: otherwise nginx answered its own
-    404 page instead of the problem `missing` (tests/test_media_download.py).
+    404 page instead of the problem `missing` (tests/media/test_media_download.py).
 
     The API answers If-None-Match itself, for an existing file, before Range (RFC 9110 section 13.2.2): a match is a
     304 with the ETag and the file is not handed to nginx, which cannot give it (its not_modified filter runs before

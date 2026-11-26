@@ -178,7 +178,7 @@ git diff --exit-code src/api/schema.ts   # the committed types match the committ
 
 Every route declares the problems it answers on its decorator (`responses=problems(...)`), and the backend
 tests fail on any problem the app answers that its operation does not declare. `api-contract/v1/openapi.json`
-is committed and `tests/test_api_contract.py` fails while the code and the file differ, naming the changed
+is committed and `tests/api/test_api_contract.py` fails while the code and the file differ, naming the changed
 operations and schemas. An intended change is accepted by rewriting the file
 (`python -m app.backend.cli.api_contract`), committed with the code, noted in `CHANGELOG.md` and announced to the
 web team; the web project's `npm run api:all` then shows exactly what it has to adapt.

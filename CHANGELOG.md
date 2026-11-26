@@ -102,7 +102,7 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   sent and `tsc` failed on the web kit's own example. Only members that a body leaves out (`scope` of an event, audit
   `params`) stay optional in a response. Model bases set `json_schema_serialization_defaults_required`
   (`utils/validators.SERIALIZED_DEFAULTS_REQUIRED`: `ResponseModel`, `PlainTextModel`, `SecureBaseModel`);
-  `tests/test_openapi.py` keeps it so.
+  `tests/api/test_openapi.py` keeps it so.
 
 ## Real-time events: rights_changed
 
@@ -469,7 +469,7 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   `app/backend`: `TopLevelType` (MIME family), `StreamType` (ffprobe stream type, new), `Disposition`
   (`attachment` / `inline`, RFC 6266, new; `services/files/serve.py` takes a member), `MediaType` (row media type)
   and `UploadTransport` (`multipart`, `nginx_offload`, `resumable`: the audit param `via` of `media.create`, new).
-  `tests/test_media_type_literals.py` now checks every module of `app/backend` (it checked three) against the values
+  `tests/media/test_media_type_literals.py` now checks every module of `app/backend` (it checked three) against the values
   of these enums.
 - The `message` of an upload answer behind nginx reads `File uploaded successfully (nginx_offload)` (was
   `nginx offload`); `message` is prose, no client reads it.
@@ -518,7 +518,7 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 - One vocabulary of media types, `app/backend/enums/media_types.py` (`ContentType`): the IANA-registered name is
   canonical wherever one exists (RFC 6838, lower case), the de facto name where IANA has none (`audio/wav`,
   `video/webm`); every other member says why it is used. No other module of `app/backend` writes a media type as a
-  string (`tests/test_media_type_literals.py`; migrations keep frozen copies). `PROBLEM_JSON` of
+  string (`tests/media/test_media_type_literals.py`; migrations keep frozen copies). `PROBLEM_JSON` of
   `errors/problems.py`, the signer's problem type, the opaque and forbidden sets, the chunk and form types, the
   report's xlsx type, the OpenAPI file responses and examples are members.
 - One Content-Type parser, `app/backend/utils/content_type.py` (RFC 9110 section 8.3: parameters, quoted strings,
@@ -883,7 +883,7 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   them the event, params, scope and request id of every row written since. Deployment (run with the api stopped,
   duration, rollback): DEPLOYMENT.md, "Audit log (migration 031)".
 - `create_audit_log(session, AuditEvent.X, params=..., scope=...)` writes them on every new row; it is the one
-  writer form: the keywords `action=`, `resource_type=` and `details=` are gone (`tests/test_audit_guard.py` scans
+  writer form: the keywords `action=`, `resource_type=` and `details=` are gone (`tests/audit/test_audit_guard.py` scans
   `app/backend` for them and for raw INSERTs into `audit_logs` outside migrations and the restore tool). An optional
   param passed as None is left out (absent, never null); None in a required param is a TypeError; the served-only
   events `legacy.unknown` and `legacy.migrate` are refused. The test session checks every params dict written against
@@ -1445,7 +1445,7 @@ the accepted values.
   its restart policy caught up.
 - `MYSETTINGS_HEALTH__ALLOWED_HOSTS` is read as a JSON list. `HealthConfig.allowed_hosts` had no parser for the
   string form, so the line `.env.example` ships stopped the api and the worker at startup (`list_type`). Every list
-  setting now has a test that it reads its JSON form (`tests/test_env_list_settings.py`).
+  setting now has a test that it reads its JSON form (`tests/infra/test_env_list_settings.py`).
 - `python -m app.backend.cli.init_user` and `migrations_manager seed` close the database pool before the event loop
   ends: they finished their work, then printed a traceback `RuntimeError: Event loop is closed`.
 
@@ -2310,7 +2310,7 @@ New in the forms: `user_type` on user create and edit, `group_id` on post create
   rejected before the handler runs (401) still leave their file: `python -m app.backend.cli.media_tools
   sweep-nginx-temp [--max-age-hours N]` deletes files in `storage.nginx_upload_temp_path` older than
   `storage.nginx_upload_temp_max_age_hours` (new setting, default 24); run it from cron (DEPLOYMENT.md). The setting
-  must name the same directory as nginx's `client_body_temp_path` (`tests/test_nginx_conf.py` checks the default).
+  must name the same directory as nginx's `client_body_temp_path` (`tests/infra/test_nginx_conf.py` checks the default).
   A body file the API cannot delete (`OSError`, for example a permission error) is logged and the upload keeps its
   answer; the sweep skips such a file, logs it and goes on, and prints `skipped N file(s)` after the removed count.
 
@@ -2581,7 +2581,7 @@ New in the forms: `user_type` on user create and edit, `group_id` on post create
 - `nginx-app.conf` claims only the paths the API publishes (`/api/`, `/docs`, `/redoc`, `/openapi.json`,
   `/problems`, `/health`); `/` belongs to the server block in `nginx.conf`, where the web client build is
   configured (`root`, client-side routes fall back to `index.html`, 404 without a build).
-  `tests/test_nginx_conf.py` fails when an API route has no location.
+  `tests/infra/test_nginx_conf.py` fails when an API route has no location.
 
 ## Client certificates checked by nginx; certificate replacement ends sessions
 
@@ -2596,7 +2596,7 @@ New in the forms: `user_type` on user create and edit, `group_id` on post create
   a forged header arrives as the real certificate's value, no certificate or a revoked one gets 400.
 - nginx files: `nginx.conf` (server blocks), `nginx-app.conf` (locations, new, shared with the e2e stack),
   `nginx-proxy.conf` (API proxy headers, new). DEPLOYMENT.md: install steps, "Client certificates (mTLS)".
-  `tests/test_nginx_conf.py` fails when an API location misses the headers or mTLS is off.
+  `tests/infra/test_nginx_conf.py` fails when an API location misses the headers or mTLS is off.
 - nginx keepalive to the API and imgproxy works in every location (`proxy_set_header Connection ""` was set at
   server level, which nginx does not copy into locations that set their own headers). The unused WebSocket
   `Upgrade` lines are gone.
@@ -2694,7 +2694,7 @@ could act on. Those clauses are gone or catch only the failure they are about; t
 
 ### Backend
 
-- `tests/test_parallel_versions.py` proves the version model: a second version with its own module on its own prefix runs next to v1, operationIds stay unique (FastAPI's `generate_unique_id_function` per include), each handler returns URLs of its own version, `/auth/route-access` lists the caller's version only, a route published twice in one version is rejected.
+- `tests/api/test_parallel_versions.py` proves the version model: a second version with its own module on its own prefix runs next to v1, operationIds stay unique (FastAPI's `generate_unique_id_function` per include), each handler returns URLs of its own version, `/auth/route-access` lists the caller's version only, a route published twice in one version is rejected.
 - Layout: `app/backend/api/v1/` holds the v1 handler modules (the folder is the version), `api/shared/` the request / response models and helpers, `api/system/` health and the problem pages; `app/backend/routes/` is gone. `api/v1/__init__.py`: `V1 = PublishedVersion(APIVersionRoutes.V1, auth, users, ...)` (`api/versioning.py`) builds the version router, rejects a route or operation published twice and gives full paths: `V1.path(PostRoutes.POST_BY_ID, post_id=7)`. Versions are self-contained and run in parallel; CLAUDE.md, "Routes and API versions".
 - `enums/routes.py`: plain `str` Enums; collection roots are `ROOT` members of their own group; `/docs`, `/docs/oauth2-redirect`, `/redoc`, `/openapi.json` come from `DocsRoutes`. Removed members no route used: `MediaRoutes.MEDIA_BY_ID`, `SystemRoutes.ROOT`, `STATIC`, `FAVICON`.
 - Errors in OpenAPI: every route declares its problems with `responses=problems(...)`; internal_error is declared on the app, the 401 set and validation_error on the version router. The static call graph of `openapi_problems.py` is gone; the `openapi()` hook only moves error content to `application/problem+json` and adds framework problems. A session fixture fails the test run on any problem the app answered that its operation does not declare.
@@ -2717,7 +2717,7 @@ could act on. Those clauses are gone or catch only the failure they are about; t
 
 ### Backend
 
-- `api-contract/problems.lock.json` locks the error contract: codes, their status and params, the codes of every operation (by operationId, never Python names). `tests/test_api_contract.py` fails on any difference with a report of what breaks the web client; `python -m app.backend.api_contract check` prints it, `lock` accepts an intended change.
+- `api-contract/problems.lock.json` locks the error contract: codes, their status and params, the codes of every operation (by operationId, never Python names). `tests/api/test_api_contract.py` fails on any difference with a report of what breaks the web client; `python -m app.backend.api_contract check` prints it, `lock` accepts an intended change.
 
 ## Errors as RFC 9457 Problem Details, documented in OpenAPI
 
@@ -2748,7 +2748,7 @@ Error bodies had four shapes under `detail`: a string (most 400 / 404 / 409), a 
 
 ### Database
 
-- No migration. Tests: `tests/test_error_contract.py` (catalog against RFC 9457, static rules, handler bodies), `tests/test_openapi.py` (generated document, real bodies validate against their problem schema), plus the updated route tests.
+- No migration. Tests: `tests/api/test_error_contract.py` (catalog against RFC 9457, static rules, handler bodies), `tests/api/test_openapi.py` (generated document, real bodies validate against their problem schema), plus the updated route tests.
 
 ## Username and post code: validation errors, case, silent no-ops and 500s
 
@@ -2768,7 +2768,7 @@ Error bodies had four shapes under `detail`: a string (most 400 / 404 / 409), a 
 
 ### Database
 
-- No migration. Tests: `tests/test_username_validation.py`, `tests/test_user_form_errors.py`, `tests/test_post_update.py`.
+- No migration. Tests: `tests/users/test_username_validation.py`, `tests/users/test_user_form_errors.py`, `tests/units/test_post_update.py`.
 
 ## Post presence without a stored connection status
 
@@ -2783,7 +2783,7 @@ Nothing kept the post connection fields up to date: `posts.last_connection_at` w
 ### Database
 
 - Migration `014_drop_post_connection_columns`: drops `posts.connection_status` and `posts.last_connection_at` with their indexes. Manually set values (`maintenance`, `error`) are lost; downgrade adds the columns back empty.
-- Tests: `tests/test_presence.py::test_post_presence_is_derived_from_home_users`, `tests/test_migrations.py::test_014_drops_post_connection_columns`.
+- Tests: `tests/auth/test_presence.py::test_post_presence_is_derived_from_home_users`, `tests/migrations/test_migrations.py::test_014_drops_post_connection_columns`.
 
 ## Observation counters of a post
 
@@ -2801,14 +2801,14 @@ Nothing kept the post connection fields up to date: `posts.last_connection_at` w
 ### Database
 
 - Migration `013_observation_count_index`: index `ix_observations_post_deleted_created` on `observations(post_id, is_deleted, created_at)`.
-- Tests: `tests/test_observation_counts.py`.
+- Tests: `tests/observations/test_observation_counts.py`.
 
 ## Member count on posts
 
 ### Added for API clients
 
 - Post responses (`GET /posts/`, `GET /posts/{id}`, `PUT /posts/{id}`, `GET /search/posts`) have a new `user_count` field: the number of active, not archived users whose home post (`users.post_id`) is the post. Users who only reach the post through `user_post_access` are not counted. `sort_by=user_count` is accepted on the post list. No database change (computed by a subquery).
-- Test: `tests/test_presence.py::test_post_status_is_derived_from_home_users`.
+- Test: `tests/auth/test_presence.py::test_post_status_is_derived_from_home_users`.
 
 ## Post and user records for administrators; statistics and upload sessions by scope
 
@@ -2819,7 +2819,7 @@ Nothing kept the post connection fields up to date: `posts.last_connection_at` w
 - User records (`GET /users/`, `GET /users/{id}`, `GET /search/users`): the same rule. An administrator with `user.view` sees users of every post; `post_id` filters of an administrator never answer 403. Everyone else keeps the post scope. The user management routes (`PATCH /users/{id}`, archive / restore, roles, post access) were already open to administrators for every user.
 - `GET /media/uploads` with `media.manage_any`: administrators list the sessions of every post, everyone else only the sessions opened for posts of their data scope (it used to list every post). Without `media.manage_any` the list stays limited to the caller's own sessions. Working on a session (status, chunks, complete, abort) keeps requiring write access to its post.
 - `POST /media/{id}/thumbnail/regenerate` is an administration route (`admin.true`), so it keeps working for media of every post.
-- Tests: `tests/test_scope3.py::test_statistics_endpoint`, `tests/test_post_access.py::test_administrators_see_every_post_record_but_not_its_data`, `tests/test_post_access.py::test_administrators_see_every_user_record`, `tests/test_media_uploads.py::test_session_list_scope`.
+- Tests: `tests/auth/test_scope3.py::test_statistics_endpoint`, `tests/units/test_post_access.py::test_administrators_see_every_post_record_but_not_its_data`, `tests/units/test_post_access.py::test_administrators_see_every_user_record`, `tests/media/test_media_uploads.py::test_session_list_scope`.
 
 ## Several frequency bands per observation
 
@@ -2841,7 +2841,7 @@ An observation had one fixed rc set and one video set of frequency columns. Band
 - `PUT /observations/{id}/frequencies/{frequency_id}` (observation.view + observation.update): partial update; `link_group: null` clears the group; when min or max changes without `frequency_center`, the center is recalculated. 422 when the result has `frequency_max <= frequency_min`.
 - `POST /observations/{id}/frequencies/{frequency_id}/archive` and `/restore` (observation.view + observation.archive). Archive of an unknown or already archived band: 404; of the last active band: 409; restore of a band that is not archived: 409.
 - All band routes follow the observation rules: owner or `observation.manage_any`, write access to the post, archived observation 404. Band changes lock the observation row (MySQL) and touch `observations.updated_at`. Audit `resource_type=observation_frequency`, actions `create`, `update`, `archive`, `restore`; observation audit rows carry the active bands in `frequencies`.
-- Tests: `tests/test_observation_frequencies.py`, `tests/test_migration_012_observation_frequencies.py`.
+- Tests: `tests/observations/test_observation_frequencies.py`, `tests/migrations/test_migration_012_observation_frequencies.py`.
 
 ### Database migrations
 
@@ -2859,7 +2859,7 @@ Deactivating (`PATCH /users/{id}` with `is_active=false`) or archiving a user al
 - A session still live for such an account (flag changed directly in the database, restored backup) is ended on the first request or refresh carrying its token, so it stops counting towards presence (`is_online`, `online_user_count`). Audit action `force_logout` with `details.reason` `account_deactivated` / `account_deleted`. (Since Audit log: the row is event `session.end`, action `end`, params `cause`.)
 - `PATCH /users/{id}` with `is_active=false` ends the user's sessions in the same transaction as the flag change, after every validation of the request (certificate, roles): a rejected update no longer leaves the user logged out. Re-sending `is_active=false` for an inactive user is a no-op. Deactivating your own account answers 400, like archiving it.
 - Reactivation (`is_active=true`, or `POST /users/{id}/restore`) does not revive ended sessions: old tokens keep answering 401 `session_expired`, the user logs in again.
-- Tests: `tests/test_user_deactivation.py`.
+- Tests: `tests/users/test_user_deactivation.py`.
 
 ## Resumable uploads (bad connections)
 
@@ -2876,7 +2876,7 @@ The one-shot upload routes fail as a whole when the connection drops. A new sess
 - Expiry: `storage.upload.session_ttl_hours` (24) after creation; the media worker sweeps every `storage.upload.sweep_interval_seconds` (600), `python -m app.backend.media_tools expire-uploads` does it on demand. Part files live under `<upload_path>/_tmp/uploads/`.
 - nginx: new location for `/api/v1/media/uploads` with `proxy_request_buffering off` and `client_max_body_size 64m` (`nginx.conf`).
 - Upload responses of all three routes carry `upload_id` (`null` for the one-shot routes).
-- Tests: `tests/test_media_uploads.py`; the Docker e2e uploads a video through a session with a simulated interruption.
+- Tests: `tests/media/test_media_uploads.py`; the Docker e2e uploads a video through a session with a simulated interruption.
 
 ### Database migrations
 
@@ -2901,7 +2901,7 @@ Nothing in the API removed data, but the permissions and routes were called "del
 - `POST /{entity}/{id}/archive` and `POST /{entity}/{id}/restore` for users, roles, observations, media, categories, signal types, tags and media formats. Requirements: `X.view` + `X.archive`; users, roles and the dictionaries are administration routes (`admin.true`); observations and media follow the ownership rules (owner or `observation.manage_any` / `media.manage_any`, write access to the post). Both answer the entity (`is_deleted` shows the new state). Archive of an unknown or already archived row: 404. Restore of a row that is not archived: 409. Archiving your own user: 400. The admin role cannot be archived (409). A signal type with live observations cannot be archived (400). Restoring a media format re-checks extension and alias collisions (400).
 - `DELETE /roles/{id}` (`role.view` + `role.delete`, `admin.true`): permanently removes a role together with its `role_permissions` rows and its `user_roles` rows. Preconditions, each 409: the role is archived; no active user holds it (`detail.assigned_users` lists them; assignments of archived users are removed with the role); the built-in `admin` role is never deletable. 204 on success; the audit row keeps the role, its permission names and the removed assignments. The name becomes free for reuse.
 - Seeding refreshes `display_name` / `description` of every permission from the code on each start.
-- Tests: `tests/test_roles_soft_delete.py` (archive lifecycle, permission split, permanent delete), `tests/test_migration_010_archive_permissions.py`, updated `tests/test_scope3.py`, `tests/test_media_formats.py`, `tests/test_observation_ownership.py`, `tests/test_tags_on_observations.py`.
+- Tests: `tests/auth/test_roles_soft_delete.py` (archive lifecycle, permission split, permanent delete), `tests/migrations/test_migration_010_archive_permissions.py`, updated `tests/auth/test_scope3.py`, `tests/media/test_media_formats.py`, `tests/observations/test_observation_ownership.py`, `tests/observations/test_tags_on_observations.py`.
 
 ### Database migrations
 
@@ -2910,7 +2910,7 @@ Nothing in the API removed data, but the permissions and routes were called "del
 ## Observation Excel report: duration in minutes
 
 - `GET /observations/report`, report type `all_fields`: the column `Тривалість (сек)` is now `Тривалість (хв)` and holds a numeric value in minutes with one decimal (150 s -> 2.5, 45 s -> 0.8). The filter summary rows `Тривалість від/до` show the same unit. The API still stores and filters `duration_seconds` / `duration_from` / `duration_to` in seconds; only the spreadsheet presentation changed.
-- Tests: `tests/test_observation_report.py`.
+- Tests: `tests/observations/test_observation_report.py`.
 
 ## Playback metadata for video and audio
 
@@ -2920,7 +2920,7 @@ A page needs to know whether the browser can play a file before it builds a play
 
 - `MediaFileInfo` (media info, media lists, `media_files` inside observations, upload responses) gains `duration_seconds`, `video_codec`, `audio_codec` and `playback_type`. `playback_type` is the RFC 6381 string, for example `video/mp4; codecs="avc1.64001F, mp4a.40.2"` or `audio/ogg; codecs="opus"`; until a file has been probed it falls back to the bare `mime_type`, and for images it is `null`. `width` and `height` are now filled for video too. Recommended client flow: `video.canPlayType(playback_type)` before showing a player; when the answer is empty show the poster and a download button.
 - Probing happens at upload (headers only, bounded, never fails the upload), during poster extraction for rows that lack it, and for existing files with `python -m app.backend.media_tools probe-missing`. Without ffprobe (Windows development with imageio-ffmpeg) the ffmpeg banner is parsed instead, which yields codecs and duration but no H.264 level.
-- Tests: `tests/test_media_probe.py`; the Docker e2e checks the probed fields after a video upload.
+- Tests: `tests/media/test_media_probe.py`; the Docker e2e checks the probed fields after a video upload.
 
 ### Database migrations
 
@@ -2942,7 +2942,7 @@ The upload allowlist is a table, `media_formats`, managed through the API like t
 - Administration dictionary `/media-formats` (new permissions `media_format.view`, `media_format.create`, `media_format.update`, `media_format.delete`, held by the admin role): `GET /list-all` (filters `id`, `media_type`, `content_type`, `content_type_contains`, `label_contains`, `is_active`, `include_deleted` with media_format.delete; sortable by id, media_type, content_type, label, max_file_size_bytes, sort_order, is_active), `GET /filter-schema`, `POST /create`, `GET|PUT|DELETE /{format_id}`. Writes are administration routes (admin.true plus the granular permission), audited as `resource_type=media_format`. Validation: `content_type` must be lower-case `type/subtype` and start with `media_type/` (other spellings go into `aliases`); extensions are normalised to `.ext`; no extension or MIME spelling may belong to two live formats; `max_file_size_bytes` is capped by the ceiling. Soft delete; `POST /create` with a deleted `content_type` restores it, `PUT` with `is_deleted=false` (media_format.delete) too. `is_active=false` keeps a row but stops accepting it.
 - `GET /search/media-formats` (media_format.view) with the same filters.
 - Seeding inserts any missing default format at startup and never edits existing rows, so a fresh install and an upgraded one both get the list; changes made by administrators persist.
-- Tests: `tests/test_media_formats.py`.
+- Tests: `tests/media/test_media_formats.py`.
 
 ### Database migrations
 
@@ -2963,7 +2963,7 @@ Request validation used to run `html.escape` on every string, so names, descript
 
 ### Tests
 
-- `tests/test_plain_text.py`: decoding rules, validator behaviour, escaped rows through post, tag, observation list and search endpoints, new input stored without entities. `tests/test_migrations.py` covers the 007 repair and the unique-clash skip.
+- `tests/api/test_plain_text.py`: decoding rules, validator behaviour, escaped rows through post, tag, observation list and search endpoints, new input stored without entities. `tests/migrations/test_migrations.py` covers the 007 repair and the unique-clash skip.
 
 ## Scope 4: media pipeline (thumbnails on demand, video posters, containers)
 
@@ -2989,7 +2989,7 @@ Thumbnails are no longer generated by the API or by the inotify + systemd watche
 - Deployment: `Dockerfile` (API and worker from one image), `docker-compose.yml` (application services only: api, media-worker, imgproxy on the host network; MySQL, nginx and the media directory stay on the host), `nginx-http.conf` (cache zone and upstreams) and rewritten `nginx.conf` for the host nginx (`/_thumb/` internal and `/t/` public cached locations), `systemd/watch-web-media-worker.service`, `DEPLOYMENT.md`.
 - `requirements.txt` is now plain ASCII (it was UTF-16 with a corrupted tail) and no longer lists PyAV; `imageio-ffmpeg` added for Windows development.
 - Settings: `storage.temp_path`, `storage.ffmpeg_path`, `storage.ffprobe_path`, `storage.imgproxy.*`, `storage.poster.*`; `storage.thumbnail` gained `preview_size`, `url_ttl_seconds`, `share_max_ttl_seconds`, `prewarm`. See `ENV.md`.
-- Tests: `tests/test_imgproxy_signing.py`, `tests/test_media_thumbnails.py`, `tests/test_poster_jobs.py`, `tests/test_posters_ffmpeg.py` (skips without ffmpeg), legacy upgrade check in `tests/test_migrations.py`.
+- Tests: `tests/media/test_imgproxy_signing.py`, `tests/media/test_media_thumbnails.py`, `tests/media/test_poster_jobs.py`, `tests/media/test_posters_ffmpeg.py` (skips without ffmpeg), legacy upgrade check in `tests/migrations/test_migrations.py`.
 - End-to-end stack `tests/docker/compose.test.yml` with `tests/docker/e2e.py`: uploads through multipart and nginx offload, thumbnails through nginx (cache MISS then HIT, WebP negotiation), signed public URLs and tamper rejection, video poster extraction by the worker, Range downloads, the nginx-less proxy path.
 
 ### Removed
@@ -3030,7 +3030,7 @@ Thumbnails are no longer generated by the API or by the inotify + systemd watche
 - `DELETE /users/{id}` (administration, user.view + user.delete): soft delete, deactivation and session invalidation; own account cannot be deleted. Restore with `PATCH /users/{id}` form field `is_deleted=false` (re-activates the user); changing `is_deleted` requires user.delete.
 - `PUT` and `DELETE /roles/{id}/permissions/{permission_id}`: grant or revoke a single permission (administration, role.view + role.update), audited, returning the role's permissions.
 - `GET /statistics/` (administration, new permission `statistics.view`, held by the admin role): posts total/active/online, users total/active/online/deleted, observations in a period (default last 30 days) by status and by post, deleted observations in the period, media count and total size. Optional `date_from` / `date_to`.
-- Tests: `tests/test_scope3.py`.
+- Tests: `tests/auth/test_scope3.py`.
 
 ### Security
 
@@ -3055,7 +3055,7 @@ Thumbnails are no longer generated by the API or by the inotify + systemd watche
 - Post presence: `online_user_count`, effective `connection_status`, derived `last_connection_at`; sorting by `online_user_count`.
 - `GET /roles?include_deleted=true` and `PATCH /roles/{id}` with `is_deleted` to soft-delete or restore a role. `RoleResponse.is_deleted`.
 - Observation report: deleted tags are marked with " (видалено)" in the tags column, and the header lists tag filters as names with ids instead of bare ids.
-- Tests: `tests/test_presence.py`, `tests/test_roles_soft_delete.py`, `tests/test_tags_on_observations.py`, migration 004 checks in `tests/test_migrations.py`.
+- Tests: `tests/auth/test_presence.py`, `tests/auth/test_roles_soft_delete.py`, `tests/observations/test_tags_on_observations.py`, migration 004 checks in `tests/migrations/test_migrations.py`.
 
 ### Changed
 

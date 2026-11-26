@@ -1,6 +1,6 @@
 """The canonical names of stored media types at revision 032_canonical_media_types. FROZEN once 032 has shipped: 032
 rewrites old rows with it. Never import enums/media_types.py or services/files/formats.py here (they move on; this
-map must not). tests/test_migration_032_canonical_media_types.py checks it against the defaults of 032.
+map must not). tests/migrations/test_migration_032_canonical_media_types.py checks it against the defaults of 032.
 
 ALIASES: an alias of exactly one default format at 032 (no default format's own name) -> that format's canonical
 name, on a row whose file extension is one of EXTENSIONS of that name. BY_EXTENSION: an alias of several default formats (text/plain: Markdown and CSV; also the plain-text format's

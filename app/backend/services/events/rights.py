@@ -13,7 +13,7 @@ on a request; the walk at delivery is AuthContext's own:
              EVERY_STREAM
 
 Every grant enters the index, a grant at an archived node too: the walk leaves archived nodes out, so a tree change
-needs no rebuild and a restore puts the grant back in effect at once. tests/test_event_rights.py compares this with
+needs no rebuild and a restore puts the grant back in effect at once. tests/events/test_event_rights.py compares this with
 AuthContext over a table of cases.
 
 An unknown post is a live node under the root (the ScopeTree rule). A create publishes scope.changed at the new node's
@@ -22,7 +22,7 @@ new post reach the holders above it at once. Only a create made with events off 
 
 fingerprint() is what the hub compares to tell a tab its rights changed (rights_changed): equal fingerprints mean equal
 rights in GET /auth/me (permissions, system_permissions, root_permissions, post_permissions, group_permissions), the
-test in tests/test_event_rights.py. It is the permissions in effect per node and kind (a grant at an archived node puts
+test in tests/events/test_event_rights.py. It is the permissions in effect per node and kind (a grant at an archived node puts
 nothing in effect; which role gives a permission does not count) plus, for each group holding some, the posts and
 groups below it (post_permissions and group_permissions list them). It may differ with equal rights in a rare case (a
 post moved between two nested groups that hold the same permissions): one refetch for nothing, never a change missed.

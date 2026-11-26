@@ -50,7 +50,7 @@ class FormClient(httpx.AsyncClient):
     """The test client: a PUT or PATCH that names a parent states the place the node holds now (expected_group_id and
     so on, API.md "A move during work"), as a form that has just read the record, unless the test wrote its own. The
     tests of permissions and tree rules are about what comes after that check. The marker raw_moves turns this off:
-    tests/test_queued_moves.py sends every request as written."""
+    tests/units/test_queued_moves.py sends every request as written."""
 
     def __init__(self, session_maker, **kwargs):
         super().__init__(**kwargs)

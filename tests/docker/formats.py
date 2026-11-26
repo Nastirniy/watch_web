@@ -21,7 +21,7 @@ names (libmagic in the api image, one of the format's content type and aliases),
 format's canonical name (video/matroska for an MKV libmagic calls video/x-matroska, audio/wav for audio/x-wav). Bytes
 the sniffer cannot name, or names otherwise, are refused whatever the extension says (415
 media_content_type_not_accepted). Document formats are checked by
-tests/test_file_sniff.py run inside the api image (the command is in its docstring): no observation route takes a
+tests/media/test_file_sniff.py run inside the api image (the command is in its docstring): no observation route takes a
 document.
 Exit code 0 when every check passes.
 Needs ffmpeg on the host (imageio-ffmpeg) and Pillow; the stack's worker runs with a short retry backoff.

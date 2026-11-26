@@ -2,7 +2,7 @@
 code, category). FROZEN once migration 031_audit_events has shipped: 031 backfills old rows with it. The mapping is
 append-only: a later catalog event adds its own new pair at the end; existing pairs never change (no row written
 before 031 has a new pair, so the backfill of the old rows stays the same). Never import the
-catalog here; tests/test_audit_catalog.py checks that every code below is a catalog event of that category and that
+catalog here; tests/audit/test_audit_catalog.py checks that every code below is a catalog event of that category and that
 DETAILS_PARAMS names only params of its event.
 
 Search rows carry the PLURAL entity as resource_type: they map to search.<entity>. The rows of the data migrations
