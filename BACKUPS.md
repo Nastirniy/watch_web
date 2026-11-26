@@ -40,7 +40,7 @@ restore cannot erase the list of backups. Labels:
 |-------|---------|------|
 | `scheduled` | the timer | the newest per day for 7 days, per ISO week for 4 weeks, per month for 6 months |
 | `manual` | an operator | 90 days |
-| `pre-upgrade` | the upgrade steps in DEPLOYMENT.md | 90 days |
+| `pre-upgrade` | `deploy/release.sh deploy` before it migrates (RELEASE.md) | 90 days |
 
 The newest backup is never deleted, whatever its age. Retention runs after every `create` and on `prune`.
 

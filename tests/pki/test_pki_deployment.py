@@ -103,7 +103,9 @@ def test_env_example_documents_pki():
 
 def test_deployment_files_are_ascii():
     for relative in ("docker-compose.pki.yml", "signer.env.example", ".env.example", "nginx.conf",
-                     "deploy/pki/remove-old-root.cmd", "deploy/systemd/watch-web-crl.path"):
+                     "deploy/pki/remove-old-root.cmd", "deploy/systemd/watch-web-crl.path",
+                     "docker-compose.yml", "docker-compose.backup.yml", "docker-compose.backup-copy.yml",
+                     "Dockerfile", "deploy/release.sh", "RELEASE.md"):
         (ROOT / relative).read_bytes().decode("ascii")
 
 

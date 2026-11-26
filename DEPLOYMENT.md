@@ -124,19 +124,24 @@ The containers connect to `MYSETTINGS_DATABASE__HOST=127.0.0.1` over the host ne
 
 ```bash
 cp .env.example .env        # fill: database password, secret key, IMGPROXY_KEY/SALT, MEDIA_ROOT, MEDIA_UID/GID; PKI (below)
-docker compose build
+                            # and the release lines WATCH_WEB_TAG, IMGPROXY_IMAGE, IMGPROXY_IMAGE_ID (RELEASE.md)
+deploy/release.sh load watch-web-<tag>.tgz    # or deploy/release.sh build on a machine with the source (RELEASE.md)
 docker compose up -d
 docker compose ps           # api and imgproxy report healthy; media-worker and pki-signer have no health endpoint
 docker compose logs -f media-worker
 ```
 
+Releases (build, move to the server, deploy, verify, roll back, restore) follow RELEASE.md: one image
+`watch-web:<YYYY.MM.DD>-<sha7>` per commit for every service, named in `.env` by `WATCH_WEB_TAG`, deployed with
+`deploy/release.sh`. Compose never builds or pulls it.
+
 Client certificates add the `pki-signer` container and the api's PKI mounts through the override `docker-compose.pki.yml`, enabled in `.env` with `COMPOSE_FILE=docker-compose.yml:docker-compose.pki.yml`, `PKI_DIR` (a host directory outside the project directory, bind-mounted at the same path) `PKI_SIGNER_UID` (the uid that owns `PKI_DIR/private` and runs the signer) and `PKI_SOCKET_GID` (a group of its own for the signer's socket, 0660 in `PKI_DIR/run/`: the signer runs with it and the api container joins it; not `MEDIA_GID`, which host accounts such as the nginx user may share, and they must never reach the signer). Its own environment is `signer.env` (from `signer.env.example`, 0600). Without the override `docker-compose.yml` runs as it is and the API has no PKI. Setup: `PKI.md`; order of the upgrade: "Upgrading to PKI client certificates" below.
 
 Key and salt: `python3 -c "import secrets; print(secrets.token_hex(32))"` twice. The same values go to `IMGPROXY_KEY` / `IMGPROXY_SALT` (imgproxy container) and `MYSETTINGS_STORAGE__IMGPROXY__KEY` / `SALT` (API). Rotating them invalidates every issued public thumbnail URL at once.
 
-Air-gapped hosts: build on a connected machine, `docker save watch-web ghcr.io/imgproxy/imgproxy:v3 | gzip > images.tgz`, copy, `docker load`. Nothing is downloaded at runtime. `pki-signer` runs the same `watch-web` image and is never pulled (`pull_policy: never`).
+Air-gapped hosts: `deploy/release.sh save <tag> <file>` on a connected machine, copy, `deploy/release.sh load <file>` (RELEASE.md, "Move a release to the server"). Nothing is downloaded at runtime. `pki-signer`, `db-backup` and `migrate` run the same `watch-web:<tag>` image and are never pulled (`pull_policy: never`).
 
-Upgrades: back up first, `docker compose run --rm db-backup create --label pre-upgrade` (BACKUPS.md; it rolls back with `restore` if the upgrade goes wrong), then `docker compose build api && docker compose up -d api media-worker`. The API runs migrations on start; start the worker after the API has finished the first start. Upgrading to authorization v2: run the report on a copy first (see "Upgrading to authorization v2" below). Upgrading to PKI client certificates: the order of steps is in "Upgrading to PKI client certificates" below. Upgrading to storyboards with `MYSETTINGS_STORAGE__POSTER__CONCURRENCY=1`: see the upgrade note under "Storyboards" (the worker refuses to start until the concurrency is 2 or storyboards are off).
+Upgrades: `deploy/release.sh deploy <tag>` (RELEASE.md): a pre-upgrade backup, the migration with the new release while the old one serves, the switch of `WATCH_WEB_TAG`, the restart, the wait until healthy; `deploy/release.sh rollback` goes back one release without a restore. The API still migrates at its start too (under the same lock), and every process checks at start that it may run on the database's schema. Upgrading to authorization v2: run the report on a copy first (see "Upgrading to authorization v2" below). Upgrading to PKI client certificates: the order of steps is in "Upgrading to PKI client certificates" below. Upgrading to storyboards with `MYSETTINGS_STORAGE__POSTER__CONCURRENCY=1`: see the upgrade note under "Storyboards" (the worker refuses to start until the concurrency is 2 or storyboards are off).
 
 Upgrading to corps and brigades (migration 027): the API adds `scope_groups.kind` (every existing group becomes a plain group, `group`) and the table `observation_units` on start; nothing else to run. nginx needs no change (the routes live under `/api/`). Observations created before the upgrade have no recorded corps or brigade (none existed). Downgrade: `python -m app.backend.cli.migrations_manager downgrade 026_users_no_hot_columns` drops the column and the table: corps and brigades stay as plain scope groups with their posts, the recorded units are lost.
 

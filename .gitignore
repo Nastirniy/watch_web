@@ -219,3 +219,8 @@ gencert.sh
 # Release build info, written inside the image only (Dockerfile)
 app/build_info.json
 app/packages.txt
+
+# deploy/release.sh: its history and the .env it replaced (RELEASE.md)
+deploy/release-history.log
+.env.bak
+.env.tmp
