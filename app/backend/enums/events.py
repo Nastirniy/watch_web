@@ -78,9 +78,9 @@ class EventType(str, Enum):
     # An observation created, updated (any field, its tags, a band, a disappearance), archived or restored
     OBSERVATION_CHANGED = ("observation.changed", EventSpec(1, {"observation_id": int,
                                                                 "observation_change": OBSERVATION_CHANGES}))
-    # A media file stored (any upload transport), archived, restored, or its poster / storyboard processed.
-    # observation_id None (absent): media of old data without an observation, at the root
-    MEDIA_CHANGED = ("media.changed", EventSpec(1, {"media_id": int, "observation_id": Optional[int],
+    # A media file of an observation stored (any upload transport), archived, restored, or its poster / storyboard
+    # processed; media without an observation (old data) publishes none
+    MEDIA_CHANGED = ("media.changed", EventSpec(1, {"media_id": int, "observation_id": int,
                                                     "media_change": MEDIA_CHANGES}))
 
     def __new__(cls, code: str, spec: EventSpec):

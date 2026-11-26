@@ -44818,7 +44818,7 @@
           "observation_id": {
             "type": "integer",
             "title": "Observation Id",
-            "description": "The observation the media belongs to: its media list (and the media_ids of GET /observations/{observation_id}) changed on created, archived and restored. Absent for media of old data without an observation (scope: the root)"
+            "description": "The observation the media belongs to: its media list (and the media_ids of GET /observations/{observation_id}) changed on created, archived and restored. Media without an observation (old data) sends no event"
           },
           "media_change": {
             "$ref": "#/components/schemas/MediaChange",
@@ -44828,6 +44828,7 @@
         "type": "object",
         "required": [
           "media_id",
+          "observation_id",
           "media_change"
         ],
         "title": "MediaChangedData"

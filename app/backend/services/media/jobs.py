@@ -50,7 +50,7 @@ WORKER_STOPPED_ERROR = "the worker stopped during processing on the last attempt
 async def publish_processed(session: AsyncSession, media_ids: Iterable[int]) -> None:
     """media.changed processed for each of these media (of an observation), last in the transaction that changed
     their poster or storyboard: one read of where they are (the post of the observation), after the change's
-    locks. Media of old data without an observation: at the root. Nothing to read while events are off."""
+    locks. Media of old data without an observation: no event. Nothing to read while events are off."""
     ids = sorted(set(media_ids))
     if not ids or not settings.events.enabled:
         return

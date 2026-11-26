@@ -7,7 +7,7 @@ import io
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional, get_args
+from typing import get_args
 
 import pytest
 from sqlmodel import select
@@ -92,8 +92,7 @@ def test_every_audited_event_of_the_data_category_is_mapped():
 def test_params_are_ids_and_enum_values_only(event):
     for name, annotation in event.params.items():
         assert name != "user_id", "publish() targets a user by that name"
-        assert annotation is int or name in ("observation_change", "media_change") or (
-            name == "observation_id" and annotation == Optional[int])
+        assert annotation is int or name in ("observation_change", "media_change"), "never optional"
 
 
 def test_the_changes_are_the_enums():
@@ -259,7 +258,9 @@ async def test_an_aborted_upload_and_refused_media_writes_publish_nothing(client
     assert await _rows(db) == []
 
 
-async def test_media_of_old_data_without_an_observation_publishes_at_the_root(client, db, headers, events_on):
+async def test_media_of_old_data_without_an_observation_publishes_nothing(client, db, headers, events_on):
+    """Owner, 2026-11-26: work media always has an observation; nothing on screen follows the others. The archive
+    still passes the audit guard (events_follow_audit): no event is the decision of this write"""
     post = await make_post(db)
     ids = await make_dictionary(db)
     admin = await make_admin(db)
@@ -269,18 +270,15 @@ async def test_media_of_old_data_without_an_observation_publishes_at_the_root(cl
     await db.commit()
     done = await client.post(V1.path(MediaRoutes.MEDIA_ARCHIVE, media_id=media.id), headers=headers(admin))
     assert done.status_code == 200, done.text
-    assert _summary(await _rows(db)) == [("media.changed", "root", "media.view", None, f"media:{media.id}",
-                                          {"media_id": media.id, "media_change": "archived"})], "absent, never null"
+    assert await _rows(db) == []
 
 
-async def test_an_optional_id_is_an_int_or_absent(db, events_on):
+async def test_the_observation_of_a_media_event_is_required(db, events_on):
     from app.backend.services.events import publish
-    with pytest.raises(TypeError):
-        publish(db, EventType.MEDIA_CHANGED, scope=Node.post(1), permission=P.MEDIA_VIEW, media_id=1,
-                observation_id="4", media_change="created")
-    with pytest.raises(TypeError):
-        publish(db, EventType.MEDIA_CHANGED, scope=Node.post(1), permission=P.MEDIA_VIEW, media_id=1,
-                media_change="created")
+    for observation in ({"observation_id": "4"}, {"observation_id": None}, {}):
+        with pytest.raises(TypeError):
+            publish(db, EventType.MEDIA_CHANGED, scope=Node.post(1), permission=P.MEDIA_VIEW, media_id=1,
+                    media_change="created", **observation)
     with pytest.raises(TypeError):
         publish(db, EventType.OBSERVATION_CHANGED, scope=Node.post(1), permission=P.OBSERVATION_VIEW,
                 observation_id=None, observation_change="created")
@@ -317,15 +315,14 @@ async def test_poster_outcomes_a_page_shows_publish_processed(db, events_on, mon
                                          _media(retried.id, observation.id, post.id, "processed")]
 
 
-async def test_a_poster_of_media_without_an_observation_publishes_at_the_root(db, events_on):
+async def test_a_poster_of_media_without_an_observation_publishes_nothing(db, events_on):
     post, observation, (video,) = await _videos(db, 1)
     video.observation_id = None
     db.add(video)
     await db.commit()
     assert (await jobs.claim_next_poster(db, "w1")).id == video.id
     assert await jobs.complete_poster(db, video.id, "w1") is True
-    assert _summary(await _rows(db)) == [("media.changed", "root", "media.view", None, f"media:{video.id}",
-                                          {"media_id": video.id, "media_change": "processed"})]
+    assert await _rows(db) == []
 
 
 async def test_an_upload_found_without_video_publishes_only_its_creation(db, events_on):

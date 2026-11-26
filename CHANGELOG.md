@@ -5,6 +5,15 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## media.changed always names its observation
+
+### Changed
+
+- `media.changed`: `observation_id` is required in `MediaChangedData` (it was optional). Media of old data
+  without an observation (listed nowhere, `GET /media/{id}/info` 404) publishes no event any more instead of one
+  at the root with `observation_id` absent: work media always has an observation, and nothing on screen follows
+  the others (owner, 2026-11-26). The web drops the branch for an absent `observation_id`.
+
 ## Overload: 503 database_busy
 
 ### Added

@@ -305,7 +305,7 @@ async def _set_media_archived(request: Request, session: AsyncSession, auth: Aut
         user_id=current_user.id, old_values=old_values, new_values=media_file.model_dump(),
         **client_info(request, auth),
     )
-    # Media of old data without an observation: at the root, as its audit row
+    # Media of old data without an observation: no event (publish_media_changed)
     publish_media_changed(session, media_id, media_file.observation_id,
                           observation.post_id if observation is not None else None,
                           MediaChange.ARCHIVED if archived else MediaChange.RESTORED)

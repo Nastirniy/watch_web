@@ -90,13 +90,12 @@ class ObservationChangedData(ResponseModel):
                                                               "disappearance), archived or restored")
 
 
-class MediaChangedData(_Absent):
+class MediaChangedData(ResponseModel):
     media_id: int = Field(description="Read GET /media/{media_id}/info where the media is on screen; a list that does "
                                       "not show this id treats it as new")
-    observation_id: int = Field(default=None, description="The observation the media belongs to: its media list (and "
-                                                          "the media_ids of GET /observations/{observation_id}) "
-                                                          "changed on created, archived and restored. Absent for "
-                                                          "media of old data without an observation (scope: the root)")
+    observation_id: int = Field(description="The observation the media belongs to: its media list (and the media_ids "
+                                            "of GET /observations/{observation_id}) changed on created, archived and "
+                                            "restored. Media without an observation (old data) sends no event")
     media_change: MediaChange = Field(description="created (stored, by any upload), archived, restored, or processed "
                                                   "(thumbnail_status or storyboard_status reached ready, failed or "
                                                   "unsupported)")

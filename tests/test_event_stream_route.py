@@ -222,8 +222,6 @@ def _value(body: bytes) -> dict:
          permission="observation.view"),
     _row(type="media.changed", payload='{"media_id":9,"observation_id":4,"media_change":"processed"}',
          scope_key="p:7", permission="media.view"),
-    _row(type="media.changed", payload='{"media_id":9,"media_change":"archived"}', scope_key="root",
-         permission="media.view"),
 ])
 def test_every_rendered_event_validates(row):
     value = _value(render_v1.event(row, 1234))

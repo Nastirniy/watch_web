@@ -26,7 +26,7 @@ from typing import Any, Dict, Iterable, Literal, Optional, Union, get_args, get_
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.backend.auth.scope import ROOT, Node
+from app.backend.auth.scope import Node
 from app.backend.config import settings
 from app.backend.enums.events import PAYLOAD_LIMIT, Dictionary, EventType, MediaChange, ObservationChange
 from app.backend.enums.general import Permissions
@@ -185,10 +185,13 @@ def publish_observation_changed(session: AsyncSession, observation_id: int, post
 def publish_media_changed(session: AsyncSession, media_id: int, observation_id: Optional[int],
                           post_id: Optional[int], change: MediaChange) -> None:
     """media.changed: to media.view in effect at the post of the media's observation, conflated per media. Never per
-    chunk or upload session: created once the file is stored (the transaction of its audit row). Media of old data
-    without an observation (observation_id and post_id None): at the root, where its audit row goes, observation_id
-    absent."""
-    scope = Node.post(post_id) if post_id is not None else ROOT
-    publish(session, EventType.MEDIA_CHANGED, scope=scope, permission=Permissions.MEDIA_VIEW,
+    chunk or upload session: created once the file is stored (the transaction of its audit row). Media without an
+    observation (old data; observation_id or post_id None) publishes nothing (owner, 2026-11-26: work media always
+    has one, and nothing on screen follows the others); that is this write's decision about its event, so the audit
+    guard counts it as made."""
+    if observation_id is None or post_id is None:
+        _published(session, EventType.MEDIA_CHANGED)
+        return
+    publish(session, EventType.MEDIA_CHANGED, scope=Node.post(post_id), permission=Permissions.MEDIA_VIEW,
             conflate_key=f"media:{media_id}", media_id=media_id, observation_id=observation_id,
             media_change=MediaChange(change).value)
