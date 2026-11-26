@@ -90,6 +90,22 @@ def test_dockerfile_labels_the_image(label, arg):
     assert re.search(rf'{re.escape(label)}="\$\{{?{arg}\}}?"', DOCKERFILE), label
 
 
+def test_dockerfile_instructions_are_whole():
+    """A continuation line (a backslash at its end) or an instruction keyword starts every non-comment line: a lost
+    backslash split an instruction and the build stopped with 'unknown instruction'"""
+    keywords = {"FROM", "ARG", "ENV", "RUN", "COPY", "WORKDIR", "LABEL", "USER", "EXPOSE", "CMD", "ENTRYPOINT"}
+    continued = False
+    for number, line in enumerate(DOCKERFILE.splitlines(), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not continued:
+            assert stripped.split()[0] in keywords, f"Dockerfile line {number}: {line!r}"
+        continued = stripped.endswith("\\")
+    printf = re.search(r"RUN printf '(.*?)'", DOCKERFILE)
+    assert printf and printf.group(1).endswith("\\n"), "build_info.json is written with a newline escape"
+
+
 def test_dockerfile_writes_build_info_and_package_list():
     assert "/srv/app/app/build_info.json" in DOCKERFILE
     assert "dpkg-query -W" in DOCKERFILE and "/srv/app/app/packages.txt" in DOCKERFILE

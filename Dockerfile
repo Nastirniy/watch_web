@@ -40,9 +40,13 @@ COPY alembic.ini ./
 ARG WATCH_WEB_VERSION=dev
 ARG WATCH_WEB_REVISION=
 ARG WATCH_WEB_CREATED=
-LABEL org.opencontainers.image.title="watch-web"       org.opencontainers.image.version="${WATCH_WEB_VERSION}"       org.opencontainers.image.revision="${WATCH_WEB_REVISION}"       org.opencontainers.image.created="${WATCH_WEB_CREATED}"
-RUN printf '{"version": "%s", "revision": "%s", "created": "%s"}
-'         "$WATCH_WEB_VERSION" "$WATCH_WEB_REVISION" "$WATCH_WEB_CREATED" > /srv/app/app/build_info.json     && dpkg-query -W > /srv/app/app/packages.txt
+LABEL org.opencontainers.image.title="watch-web" \
+      org.opencontainers.image.version="${WATCH_WEB_VERSION}" \
+      org.opencontainers.image.revision="${WATCH_WEB_REVISION}" \
+      org.opencontainers.image.created="${WATCH_WEB_CREATED}"
+RUN printf '{"version": "%s", "revision": "%s", "created": "%s"}\n' \
+        "$WATCH_WEB_VERSION" "$WATCH_WEB_REVISION" "$WATCH_WEB_CREATED" > /srv/app/app/build_info.json \
+    && dpkg-query -W > /srv/app/app/packages.txt
 
 # Media, temp spool and the nginx upload directory are bind-mounted from the host at runtime
 # (docker-compose.yml, same path inside and outside). The container runs as the owner of that
