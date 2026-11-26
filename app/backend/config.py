@@ -10,7 +10,6 @@ from app.backend.enums.general import AppEnvironment, P12Encryption
 
 class AppConfig(BaseModel):
     name: str = "Radio Monitoring System"
-    version: str = "1.0.0"
     debug: bool = False
     environment: str = AppEnvironment.PRODUCTION.value
     # Base of the RFC 9457 "type" URIs, e.g. "https://monitoring.example/problems". Empty: the origin of

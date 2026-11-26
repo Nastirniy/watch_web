@@ -117,7 +117,8 @@ class HealthResponse(ResponseModel):
     """Main health check response model"""
     status: str = Field(..., description="Overall system status")
     timestamp: ResponseDatetime = Field(..., description="Current server timestamp")
-    version: str = Field(..., description="Application version")
+    version: str = Field(..., description="Release tag of the running image (YYYY.MM.DD-sha7), dev outside an image")
+    revision: Optional[str] = Field(..., description="Commit the image was built from; null outside an image")
     environment: str = Field(..., description="Current environment")
     timezone: str = Field(..., description="Server timezone")
     database: DatabaseHealthModel = Field(..., description="Database health information")

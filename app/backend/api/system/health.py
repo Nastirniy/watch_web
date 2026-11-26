@@ -3,6 +3,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 import asyncio
 from loguru import logger
 
+from app.backend.build_info import build_info
 from app.backend.database import get_session
 from app.backend.config import settings
 from app.backend.enums.general import ServiceHealthStatus, ServiceUptimeStatus
@@ -90,7 +91,8 @@ async def health_check(
         return HealthResponse(
             status=overall_status,
             timestamp=get_current_time_in_timezone(settings.timezone.timezone),
-            version=settings.app.version,
+            version=build_info().version,
+            revision=build_info().revision,
             environment=settings.app.environment,
             timezone=settings.timezone.timezone,
             database=db_health,
@@ -110,7 +112,8 @@ async def health_check(
         return HealthResponse(
             status=ServiceHealthStatus.UNHEALTHY.value,
             timestamp=get_current_time_in_timezone(settings.timezone.timezone),
-            version=settings.app.version,
+            version=build_info().version,
+            revision=build_info().revision,
             environment=settings.app.environment,
             timezone=settings.timezone.timezone,
             database=DatabaseHealthModel(

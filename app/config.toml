@@ -1,6 +1,5 @@
 [app]
 name = "Radio Monitoring System"
-version = "1.0.0"
 debug = true
 environment = "development"
 problem_base_url = ""  # Base of error "type" URIs, e.g. "https://monitoring.example/problems"; empty = request origin + /problems

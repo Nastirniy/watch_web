@@ -43332,7 +43332,19 @@
           "version": {
             "type": "string",
             "title": "Version",
-            "description": "Application version"
+            "description": "Release tag of the running image (YYYY.MM.DD-sha7), dev outside an image"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision",
+            "description": "Commit the image was built from; null outside an image"
           },
           "environment": {
             "type": "string",
@@ -43413,6 +43425,7 @@
           "status",
           "timestamp",
           "version",
+          "revision",
           "environment",
           "timezone",
           "database",

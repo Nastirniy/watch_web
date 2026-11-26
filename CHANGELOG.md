@@ -5,6 +5,21 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
 
 ## [Unreleased] - Permission system refactor
 
+## Release images and schema compatibility
+
+### Added
+
+- `/health`: `revision` (the commit the image was built from, null outside an image) next to `version`, which is
+  now the release tag of the image (`YYYY.MM.DD-sha7`, `dev` outside an image) instead of the fixed `1.0.0`. The
+  image carries the same values as OCI labels and in `app/build_info.json`; the media worker heartbeat details
+  end with ` version=<tag>` (`/media/posters/status`). RELEASE.md.
+
+### Changed
+
+- `info.version` of the OpenAPI document stays `1.0.0`: it is the contract version (`API_DOCUMENT_VERSION` in
+  `app/main.py`), changed only with a new API version. The setting `app.version` is removed
+  (`MYSETTINGS_APP__VERSION` is reported as an unknown setting and ignored).
+
 ## media.changed always names its observation
 
 ### Changed

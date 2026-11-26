@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Awaitable, Callable, Dict, Optional
 
+from app.backend.build_info import build_info
 from app.backend.config import settings
 from app.backend.models.media import MediaFile
 from app.backend.models.storyboard import VideoStoryboard, storyboard_relative_dir
@@ -387,6 +388,13 @@ class MediaWorker:
             except asyncio.TimeoutError:
                 pass
 
+    def heartbeat_details(self) -> str:
+        """The details of the heartbeat row, shown by /media/posters/status; the release tag last"""
+        return (
+            f"running={len(self._running)} storyboards={self._storyboards_running} "
+            f"concurrency={self.concurrency} version={build_info().version}"
+        )
+
     async def _heartbeat_loop(self) -> None:
         interval = settings.storage.poster.heartbeat_seconds
         while not self._stop.is_set():
@@ -395,10 +403,7 @@ class MediaWorker:
                     await jobs.heartbeat(
                         session, self.name, WORKER_KIND, self.hostname, self.pid,
                         self.started_at, self.jobs_done, self.jobs_failed,
-                        details=(
-                            f"running={len(self._running)} storyboards={self._storyboards_running} "
-                            f"concurrency={self.concurrency}"
-                        ),
+                        details=self.heartbeat_details(),
                     )
             except Exception as exc:
                 _logger.warning(f"heartbeat failed: {exc}")

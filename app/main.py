@@ -30,6 +30,10 @@ setup_logging(
 # Get application logger
 _logger = get_main_logger()
 
+# info.version of every OpenAPI document: the contract version, changed only with a new API version. The build
+# (release tag, commit) is app/backend/build_info.py and shows in /health, never in the document.
+API_DOCUMENT_VERSION = "1.0.0"
+
 API_DESCRIPTION = f"""
 Radio monitoring API. Every API version has its own OpenAPI document, generated from the code, errors included,
 with Swagger UI and ReDoc next to it: `{V1.path(DocsRoutes.OPENAPI_JSON)}`, `{V1.path(DocsRoutes.SWAGGER_UI)}`,
@@ -132,7 +136,7 @@ async def lifespan(app: FastAPI):
 
 fastapi_app = FastAPI(
     title=settings.app.name,
-    version=settings.app.version,
+    version=API_DOCUMENT_VERSION,
     description=API_DESCRIPTION,
     lifespan=lifespan,
     # No document at the root: each API version serves its own (/api/v1/openapi.json, /docs, /redoc), so models
