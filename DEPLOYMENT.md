@@ -127,7 +127,7 @@ cp .env.example .env        # fill: database password, secret key, IMGPROXY_KEY/
                             # and the release lines WATCH_WEB_TAG, IMGPROXY_IMAGE, IMGPROXY_IMAGE_ID (RELEASE.md)
 deploy/release.sh load watch-web-<tag>.tgz    # or deploy/release.sh build on a machine with the source (RELEASE.md)
 docker compose up -d
-docker compose ps           # api and imgproxy report healthy; media-worker and pki-signer have no health endpoint
+docker compose ps           # api, media-worker, pki-signer and imgproxy report healthy (RELEASE.md, "Verify")
 docker compose logs -f media-worker
 ```
 

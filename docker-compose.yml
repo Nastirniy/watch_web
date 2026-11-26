@@ -62,7 +62,9 @@ services:
       - ${MEDIA_ROOT}:${MEDIA_ROOT}
       - ${NGINX_UPLOAD_TEMP}:${NGINX_UPLOAD_TEMP}
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:${API_PORT:-8000}/health', timeout=5).status == 200 else 1)"]
+      # /health/ready (database reachable, schema in range); an image from before it answers 404 there and is
+      # checked on /health instead, so a rollback to it is not reported unhealthy (RELEASE.md)
+      test: ["CMD", "python", "-c", "import sys,urllib.request,urllib.error\nbase='http://127.0.0.1:${API_PORT:-8000}'\ndef get(path):\n    try:\n        return urllib.request.urlopen(base + path, timeout=5).status\n    except urllib.error.HTTPError as e:\n        return e.code\nstatus = get('/health/ready')\nif status == 404:\n    status = get('/health')\nsys.exit(0 if status == 200 else 1)"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -94,6 +96,15 @@ services:
       resources:
         limits:
           memory: ${WORKER_MEMORY_LIMIT:-1g}
+    healthcheck:
+      # The alive file the worker touches after every heartbeat (workers/alive.py: younger than 3 heartbeats). Run
+      # only where the image has that module: an older image (a rollback) passes, and its media_worker is never run
+      # a second time by a check
+      test: ["CMD", "python", "-c", "import importlib.util,runpy,sys\nif importlib.util.find_spec('app.backend.workers.alive') is None:\n    sys.exit(0)\nrunpy.run_module('app.backend.workers.alive', run_name='__main__')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 2m
     stop_grace_period: 90s
 
   # One-off: migrate the database with the release in WATCH_WEB_TAG, under the api's schema lock, then exit.

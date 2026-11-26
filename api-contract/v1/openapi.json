@@ -6,6 +6,82 @@
     "version": "1.0.0"
   },
   "paths": {
+    "/health/ready": {
+      "get": {
+        "tags": [
+          "SYSTEM"
+        ],
+        "summary": "Health Ready",
+        "description": "Whether this process may take requests: the database answers and the schema admits this release\n(RELEASE.md). 200 with the release and the schema revision, or 503 service_not_ready with reason_code\ndatabase_unreachable | schema_out_of_range. Cached 10 s. The event hub, PKI and backups do not count\n(GET /health reports them). Same host check as /health, its own rate limit.",
+        "operationId": "health_ready",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: Internal server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_busy`: Database busy; `service_not_ready`: Service not ready",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/DatabaseBusyProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ServiceNotReadyProblem"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "database_busy": "#/components/schemas/DatabaseBusyProblem",
+                      "service_not_ready": "#/components/schemas/ServiceNotReadyProblem"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`health_host_not_allowed`: This host is not allowed to access the health endpoint",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthHostNotAllowedProblem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`health_rate_limited`: Rate limit exceeded",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthRateLimitedProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": [
@@ -43418,6 +43494,17 @@
               }
             ],
             "description": "Real-time events, counts only; only when they are on"
+          },
+          "schema": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SchemaHealthModel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The database schema against this release"
           }
         },
         "type": "object",
@@ -43434,7 +43521,8 @@
           "backups",
           "authorization",
           "moves",
-          "events"
+          "events",
+          "schema"
         ],
         "title": "HealthResponse",
         "description": "Main health check response model"
@@ -56688,6 +56776,53 @@
           }
         ]
       },
+      "ReadyResponse": {
+        "properties": {
+          "ready": {
+            "type": "boolean",
+            "title": "Ready",
+            "description": "Always true in a 200 answer"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "description": "Release tag of the running image (YYYY.MM.DD-sha7), dev outside an image"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision",
+            "description": "Commit the image was built from; null outside an image"
+          },
+          "schema_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Revision",
+            "description": "Migration revision of the database"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ready",
+          "version",
+          "revision",
+          "schema_revision"
+        ],
+        "title": "ReadyResponse",
+        "description": "GET /health/ready when this process may take requests"
+      },
       "RefreshRequest": {
         "properties": {
           "refresh_token": {
@@ -60045,6 +60180,53 @@
           "routes"
         ],
         "title": "RouteAccessResponse"
+      },
+      "SchemaHealthModel": {
+        "properties": {
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision",
+            "description": "Migration revision of the database; null before the first"
+          },
+          "code_head": {
+            "type": "string",
+            "title": "Code Head",
+            "description": "Newest migration revision this release knows"
+          },
+          "min_code_head": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Code Head",
+            "description": "Oldest code head the schema admits (schema_compat); null: no contract migration since the baseline"
+          },
+          "compatible": {
+            "type": "boolean",
+            "title": "Compatible",
+            "description": "This release runs on the schema"
+          }
+        },
+        "type": "object",
+        "required": [
+          "revision",
+          "code_head",
+          "min_code_head",
+          "compatible"
+        ],
+        "title": "SchemaHealthModel",
+        "description": "The database schema against this release (RELEASE.md, \"Release rules for developers\")"
       },
       "ScopeChanged": {
         "properties": {
@@ -63877,6 +64059,75 @@
         ],
         "title": "SecurityCertificateMismatch",
         "description": "A valid token of a session was presented with another client certificate: the request was refused, the session\nstays, and an audit row session.certificate_mismatch records it (at most one per session in 5 minutes, and this\nevent exactly as often). Sent to the holders of audit.view only, never to the user of the session"
+      },
+      "ServiceNotReadyProblem": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "title": "Type",
+            "description": "URI of the problem type; dereference it for its documentation"
+          },
+          "title": {
+            "type": "string",
+            "const": "Service not ready",
+            "title": "Title",
+            "description": "Summary of the problem type"
+          },
+          "status": {
+            "type": "integer",
+            "const": 503,
+            "title": "Status",
+            "description": "HTTP status code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Explanation of this occurrence",
+            "examples": [
+              "This process is not ready to take requests: {reason_code}"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Path of the request that failed"
+          },
+          "code": {
+            "type": "string",
+            "const": "service_not_ready",
+            "title": "Code",
+            "description": "Key of exactly this problem in the localization package"
+          },
+          "reason_code": {
+            "type": "string",
+            "title": "Reason Code"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code",
+          "reason_code"
+        ],
+        "title": "ServiceNotReadyProblem",
+        "description": "Service not ready (HTTP 503). Problem type service_not_ready.",
+        "examples": [
+          {
+            "code": "service_not_ready",
+            "detail": "This process is not ready to take requests: <reason_code>",
+            "instance": "/api/v1/...",
+            "reason_code": "<reason_code>",
+            "status": 503,
+            "title": "Service not ready",
+            "type": "https://example.org/problems/service_not_ready"
+          }
+        ]
       },
       "ServiceStatusModel": {
         "properties": {

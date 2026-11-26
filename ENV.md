@@ -247,6 +247,22 @@ Seek previews (sprite sheets) made by the media worker with ffmpeg, only while t
 | `MYSETTINGS_HEALTH__ENABLE_RATE_LIMIT` | `true` | Rate-limit `/health` requests |
 | `MYSETTINGS_HEALTH__RATE_LIMIT_REQUESTS` | `10` | Max requests per window |
 | `MYSETTINGS_HEALTH__RATE_LIMIT_WINDOW_SECONDS` | `60` | Rate limit window in seconds |
+| `MYSETTINGS_HEALTH__READY_RATE_LIMIT_REQUESTS` | `60` | Max requests to `/health/ready` per window (its own bucket: the compose healthcheck calls it every 30 s) |
+| `MYSETTINGS_HEALTH__READY_RATE_LIMIT_WINDOW_SECONDS` | `60` | Window of the `/health/ready` limit in seconds |
+
+---
+
+## Release (docker compose, RELEASE.md)
+
+Read by `docker compose` and `deploy/release.sh`, not by the application.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WATCH_WEB_TAG` | none (compose stops with `set WATCH_WEB_TAG in .env (see RELEASE.md)`) | The release every watch-web service runs: image `watch-web:<YYYY.MM.DD>-<sha7>`. `deploy/release.sh deploy` and `rollback` change it (the previous `.env` is kept as `.env.bak`) |
+| `IMGPROXY_IMAGE` | none (compose stops) | The pinned imgproxy: `ghcr.io/imgproxy/imgproxy:v3.31.4`, optionally with `@sha256:<digest>` (RELEASE.md, "Pin imgproxy") |
+| `IMGPROXY_IMAGE_ID` | none (`release.sh deploy` refuses) | The image id of `IMGPROXY_IMAGE` (`docker image inspect --format '{{.Id}}'`); `release.sh` compares it before every deploy |
+| `RELEASE_MIN_FREE_MB` | `2048` | Environment of `release.sh` only: free space `BACKUP_DIR` needs before a deploy |
+| `RELEASE_WAIT_SECONDS` | `1200` | Environment of `release.sh` only: how long a deploy or rollback waits for every service to be healthy |
 
 ---
 

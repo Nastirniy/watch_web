@@ -358,6 +358,9 @@ class HealthConfig(BaseModel):
     allowed_hosts: list[str] = ["127.0.0.1", "localhost", "::1"]
     rate_limit_requests: int = 10
     rate_limit_window_seconds: int = 60
+    # GET /health/ready has its own bucket: the compose healthcheck calls it every 30 s
+    ready_rate_limit_requests: int = 60
+    ready_rate_limit_window_seconds: int = 60
     enable_rate_limit: bool = True
     # None: on in production, off elsewhere (resolved in Settings); set it to decide explicitly
     enable_host_check: Optional[bool] = None

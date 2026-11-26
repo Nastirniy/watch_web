@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Awaitable, Callable, Dict, Optional
 
 from app.backend.build_info import build_info
+from app.backend.workers import alive
 from app.backend.config import settings
 from app.backend.models.media import MediaFile
 from app.backend.models.storyboard import VideoStoryboard, storyboard_relative_dir
@@ -395,16 +396,22 @@ class MediaWorker:
             f"concurrency={self.concurrency} version={build_info().version}"
         )
 
+    async def write_heartbeat(self) -> None:
+        """The heartbeat row, then the alive file the container's healthcheck reads (workers/alive.py)"""
+        async with self.session_maker() as session:
+            await jobs.heartbeat(
+                session, self.name, WORKER_KIND, self.hostname, self.pid,
+                self.started_at, self.jobs_done, self.jobs_failed,
+                details=self.heartbeat_details(),
+            )
+        alive.touch()
+
     async def _heartbeat_loop(self) -> None:
         interval = settings.storage.poster.heartbeat_seconds
+        alive.clear()   # a file of an earlier run of this container says nothing about this one
         while not self._stop.is_set():
             try:
-                async with self.session_maker() as session:
-                    await jobs.heartbeat(
-                        session, self.name, WORKER_KIND, self.hostname, self.pid,
-                        self.started_at, self.jobs_done, self.jobs_failed,
-                        details=self.heartbeat_details(),
-                    )
+                await self.write_heartbeat()
             except Exception as exc:
                 _logger.warning(f"heartbeat failed: {exc}")
             try:

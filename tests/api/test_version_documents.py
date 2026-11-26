@@ -17,7 +17,8 @@ async def test_version_document_is_served_at_the_version_prefix(client):
     assert response.status_code == 200
     document = response.json()
     assert document == V1.openapi(fastapi_app)
-    assert all(V1.owns(path) or path == SystemRoutes.HEALTH.value for path in document["paths"])
+    unversioned = {SystemRoutes.HEALTH.value, SystemRoutes.HEALTH_READY.value}
+    assert all(V1.owns(path) or path in unversioned for path in document["paths"])
     assert SystemRoutes.HEALTH.value in document["paths"]
 
 

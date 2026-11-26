@@ -182,7 +182,8 @@ What each step does:
    `.env.tmp` and renamed, so it is never half written.
 4. **Restart**: `docker compose up -d` recreates api, media-worker and pki-signer on the new image (graceful stop:
    open requests get 25 s, event streams are told to reconnect).
-5. **Wait**: until every service runs, is healthy where it has a health check, and runs the new image.
+5. **Wait**: until every service runs, is healthy (api, media-worker, pki-signer and imgproxy have health checks),
+   and runs the new image.
 
 A failure in steps 1 to 3 leaves the running release as it was (exit 2): correct the cause and deploy again. A
 failure in steps 4 or 5 prints the rollback command (exit 5).
@@ -191,13 +192,19 @@ failure in steps 4 or 5 prints the rollback command (exit 5).
 
 ```
 deploy/release.sh status
-curl -s http://127.0.0.1:8000/health          # "version": "<tag>", "revision": "<commit>", "status": "healthy"
-docker compose ps                             # api healthy, imgproxy healthy, the others running
+curl -s http://127.0.0.1:8000/health/ready    # {"ready": true, "version": "<tag>", "revision": ..., "schema_revision": ...}
+curl -s http://127.0.0.1:8000/health          # "version": "<tag>", "status": "healthy", "schema": {..., "compatible": true}
+docker compose ps                             # api, media-worker, pki-signer and imgproxy healthy
 docker compose logs --since 15m api | grep -E "Schema check|SCHEMA CHECK|Server ready|ERROR"
 docker compose logs --since 15m media-worker | grep -E "Schema check|SCHEMA CHECK|ERROR"
 ```
 
-`/health` answers only from the allowed hosts (127.0.0.1 on the server) and at most 10 times a minute per client.
+`/health` and `/health/ready` answer only from the allowed hosts (127.0.0.1 on the server); `/health` at most 10
+times a minute per client, `/health/ready` 60. `/health/ready` answers 503 `service_not_ready` with `reason_code`
+`database_unreachable` (MariaDB down or unreachable) or `schema_out_of_range` (this release does not run on the
+database's schema: the `SCHEMA CHECK FAILED` line is in the api log). The health checks of the containers: the api
+asks `/health/ready` every 30 s (an image from before it: `/health`), the media worker is healthy while it writes
+its heartbeat (a file it touches, younger than 3 heartbeats), pki-signer while it answers on its socket.
 Then open the web client and do one ordinary thing (log in, open a post, upload a small photo).
 
 ## Roll back

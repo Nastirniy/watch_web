@@ -126,6 +126,8 @@ retry_after_seconds = 30  # Retry-After of the 202 answer
 allowed_hosts = ["127.0.0.1", "localhost", "::1"]  # Client addresses allowed to call /health ("*" allows all)
 rate_limit_requests = 10  # Maximum requests per window (1-1000)
 rate_limit_window_seconds = 60  # Rate limit window in seconds (10-3600)
+ready_rate_limit_requests = 60  # /health/ready, its own bucket (the compose healthcheck calls it every 30 s)
+ready_rate_limit_window_seconds = 60
 enable_rate_limit = true  # Enable rate limiting for health endpoint
 # enable_host_check: left out = on in production, off in development; set true/false to decide explicitly
 

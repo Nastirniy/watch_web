@@ -33,6 +33,8 @@ class SystemRoutes(str, Enum):
     """System routes outside any API version"""
     BASE = ""
     HEALTH = "/health"
+    # Whether this process may take requests (database reachable, schema in range): compose healthcheck, release.sh
+    HEALTH_READY = "/health/ready"
     # RFC 9457 problem type documentation: the "type" URI of every error points here
     PROBLEMS = "/problems"
     PROBLEM_BY_CODE = "/problems/{code}"

@@ -23,6 +23,13 @@ services:
     # primary group PKI_SOCKET_GID: the socket (0660) in run/ (0770, PKI_SIGNER_UID:PKI_SOCKET_GID) belongs to it
     user: "${PKI_SIGNER_UID:?set PKI_SIGNER_UID in .env}:${PKI_SOCKET_GID:?set PKI_SOCKET_GID in .env}"
     command: ["python", "-m", "app.backend.signer", "serve"]
+    healthcheck:
+      # GET /health over the signer's own socket (signer/health.py); an older image without it passes
+      test: ["CMD", "python", "-c", "import importlib.util,runpy,sys\nif importlib.util.find_spec('app.backend.signer.health') is None:\n    sys.exit(0)\nrunpy.run_module('app.backend.signer.health', run_name='__main__')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     volumes:
       - ${PKI_DIR:?set PKI_DIR in .env}/ca:${PKI_DIR}/ca:ro
       - ${PKI_DIR}/private:${PKI_DIR}/private:ro

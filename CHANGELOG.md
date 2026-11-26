@@ -26,6 +26,17 @@ Format: Keep a Changelog. Entries are grouped by step of the permission refactor
   (`bootstrap/schema_range.py`): on a schema newer than the code the previous release runs without migrating or
   seeding; on a schema that admits only newer code, or (worker) a schema behind the code, the process logs one
   `SCHEMA CHECK FAILED (<role>): ... Fix: ...` line and exits 3. The api image runs the check before uvicorn.
+- `GET /health/ready` (unversioned, like `/health`; in the v1 document): 200 `{ready, version, revision,
+  schema_revision}` when the database answers and its schema admits this release, else 503 problem
+  `service_not_ready` with `reason_code` `database_unreachable` or `schema_out_of_range` (`Retry-After: 10`).
+  Cached 10 s; the event hub, PKI and backups do not count. Same host check as `/health`, its own rate limit
+  (`health.ready_rate_limit_requests` 60 per `ready_rate_limit_window_seconds` 60). nginx proxies it
+  (`location = /health/ready`). `/health` gains a `schema` part (`revision`, `code_head`, `min_code_head`,
+  `compatible`) and turns `degraded` when the schema does not admit the release. The web translates the new code.
+- Compose healthchecks: the api on `/health/ready` (an older image's 404 falls back to `/health`), the media worker
+  on an alive file it touches after every heartbeat (`app/backend/workers/alive.py`), the signer on `GET /health`
+  over its socket (`app/backend/signer/health.py`); both run only where the image has the module, so a rollback to
+  an older image is not reported unhealthy.
 - `migrations_manager migrate` now takes the api's path: schema check, the schema lock, upgrade, seeding, the start
   checks (exit 3 on a refused schema). With `WATCH_WEB_ALEMBIC_URL` set it stays a plain alembic upgrade.
 
