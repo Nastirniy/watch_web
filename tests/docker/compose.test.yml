@@ -68,6 +68,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 30
+      start_period: 5m        # the first start initialises the data directory: over 150 s on Docker Desktop
 
   api:
     <<: *app
