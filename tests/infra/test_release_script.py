@@ -81,6 +81,10 @@ class Project:
         self.rule("image inspect watch-web:* --format*", 0, "2a8c1e7aaaa 2026-11-24T09:12:00Z\n")
         self.rule("compose run --rm -T --no-deps --entrypoint python migrate -m app.backend.cli.schema_check check*", 0,
                   "Schema check: database at 037_outbox_events; release x migrates it to 038_x\n")
+        # a rollback target (role api) runs on the newer schema without migrating
+        self.rule("compose run --rm -T --no-deps --entrypoint python migrate -m app.backend.cli.schema_check check "
+                  "--role api", 0, "Schema check: database at 038_x, newer than this release (037_outbox_events); "
+                  "allowed (min code head none); not migrating, not seeding\n")
         self.rule("compose run --rm -T --no-deps --entrypoint python migrate -m app.backend.cli.schema_check status", 0,
                   "INFO: Loaded configuration for environment: production\ndatabase_revision=037_outbox_events\n"
                   "min_code_head=\ncode_head=037_outbox_events\nversion=" + TAG_OLD + "\n")
@@ -495,3 +499,72 @@ def test_load_without_the_checksum_file_refuses(project):
     (project.root / "images.tgz").write_bytes(b"x")
     result = project.run("load", "images.tgz")
     assert result.returncode == 2 and ".sha256" in fix_line(result)
+
+
+# ---------------------------------------------------------------- final review findings
+
+def test_rollback_after_a_failed_deploy_goes_back(project):
+    """Review I1: deploy A -> B failed while waiting (exit 5, .env already says B); the Fix line says rollback"""
+    project.add_history(f"2026-11-20T10:00:00Z deploy 2026.11.01-0000000 -> {TAG_OLD} ok backup=a by=x",
+                        f"2026-11-24T10:00:00Z deploy {TAG_OLD} -> {TAG_NEW} failed step=wait backup=b by=x")
+    (project.root / ".env").write_text(project.env_text.replace(TAG_OLD, TAG_NEW), newline="\n")
+    project.ps(TAG_OLD)
+    result = project.run("rollback", "--yes")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"WATCH_WEB_TAG={TAG_OLD}" in project.env
+
+
+def test_rollback_after_a_redeploy_of_the_same_tag(project):
+    """Review I1: deploy B again after a fix writes deploy B -> B; rollback still goes to A"""
+    project.add_history(f"2026-11-24T10:00:00Z deploy {TAG_OLD} -> {TAG_NEW} failed step=wait backup=b by=x",
+                        f"2026-11-24T11:00:00Z deploy {TAG_NEW} -> {TAG_NEW} ok backup=c by=x")
+    (project.root / ".env").write_text(project.env_text.replace(TAG_OLD, TAG_NEW), newline="\n")
+    project.ps(TAG_OLD)
+    result = project.run("rollback", "--yes")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"WATCH_WEB_TAG={TAG_OLD}" in project.env
+
+
+def test_rollback_never_migrates(project):
+    """Review M1: after a restore and a deploy of the old release, a rollback to the newer release would migrate the
+    database forward at its start; a rollback refuses instead"""
+    project.add_history(f"2026-11-24T10:00:00Z deploy {TAG_OLD} -> {TAG_NEW} ok backup=b by=x")
+    (project.root / ".env").write_text(project.env_text.replace(TAG_OLD, TAG_NEW), newline="\n")
+    project.rule("compose run --rm -T --no-deps --entrypoint python migrate -m app.backend.cli.schema_check check*", 0,
+                 "Schema check: database at 037_outbox_events; release x migrates it to 038_x\n")
+    result = project.run("rollback", "--yes")
+    assert result.returncode == 3
+    assert "migrate" in fix_line(result) and f"deploy/release.sh deploy {TAG_OLD}" in fix_line(result)
+    assert f"WATCH_WEB_TAG={TAG_NEW}" in project.env
+
+
+def test_save_refuses_when_docker_save_fails(project):
+    """Review I2: a pipeline answers gzip's status; a failed docker save must not leave an archive and checksum"""
+    project.rule(f"save watch-web:{TAG_NEW} {IMGPROXY}", 1, "")
+    result = project.run("save", TAG_NEW, "images.tgz")
+    assert result.returncode == 2
+    assert "docker save failed" in fix_line(result)
+    assert not (project.root / "images.tgz").exists() and not (project.root / "images.tgz.sha256").exists()
+
+
+def test_save_refuses_a_missing_imgproxy_image(project):
+    project.rule("image inspect " + IMGPROXY, 1, "")
+    result = project.run("save", TAG_NEW, "images.tgz")
+    assert result.returncode == 2 and "docker pull" in fix_line(result)
+    assert not [call for call in project.calls() if call.startswith("save ")]
+
+
+def test_the_script_is_executable_in_git():
+    """Review I3: the files archive (git archive) and a checkout must give an executable script"""
+    index = subprocess.run(["git", "ls-files", "-s", "deploy/release.sh"], cwd=PROJECT_ROOT, capture_output=True,
+                           text=True).stdout
+    assert index.startswith("100755 "), index
+
+
+def test_the_runbook_reads_the_imgproxy_id_on_its_own():
+    """Review M4: on an image store where RepoDigests is empty after docker load, a template that indexes it prints
+    nothing, the id included; the id is read alone"""
+    for name in ("RELEASE.md", ".env.example"):
+        text = (PROJECT_ROOT / name).read_text(encoding="utf-8")
+        assert "docker image inspect --format '{{.Id}}' ghcr.io/imgproxy/imgproxy:v3.31.4" in text, name
+        assert "{{index .RepoDigests 0}} {{.Id}}" not in text, name

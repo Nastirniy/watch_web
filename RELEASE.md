@@ -71,16 +71,17 @@ IMGPROXY_IMAGE=ghcr.io/imgproxy/imgproxy:v3.31.4
 IMGPROXY_IMAGE_ID=sha256:<the image id>
 ```
 
-Read both on the server after the image is there (pulled or loaded); never type them from memory:
+Read the id on the server after the image is there (pulled or loaded); never type it from memory:
 
 ```
-docker image inspect --format '{{index .RepoDigests 0}} {{.Id}}' ghcr.io/imgproxy/imgproxy:v3.31.4
+docker image inspect --format '{{.Id}}' ghcr.io/imgproxy/imgproxy:v3.31.4
 ```
 
-The second value is the image id: put it into `IMGPROXY_IMAGE_ID`. It is a digest of the image's content and stays
+Put the printed `sha256:...` into `IMGPROXY_IMAGE_ID`. It is a digest of the image's content and stays
 the same after `docker save` / `docker load`. `release.sh deploy` refuses when the image in `IMGPROXY_IMAGE` has
 another id, so a different image under the same tag never runs unnoticed. `IMGPROXY_IMAGE` may also carry the digest
-(`ghcr.io/imgproxy/imgproxy:v3.31.4@sha256:<digest>`, the first value above) where that reference still resolves
+(`ghcr.io/imgproxy/imgproxy:v3.31.4@sha256:<digest>`, read with `docker image inspect --format '{{json .RepoDigests}}'
+ghcr.io/imgproxy/imgproxy:v3.31.4`; after `docker load` that list may be empty) where that reference still resolves
 after `docker load` (check: `docker image inspect '<IMGPROXY_IMAGE>'` answers); the plain version tag plus the id
 check is enough.
 
@@ -214,8 +215,8 @@ deploy/release.sh rollback --dry-run
 deploy/release.sh rollback
 ```
 
-It takes the release before the current one from `deploy/release-history.log` (the `deploy <old> -> <current> ok`
-line), runs that image's schema check against the database, then sets `.env`, restarts and waits. No backup, no
+It takes the release before the current one from `deploy/release-history.log` (the last `deploy <old> -> <current>`
+line with another `<old>`, also one that failed while starting: after an exit 5 this is how you go back), runs that image's schema check against the database, then sets `.env`, restarts and waits. No backup, no
 migration: the old release runs on the new schema without migrating or seeding, and logs
 `Schema check: database at <new revision>, newer than this release (<its head>); allowed (min code head ...); not
 migrating, not seeding`.
@@ -318,7 +319,8 @@ Every error of release.sh is one line on stderr: `release.sh: <what failed>. Fix
 | `release.sh: docker compose up failed on the new release` (exit 5) | a container could not be created | `deploy/release.sh rollback`, then `docker compose logs` |
 | `release.sh: the new release is not healthy after N s` (exit 5) | the api or worker does not get healthy | `deploy/release.sh rollback`, then `docker compose logs api media-worker` |
 | `release.sh: WATCH_WEB_TAG is not set in .env` | server not adopted yet | "Adopt release.sh on a running server" |
-| `release.sh: no deploy/release-history.log` / `no successful deploy of <tag>` | release.sh never deployed the current release | `release.sh deploy <tag>` of the release you want |
+| `release.sh: no deploy/release-history.log` / `no deploy to <tag> from another release` | release.sh never deployed the current release | `release.sh deploy <tag>` of the release you want |
+| `release.sh: watch-web:<old> would migrate the database at its start, and a rollback never migrates` (exit 3) | the target is newer than the database (after a restore and a deploy of an older release) | `release.sh deploy <that tag>` if you mean to go forward (it backs up first) |
 | `release.sh: <tag> was deployed over a release release.sh did not know` | the deploy before had no tag in `.env` | tag the old image ("Adopt", step 1), or restore |
 | `release.sh: watch-web:<old> does not run on the database's schema ...` (exit 3) | a contract migration after the old release | "Restore the database" with the backup the line names |
 | `release.sh: docker compose up failed on <old>` / `watch-web:<old> is not healthy` (rollback, exit 5) | the old release does not start | `docker compose logs`; `release.sh deploy <newer>` goes back |
@@ -326,7 +328,8 @@ Every error of release.sh is one line on stderr: `release.sh: <what failed>. Fix
 | `release.sh: <dir> is not a git checkout` (build) | build run outside the source | run build in the checkout |
 | `release.sh: docker build failed` | the build output above says why | fix and build again |
 | `release.sh: IMGPROXY_IMAGE is not set (environment or .env)` (save) | no imgproxy named | `IMGPROXY_IMAGE=... deploy/release.sh save ...` |
-| `release.sh: docker save failed` | imgproxy not pulled, or no room | `docker pull <imgproxy>`; free space |
+| `release.sh: imgproxy image ... is not on this machine` (save) | imgproxy not pulled on the build machine | `docker pull <imgproxy>`, save again |
+| `release.sh: docker save failed, nothing was written` | an image could not be read, or no room | free space, save again |
 | `release.sh: no file` / `no <file>.sha256 next to <file>` (load) | files not copied together | copy the archive and its `.sha256` |
 | `release.sh: the checksum of <file> does not match` | damaged on the way | copy it again |
 | `release.sh: docker load failed` | no room in `/var/lib/docker` | free space, load again |

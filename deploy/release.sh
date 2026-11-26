@@ -360,8 +360,10 @@ cmd_rollback() {
     current=$(current_tag)
     [ -n "$current" ] || die "WATCH_WEB_TAG is not set in .env" "set it to the release that runs (RELEASE.md, Adopt release.sh)"
     [ -f "$HISTORY" ] || die "no $HISTORY: release.sh never deployed here" "deploy the wanted release with deploy/release.sh deploy <tag>"
-    found=$(awk -v cur="$current" '$2 == "deploy" && $5 == cur && $6 == "ok" { line = $0 } END { print line }' "$HISTORY")
-    [ -n "$found" ] || die "no successful deploy of $current in $HISTORY" "deploy the wanted release with deploy/release.sh deploy <tag>"
+    # The last deploy that switched to the current release from another one, ok or failed while starting (a failed
+    # deploy has set .env already and its Fix line says rollback); a redeploy of the same tag (B -> B) is skipped
+    found=$(awk -v cur="$current" '$2 == "deploy" && $5 == cur && $3 != cur { line = $0 } END { print line }' "$HISTORY")
+    [ -n "$found" ] || die "no deploy to $current from another release in $HISTORY" "deploy the wanted release with deploy/release.sh deploy <tag>"
     target=$(printf '%s\n' "$found" | awk '{ print $3 }')
     backup_id=$(printf '%s\n' "$found" | sed -n 's/.* backup=\([^ ]*\).*/\1/p')
     [ "$target" != "none" ] ||
@@ -373,6 +375,11 @@ cmd_rollback() {
     if ! schema_check "$target" api; then
         die "watch-web:$target does not run on the database's schema (a contract migration came after it): a rollback needs the database restore" "RELEASE.md, Restore the database; the backup of that deploy is ${backup_id:-none}" 3
     fi
+    # A rollback never migrates: a target that would migrate at its start is newer than the database (after a restore)
+    case "$line" in
+        *" migrates it to "*)
+            die "watch-web:$target would migrate the database at its start, and a rollback never migrates" "deploy/release.sh deploy $target (it backs up first) if that is what you want" 3 ;;
+    esac
     check_env_writable
     say "Plan (running release $current):"
     say "  1. set WATCH_WEB_TAG=$target in .env (old file kept as .env.bak); no backup, no migration"
@@ -438,8 +445,15 @@ cmd_save() {
         say "Dry run: nothing written."
         return 0
     fi
-    docker save "watch-web:$tag" "$image" | gzip > "$file" ||
-        die "docker save failed" "check that $image is pulled (docker pull $image) and that there is room for $file"
+    docker image inspect "$image" >/dev/null 2>&1 ||
+        die "imgproxy image $image is not on this machine" "docker pull $image, then save again"
+    # A pipeline answers gzip's status: a failure of docker save is written down beside the archive instead
+    rm -f "$file.failed"
+    { docker save "watch-web:$tag" "$image" || : > "$file.failed"; } | gzip > "$file" || : > "$file.failed"
+    if [ -e "$file.failed" ]; then
+        rm -f "$file" "$file.failed" "$file.sha256"
+        die "docker save failed, nothing was written" "check that $image is pulled (docker pull $image) and that there is room for $file"
+    fi
     ( cd "$(dirname "$file")" && sha256sum "$(basename "$file")" > "$(basename "$file").sha256" )
     say "Wrote $file and $file.sha256. Copy both to the server, then: deploy/release.sh load $(basename "$file")"
 }
