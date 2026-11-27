@@ -285,7 +285,12 @@ cmd_status() {
         awk -F'|' 'NF >= 3 { printf "  %-14s %-40s %s %s\n", $1, $2, $3, $4 }' || true
     if [ -n "$tag" ]; then
         say "Schema (from watch-web:$tag):"
-        schema_status "$tag" | sed 's/^/  /'
+        status_lines=$(schema_status "$tag")
+        if [ -n "$status_lines" ]; then
+            printf '%s\n' "$status_lines" | sed 's/^/  /'
+        else
+            say "  (no answer: watch-web:$tag predates the schema check, or the database is unreachable)"
+        fi
     fi
     if [ -n "$(env_value IMGPROXY_IMAGE)" ]; then
         ( check_imgproxy ) || true

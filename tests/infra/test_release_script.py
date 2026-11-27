@@ -568,3 +568,12 @@ def test_the_runbook_reads_the_imgproxy_id_on_its_own():
         text = (PROJECT_ROOT / name).read_text(encoding="utf-8")
         assert "docker image inspect --format '{{.Id}}' ghcr.io/imgproxy/imgproxy:v3.31.4" in text, name
         assert "{{index .RepoDigests 0}} {{.Id}}" not in text, name
+
+
+def test_status_explains_an_image_without_the_schema_check(project):
+    """Live test 2026-11-27: status on the adopted build before release.sh printed an empty schema part"""
+    project.rule("compose run --rm -T --no-deps --entrypoint python migrate -m app.backend.cli.schema_check status", 1,
+                 "/usr/local/bin/python: No module named app.backend.cli.schema_check\n")
+    result = project.run("status")
+    assert result.returncode == 0
+    assert "predates the schema check" in result.stdout

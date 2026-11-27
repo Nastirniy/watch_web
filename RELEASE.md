@@ -96,11 +96,19 @@ has no `WATCH_WEB_TAG`). Nothing restarts.
 1. Note the commit the server runs (from your deploy notes) and give its image a release tag:
    `docker tag watch-web:latest watch-web:<YYYY.MM.DD>-<sha7>` (the commit's date and hash; on the build machine:
    `TZ=UTC git show -s --date=format-local:%Y.%m.%d --format=%cd <commit>` and `git rev-parse --short=7 <commit>`).
-2. Unpack the deployment files of the first release with release.sh into the project directory ("Move a release
-   to the server", step 3). The running containers are not touched.
-3. Add to `.env`: `WATCH_WEB_TAG=<the tag of step 1>`, `IMGPROXY_IMAGE=` and `IMGPROXY_IMAGE_ID=` of the imgproxy that
-   runs (`docker compose ps imgproxy` shows its image; "Pin imgproxy").
-4. `docker compose config -q` prints nothing; `deploy/release.sh status` shows the tag and the services.
+2. Keep a copy of what is there (`tar -czf ~/watch_web-before-release.tgz -C <parent> watch_web` and
+   `cp -p .env ~/env-before-release`), then unpack the deployment files and load the image of the first release
+   with release.sh ("Move a release to the server", step 3). The running containers are not touched.
+3. In `.env`: add `WATCH_WEB_TAG=<the tag of step 1>`, `IMGPROXY_IMAGE=` and `IMGPROXY_IMAGE_ID=` ("Pin imgproxy"; the
+   imgproxy of the release archive once it is loaded, or the one that runs: `docker compose ps imgproxy`), and make
+   `COMPOSE_FILE` name every override the server uses, the backup ones included
+   (`COMPOSE_FILE=docker-compose.yml:docker-compose.pki.yml:docker-compose.backup.yml[:docker-compose.backup-copy.yml]`).
+4. Anything else that runs `docker compose` for this deployment must use the project directory and its `.env`: the
+   backup timer (`deploy/systemd/watch-web-db-backup.service`: `WorkingDirectory=` the project directory and plain
+   `docker compose run ...`), and any wrapper script with its own `-f` files (point it at the project directory or
+   retire it). Otherwise the timer keeps running the old image with old compose files.
+5. `docker compose config -q` prints nothing; `deploy/release.sh status` shows the tag and the services (its schema
+   part says `no answer` for the old build: it predates the schema check).
 
 `release.sh rollback` from the first release goes back to the tag of step 1: that image predates the schema check,
 so release.sh compares its migration head with the database revision instead (the first release with release.sh
@@ -224,6 +232,8 @@ migrating, not seeding`.
 When a contract migration came after the old release, the check refuses and nothing changes (exit 3):
 `release.sh: watch-web:<old> does not run on the database's schema (a contract migration came after it): a
 rollback needs the database restore. Fix: RELEASE.md, Restore the database; the backup of that deploy is <id>.`
+That backup was taken just before the newest deploy: restoring it goes back exactly one release (the database as the
+old release left it). To go further back, use the `backup=` of an earlier deploy line in the history.
 
 Rolling back twice goes one release further back each time. To return to the newer release:
 `deploy/release.sh deploy <newer tag>` (it backs up and migrates, which is then nothing to do).
@@ -237,8 +247,11 @@ The backup taken by the deploy is named in the history line (`backup=...`) and i
 docker compose run --rm db-backup verify <id> --deep
 docker compose stop api media-worker
 docker compose run --rm db-backup restore <id>          # shows the plan, asks for "yes"
-deploy/release.sh deploy <the release that made the backup>
+deploy/release.sh deploy <the release that ran when the backup was taken>
 ```
+
+The release that ran when the backup was taken is the `<old>` of its history line
+(`deploy <old> -> <new> ok backup=<id>`): the backup step runs before the switch, with the old release.
 
 then the steps after a restore in BACKUPS.md ("Restore (rollback)": the CRL, `restore_reconcile`). The restore tool
 of the running release knows every revision up to its own, so it restores a backup an older release took. A backup
@@ -340,16 +353,20 @@ Every error of release.sh is one line on stderr: `release.sh: <what failed>. Fix
 
 ## How long each step takes
 
-Measured on the test server (VM, 4 cores, database about 233 MB as a dump): filled in after the live test.
+Measured on the test server on 2026-11-27 (a VM on a developer machine, MariaDB 11.8, database dump about 53 MB
+compressed, 4 api workers, events on), following this runbook; the build on the developer machine (Docker Desktop).
 
 | Step | Time |
 |------|------|
-| build (build machine, cached base) | measured in Task 7 |
-| save / copy / load (about 1.2 GB) | measured in Task 7 |
-| backup (pre-upgrade) | measured in Task 7 |
-| migrate (no migration) | measured in Task 7 |
-| restart until healthy (no service) | measured in Task 7 |
-| rollback until healthy | measured in Task 7 |
+| build, Python packages cached / from scratch | 61 s / about 9 min |
+| save (406 MB archive) / copy over the LAN / load | 25 s / 21 s / 10 s (layers already there) to 68 s |
+| deploy checks (image, schema check from the new image, imgproxy, disk) | 6 s |
+| backup (pre-upgrade) | 18 to 20 s |
+| migrate: nothing to do / one small migration | 2 s / 3 s |
+| restart (`up -d`): the services do not answer | 13 s |
+| until every service is healthy after the restart | 10 s |
+| a whole deploy, from the command to `Deployed` | 47 s |
+| a whole rollback, from the command to `Rolled back` | 22 to 23 s |
 
 ## Where things are
 
