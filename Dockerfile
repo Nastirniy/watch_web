@@ -83,4 +83,6 @@ EXPOSE 8000
 # The schema check first (RELEASE.md): with --workers uvicorn restarts a worker whose start failed, for ever, so a
 # release that must not run on the database's schema would never exit. The check prints its one line and exits 3;
 # Docker's restart policy tries again with a growing delay. uvicorn is then exec'd: PID 1, it gets SIGTERM itself.
-CMD ["sh", "-c", "python -m app.backend.cli.schema_check check --role api && exec python -m uvicorn app.main:fastapi_app --host \"$MYSETTINGS_SERVER__HOST\" --port \"$MYSETTINGS_SERVER__PORT\" --workers \"$MYSETTINGS_SERVER__WORKERS\" --proxy-headers --timeout-graceful-shutdown 25"]
+# While the check runs sh is PID 1: it runs the check in the background and waits, so a stop (SIGTERM) ends the check
+# and the container at once (143) instead of after the whole stop_grace_period.
+CMD ["sh", "-c", "trap 'kill -TERM $check 2>/dev/null; exit 143' TERM INT; python -m app.backend.cli.schema_check check --role api & check=$!; wait $check || exit $?; trap - TERM INT; exec python -m uvicorn app.main:fastapi_app --host \"$MYSETTINGS_SERVER__HOST\" --port \"$MYSETTINGS_SERVER__PORT\" --workers \"$MYSETTINGS_SERVER__WORKERS\" --proxy-headers --timeout-graceful-shutdown 25"]

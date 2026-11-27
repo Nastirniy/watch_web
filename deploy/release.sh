@@ -27,6 +27,8 @@ POLL_SECONDS=${RELEASE_POLL_SECONDS:-5}
 WAIT_SECONDS=${RELEASE_WAIT_SECONDS:-1200}     # the api's start_period (20 min): a long migration at its start
 MIN_FREE_MB=${RELEASE_MIN_FREE_MB:-2048}        # free space the backup needs at least
 SCHEMA_CHECK="compose run --rm -T --no-deps --entrypoint python migrate -m app.backend.cli.schema_check"
+# Every `docker compose run` below reads </dev/null: compose run stays interactive with -T and would read the answer
+# meant for the Proceed? question (echo y | release.sh ...)
 
 YES=0
 DRY_RUN=0
@@ -141,7 +143,7 @@ check_image() {
 # An image older than the check (no schema_check module) is compared by its alembic head instead.
 schema_check() {
     set +e
-    output=$(WATCH_WEB_TAG="$1" docker $SCHEMA_CHECK check --role "$2" 2>&1)
+    output=$(WATCH_WEB_TAG="$1" docker $SCHEMA_CHECK check --role "$2" </dev/null 2>&1)
     code=$?
     set -e
     line=$(printf '%s\n' "$output" | grep -E '^(Schema check|SCHEMA CHECK FAILED)' | tail -n 1)
@@ -165,7 +167,7 @@ schema_check() {
 legacy_schema_check() {
     target_head=$(WATCH_WEB_TAG="$1" docker compose run --rm -T --no-deps --entrypoint python migrate -c \
         "from alembic.config import Config; from alembic.script import ScriptDirectory; print(ScriptDirectory.from_config(Config('alembic.ini')).get_current_head())" \
-        2>/dev/null | tail -n 1)
+        </dev/null 2>/dev/null | tail -n 1)
     database=$(schema_status "$(current_tag)" | sed -n 's/^database_revision=//p')
     if [ -n "$target_head" ] && [ "$target_head" = "$database" ]; then
         say "  ok   schema: watch-web:$1 predates the schema check; its head $target_head is the database revision"
@@ -178,7 +180,7 @@ legacy_schema_check() {
 
 # schema_status TAG: the key=value lines of cli/schema_check status, run from that image
 schema_status() {
-    WATCH_WEB_TAG="$1" docker $SCHEMA_CHECK status 2>/dev/null | grep -E '^[a-z_]+=' || true
+    WATCH_WEB_TAG="$1" docker $SCHEMA_CHECK status </dev/null 2>/dev/null | grep -E '^[a-z_]+=' || true
 }
 
 check_imgproxy() {
@@ -331,7 +333,7 @@ cmd_deploy() {
     backup_id=none
     if [ "$BACKUP" -eq 1 ]; then
         say "1. Backing up the database..."
-        if ! backup_out=$(docker compose run --rm -T db-backup create --label pre-upgrade); then
+        if ! backup_out=$(docker compose run --rm -T db-backup create --label pre-upgrade </dev/null); then
             printf '%s\n' "$backup_out" >&2
             history_line "deploy ${old:-none} -> $tag failed step=backup"
             die "the backup failed, nothing was changed" "read the line above (BACKUPS.md lists the codes), correct it and deploy again"
@@ -340,7 +342,7 @@ cmd_deploy() {
         say "   backup $backup_id"
     fi
     say "2. Migrating the database with watch-web:$tag..."
-    if ! WATCH_WEB_TAG="$tag" docker compose run --rm -T migrate; then
+    if ! WATCH_WEB_TAG="$tag" docker compose run --rm -T migrate </dev/null; then
         history_line "deploy ${old:-none} -> $tag failed step=migrate backup=$backup_id"
         die "the migration failed; the running release keeps serving" "read the migration log above; the database is at the last revision that completed (deploy/release.sh status), restore $backup_id only if the release cannot run on it (RELEASE.md, Restore the database)"
     fi
@@ -409,6 +411,7 @@ cmd_rollback() {
 }
 
 cmd_prune() {
+    check_project_dir   # without .env and the history nothing protects the release in use or the rollback target
     tags=$(docker image ls watch-web --format '{{.Tag}}' | grep -v '^<none>$' || true)
     keep_list=$(
         printf '%s\n' "$tags" | head -n "$KEEP"

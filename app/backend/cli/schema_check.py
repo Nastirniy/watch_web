@@ -1,6 +1,6 @@
 """The schema check of a role, without starting anything (RELEASE.md).
 
-    python -m app.backend.cli.schema_check check --role api|migrate|worker|cli
+    python -m app.backend.cli.schema_check check --role api|migrate|worker
         prints the decision of bootstrap/schema_range.py in one line; exit 0 this release runs on the database,
         3 it refuses (the SCHEMA CHECK FAILED line), 2 the database is unreachable
     python -m app.backend.cli.schema_check status
@@ -28,7 +28,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m app.backend.cli.schema_check", description=__doc__.split("\n")[0])
     commands = parser.add_subparsers(dest="command", required=True)
     check = commands.add_parser("check", help="exit 0 when this release runs on the database, 3 when it refuses")
-    check.add_argument("--role", required=True, choices=["api", "migrate", "worker", "cli"])
+    check.add_argument("--role", required=True, choices=["api", "migrate", "worker"])
     commands.add_parser("status", help="database_revision, min_code_head, code_head, version")
     return parser
 
@@ -45,7 +45,7 @@ async def _state() -> tuple[Optional[str], Optional[str]]:
 
 async def run(argv: list[str]) -> int:
     args = _parser().parse_args(argv)
-    role = getattr(args, "role", "cli")
+    role = getattr(args, "role", "status")
     try:
         revision, min_code_head = await _state()
     except (OperationalError, OSError) as exc:

@@ -26,6 +26,9 @@ STUB = r'''#!/bin/sh
 args="$*"
 printf '%s\n' "$args" >> "$STUB_DIR/calls.log"
 printf '%s|%s\n' "${WATCH_WEB_TAG:-}" "$args" >> "$STUB_DIR/env.log"
+case "$args" in
+  "compose run"*) cat > /dev/null ;;   # compose run stays interactive with -T: it reads the script's stdin
+esac
 for rule in "$STUB_DIR"/rules/*; do
   [ -f "$rule" ] || continue
   pattern=$(sed -n 1p "$rule")
@@ -577,3 +580,12 @@ def test_status_explains_an_image_without_the_schema_check(project):
     result = project.run("status")
     assert result.returncode == 0
     assert "predates the schema check" in result.stdout
+
+
+def test_prune_outside_the_project_directory_refuses(project):
+    """Review M8: without .env and the history nothing protects the rollback target"""
+    (project.root / "docker-compose.yml").unlink()
+    project.rule("image ls watch-web --format {{.Tag}}", 0, "a\nb\nc\nd\ne\n")
+    result = project.run("prune", "--keep", "1", "--yes")
+    assert result.returncode == 1
+    assert not [call for call in project.calls() if call.startswith("image rm")]

@@ -6,6 +6,7 @@ CLI read the revision and min_code_head from the database and act on its verdict
 """
 import asyncio
 import json
+import os
 
 import pytest
 import sqlalchemy as sa
@@ -68,7 +69,7 @@ def test_fake_history_order():
 # ---------------------------------------------------------------- decide (pure)
 
 RUN_AND_MIGRATE = ("api", "migrate")
-RUN_ONLY = ("worker", "cli")
+RUN_ONLY = ("worker",)
 
 
 @pytest.mark.parametrize("role", RUN_AND_MIGRATE)
@@ -135,11 +136,12 @@ def test_the_refusal_line_of_the_worker():
     assert empty.message.startswith("SCHEMA CHECK FAILED (worker): the database is at no revision (empty), ")
 
 
-def test_the_refusal_line_of_a_cli():
-    assert decide("cli", "b", None, FAKE).message == (
-        "SCHEMA CHECK FAILED (cli): the database is at b, release 2026.11.20-73a93fa needs c. Fix: start the api "
-        "first (docker compose up -d api), then run this command again."
-    )
+def test_cli_is_not_a_role():
+    """Review M6: no command checks as a role of its own; the CLIs run in the api container, which passed the check"""
+    from app.backend.cli import schema_check
+    assert set(schema_range.Role.__args__) == {"api", "migrate", "worker"}
+    with pytest.raises(SystemExit):
+        asyncio.run(schema_check.run(["check", "--role", "cli"]))
 
 
 def test_the_line_of_a_start_on_a_newer_schema():
@@ -383,4 +385,26 @@ def test_the_api_image_checks_the_schema_before_uvicorn():
     from tests.paths import PROJECT_ROOT
     dockerfile = (PROJECT_ROOT / "Dockerfile").read_text(encoding="utf-8")
     cmd = json.loads(re.search(r"^CMD (\[.*\])$", dockerfile, re.M).group(1))
-    assert cmd[2].startswith("python -m app.backend.cli.schema_check check --role api && exec python -m uvicorn ")
+    assert "python -m app.backend.cli.schema_check check --role api & " in cmd[2]
+    assert "trap " in cmd[2] and "wait " in cmd[2], "a SIGTERM during the check stops it (review M2)"
+    assert cmd[2].index("schema_check") < cmd[2].index("exec python -m uvicorn ")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX signals")
+def test_a_stop_during_the_schema_check_is_immediate():
+    """Review M2: sh is PID 1 while the check runs; a SIGTERM must stop the container at once, not after the grace"""
+    import re
+    import signal
+    import subprocess
+    import time
+    from tests.paths import PROJECT_ROOT
+    dockerfile = (PROJECT_ROOT / "Dockerfile").read_text(encoding="utf-8")
+    script = json.loads(re.search(r"^CMD (\[.*\])$", dockerfile, re.M).group(1))[2]
+    script = script.replace("python -m app.backend.cli.schema_check check --role api", "sleep 30")
+    script = re.sub(r"exec python -m uvicorn .*$", "exec sleep 30", script)
+    process = subprocess.Popen(["sh", "-c", script])
+    time.sleep(1)
+    started = time.monotonic()
+    process.send_signal(signal.SIGTERM)
+    code = process.wait(timeout=10)
+    assert time.monotonic() - started < 3 and code == 143

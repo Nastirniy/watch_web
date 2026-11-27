@@ -3,8 +3,9 @@
 R = the database revision (alembic_version), H = this code's head, M = schema_compat.min_code_head (absent: BASELINE,
 no contract since then; migrations/support/compat.py).
 
-- R known to this code (or no revision yet): the api and `migrate` migrate up to H and seed; any other role (the media
-  worker, a CLI) needs R = H, else it refuses ("start the api first, it migrates").
+- R known to this code (or no revision yet): the api and `migrate` migrate up to H and seed; the media worker needs
+  R = H, else it refuses ("start the api first, it migrates"). The other CLIs run in the api container, which passed
+  the check at its start.
 - R unknown (a newer release migrated): nobody migrates or seeds. Every role runs when M is known to this code and at
   or before H: the previous release runs on the new schema, which is the promise of every expand migration. The
   authorization catalog check then accepts built-in roles holding more permissions than this code knows.
@@ -27,7 +28,7 @@ import sqlalchemy as sa
 BASELINE = "037_outbox_events"
 EMPTY = "no revision (empty)"
 
-Role = Literal["api", "migrate", "worker", "cli"]
+Role = Literal["api", "migrate", "worker"]
 MIGRATING_ROLES = ("api", "migrate")
 
 
@@ -53,11 +54,8 @@ class SchemaOutOfRange(RuntimeError):
 
 
 def _refuse_behind(role: str, revision: Optional[str], head: str, version: str) -> str:
-    fix = ("this worker retries by itself." if role == "worker"
-           else "then run this command again.")
-    joiner = "; " if role == "worker" else ", "
     return (f"SCHEMA CHECK FAILED ({role}): the database is at {revision or EMPTY}, release {version} needs {head}. "
-            f"Fix: start the api first (docker compose up -d api){joiner}{fix}")
+            f"Fix: start the api first (docker compose up -d api); this worker retries by itself.")
 
 
 def _refuse_newer(role: str, revision: str, head: str, admits: str, version: str) -> str:

@@ -392,7 +392,8 @@ compressed, 4 api workers, events on), following this runbook; the build on the 
 - **What the test cannot see, mark by hand** (`CONTRACT = True`): a stored value older code cannot read (a new value
   of a status or reason column the old enum does not have: migration 034 is the example), and a change of a
   protocol shared through the database (job claims, the move claim and its lock order, status values another
-  process acts on).
+  process acts on), a new `NOT NULL` column without a `server_default` (the old release's inserts fail), and a new
+  unique index or constraint (the old release's writes may fail on it).
 - **No migration in a release that must roll back to a build from before the schema check** (the first release with
   release.sh).
 - **Base image**: `ARG PYTHON_BASE_IMAGE` in the Dockerfile pins `python:3.13-slim` by digest. To update:
