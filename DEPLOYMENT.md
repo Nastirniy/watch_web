@@ -538,6 +538,24 @@ docker compose exec media-worker python -m app.backend.cli.media_tools storyboar
 
 `X-Cache: HIT` means nginx served from cache; `MISS` means imgproxy rendered. A 403 from `/media-images/` is an invalid or expired signature; a 422 from imgproxy usually means the source is missing under `MEDIA_ROOT` or exceeds `IMGPROXY_MAX_SRC_RESOLUTION`. Images above that limit get `thumbnail_status: unsupported` from the API (it reads the size from the header at upload), as long as the API has the same limit: docker-compose.yml passes `IMGPROXY_MAX_SRC_RESOLUTION` from `.env` (default 250 megapixels, enough for 200 MP phone cameras) to both containers. The limit bounds CPU time, not memory: libvips decodes a JPEG at a reduced scale and a PNG line by line, so a 200 MP source peaked at 63 MB (JPEG) and 124 MB (PNG) per render, and four 1600 px previews of a 200 MP PNG at once at 431 MB, under the 1 GB container limit. What it stops is a crafted file: a 274 KB PNG holding 1.6 gigapixels took 3.5 s of CPU and 305 MB per render, and the per-format file size limit cannot catch it.
 
+## Logs and their rotation
+
+- The containers log to stdout; Docker keeps it as `json-file` with `max-size: 50m` and `max-file: 5` per service
+  (every service of the compose files, `tests/infra/test_deployment_images.py`): at most 250 MB per container on the
+  host's disk, the oldest part dropped first. Read them with `docker compose logs --since 30m api`. A deploy
+  recreates the containers, which starts their logs afresh.
+- Keep `MYSETTINGS_LOGGING__ENABLE_FILE_LOGGING=false` in the containers: a log file would land in the container's
+  writable layer, outside Docker's rotation, written by every uvicorn worker at once (file logging is for a venv run).
+- A container started by hand (`docker run`, not `docker compose`) gets Docker's default: `json-file` without a size
+  limit. Set a default for the host in `/etc/docker/daemon.json`, then `systemctl restart docker` (every container
+  restarts; do it in a quiet hour):
+  ```json
+  { "log-driver": "json-file", "log-opts": { "max-size": "50m", "max-file": "5" } }
+  ```
+  It applies to containers created afterwards; the compose files set their own limits anyway.
+- Host logs: nginx rotates daily through logrotate (`/etc/logrotate.d/nginx`), journald keeps its default limit
+  (`journalctl --disk-usage`). Check the totals with `du -sh /var/lib/docker/containers /var/log`.
+
 ## Troubleshooting
 
 | Symptom | Cause |

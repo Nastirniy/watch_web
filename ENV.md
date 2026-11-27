@@ -224,7 +224,7 @@ Seek previews (sprite sheets) made by the media worker with ffmpeg, only while t
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MYSETTINGS_LOGGING__LEVEL` | `INFO` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-| `MYSETTINGS_LOGGING__ENABLE_FILE_LOGGING` | `false` | Write logs to a file in addition to stdout |
+| `MYSETTINGS_LOGGING__ENABLE_FILE_LOGGING` | `false` | Write logs to a file in addition to stdout (loguru: 10 MB files, kept 30 days, gzip). Only for a venv run: in the containers keep it `false`, Docker rotates stdout (`json-file`, 50m x 5 per service) |
 | `MYSETTINGS_LOGGING__FILE_PATH` | *(none)* | Log file path, e.g. `/var/log/app/app.log` |
 
 ---

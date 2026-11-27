@@ -97,3 +97,24 @@ def test_e2e_stack_uses_a_tag_and_the_imgproxy_variable():
         assert e2e[service]["pull_policy"] == "never", service
     assert e2e["imgproxy"]["image"].startswith("${IMGPROXY_IMAGE:-ghcr.io/imgproxy/imgproxy:v3")
     assert "docker build -t watch-web:e2e ." in text
+
+
+@pytest.mark.parametrize("name", PRODUCTION_FILES)
+def test_every_service_rotates_its_docker_log(name):
+    """Container logs are files on the host: every service caps them (json-file, max-size, max-file), so a busy
+    api fills at most max-size x max-file per container"""
+    for service, spec in services(name).items():
+        if "logging" not in spec and name != "docker-compose.yml":
+            # an override service that only adds to a base service takes the base's logging
+            continue
+        logging = spec.get("logging")
+        assert logging and logging["driver"] == "json-file", (name, service)
+        assert logging["options"]["max-size"] and int(logging["options"]["max-file"]) >= 1, (name, service)
+
+
+def test_containers_log_to_stdout_only():
+    """In a container the app logs to stdout, which Docker rotates: a log file would land in the container's
+    writable layer (gone at the next deploy, outside the rotation, written by 4 uvicorn processes at once) and its
+    folder is not writable for MEDIA_UID, so the start would fail"""
+    text = (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert re.search(r"^MYSETTINGS_LOGGING__ENABLE_FILE_LOGGING=false$", text, re.M)
