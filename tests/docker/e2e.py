@@ -84,12 +84,21 @@ def make_mp4(path: Path) -> Path:
     return path
 
 
+def event_lines(response):
+    """One line iterator per stream, kept on the response: leaving a response.iter_lines() early (the break below)
+    closes the response under urllib3 2.x, so a second iter_lines() of the same stream read nothing at once and the
+    event checks failed although the server had sent the event"""
+    if not hasattr(response, "_event_lines"):
+        response._event_lines = response.iter_lines(decode_unicode=True)
+    return response._event_lines
+
+
 def read_events(response, wanted: str, timeout: float = 15) -> tuple[list[dict], str]:
     """(messages, last position) of an open text/event-stream response until a message of type wanted"""
     import json
     messages, position, fields = [], "", {}
     deadline = time.time() + timeout
-    for line in response.iter_lines(decode_unicode=True):
+    for line in event_lines(response):
         if time.time() > deadline:
             break
         if line:
